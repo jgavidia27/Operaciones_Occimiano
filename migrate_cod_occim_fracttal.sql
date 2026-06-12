@@ -1,0 +1,51 @@
+-- Paso 1: agregar columna (si no existe)
+ALTER TABLE estaciones_servicio
+  ADD COLUMN IF NOT EXISTS cod_occim_fracttal TEXT;
+
+-- Paso 2: poblar con codigos Fracttal internos para ESMAX (ex-Petrobras)
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S225' WHERE eds_occim = 'PBR-01';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S032' WHERE eds_occim = 'PBR-02';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S263' WHERE eds_occim = 'PBR-03';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S038' WHERE eds_occim = 'PBR-04';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S043' WHERE eds_occim = 'PBR-05';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S232' WHERE eds_occim = 'PBR-06';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S109' WHERE eds_occim = 'PBR-07';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S189' WHERE eds_occim = 'PBR-08';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S189' WHERE eds_occim = 'PBR-08B';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S051' WHERE eds_occim = 'PBR-09';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S250' WHERE eds_occim = 'PBR-10';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S272' WHERE eds_occim = 'PBR-11';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S274' WHERE eds_occim = 'PBR-12';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S124' WHERE eds_occim = 'PBR-13';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S228' WHERE eds_occim = 'PBR-14';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S048' WHERE eds_occim = 'PBR-15';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S195' WHERE eds_occim = 'PBR-16';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S205' WHERE eds_occim = 'PBR-17';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S163' WHERE eds_occim = 'PBR-18';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S282' WHERE eds_occim = 'PBR-19';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S201' WHERE eds_occim = 'PBR-20';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S179' WHERE eds_occim = 'PBR-21';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S268' WHERE eds_occim = 'PBR-22';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S268' WHERE eds_occim = 'PBR-22B';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S251' WHERE eds_occim = 'PBR-23';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S293' WHERE eds_occim = 'PBR-24';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S185' WHERE eds_occim = 'PBR-25';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S203' WHERE eds_occim = 'PBR-26';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S005' WHERE eds_occim = 'PBR-27';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S050' WHERE eds_occim = 'PBR-28';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S186' WHERE eds_occim = 'PBR-29';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S212' WHERE eds_occim = 'PBR-30';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S229' WHERE eds_occim = 'PBR-31';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S018' WHERE eds_occim = 'PBR-32';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S307' WHERE eds_occim = 'PBR-33';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S058' WHERE eds_occim = 'PBR-34';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S003' WHERE eds_occim = 'PBR-35';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S341' WHERE eds_occim = 'PBR-36';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S045' WHERE eds_occim = 'PBR-37';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S045' WHERE eds_occim = 'PBR-37B';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S200' WHERE eds_occim = 'PBR-38';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S200' WHERE eds_occim = 'PBR-38B';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S300' WHERE eds_occim = 'PBR-39';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S300' WHERE eds_occim = 'PBR-39B';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S165' WHERE eds_occim = 'PBR-40';
+UPDATE estaciones_servicio SET cod_occim_fracttal = 'EE_S016' WHERE eds_occim = 'PBR-41';

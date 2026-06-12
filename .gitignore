@@ -1,0 +1,21 @@
+# ── Credenciales (NUNCA subir) ────────────────────────────────────────────────
+.env
+.env.*
+.streamlit/secrets.toml
+
+# ── Cache Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Streamlit config local ────────────────────────────────────────────────────
+.streamlit/
+
+# ── Scripts de diagnóstico y debug locales (no parte del dashboard) ───────────
+_*.py
+
+# ── Archivos de sistema ───────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+*.tmp
+*.log
