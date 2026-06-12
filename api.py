@@ -16,18 +16,31 @@ Ejemplo de rendimiento (5 workers):
  10 000 registros = 100 páginas → ~12 s
 """
 
+import os
 import requests
 import threading
 import streamlit as st
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
+# ── Cargar .env local si existe ───────────────────────────────────────────────
+def _load_env():
+    _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(_p):
+        with open(_p, "r", encoding="utf-8") as _f:
+            for _l in _f:
+                _l = _l.strip()
+                if _l and not _l.startswith("#") and "=" in _l:
+                    _k, _v = _l.split("=", 1)
+                    os.environ.setdefault(_k.strip(), _v.strip())
+_load_env()
+
 # ── Credenciales Fracttal Occimiano ──────────────────────────────────────────
-BASE_URL      = "https://app.fracttal.com"
+BASE_URL      = os.getenv("FRACTTAL_BASE_URL", "https://app.fracttal.com")
 TOKEN_URL     = f"{BASE_URL}/oauth/token"
-CLIENT_ID     = "KtHFO5pMskBbJ3lhPr"
-CLIENT_SECRET = "bnpkpimGY4O0N9TxLUeKPXlKYRPV517m"
-ID_COMPANY    = 1507    # Occimiano — servidor AMERICAN
+CLIENT_ID     = os.getenv("FRACTTAL_CLIENT_ID", "")
+CLIENT_SECRET = os.getenv("FRACTTAL_CLIENT_SECRET", "")
+ID_COMPANY    = int(os.getenv("FRACTTAL_COMPANY_ID", "1507"))
 
 _FRACTTAL_MAX = 100     # Máximo de registros por llamada (límite API)
 _WORKERS      = 16      # Páginas en paralelo — 16 reduce el tiempo a ~mitad vs 8
