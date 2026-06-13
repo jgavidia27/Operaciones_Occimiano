@@ -1060,10 +1060,19 @@ _CAPTION = (
 # ── Navegación rápida móvil ───────────────────────────────────────────────────
 # En móvil el sidebar queda pequeño; este selectbox permite navegar fácil.
 # En desktop se oculta con CSS para no duplicar la interfaz.
+#
+# Streamlit ignora el parámetro `index=` cuando ya existe session_state["_mob_nav"].
+# Sincronizamos manualmente cuando la página cambia desde el sidebar usando
+# _mob_nav_last_page como referencia de la última página conocida.
+if "_mob_nav_last_page" not in st.session_state:
+    st.session_state["_mob_nav_last_page"] = _page
+elif st.session_state["_mob_nav_last_page"] != _page:
+    st.session_state["_mob_nav"] = _page
+    st.session_state["_mob_nav_last_page"] = _page
+
 st.markdown('<div id="_mob_nav_wrap">', unsafe_allow_html=True)
 _mob_sel = st.selectbox(
     "📱 Navegar:", _NAV_PAGES,
-    index=_NAV_PAGES.index(_page),
     key="_mob_nav",
     label_visibility="collapsed",
 )
@@ -1079,6 +1088,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 if _mob_sel != _page:
     st.session_state["_mob_nav_pending"] = _mob_sel
+    st.session_state["_mob_nav_last_page"] = _mob_sel  # pre-set para evitar sync inverso
     st.rerun()
 
 # ── Helper: carga OTs con spinner nativo ────────────────────────────────────
