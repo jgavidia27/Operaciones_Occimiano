@@ -12,6 +12,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 
+from auth import is_authenticated, try_login, logout
+
 from api import (
     load_work_orders, load_third_parties,
     load_work_orders_subtasks, load_wo_resources,
@@ -457,12 +459,194 @@ def _inject_toggle(theme: str) -> None:
     )
 
 
+# ── Pantalla de inicio de sesión ──────────────────────────────────────────────
+def _show_login_page() -> None:
+    """Renderiza la pantalla de login. Llamar antes del bloque principal."""
+    logo_uri = _load_logo_b64()
+
+    st.markdown("""
+    <style>
+    /* Ocultar chrome de Streamlit en pantalla de login */
+    [data-testid="stSidebar"],
+    [data-testid="stHeader"],
+    [data-testid="stToolbar"],
+    [data-testid="stMainMenu"],
+    footer, .stDeployButton { display: none !important; }
+
+    /* Fondo página */
+    .stApp, [data-testid="stAppViewContainer"] {
+        background: #060d1a !important;
+    }
+    [data-testid="stMain"] > div {
+        padding: 3vh 2vw !important;
+        max-width: 960px !important;
+        margin: 0 auto !important;
+    }
+
+    /* Card del formulario */
+    [data-testid="stForm"] {
+        background: #0f1a2e !important;
+        border: 1px solid rgba(255,255,255,0.07) !important;
+        border-radius: 14px !important;
+        padding: 2rem 2rem 1.5rem !important;
+        margin-top: 0 !important;
+    }
+
+    /* Labels de inputs */
+    [data-testid="stForm"] label {
+        color: rgba(255,255,255,0.55) !important;
+        font-size: 0.78rem !important;
+        letter-spacing: 0.6px !important;
+        text-transform: uppercase !important;
+    }
+
+    /* Inputs */
+    [data-testid="stForm"] input {
+        background: rgba(255,255,255,0.05) !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        color: #f1f5f9 !important;
+        border-radius: 8px !important;
+        font-size: 0.95rem !important;
+    }
+    [data-testid="stForm"] input:focus {
+        border-color: rgba(59,130,246,0.5) !important;
+        box-shadow: 0 0 0 3px rgba(59,130,246,0.12) !important;
+    }
+    [data-testid="stForm"] input::placeholder { color: rgba(255,255,255,0.2) !important; }
+
+    /* Botón submit */
+    [data-testid="stForm"] button[kind="primaryFormSubmit"],
+    [data-testid="stForm"] button[data-testid="baseButton-primaryFormSubmit"] {
+        background: #2563eb !important;
+        border: none !important;
+        color: #fff !important;
+        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+        letter-spacing: 0.4px !important;
+        height: 2.8rem !important;
+        border-radius: 8px !important;
+        transition: background 0.2s !important;
+    }
+    [data-testid="stForm"] button[kind="primaryFormSubmit"]:hover {
+        background: #1d4ed8 !important;
+    }
+
+    /* Alinear verticalmente los paneles */
+    [data-testid="stHorizontalBlock"] { align-items: stretch !important; }
+    [data-testid="column"] { display: flex !important; flex-direction: column !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _col_brand, _col_sep, _col_form = st.columns([1.05, 0.06, 1])
+
+    # ── Panel izquierdo: Branding ──
+    with _col_brand:
+        _logo_tag = (
+            f'<img src="{logo_uri}" style="max-width:220px;width:80%;margin-bottom:2.5rem;" />'
+            if logo_uri else
+            '<span style="font-size:3rem;font-weight:900;letter-spacing:3px;color:#fff;'
+            'display:block;margin-bottom:2rem;">OCCIM</span>'
+        )
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(150deg, #0d1a3a 0%, #1c3a72 55%, #0d1a3a 100%);
+            border-radius: 18px;
+            border: 1px solid rgba(59,130,246,0.22);
+            padding: 4rem 2.5rem;
+            height: 100%;
+            min-height: 480px;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            text-align: center;
+            position: relative; overflow: hidden;
+            box-sizing: border-box;
+        ">
+            <!-- Destellos decorativos -->
+            <div style="position:absolute;top:-70px;right:-70px;width:220px;height:220px;
+                border-radius:50%;background:radial-gradient(circle,rgba(59,130,246,0.13) 0%,transparent 70%);
+                pointer-events:none;"></div>
+            <div style="position:absolute;bottom:-50px;left:-50px;width:170px;height:170px;
+                border-radius:50%;background:radial-gradient(circle,rgba(96,165,250,0.09) 0%,transparent 70%);
+                pointer-events:none;"></div>
+
+            {_logo_tag}
+
+            <div style="width:46px;height:3px;
+                background:linear-gradient(90deg,#3b82f6,#60a5fa);
+                border-radius:2px;margin-bottom:1.75rem;"></div>
+
+            <p style="color:#93c5fd;font-size:0.88rem;font-weight:600;
+                letter-spacing:2px;text-transform:uppercase;
+                margin:0 0 1rem;">Panel Operacional</p>
+
+            <p style="color:rgba(255,255,255,0.35);font-size:0.8rem;
+                line-height:1.8;max-width:230px;margin:0;">
+                Gestión interna de operaciones,<br>
+                EDS, equipos técnicos y<br>
+                órdenes de trabajo.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Separador invisible ──
+    with _col_sep:
+        st.markdown("&nbsp;", unsafe_allow_html=True)
+
+    # ── Panel derecho: Formulario ──
+    with _col_form:
+        st.markdown("""
+        <div style="padding: 2.5rem 0 1rem;">
+            <p style="color:#f1f5f9;font-size:1.6rem;font-weight:700;
+                margin:0 0 0.3rem;line-height:1.2;">Iniciar sesión</p>
+            <p style="color:rgba(255,255,255,0.35);font-size:0.82rem;margin:0;">
+                Acceso restringido — solo cuentas&nbsp;<strong style="color:rgba(255,255,255,0.5);">@occimiano.cl</strong>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Mensaje de error persistido entre reruns
+        if st.session_state.get("_login_failed"):
+            st.error("Correo o contraseña incorrectos. Verifica tus datos.", icon="⚠️")
+
+        with st.form("occim_login"):
+            _login_email = st.text_input(
+                "Correo electrónico",
+                placeholder="nombre@occimiano.cl",
+                key="_lf_email",
+            )
+            _login_pw = st.text_input(
+                "Contraseña",
+                placeholder="Tu contraseña",
+                type="password",
+                key="_lf_pw",
+            )
+            st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
+            _submitted = st.form_submit_button(
+                "→  Ingresar",
+                use_container_width=True,
+                type="primary",
+            )
+
+        if _submitted:
+            if try_login(_login_email, _login_pw):
+                st.session_state.pop("_login_failed", None)
+                st.rerun()
+            else:
+                st.session_state["_login_failed"] = True
+                st.rerun()
+
+
 st.set_page_config(
     page_title="Occimiano - Panel Operacional",
     page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ── Autenticación — mostrar login y detener si no hay sesión ─────────────────
+if not is_authenticated():
+    _show_login_page()
+    st.stop()
 
 # ── Tema (dark / light) — leer desde URL query param ─────────────────────────
 # Limpiar query param heredado del sistema anterior (URL ?theme=dark/light)
@@ -975,6 +1159,20 @@ with st.sidebar:
             if _new_fk != _fk:
                 st.session_state.pop(_fk, None)
                 st.session_state[_new_fk] = _fv
+        st.rerun()
+
+    st.divider()
+
+    # ── Sesión activa: usuario y cierre de sesión ─────────────────────────────
+    _auth_email = st.session_state.get("_auth_email", "")
+    _auth_user  = _auth_email.split("@")[0] if _auth_email else "usuario"
+    st.markdown(
+        f'<div style="font-size:0.7rem;color:rgba(255,255,255,0.35);'
+        f'text-align:center;padding:2px 0 4px;">👤 {_auth_user}</div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("⎋  Cerrar sesión", use_container_width=True, key="logout_btn"):
+        logout()
         st.rerun()
 
     st.divider()
