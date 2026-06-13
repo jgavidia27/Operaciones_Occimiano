@@ -40,7 +40,7 @@ def try_login(email: str, password: str) -> bool:
     master = _get_password()
     if not master:
         return False
-    if password == master:
+    if password.strip() == master.strip():
         st.session_state["_auth_ok"]    = True
         st.session_state["_auth_email"] = email
         return True
