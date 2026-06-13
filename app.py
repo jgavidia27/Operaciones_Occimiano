@@ -632,14 +632,16 @@ st.markdown("""
     [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
         padding: 10px 14px !important;
         border-radius: 8px !important;
-        transition: background 0.15s;
+        transition: background 0.15s, box-shadow 0.15s !important;
         width: 100%;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
-        background: rgba(255,255,255,0.08) !important;
+        background: rgba(59,130,246,0.18) !important;
+        box-shadow: inset 3px 0 0 #3b82f6 !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"][aria-checked="true"] {
         background: rgba(59,130,246,0.35) !important;
+        box-shadow: inset 3px 0 0 #60a5fa !important;
     }
     /* Multiselect "Select all" → ocultar el inglés y simular "Seleccionar todos" */
     [data-testid="stMultiSelect"] li[role="option"]:first-child > div > span {
@@ -736,12 +738,12 @@ st.markdown("""
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 _NAV_PAGES = [
-    "🏆  Desempeño Servicio Tecnico",
-    "📊  Cumplimiento SLA",
-    "📋  Estaciones de Servicio",
-    "🔧  Órdenes por Cliente",
-    "⏱  Planificación Semanal",
-    "🔩  Mantenciones Preventivas",
+    "🥇  Desempeño Servicio Tecnico",
+    "✅  Cumplimiento SLA",
+    "🛠️  Mantenciones Preventivas",
+    "⛽  Estaciones de Servicio",
+    "⌛  Planificación Semanal",
+    "📩  Órdenes por Cliente",
 ]
 
 with st.sidebar:
@@ -893,7 +895,7 @@ with st.sidebar:
 # ── Carga de datos base (barra de progreso en sidebar, no en área principal) ──
 # Páginas que necesitan los llamados de Excel (COPEC / ESMAX / Shell).
 # En las demás páginas se omite esa carga para no bloquear el arranque.
-_PAGES_NEED_LLAMADOS = {_NAV_PAGES[0], _NAV_PAGES[1], _NAV_PAGES[2]}
+_PAGES_NEED_LLAMADOS = {_NAV_PAGES[0], _NAV_PAGES[1], _NAV_PAGES[3]}
 
 with _sidebar_load_slot.container():
     _base_prog = st.progress(0, text="📂 Cargando…")
@@ -966,10 +968,10 @@ else:
 _PAGE_TITLE = {
     _NAV_PAGES[0]: "Desempeño Servicio Tecnico",
     _NAV_PAGES[1]: "Cumplimiento SLA",
-    _NAV_PAGES[2]: "Estaciones de Servicio",
-    _NAV_PAGES[3]: "Órdenes por Cliente",
+    _NAV_PAGES[2]: "Mantenciones Preventivas",
+    _NAV_PAGES[3]: "Estaciones de Servicio",
     _NAV_PAGES[4]: "Planificación Semanal",
-    _NAV_PAGES[5]: "Mantenciones Preventivas",
+    _NAV_PAGES[5]: "Órdenes por Cliente",
 }
 _n_ll = f"{len(df_llamados):,}" if not df_llamados.empty else "–"
 _CAPTION = (
@@ -1006,8 +1008,8 @@ def _load_wo_con_progreso(label: str = "órdenes de trabajo") -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 # PÁGINA 1: HISTORIAL FRACTTAL
 # ─────────────────────────────────────────────────────────────────────────────
-if _page == _NAV_PAGES[3]:
-    st.title(_PAGE_TITLE[_NAV_PAGES[3]])
+if _page == _NAV_PAGES[5]:
+    st.title(_PAGE_TITLE[_NAV_PAGES[5]])
     st.caption(_CAPTION)
     st.divider()
     # ── Cargar OTs: Supabase (rapido) o Fracttal API (lento) ─────────────────
@@ -2455,7 +2457,7 @@ elif _page == _NAV_PAGES[1]:
 # ─────────────────────────────────────────────────────────────────────────────
 # PÁGINA 3: ESTACIONES DE SERVICIO
 # ─────────────────────────────────────────────────────────────────────────────
-elif _page == _NAV_PAGES[2]:
+elif _page == _NAV_PAGES[3]:
 
     # ── Datos base ──────────────────────────────────────────────────────────
     import datetime as _dt
@@ -7232,8 +7234,8 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
 # ─────────────────────────────────────────────────────────────────────────────
 # PÁGINA 5: MANTENCIONES PREVENTIVAS
 # ─────────────────────────────────────────────────────────────────────────────
-elif _page == _NAV_PAGES[5]:
-    st.title(_PAGE_TITLE[_NAV_PAGES[5]])
+elif _page == _NAV_PAGES[2]:
+    st.title(_PAGE_TITLE[_NAV_PAGES[2]])
     st.caption("Órdenes de mantenimiento preventivo — Fracttal One · 2026")
     st.divider()
 
