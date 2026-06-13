@@ -138,7 +138,7 @@ def _load_wallpaper_b64(theme: str) -> str:
 @st.cache_resource(show_spinner=False)
 def _load_logo_b64() -> str:
     """Carga logo.png/.jpg como data-URI base64 (cacheado). PNG tiene prioridad."""
-    for name in ("logo_occim.jpg", "logo_occim.png", "logo.png", "logo.jpg", "logo.jpeg"):
+    for name in ("logo_dashboard.jpg", "logo_occim.jpg", "logo_occim.png", "logo.png", "logo.jpg", "logo.jpeg"):
         path = os.path.join(_APP_DIR, name)
         if os.path.exists(path):
             with open(path, "rb") as fh:
