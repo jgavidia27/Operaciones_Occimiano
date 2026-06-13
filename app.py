@@ -569,15 +569,17 @@ def _show_login_page() -> None:
 
         with st.form("occim_login"):
 
-            # Logo
-            if _logo_path:
-                st.image(_logo_path, width=160)
-            else:
-                st.markdown(
-                    '<p style="text-align:center;font-size:2rem;font-weight:900;'
-                    'color:#0d1427;letter-spacing:3px;margin:0 0 0.5rem;">OCCIM</p>',
-                    unsafe_allow_html=True,
-                )
+            # Logo centrado
+            _lc1, _lc2, _lc3 = st.columns([1, 2, 1])
+            with _lc2:
+                if _logo_path:
+                    st.image(_logo_path, use_container_width=True)
+                else:
+                    st.markdown(
+                        '<p style="text-align:center;font-size:2rem;font-weight:900;'
+                        'color:#0d1427;letter-spacing:3px;margin:0 0 0.5rem;">OCCIM</p>',
+                        unsafe_allow_html=True,
+                    )
 
             # Título + subtítulo
             st.markdown("""
