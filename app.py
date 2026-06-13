@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 
-from auth import is_authenticated, try_login, logout
+from auth import init_cookie_manager, is_authenticated, try_login, logout
 
 from api import (
     load_work_orders, load_third_parties,
@@ -630,7 +630,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Logout via query param (?_lo=1) — debe ir ANTES del chequeo de sesión ────
+# ── Cookie manager — debe inicializarse ANTES de cualquier chequeo de sesión ─
+# init_cookie_manager() retorna False en el primer render (cookies aún cargando)
+# En ese caso detenemos la ejecución y esperamos el re-run automático del componente
+if not init_cookie_manager():
+    st.stop()
+
+# ── Logout via query param (?_lo=1) ──────────────────────────────────────────
 if st.query_params.get("_lo") == "1":
     logout()
     try:
