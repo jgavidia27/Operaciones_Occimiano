@@ -665,6 +665,24 @@ if _wo_2026:
 }})();
 </script>""", height=0)
 
+# ── Badge de usuario: correo en esquina superior derecha ─────────────────────
+_auth_email_badge = st.session_state.get("_auth_email", "")
+components.html(f"""<script>
+(function(){{
+    var p = window.parent; if(!p||!p.document) return;
+    var old = p.document.getElementById('occ-user-badge'); if(old) old.remove();
+    var d = p.document.createElement('div'); d.id = 'occ-user-badge';
+    d.style.cssText = 'position:fixed;top:7px;right:0.9rem;z-index:2147483640;'
+        + 'background:rgba(13,20,39,0.82);border:1px solid rgba(255,255,255,0.13);'
+        + 'border-radius:14px;padding:3px 11px;'
+        + 'font-family:system-ui,sans-serif;font-size:0.72rem;'
+        + 'color:rgba(255,255,255,0.72);white-space:nowrap;'
+        + 'backdrop-filter:blur(6px);pointer-events:none;';
+    d.textContent = '👤 {_auth_email_badge}';
+    p.document.body.appendChild(d);
+}})();
+</script>""", height=0)
+
 # Colores de tema para HTML inline — evita hardcodear colores claros en dark mode
 _t = {
     "card":     "#111f38"               if _current_theme == "dark" else "#f8fafc",
@@ -923,7 +941,12 @@ st.markdown("""
         justify-content: flex-start !important;
         text-align: left !important;
         padding-left: 10px !important;
-        font-size: 1.1rem !important;
+        font-size: 1.2rem !important;
+        max-width: 3rem !important;
+    }
+    section[data-testid="stSidebar"]:hover .stButton > button {
+        max-width: none !important;
+        font-size: 0.9rem !important;
     }
 
     /* ── Logo y caption: desvanecen en colapsado, aparecen en hover ──────────── */
