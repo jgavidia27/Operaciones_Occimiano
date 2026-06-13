@@ -716,20 +716,31 @@ st.markdown("""
         background: rgba(59,130,246,0.35) !important;
         box-shadow: inset 3px 0 0 #60a5fa !important;
     }
-    /* ── Colapsado: ocultar indicador radio y centrar solo el emoji ─────────── */
-    /* Sin el círculo el emoji tiene todo el espacio para verse claramente */
+    /* ── Colapsado: ocultar indicador radio, mostrar solo el emoji ─────────── */
+    /* Sin el círculo, el emoji queda a la izquierda y el texto desborda a la
+       derecha (clipado por overflow:hidden del label). */
     section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
         display: none !important;
     }
     section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] {
         padding: 10px 4px !important;
-        justify-content: center !important;
-        font-size: 1.25rem !important;
+        justify-content: flex-start !important;
+        font-size: 1.3rem !important;
+    }
+    /* Limitar el contenedor de texto al ancho del emoji para que no muestre texto */
+    section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
+        max-width: 2em !important;
+        overflow: hidden !important;
+        display: block !important;
     }
     /* Al expandir: restaurar indicador y alineación */
     section[data-testid="stSidebar"]:hover [data-testid="stRadio"] label[data-baseweb="radio"] {
         justify-content: flex-start !important;
         font-size: 1rem !important;
+    }
+    section[data-testid="stSidebar"]:hover [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
+        max-width: none !important;
+        overflow: visible !important;
     }
 
     /* ── Botones del sidebar: left-align para que el ícono quede visible ────── */
