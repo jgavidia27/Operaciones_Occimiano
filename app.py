@@ -461,7 +461,7 @@ st.set_page_config(
     page_title="Occimiano - Panel Operacional",
     page_icon="🔧",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 # ── Tema (dark / light) — leer desde URL query param ─────────────────────────
@@ -599,15 +599,37 @@ st.markdown("""
             display: none !important;
         }
     }
-    /* Mobile: mostrar header para que aparezca el botón ☰ del sidebar */
+    /* Mobile: mostrar header con botón ☰ nativo de Streamlit */
     @media screen and (max-width: 767px) {
         [data-testid="stHeader"] {
             display: flex !important;
             background: #0d1427 !important;
-            height: 2.5rem !important;
+            height: 2.8rem !important;
             padding: 0 0.5rem !important;
             align-items: center !important;
-            border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+            border-bottom: 1px solid rgba(255,255,255,0.12) !important;
+        }
+        /* Botón ☰ — ícono blanco sobre fondo oscuro */
+        [data-testid="stHeader"] button {
+            color: #f1f5f9 !important;
+            background: rgba(255,255,255,0.08) !important;
+            border-radius: 6px !important;
+            padding: 6px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-width: 36px !important;
+            min-height: 32px !important;
+        }
+        [data-testid="stHeader"] button svg {
+            fill: #f1f5f9 !important;
+            color: #f1f5f9 !important;
+            width: 20px !important;
+            height: 20px !important;
+        }
+        [data-testid="stHeader"] button svg path {
+            fill: #f1f5f9 !important;
+            stroke: #f1f5f9 !important;
         }
         /* Ocultar Deploy/Share incluso en móvil */
         [data-testid="stToolbar"],
@@ -930,64 +952,7 @@ with st.sidebar:
 
     _sidebar_load_slot = st.empty()   # placeholder para la barra de carga
 
-# ── Menú móvil — toggle CSS puro con :has() (sin JavaScript) ─────────────────
-# Truco: checkbox oculto + label como botón ☰.
-# body:has(#_occ_toggle:checked) detecta el estado y el CSS mueve el sidebar.
-# No requiere JS — funciona dentro del sandbox de Streamlit.
-st.markdown("""
-<input type="checkbox" id="_occ_toggle" style="display:none!important;position:absolute;opacity:0;pointer-events:none;">
-<style>
-@media (max-width: 767px) {
-    /* Sidebar: overlay oculto por defecto */
-    section[data-testid="stSidebar"] {
-        position: fixed !important;
-        top: 0 !important; left: 0 !important;
-        height: 100dvh !important;
-        z-index: 9998 !important;
-        transform: translateX(-110%) !important;
-        min-width: 82vw !important;
-        max-width: 90vw !important;
-        overflow-y: auto !important;
-        transition: transform 0.28s ease !important;
-        box-shadow: 4px 0 20px rgba(0,0,0,0.55) !important;
-    }
-    /* Sidebar visible cuando checkbox marcado */
-    body:has(#_occ_toggle:checked) section[data-testid="stSidebar"] {
-        transform: translateX(0) !important;
-    }
-    /* Label = botón ☰ flotante */
-    label[for="_occ_toggle"] {
-        position: fixed !important;
-        top: 10px !important; left: 10px !important;
-        z-index: 99999 !important;
-        background: #1e3a5f !important;
-        color: #f1f5f9 !important;
-        border: 1px solid rgba(255,255,255,0.35) !important;
-        border-radius: 8px !important;
-        width: 42px !important; height: 38px !important;
-        font-size: 18px !important;
-        cursor: pointer !important;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.6) !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        user-select: none !important;
-    }
-    /* Cuando sidebar está abierto: mostrar × para cerrar */
-    body:has(#_occ_toggle:checked) label[for="_occ_toggle"]::before {
-        content: "✕" !important;
-    }
-    body:not(:has(#_occ_toggle:checked)) label[for="_occ_toggle"]::before {
-        content: "☰" !important;
-    }
-    label[for="_occ_toggle"] { font-size: 0 !important; }
-}
-@media (min-width: 768px) {
-    label[for="_occ_toggle"] { display: none !important; }
-}
-</style>
-<label for="_occ_toggle"></label>
-""", unsafe_allow_html=True)
+# (bloque de toggle móvil eliminado — se usa el botón nativo de Streamlit)
 
 # ── Carga de datos base (barra de progreso en sidebar, no en área principal) ──
 # Páginas que necesitan los llamados de Excel (COPEC / ESMAX / Shell).
