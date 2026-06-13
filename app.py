@@ -674,43 +674,28 @@ if _wo_2026:
 }})();
 </script>""", height=0)
 
-# ── Badge de usuario + botón salir en esquina superior derecha ───────────────
+# ── Badge de usuario + botón salir (st.markdown → enlace real en la página) ──
 _auth_email_badge = st.session_state.get("_auth_email", "")
-components.html(f"""<script>
-(function(){{
-    var p = window.parent; if(!p||!p.document) return;
-    var old = p.document.getElementById('occ-user-badge'); if(old) old.remove();
-
-    var d = p.document.createElement('div'); d.id = 'occ-user-badge';
-    d.style.cssText = 'position:fixed;top:7px;right:0.9rem;z-index:2147483640;'
-        + 'display:flex;align-items:center;gap:8px;'
-        + 'background:rgba(13,20,39,0.88);border:1px solid rgba(255,255,255,0.13);'
-        + 'border-radius:20px;padding:4px 6px 4px 12px;'
-        + 'font-family:system-ui,sans-serif;font-size:0.72rem;'
-        + 'color:rgba(255,255,255,0.75);white-space:nowrap;'
-        + 'backdrop-filter:blur(6px);box-shadow:0 2px 8px rgba(0,0,0,0.3);';
-
-    var emailSpan = p.document.createElement('span');
-    emailSpan.textContent = '👤 {_auth_email_badge}';
-
-    var btn = p.document.createElement('button');
-    btn.textContent = 'Salir';
-    btn.title = 'Cerrar sesión';
-    btn.style.cssText = 'background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);'
-        + 'border-radius:12px;padding:2px 10px;cursor:pointer;'
-        + 'font-size:0.7rem;font-family:system-ui,sans-serif;'
-        + 'color:#fff;font-weight:500;transition:background 0.15s;';
-    btn.onmouseover = function(){{ this.style.background='rgba(255,255,255,0.22)'; }};
-    btn.onmouseout  = function(){{ this.style.background='rgba(255,255,255,0.12)'; }};
-    btn.onclick = function(){{
-        p.location.href = p.location.pathname + '?_lo=1';
-    }};
-
-    d.appendChild(emailSpan);
-    d.appendChild(btn);
-    p.document.body.appendChild(d);
-}})();
-</script>""", height=0)
+st.markdown(f"""
+<div style="
+    position:fixed;top:7px;right:0.9rem;z-index:99999;
+    display:flex;align-items:center;gap:8px;
+    background:rgba(13,20,39,0.88);border:1px solid rgba(255,255,255,0.13);
+    border-radius:20px;padding:4px 6px 4px 12px;
+    font-family:system-ui,sans-serif;font-size:0.72rem;
+    color:rgba(255,255,255,0.75);white-space:nowrap;
+    box-shadow:0 2px 8px rgba(0,0,0,0.3);
+">
+    <span>👤 {_auth_email_badge}</span>
+    <a href="?_lo=1" style="
+        background:rgba(255,255,255,0.12);
+        border:1px solid rgba(255,255,255,0.22);
+        border-radius:12px;padding:2px 10px;
+        text-decoration:none;color:#fff;
+        font-size:0.7rem;font-weight:500;
+    ">Salir</a>
+</div>
+""", unsafe_allow_html=True)
 
 # Colores de tema para HTML inline — evita hardcodear colores claros en dark mode
 _t = {
