@@ -3120,8 +3120,53 @@ elif _page == _NAV_PAGES[4]:
         df_util, util_sheet, util_error = load_utilizacion_tiempo(sheet_name=_sel_mes)
 
     if util_error and df_util.empty:
-        st.error(f"No se pudo cargar la hoja '{util_sheet}': {util_error}")
-        st.info("Verifica que Google Drive está sincronizado (G:).")
+        st.info(
+            "📋 **Utilización del tiempo** — sección en proceso de migración a la nube.\n\n"
+            "Esta vista lee un archivo Excel de Google Drive que solo está disponible en la versión "
+            "local del dashboard. Estará disponible aquí una vez migrada a Supabase.",
+            icon="🚧",
+        )
+        # ── Mostrar datos de Supabase que SÍ están disponibles ───────────────
+        st.markdown("---")
+        st.markdown("### 🛠️ Mantenciones Preventivas — estado actual")
+        st.caption("Datos disponibles en la nube desde Supabase")
+        with st.spinner("Cargando preventivas…"):
+            _prev_plan = load_preventivas_supabase()
+        if _prev_plan:
+            _df_prev_plan = pd.DataFrame(_prev_plan)
+            # Parsear fechas
+            for _c in ["fecha_programada", "fecha_creacion", "fecha_finalizacion"]:
+                if _c in _df_prev_plan.columns:
+                    _df_prev_plan[_c] = pd.to_datetime(_df_prev_plan[_c], errors="coerce")
+            # Filtrar próximas 30 días + pendientes
+            _hoy = pd.Timestamp.today().normalize()
+            _en_30 = _hoy + pd.Timedelta(days=30)
+            if "fecha_programada" in _df_prev_plan.columns:
+                _prox = _df_prev_plan[
+                    (_df_prev_plan["fecha_programada"] >= _hoy) &
+                    (_df_prev_plan["fecha_programada"] <= _en_30)
+                ].copy()
+            else:
+                _prox = pd.DataFrame()
+            # KPIs rápidos
+            _pk1, _pk2, _pk3 = st.columns(3)
+            _pk1.metric("Total OTs preventivas", f"{len(_df_prev_plan):,}")
+            _pk2.metric("Próximas 30 días", f"{len(_prox):,}")
+            _pend = len(_df_prev_plan[_df_prev_plan.get("estado", pd.Series()).str.lower().str.contains("inici", na=False)]) if "estado" in _df_prev_plan.columns else "—"
+            _pk3.metric("No iniciadas", str(_pend))
+            # Tabla próximas
+            if not _prox.empty:
+                st.markdown("**Próximas mantenciones (30 días)**")
+                _cols_prox = [c for c in ["id_ot","nombre_tarea","responsable","fecha_programada","estado","estado_tarea"] if c in _prox.columns]
+                _prox_disp = _prox[_cols_prox].copy()
+                if "fecha_programada" in _prox_disp.columns:
+                    _prox_disp["fecha_programada"] = _prox_disp["fecha_programada"].dt.strftime("%d/%m/%Y")
+                _show_df(_prox_disp.sort_values("fecha_programada") if "fecha_programada" in _prox_disp.columns else _prox_disp,
+                         use_container_width=True, hide_index=True)
+            else:
+                st.info("No hay mantenciones programadas en los próximos 30 días.")
+        else:
+            st.warning("No se pudieron cargar datos de Supabase.")
     else:
         if util_error:
             st.warning(f"Aviso: {util_error}")
