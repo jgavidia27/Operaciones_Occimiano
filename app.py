@@ -667,9 +667,9 @@ st.markdown("""
         visibility: visible !important;
         display: flex !important;
         overflow: hidden !important;
-        min-width: 4rem !important;
-        max-width: 4rem !important;
-        transition: min-width 0.28s ease, max-width 0.28s ease;
+        min-width: 4.5rem !important;
+        max-width: 4.5rem !important;
+        transition: min-width 0.3s ease, max-width 0.3s ease;
     }
     section[data-testid="stSidebar"]:hover {
         min-width: 16rem !important;
@@ -680,16 +680,18 @@ st.markdown("""
         overflow: hidden !important;
         width: 100% !important;
     }
-    /* Colapsado: reducir padding interno para que el emoji quepa en 4rem */
-    section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarContent"] {
-        padding-left: 0.25rem !important;
-        padding-right: 0.25rem !important;
+    /* Colapsado: eliminar padding interno en todas las capas del sidebar */
+    section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarContent"],
+    section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarContent"] > div,
+    section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarContent"] > div > div {
+        padding-left: 0.1rem !important;
+        padding-right: 0.1rem !important;
     }
     /* Móvil: sin hover-expand (no hay hover en touch; nav via selectbox) */
     @media (max-width: 767px) {
         section[data-testid="stSidebar"]:hover {
-            min-width: 4rem !important;
-            max-width: 4rem !important;
+            min-width: 4.5rem !important;
+            max-width: 4.5rem !important;
         }
     }
 
@@ -714,9 +716,20 @@ st.markdown("""
         background: rgba(59,130,246,0.35) !important;
         box-shadow: inset 3px 0 0 #60a5fa !important;
     }
-    /* Colapsado: padding reducido para que el emoji quepa en 4rem */
+    /* ── Colapsado: ocultar indicador radio y centrar solo el emoji ─────────── */
+    /* Sin el círculo el emoji tiene todo el espacio para verse claramente */
+    section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
+        display: none !important;
+    }
     section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] {
-        padding: 10px 5px !important;
+        padding: 10px 4px !important;
+        justify-content: center !important;
+        font-size: 1.25rem !important;
+    }
+    /* Al expandir: restaurar indicador y alineación */
+    section[data-testid="stSidebar"]:hover [data-testid="stRadio"] label[data-baseweb="radio"] {
+        justify-content: flex-start !important;
+        font-size: 1rem !important;
     }
 
     /* ── Botones del sidebar: left-align para que el ícono quede visible ────── */
@@ -727,17 +740,17 @@ st.markdown("""
     section[data-testid="stSidebar"]:not(:hover) .stButton > button {
         justify-content: flex-start !important;
         text-align: left !important;
-        padding-left: 8px !important;
+        padding-left: 10px !important;
+        font-size: 1.1rem !important;
     }
 
-    /* ── Logo: desvanece en colapsado, aparece en hover ─────────────────────── */
+    /* ── Logo y caption: desvanecen en colapsado, aparecen en hover ──────────── */
     section[data-testid="stSidebar"] img {
         transition: opacity 0.25s !important;
     }
     section[data-testid="stSidebar"]:not(:hover) img {
         opacity: 0 !important;
     }
-    /* Ocultar caption "Panel Operacional" cuando colapsado */
     section[data-testid="stSidebar"]:not(:hover) small,
     section[data-testid="stSidebar"]:not(:hover) [data-testid="stCaptionContainer"] {
         opacity: 0 !important;
