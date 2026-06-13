@@ -671,6 +671,30 @@ st.markdown("""
     [data-testid="stSidebarCollapseButton"] {
         display: none !important;
     }
+    /* Móvil: sidebar más angosto + texto más pequeño */
+    @media (max-width: 767px) {
+        section[data-testid="stSidebar"] {
+            min-width: 9rem !important;
+            max-width: 9rem !important;
+        }
+        [data-testid="stSidebar"] img,
+        [data-testid="stSidebar"] [data-testid="stImage"] {
+            max-height: 50px !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
+            padding: 7px 6px !important;
+            font-size: 0.72rem !important;
+            line-height: 1.25 !important;
+        }
+        [data-testid="stSidebar"] .stButton > button {
+            font-size: 0.7rem !important;
+            padding: 4px 6px !important;
+        }
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] span {
+            font-size: 0.72rem !important;
+        }
+    }
 
     /* Navigation radio buttons styled as menu items */
     [data-testid="stSidebar"] [data-testid="stRadio"] > label {
