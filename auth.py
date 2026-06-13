@@ -1,23 +1,39 @@
 """
-auth.py — Autenticación con sesión persistente via cookie.
+auth.py — Autenticación con sesión persistente (sin dependencias externas).
 
-Cookie 'occ_s' guarda "1|email" durante SESSION_HOURS horas.
-Al refrescar la página se restaura automáticamente.
-Solo se cierra sesión al presionar el botón Salir.
+Cómo funciona:
+- Al hacer login se genera un token aleatorio y se guarda en la URL (?s=TOKEN)
+  y en un dict del servidor (cache_resource).
+- Al refrescar la página la URL mantiene el token → sesión restaurada.
+- Al presionar Salir el token se elimina del servidor → sesión cerrada.
+- Expira automáticamente tras SESSION_HOURS horas.
 
 Requiere en Streamlit Cloud Secrets:
     DASHBOARD_PASSWORD = "tu_clave"
 """
 import os
+import hashlib
+import time
 import streamlit as st
-from datetime import datetime, timedelta
 
 DOMAIN        = "@occimiano.cl"
-_COOKIE       = "occ_s"
-SESSION_HOURS = 8          # horas de sesión antes de requerir nuevo login
+SESSION_HOURS = 8
+_PARAM        = "s"          # nombre del query param en la URL
 
 
-# ── Contraseña ────────────────────────────────────────────────────────────────
+# ── Store de sesiones del servidor ───────────────────────────────────────────
+
+@st.cache_resource
+def _sessions() -> dict:
+    """Dict compartido en memoria: {token: {email, expires}}."""
+    return {}
+
+
+# ── Helpers internos ─────────────────────────────────────────────────────────
+
+def _gen_token() -> str:
+    return hashlib.sha256(os.urandom(32)).hexdigest()[:40]
+
 
 def _get_password() -> str:
     try:
@@ -27,82 +43,67 @@ def _get_password() -> str:
     return os.getenv("DASHBOARD_PASSWORD", "")
 
 
-# ── Cookie Manager (singleton por sesión) ────────────────────────────────────
-
-def _cm():
-    """Retorna la instancia de CookieManager almacenada en session_state."""
-    return st.session_state.get("_occ_cm")
-
-
 # ── API pública ───────────────────────────────────────────────────────────────
 
-def init_cookie_manager():
-    """
-    Debe llamarse UNA VEZ al inicio de app.py, antes de cualquier auth check.
-    Inicializa el CookieManager y lo guarda en session_state.
-    Retorna True cuando las cookies están listas, False si aún se está cargando.
-    """
-    try:
-        import extra_streamlit_components as stx
-    except ImportError:
-        return True  # Sin librería: sin cookies, continuar normalmente
-
-    if "_occ_cm" not in st.session_state:
-        st.session_state["_occ_cm"] = stx.CookieManager(key="_occ_cm")
-
-    # get_all() retorna None en el primer render (componente aún cargando)
-    cookies = st.session_state["_occ_cm"].get_all()
-    return cookies is not None
+def init_cookie_manager() -> bool:
+    """Compatibilidad con app.py — no hace nada en este enfoque."""
+    return True
 
 
 def is_authenticated() -> bool:
-    """True si hay sesión activa en memoria O cookie válida."""
+    """True si hay sesión activa en memoria o token válido en la URL."""
     if bool(st.session_state.get("_auth_ok")):
         return True
-    cm = _cm()
-    if cm is None:
+
+    token = st.query_params.get(_PARAM, "")
+    if not token:
         return False
-    try:
-        val = cm.get(_COOKIE)
-        if val and str(val).startswith("1|"):
-            email = str(val).split("|", 1)[1]
-            st.session_state["_auth_ok"]    = True
-            st.session_state["_auth_email"] = email
-            return True
-    except Exception:
-        pass
-    return False
+
+    session = _sessions().get(token)
+    if not session:
+        return False
+    if session["expires"] < time.time():
+        _sessions().pop(token, None)
+        return False
+
+    # Restaurar sesión desde token
+    st.session_state["_auth_ok"]    = True
+    st.session_state["_auth_email"] = session["email"]
+    st.session_state["_auth_token"] = token
+    return True
 
 
 def try_login(email: str, password: str) -> bool:
-    """Valida credenciales y crea sesión + cookie."""
+    """Valida credenciales, crea token y lo pone en la URL."""
     email = email.strip().lower()
     if not email.endswith(DOMAIN):
         return False
     master = _get_password()
     if not master:
         return False
-    if password.strip() == master.strip():
-        st.session_state["_auth_ok"]    = True
-        st.session_state["_auth_email"] = email
-        cm = _cm()
-        if cm:
-            try:
-                exp = datetime.now() + timedelta(hours=SESSION_HOURS)
-                cm.set(_COOKIE, f"1|{email}", expires_at=exp, key="_occ_set")
-            except Exception:
-                pass
-        return True
-    return False
+    if password.strip() != master.strip():
+        return False
+
+    token   = _gen_token()
+    expires = time.time() + SESSION_HOURS * 3600
+    _sessions()[token] = {"email": email, "expires": expires}
+
+    st.session_state["_auth_ok"]    = True
+    st.session_state["_auth_email"] = email
+    st.session_state["_auth_token"] = token
+    st.query_params[_PARAM]         = token
+    return True
 
 
 def logout() -> None:
-    """Elimina sesión en memoria y cookie."""
-    cm = _cm()
-    if cm:
-        try:
-            cm.delete(_COOKIE, key="_occ_del")
-        except Exception:
-            pass
-    for k in ("_auth_ok", "_auth_email", "_login_failed"):
+    """Elimina el token del servidor y limpia la sesión."""
+    token = (st.session_state.get("_auth_token")
+             or st.query_params.get(_PARAM, ""))
+    if token:
+        _sessions().pop(token, None)
+    for k in ("_auth_ok", "_auth_email", "_login_failed", "_auth_token"):
         st.session_state.pop(k, None)
+    try:
+        del st.query_params[_PARAM]
+    except Exception:
+        pass
