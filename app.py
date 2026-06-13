@@ -840,6 +840,9 @@ with st.sidebar:
     st.caption("Panel Operacional")
     st.divider()
 
+    # Si el selectbox móvil solicitó un cambio de página, aplicarlo antes de crear el radio
+    if "_mob_nav_pending" in st.session_state:
+        st.session_state["_nav_radio"] = st.session_state.pop("_mob_nav_pending")
     _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed", key="_nav_radio")
 
     st.divider()
@@ -1075,7 +1078,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 if _mob_sel != _page:
-    st.session_state["_nav_radio"] = _mob_sel
+    st.session_state["_mob_nav_pending"] = _mob_sel
     st.rerun()
 
 # ── Helper: carga OTs con spinner nativo ────────────────────────────────────
