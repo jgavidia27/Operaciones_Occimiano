@@ -460,155 +460,140 @@ def _inject_toggle(theme: str) -> None:
 
 
 # ── Pantalla de inicio de sesión ──────────────────────────────────────────────
+def _get_logo_path() -> str:
+    """Retorna la ruta al archivo de logo (PNG preferido sobre JPG)."""
+    for name in ("logo.png", "logo_occim.png", "logo.jpg", "logo.jpeg"):
+        path = os.path.join(_APP_DIR, name)
+        if os.path.exists(path):
+            return path
+    return ""
+
+
 def _show_login_page() -> None:
-    """Renderiza la pantalla de login. Llamar antes del bloque principal."""
-    logo_uri = _load_logo_b64()
+    """Pantalla de login: card blanco centrado sobre fondo oscuro."""
 
     st.markdown("""
     <style>
-    /* Ocultar chrome de Streamlit en pantalla de login */
-    [data-testid="stSidebar"],
-    [data-testid="stHeader"],
-    [data-testid="stToolbar"],
-    [data-testid="stMainMenu"],
+    /* Ocultar chrome de Streamlit */
+    [data-testid="stSidebar"], [data-testid="stHeader"],
+    [data-testid="stToolbar"], [data-testid="stMainMenu"],
     footer, .stDeployButton { display: none !important; }
 
-    /* Fondo página */
+    /* Fondo oscuro navy */
     .stApp, [data-testid="stAppViewContainer"] {
-        background: #060d1a !important;
+        background: #0d1427 !important;
     }
+
+    /* Centrar el contenido principal */
     [data-testid="stMain"] > div {
-        padding: 3vh 2vw !important;
-        max-width: 960px !important;
+        padding: 6vh 1rem 4vh !important;
+    }
+
+    /* ── Card blanco ── */
+    [data-testid="stForm"] {
+        background: #ffffff !important;
+        border-radius: 18px !important;
+        border: none !important;
+        padding: 2.75rem 2.5rem 2.25rem !important;
+        box-shadow: 0 24px 60px rgba(0,0,0,0.45) !important;
+        max-width: 420px !important;
         margin: 0 auto !important;
     }
 
-    /* Card del formulario */
-    [data-testid="stForm"] {
-        background: #0f1a2e !important;
-        border: 1px solid rgba(255,255,255,0.07) !important;
-        border-radius: 14px !important;
-        padding: 2rem 2rem 1.5rem !important;
-        margin-top: 0 !important;
+    /* Logo centrado */
+    [data-testid="stForm"] [data-testid="stImage"] {
+        display: flex !important;
+        justify-content: center !important;
+        margin-bottom: 0.25rem !important;
+    }
+    [data-testid="stForm"] [data-testid="stImage"] img {
+        max-height: 56px !important;
+        width: auto !important;
+        object-fit: contain !important;
     }
 
-    /* Labels de inputs */
+    /* Labels */
     [data-testid="stForm"] label {
-        color: rgba(255,255,255,0.55) !important;
-        font-size: 0.78rem !important;
-        letter-spacing: 0.6px !important;
+        color: #374151 !important;
+        font-size: 0.8rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.4px !important;
         text-transform: uppercase !important;
     }
 
     /* Inputs */
     [data-testid="stForm"] input {
-        background: rgba(255,255,255,0.05) !important;
-        border: 1px solid rgba(255,255,255,0.12) !important;
-        color: #f1f5f9 !important;
+        background: #f9fafb !important;
+        border: 1.5px solid #e5e7eb !important;
+        color: #111827 !important;
         border-radius: 8px !important;
         font-size: 0.95rem !important;
     }
     [data-testid="stForm"] input:focus {
-        border-color: rgba(59,130,246,0.5) !important;
-        box-shadow: 0 0 0 3px rgba(59,130,246,0.12) !important;
+        border-color: #0d1427 !important;
+        box-shadow: 0 0 0 3px rgba(13,26,39,0.1) !important;
     }
-    [data-testid="stForm"] input::placeholder { color: rgba(255,255,255,0.2) !important; }
+    [data-testid="stForm"] input::placeholder { color: #9ca3af !important; }
 
-    /* Botón submit */
+    /* Botón submit — navy oscuro */
     [data-testid="stForm"] button[kind="primaryFormSubmit"],
     [data-testid="stForm"] button[data-testid="baseButton-primaryFormSubmit"] {
-        background: #2563eb !important;
+        background: #0d1427 !important;
         border: none !important;
         color: #fff !important;
         font-weight: 600 !important;
         font-size: 0.95rem !important;
-        letter-spacing: 0.4px !important;
-        height: 2.8rem !important;
-        border-radius: 8px !important;
+        height: 2.85rem !important;
+        border-radius: 9px !important;
+        letter-spacing: 0.3px !important;
         transition: background 0.2s !important;
     }
     [data-testid="stForm"] button[kind="primaryFormSubmit"]:hover {
-        background: #1d4ed8 !important;
+        background: #1a3066 !important;
     }
 
-    /* Alinear verticalmente los paneles */
-    [data-testid="stHorizontalBlock"] { align-items: stretch !important; }
-    [data-testid="column"] { display: flex !important; flex-direction: column !important; }
+    /* Error dentro del card */
+    [data-testid="stForm"] [data-testid="stAlert"] {
+        background: #fef2f2 !important;
+        border: 1px solid #fecaca !important;
+        border-radius: 8px !important;
+        color: #991b1b !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-    _col_brand, _col_sep, _col_form = st.columns([1.05, 0.06, 1])
-
-    # ── Panel izquierdo: Branding ──
-    with _col_brand:
-        _logo_tag = (
-            f'<img src="{logo_uri}" style="max-width:220px;width:80%;margin-bottom:2.5rem;" />'
-            if logo_uri else
-            '<span style="font-size:3rem;font-weight:900;letter-spacing:3px;color:#fff;'
-            'display:block;margin-bottom:2rem;">OCCIM</span>'
-        )
-        st.markdown(f"""
-        <div style="
-            background: linear-gradient(150deg, #0d1a3a 0%, #1c3a72 55%, #0d1a3a 100%);
-            border-radius: 18px;
-            border: 1px solid rgba(59,130,246,0.22);
-            padding: 4rem 2.5rem;
-            height: 100%;
-            min-height: 480px;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            text-align: center;
-            position: relative; overflow: hidden;
-            box-sizing: border-box;
-        ">
-            <!-- Destellos decorativos -->
-            <div style="position:absolute;top:-70px;right:-70px;width:220px;height:220px;
-                border-radius:50%;background:radial-gradient(circle,rgba(59,130,246,0.13) 0%,transparent 70%);
-                pointer-events:none;"></div>
-            <div style="position:absolute;bottom:-50px;left:-50px;width:170px;height:170px;
-                border-radius:50%;background:radial-gradient(circle,rgba(96,165,250,0.09) 0%,transparent 70%);
-                pointer-events:none;"></div>
-
-            {_logo_tag}
-
-            <div style="width:46px;height:3px;
-                background:linear-gradient(90deg,#3b82f6,#60a5fa);
-                border-radius:2px;margin-bottom:1.75rem;"></div>
-
-            <p style="color:#93c5fd;font-size:0.88rem;font-weight:600;
-                letter-spacing:2px;text-transform:uppercase;
-                margin:0 0 1rem;">Panel Operacional</p>
-
-            <p style="color:rgba(255,255,255,0.35);font-size:0.8rem;
-                line-height:1.8;max-width:230px;margin:0;">
-                Gestión interna de operaciones,<br>
-                EDS, equipos técnicos y<br>
-                órdenes de trabajo.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ── Separador invisible ──
-    with _col_sep:
-        st.markdown("&nbsp;", unsafe_allow_html=True)
-
-    # ── Panel derecho: Formulario ──
-    with _col_form:
-        st.markdown("""
-        <div style="padding: 2.5rem 0 1rem;">
-            <p style="color:#f1f5f9;font-size:1.6rem;font-weight:700;
-                margin:0 0 0.3rem;line-height:1.2;">Iniciar sesión</p>
-            <p style="color:rgba(255,255,255,0.35);font-size:0.82rem;margin:0;">
-                Acceso restringido — solo cuentas&nbsp;<strong style="color:rgba(255,255,255,0.5);">@occimiano.cl</strong>
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Mensaje de error persistido entre reruns
-        if st.session_state.get("_login_failed"):
-            st.error("Correo o contraseña incorrectos. Verifica tus datos.", icon="⚠️")
+    # Columna centrada
+    _, _col, _ = st.columns([0.6, 1, 0.6])
+    with _col:
+        _logo_path = _get_logo_path()
 
         with st.form("occim_login"):
+
+            # Logo
+            if _logo_path:
+                st.image(_logo_path, width=160)
+            else:
+                st.markdown(
+                    '<p style="text-align:center;font-size:2rem;font-weight:900;'
+                    'color:#0d1427;letter-spacing:3px;margin:0 0 0.5rem;">OCCIM</p>',
+                    unsafe_allow_html=True,
+                )
+
+            # Título + subtítulo
+            st.markdown("""
+            <div style="text-align:center;padding:1rem 0 1.5rem;">
+                <p style="color:#0d1427;font-size:1.45rem;font-weight:700;
+                    margin:0 0 0.3rem;line-height:1.2;">Iniciar sesión</p>
+                <p style="color:#6b7280;font-size:0.8rem;margin:0;">
+                    Solo cuentas <strong>@occimiano.cl</strong>
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Error
+            if st.session_state.get("_login_failed"):
+                st.error("Correo o contraseña incorrectos.", icon="⚠️")
+
             _login_email = st.text_input(
                 "Correo electrónico",
                 placeholder="nombre@occimiano.cl",
@@ -616,13 +601,13 @@ def _show_login_page() -> None:
             )
             _login_pw = st.text_input(
                 "Contraseña",
-                placeholder="Tu contraseña",
+                placeholder="••••••••",
                 type="password",
                 key="_lf_pw",
             )
-            st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
             _submitted = st.form_submit_button(
-                "→  Ingresar",
+                "Ingresar  →",
                 use_container_width=True,
                 type="primary",
             )
