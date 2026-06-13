@@ -27,25 +27,25 @@ def _load_env_file():
 
 _load_env_file()
 
-# ── Credenciales (local: .env | Streamlit Cloud: Secrets) ────────────────────
-def _secret(key: str) -> str:
-    """Lee de st.secrets (Streamlit Cloud) o de variable de entorno (local)."""
+# ── Credenciales — se leen en tiempo de ejecución (no al importar) ───────────
+def _get_creds() -> tuple[str, str]:
+    """
+    Lee SUPABASE_URL y SUPABASE_KEY en este orden:
+    1. st.secrets  (Streamlit Cloud)
+    2. os.environ  (local via .env ya cargado por _load_env_file)
+    Se llama dentro de _query() para que st.secrets esté disponible.
+    """
+    url = key = ""
     try:
-        val = st.secrets.get(key)
-        if val:
-            return str(val)
+        url = str(st.secrets["SUPABASE_URL"])
+        key = str(st.secrets["SUPABASE_KEY"])
     except Exception:
         pass
-    return os.getenv(key, "")
-
-SUPABASE_URL = _secret("SUPABASE_URL")
-SUPABASE_KEY = _secret("SUPABASE_KEY")
-
-_HEADERS = {
-    "apikey":        SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Accept":        "application/json",
-}
+    if not url:
+        url = os.getenv("SUPABASE_URL", "")
+    if not key:
+        key = os.getenv("SUPABASE_KEY", "")
+    return url, key
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper base
@@ -53,12 +53,18 @@ _HEADERS = {
 
 def _query(tabla: str, params: str = "", limit: int = 10_000) -> list:
     """Paginación automática hasta limit registros."""
+    supabase_url, supabase_key = _get_creds()
+    headers = {
+        "apikey":        supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Accept":        "application/json",
+    }
     results = []
     offset  = 0
     page    = 1000
     while offset < limit:
-        url = f"{SUPABASE_URL}/rest/v1/{tabla}?{params}&limit={page}&offset={offset}"
-        r = requests.get(url, headers=_HEADERS, timeout=20)
+        url = f"{supabase_url}/rest/v1/{tabla}?{params}&limit={page}&offset={offset}"
+        r = requests.get(url, headers=headers, timeout=20)
         if r.status_code != 200:
             break
         batch = r.json()
