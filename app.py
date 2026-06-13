@@ -3152,10 +3152,13 @@ elif _page == _NAV_PAGES[4]:
             _prev_plan = load_preventivas_supabase()
         if _prev_plan:
             _df_prev_plan = pd.DataFrame(_prev_plan)
-            # Parsear fechas
+            # Parsear fechas — quitar timezone si Supabase las devuelve con offset
             for _c in ["fecha_programada", "fecha_creacion", "fecha_finalizacion"]:
                 if _c in _df_prev_plan.columns:
-                    _df_prev_plan[_c] = pd.to_datetime(_df_prev_plan[_c], errors="coerce")
+                    _tmp = pd.to_datetime(_df_prev_plan[_c], errors="coerce")
+                    if _tmp.dt.tz is not None:
+                        _tmp = _tmp.dt.tz_convert(None)
+                    _df_prev_plan[_c] = _tmp
             # Filtrar próximas 30 días + pendientes
             _hoy = pd.Timestamp.today().normalize()
             _en_30 = _hoy + pd.Timedelta(days=30)
