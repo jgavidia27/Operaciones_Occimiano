@@ -2,100 +2,47 @@
 auth.py — Autenticación para el Dashboard Operacional Occimiano.
 ================================================================
 
-Cómo agregar usuarios:
-  1. Generar hash de la contraseña (ejecutar una sola vez):
-       python -c "from auth import hash_password; print(hash_password('la_clave'))"
+Configuración (solo esto se necesita en Streamlit Cloud → Settings → Secrets):
 
-  2. Copiar el hash y agregarlo a los secrets de Streamlit Cloud:
-       [auth_users]
-       "nombre@occimiano.cl" = "el_hash_generado"
+    DASHBOARD_PASSWORD = "la_clave_que_elijas"
 
-  3. Para desarrollo local, agregar al archivo .env:
-       AUTH_USERS={"nombre@occimiano.cl": "el_hash_generado"}
-
-Solo se permite el dominio @occimiano.cl.
+Eso es todo. Cualquier correo @occimiano.cl + esa clave puede ingresar.
 """
 
-import hashlib
-import hmac
-import json
-import os
 import streamlit as st
+import os
 
 DOMAIN = "@occimiano.cl"
-_SALT  = b"occim_panel_2026_s3cr3t"
 
 
-# ── Hashing ───────────────────────────────────────────────────────────────────
-
-def hash_password(password: str) -> str:
-    """
-    Genera un hash PBKDF2-SHA256 para almacenar en secrets.
-    Llamar desde CLI para crear hashes de contraseñas nuevas:
-        python -c "from auth import hash_password; print(hash_password('mi_clave'))"
-    """
-    return hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        _SALT,
-        200_000,
-    ).hex()
-
-
-# ── Lectura de usuarios autorizados ──────────────────────────────────────────
-
-def _load_users() -> dict[str, str]:
-    """
-    Retorna dict {email_lowercase: password_hash}.
-    Fuentes (por orden de prioridad):
-      1. st.secrets["auth_users"]  (Streamlit Cloud)
-      2. Variable de entorno AUTH_USERS  (JSON, desarrollo local)
-    """
-    # Fuente 1: st.secrets
+def _get_password() -> str:
+    """Lee la contraseña desde st.secrets o variable de entorno."""
     try:
-        raw = st.secrets.get("auth_users", {})
-        if raw:
-            return {k.strip().lower(): v for k, v in dict(raw).items()}
+        return str(st.secrets["DASHBOARD_PASSWORD"])
     except Exception:
         pass
+    return os.getenv("DASHBOARD_PASSWORD", "")
 
-    # Fuente 2: variable de entorno (JSON)
-    try:
-        raw_env = os.getenv("AUTH_USERS", "")
-        if raw_env:
-            parsed = json.loads(raw_env)
-            return {k.strip().lower(): v for k, v in parsed.items()}
-    except Exception:
-        pass
-
-    return {}
-
-
-# ── Verificación ─────────────────────────────────────────────────────────────
-
-def _verify(email: str, password: str) -> bool:
-    email = email.strip().lower()
-    if not email.endswith(DOMAIN):
-        return False
-    users = _load_users()
-    stored = users.get(email)
-    if not stored:
-        return False
-    candidate = hash_password(password)
-    return hmac.compare_digest(candidate, stored)
-
-
-# ── API pública ───────────────────────────────────────────────────────────────
 
 def is_authenticated() -> bool:
     return bool(st.session_state.get("_auth_ok"))
 
 
 def try_login(email: str, password: str) -> bool:
-    """Intenta iniciar sesión. Retorna True si las credenciales son válidas."""
-    if _verify(email, password):
+    """
+    Retorna True si:
+      - el correo termina en @occimiano.cl
+      - la contraseña coincide con DASHBOARD_PASSWORD en secrets
+    """
+    email = email.strip().lower()
+    if not email.endswith(DOMAIN):
+        return False
+    master = _get_password()
+    if not master:
+        return False
+    if password == master:
         st.session_state["_auth_ok"]    = True
-        st.session_state["_auth_email"] = email.strip().lower()
+        st.session_state["_auth_email"] = email
         return True
     return False
 
