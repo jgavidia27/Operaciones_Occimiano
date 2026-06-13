@@ -930,6 +930,54 @@ with st.sidebar:
 
     _sidebar_load_slot = st.empty()   # placeholder para la barra de carga
 
+# ── Botón flotante ☰ para móvil — abre/cierra el sidebar ─────────────────────
+st.markdown("""
+<style>
+#_occ_mob_btn {
+    display: none;
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 999999;
+    background: #1e3a5f;
+    color: #f1f5f9;
+    border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 8px;
+    width: 42px;
+    height: 38px;
+    font-size: 18px;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    align-items: center;
+    justify-content: center;
+}
+@media (max-width: 767px) {
+    #_occ_mob_btn { display: flex !important; }
+}
+</style>
+<button id="_occ_mob_btn" title="Menú">☰</button>
+<script>
+(function(){
+    var btn = document.getElementById('_occ_mob_btn');
+    if (!btn) return;
+    btn.addEventListener('click', function(){
+        var sb = document.querySelector('[data-testid="stSidebar"]');
+        if (!sb) return;
+        var isHidden = sb.style.visibility === 'hidden'
+                    || sb.style.transform.includes('-110')
+                    || sb.getBoundingClientRect().right < 0;
+        sb.style.transition = 'transform 0.3s ease, visibility 0.1s';
+        if (isHidden) {
+            sb.style.transform = 'translateX(0)';
+            sb.style.visibility = 'visible';
+        } else {
+            sb.style.transform = 'translateX(-110%)';
+            setTimeout(function(){ sb.style.visibility = 'hidden'; }, 250);
+        }
+    });
+})();
+</script>
+""", unsafe_allow_html=True)
 
 # ── Carga de datos base (barra de progreso en sidebar, no en área principal) ──
 # Páginas que necesitan los llamados de Excel (COPEC / ESMAX / Shell).
