@@ -39,15 +39,12 @@ def _get_creds() -> tuple[str, str]:
     try:
         url = str(st.secrets["SUPABASE_URL"])
         key = str(st.secrets["SUPABASE_KEY"])
-    except Exception as _e:
-        print(f"[CREDS] st.secrets falló: {type(_e).__name__}: {_e}")
+    except Exception:
+        pass
     if not url:
         url = os.getenv("SUPABASE_URL", "")
-        print(f"[CREDS] usando os.getenv SUPABASE_URL → {'OK' if url else 'VACÍO'}")
     if not key:
         key = os.getenv("SUPABASE_KEY", "")
-    if not url:
-        print("[CREDS] ERROR: SUPABASE_URL sigue vacío — verifica los Secrets en Streamlit Cloud")
     return url, key
 
 # ─────────────────────────────────────────────────────────────────────────────
