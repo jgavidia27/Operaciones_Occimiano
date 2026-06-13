@@ -375,10 +375,21 @@ def _inject_theme(theme: str) -> None:
             color: #f1f5f9 !important;
         }}
 
-        /* Sidebar siempre visible — anula transform de colapso */
-        section[data-testid="stSidebar"] {{
-            transform: translateX(0) !important;
-            visibility: visible !important;
+        /* Desktop: sidebar siempre visible */
+        @media screen and (min-width: 768px) {{
+            section[data-testid="stSidebar"] {{
+                transform: translateX(0) !important;
+                visibility: visible !important;
+            }}
+            [data-testid="stSidebarCollapseButton"] {{
+                display: none !important;
+            }}
+        }}
+        /* Mobile: botón hamburguesa siempre visible para abrir/cerrar */
+        @media screen and (max-width: 767px) {{
+            [data-testid="stSidebarCollapseButton"] {{
+                display: flex !important;
+            }}
         }}
 
         </style>
@@ -610,16 +621,26 @@ st.markdown("""
         background: rgba(255,255,255,0.20) !important;
         border-color: rgba(255,255,255,0.38) !important;
     }
-    /* Sidebar siempre visible — anula el transform de colapso de Streamlit */
-    section[data-testid="stSidebar"] {
-        transform: translateX(0) !important;
-        min-width: 14rem !important;
-        visibility: visible !important;
-        display: flex !important;
+    /* Desktop: sidebar siempre visible, sin botón de colapso */
+    @media screen and (min-width: 768px) {
+        section[data-testid="stSidebar"] {
+            transform: translateX(0) !important;
+            min-width: 14rem !important;
+            visibility: visible !important;
+            display: flex !important;
+        }
+        [data-testid="stSidebarCollapseButton"] {
+            display: none !important;
+        }
     }
-    /* Ocultar solo el botón « (collapse) dentro del header del sidebar */
-    [data-testid="stSidebarCollapseButton"] {
-        display: none !important;
+    /* Mobile: sidebar colapsable — botón ☰ siempre visible para reabrir */
+    @media screen and (max-width: 767px) {
+        section[data-testid="stSidebar"] {
+            min-width: unset !important;
+        }
+        [data-testid="stSidebarCollapseButton"] {
+            display: flex !important;
+        }
     }
 
     /* Navigation radio buttons styled as menu items */
