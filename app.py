@@ -661,53 +661,50 @@ st.markdown("""
         background: rgba(255,255,255,0.20) !important;
         border-color: rgba(255,255,255,0.38) !important;
     }
-    /* Sidebar siempre visible en todas las pantallas */
+    /* ── Sidebar: icono por defecto → expansión en hover ──────────────────── */
     section[data-testid="stSidebar"] {
         transform: translateX(0) !important;
-        min-width: 14rem !important;
         visibility: visible !important;
         display: flex !important;
+        overflow: hidden !important;
+        min-width: 4rem !important;
+        max-width: 4rem !important;
+        transition: min-width 0.28s ease, max-width 0.28s ease;
     }
-    [data-testid="stSidebarCollapseButton"] {
-        display: none !important;
+    section[data-testid="stSidebar"]:hover {
+        min-width: 16rem !important;
+        max-width: 16rem !important;
     }
-    /* Móvil: sidebar más angosto + texto más pequeño */
+    [data-testid="stSidebarCollapseButton"] { display: none !important; }
+    [data-testid="stSidebarContent"] {
+        overflow: hidden !important;
+        width: 100% !important;
+    }
+    /* Colapsado: reducir padding interno para que el emoji quepa en 4rem */
+    section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarContent"] {
+        padding-left: 0.25rem !important;
+        padding-right: 0.25rem !important;
+    }
+    /* Móvil: sin hover-expand (no hay hover en touch; nav via selectbox) */
     @media (max-width: 767px) {
-        section[data-testid="stSidebar"] {
-            min-width: 9rem !important;
-            max-width: 9rem !important;
-        }
-        [data-testid="stSidebar"] img,
-        [data-testid="stSidebar"] [data-testid="stImage"] {
-            max-height: 50px !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-            padding: 7px 6px !important;
-            font-size: 0.72rem !important;
-            line-height: 1.25 !important;
-        }
-        [data-testid="stSidebar"] .stButton > button {
-            font-size: 0.7rem !important;
-            padding: 4px 6px !important;
-        }
-        [data-testid="stSidebar"] p,
-        [data-testid="stSidebar"] span {
-            font-size: 0.72rem !important;
+        section[data-testid="stSidebar"]:hover {
+            min-width: 4rem !important;
+            max-width: 4rem !important;
         }
     }
 
-    /* Navigation radio buttons styled as menu items */
-    [data-testid="stSidebar"] [data-testid="stRadio"] > label {
-        display: none;
-    }
+    /* ── Navigation radio buttons styled as menu items ─────────────────────── */
+    [data-testid="stSidebar"] [data-testid="stRadio"] > label { display: none; }
     [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] {
         gap: 2px !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
         padding: 10px 14px !important;
         border-radius: 8px !important;
-        transition: background 0.15s, box-shadow 0.15s !important;
+        transition: background 0.15s, box-shadow 0.15s, padding 0.2s !important;
         width: 100%;
+        white-space: nowrap !important;
+        overflow: hidden !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
         background: rgba(59,130,246,0.18) !important;
@@ -716,6 +713,35 @@ st.markdown("""
     [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"][aria-checked="true"] {
         background: rgba(59,130,246,0.35) !important;
         box-shadow: inset 3px 0 0 #60a5fa !important;
+    }
+    /* Colapsado: padding reducido para que el emoji quepa en 4rem */
+    section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] {
+        padding: 10px 5px !important;
+    }
+
+    /* ── Botones del sidebar: left-align para que el ícono quede visible ────── */
+    [data-testid="stSidebar"] .stButton > button {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+    }
+    section[data-testid="stSidebar"]:not(:hover) .stButton > button {
+        justify-content: flex-start !important;
+        text-align: left !important;
+        padding-left: 8px !important;
+    }
+
+    /* ── Logo: desvanece en colapsado, aparece en hover ─────────────────────── */
+    section[data-testid="stSidebar"] img {
+        transition: opacity 0.25s !important;
+    }
+    section[data-testid="stSidebar"]:not(:hover) img {
+        opacity: 0 !important;
+    }
+    /* Ocultar caption "Panel Operacional" cuando colapsado */
+    section[data-testid="stSidebar"]:not(:hover) small,
+    section[data-testid="stSidebar"]:not(:hover) [data-testid="stCaptionContainer"] {
+        opacity: 0 !important;
+        font-size: 0 !important;
     }
     /* Multiselect "Select all" → ocultar el inglés y simular "Seleccionar todos" */
     [data-testid="stMultiSelect"] li[role="option"]:first-child > div > span {
