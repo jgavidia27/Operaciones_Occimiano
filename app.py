@@ -461,7 +461,7 @@ st.set_page_config(
     page_title="Occimiano - Panel Operacional",
     page_icon="🔧",
     layout="wide",
-    initial_sidebar_state="auto",
+    initial_sidebar_state="expanded",
 )
 
 # ── Tema (dark / light) — leer desde URL query param ─────────────────────────
@@ -661,26 +661,15 @@ st.markdown("""
         background: rgba(255,255,255,0.20) !important;
         border-color: rgba(255,255,255,0.38) !important;
     }
-    /* Desktop: sidebar siempre visible, sin botón de colapso */
-    @media screen and (min-width: 768px) {
-        section[data-testid="stSidebar"] {
-            transform: translateX(0) !important;
-            min-width: 14rem !important;
-            visibility: visible !important;
-            display: flex !important;
-        }
-        [data-testid="stSidebarCollapseButton"] {
-            display: none !important;
-        }
+    /* Sidebar siempre visible en todas las pantallas */
+    section[data-testid="stSidebar"] {
+        transform: translateX(0) !important;
+        min-width: 14rem !important;
+        visibility: visible !important;
+        display: flex !important;
     }
-    /* Mobile: sidebar colapsable — botón ☰ siempre visible para reabrir */
-    @media screen and (max-width: 767px) {
-        section[data-testid="stSidebar"] {
-            min-width: unset !important;
-        }
-        [data-testid="stSidebarCollapseButton"] {
-            display: flex !important;
-        }
+    [data-testid="stSidebarCollapseButton"] {
+        display: none !important;
     }
 
     /* Navigation radio buttons styled as menu items */
@@ -827,7 +816,7 @@ with st.sidebar:
     st.caption("Panel Operacional")
     st.divider()
 
-    _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed")
+    _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed", key="_nav_radio")
 
     st.divider()
     if st.button("↺  Actualizar datos", use_container_width=True):  # noqa
@@ -1040,6 +1029,30 @@ _CAPTION = (
     f"Llamados 2026: **{_n_ll}**  |  "
     f"EDS activas: **{int(df_eds['activa'].sum()) if not df_eds.empty else '?'}**"
 )
+
+# ── Navegación rápida móvil ───────────────────────────────────────────────────
+# En móvil el sidebar queda pequeño; este selectbox permite navegar fácil.
+# En desktop se oculta con CSS para no duplicar la interfaz.
+st.markdown('<div id="_mob_nav_wrap">', unsafe_allow_html=True)
+_mob_sel = st.selectbox(
+    "📱 Navegar:", _NAV_PAGES,
+    index=_NAV_PAGES.index(_page),
+    key="_mob_nav",
+    label_visibility="collapsed",
+)
+st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("""
+<style>
+@media (min-width: 768px) {
+    div#_mob_nav_wrap, div#_mob_nav_wrap + div[data-testid="stVerticalBlock"] {
+        display: none !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+if _mob_sel != _page:
+    st.session_state["_nav_radio"] = _mob_sel
+    st.rerun()
 
 # ── Helper: carga OTs con spinner nativo ────────────────────────────────────
 def _load_wo_con_progreso(label: str = "órdenes de trabajo") -> list:
