@@ -590,12 +590,30 @@ def _plot_cached(cache_key: str, sig: str, builder, **kw) -> None:
 # ── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    /* Ocultar header nativo de Streamlit (barra Deploy) */
-    [data-testid="stHeader"] {
-        display: none !important;
+    /* Desktop: ocultar header completo (barra Deploy) */
+    @media screen and (min-width: 768px) {
+        [data-testid="stHeader"] {
+            display: none !important;
+        }
+        [data-testid="stToolbar"] {
+            display: none !important;
+        }
     }
-    [data-testid="stToolbar"] {
-        display: none !important;
+    /* Mobile: mostrar header para que aparezca el botón ☰ del sidebar */
+    @media screen and (max-width: 767px) {
+        [data-testid="stHeader"] {
+            display: flex !important;
+            background: #0d1427 !important;
+            height: 2.5rem !important;
+            padding: 0 0.5rem !important;
+            align-items: center !important;
+            border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+        }
+        /* Ocultar Deploy/Share incluso en móvil */
+        [data-testid="stToolbar"],
+        [data-testid="stMainMenu"] {
+            display: none !important;
+        }
     }
 
     .section-header {
