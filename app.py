@@ -630,6 +630,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Logout via query param (?_lo=1) — debe ir ANTES del chequeo de sesión ────
+if st.query_params.get("_lo") == "1":
+    logout()
+    try:
+        del st.query_params["_lo"]
+    except Exception:
+        pass
+    st.rerun()
+
 # ── Autenticación — mostrar login y detener si no hay sesión ─────────────────
 if not is_authenticated():
     _show_login_page()
@@ -694,7 +703,7 @@ components.html(f"""<script>
     btn.onmouseover = function(){{ this.style.background='rgba(255,255,255,0.22)'; }};
     btn.onmouseout  = function(){{ this.style.background='rgba(255,255,255,0.12)'; }};
     btn.onclick = function(){{
-        p.location.href = p.location.pathname;
+        p.location.href = p.location.pathname + '?_lo=1';
     }};
 
     d.appendChild(emailSpan);
