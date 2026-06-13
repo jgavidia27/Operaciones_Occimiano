@@ -931,53 +931,88 @@ with st.sidebar:
     _sidebar_load_slot = st.empty()   # placeholder para la barra de carga
 
 # ── Botón flotante ☰ para móvil — abre/cierra el sidebar ─────────────────────
+# CSS del botón (el <button> lo crea el JS del componente directamente en el DOM padre)
 st.markdown("""
 <style>
-#_occ_mob_btn {
-    display: none;
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    z-index: 999999;
-    background: #1e3a5f;
-    color: #f1f5f9;
-    border: 1px solid rgba(255,255,255,0.35);
-    border-radius: 8px;
-    width: 42px;
-    height: 38px;
-    font-size: 18px;
-    cursor: pointer;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
-    align-items: center;
-    justify-content: center;
-}
+/* Sidebar móvil: overlay deslizable, oculto por defecto */
 @media (max-width: 767px) {
-    #_occ_mob_btn { display: flex !important; }
+    section[data-testid="stSidebar"] {
+        position: fixed !important;
+        top: 0 !important; left: 0 !important;
+        height: 100dvh !important;
+        z-index: 9998 !important;
+        transform: translateX(-110%) !important;
+        min-width: 80vw !important;
+        max-width: 88vw !important;
+        overflow-y: auto !important;
+        transition: transform 0.28s ease !important;
+        box-shadow: 4px 0 20px rgba(0,0,0,0.5) !important;
+    }
+    section[data-testid="stSidebar"]._occ_open {
+        transform: translateX(0) !important;
+    }
+    /* Botón ☰ flotante */
+    #_occ_mob_btn {
+        position: fixed !important;
+        top: 10px !important; left: 10px !important;
+        z-index: 99999 !important;
+        background: #1e3a5f !important;
+        color: #f1f5f9 !important;
+        border: 1px solid rgba(255,255,255,0.35) !important;
+        border-radius: 8px !important;
+        width: 42px !important; height: 38px !important;
+        font-size: 18px !important;
+        cursor: pointer !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.6) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+}
+@media (min-width: 768px) {
+    #_occ_mob_btn { display: none !important; }
 }
 </style>
-<button id="_occ_mob_btn" title="Menú">☰</button>
+""", unsafe_allow_html=True)
+
+# JS via componente iframe — único lugar donde los scripts se ejecutan en Streamlit
+st.components.v1.html("""
 <script>
-(function(){
-    var btn = document.getElementById('_occ_mob_btn');
-    if (!btn) return;
-    btn.addEventListener('click', function(){
-        var sb = document.querySelector('[data-testid="stSidebar"]');
-        if (!sb) return;
-        var isHidden = sb.style.visibility === 'hidden'
-                    || sb.style.transform.includes('-110')
-                    || sb.getBoundingClientRect().right < 0;
-        sb.style.transition = 'transform 0.3s ease, visibility 0.1s';
-        if (isHidden) {
-            sb.style.transform = 'translateX(0)';
-            sb.style.visibility = 'visible';
-        } else {
-            sb.style.transform = 'translateX(-110%)';
-            setTimeout(function(){ sb.style.visibility = 'hidden'; }, 250);
+(function() {
+    var pdoc = window.parent.document;
+
+    function setup() {
+        // Crear botón si no existe
+        if (!pdoc.getElementById('_occ_mob_btn')) {
+            var btn = pdoc.createElement('button');
+            btn.id = '_occ_mob_btn';
+            btn.title = 'Menú';
+            btn.innerHTML = '&#9776;';
+            pdoc.body.appendChild(btn);
         }
-    });
+
+        var btn = pdoc.getElementById('_occ_mob_btn');
+        var sb  = pdoc.querySelector('[data-testid="stSidebar"]');
+        if (!btn || !sb) return;
+
+        // Evitar doble registro
+        if (btn.dataset.occ) return;
+        btn.dataset.occ = '1';
+
+        btn.addEventListener('click', function() {
+            var sb2 = pdoc.querySelector('[data-testid="stSidebar"]');
+            if (!sb2) return;
+            sb2.classList.toggle('_occ_open');
+        });
+    }
+
+    // Intentar al cargar y con retraso por si el DOM aún no está listo
+    setup();
+    setTimeout(setup, 400);
+    setTimeout(setup, 1200);
 })();
 </script>
-""", unsafe_allow_html=True)
+""", height=0)
 
 # ── Carga de datos base (barra de progreso en sidebar, no en área principal) ──
 # Páginas que necesitan los llamados de Excel (COPEC / ESMAX / Shell).
