@@ -581,14 +581,11 @@ def _show_login_page() -> None:
                         unsafe_allow_html=True,
                     )
 
-            # Título + subtítulo
+            # Título
             st.markdown("""
             <div style="text-align:center;padding:1rem 0 1.5rem;">
                 <p style="color:#0d1427;font-size:1.45rem;font-weight:700;
-                    margin:0 0 0.3rem;line-height:1.2;">Iniciar sesión</p>
-                <p style="color:#6b7280;font-size:0.8rem;margin:0;">
-                    Solo cuentas <strong>@occimiano.cl</strong>
-                </p>
+                    margin:0;line-height:1.2;">Iniciar sesión</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -680,28 +677,32 @@ if _wo_2026:
 }})();
 </script>""", height=0)
 
-# ── Badge de usuario + botón salir (st.markdown → enlace real en la página) ──
+# ── Badge usuario + Salir inyectado en el body del parent (evita clip) ───────
 _auth_email_badge = st.session_state.get("_auth_email", "")
-st.markdown(f"""
-<div style="
-    position:fixed;top:7px;right:0.9rem;z-index:99999;
-    display:flex;align-items:center;gap:8px;
-    background:rgba(13,20,39,0.88);border:1px solid rgba(255,255,255,0.13);
-    border-radius:20px;padding:4px 6px 4px 12px;
-    font-family:system-ui,sans-serif;font-size:0.72rem;
-    color:rgba(255,255,255,0.75);white-space:nowrap;
-    box-shadow:0 2px 8px rgba(0,0,0,0.3);
-">
-    <span>👤 {_auth_email_badge}</span>
-    <a href="?_lo=1" style="
-        background:rgba(255,255,255,0.12);
-        border:1px solid rgba(255,255,255,0.22);
-        border-radius:12px;padding:2px 10px;
-        text-decoration:none;color:#fff;
-        font-size:0.7rem;font-weight:500;
-    ">Salir</a>
-</div>
-""", unsafe_allow_html=True)
+components.html(f"""<script>
+(function(){{
+    var p = window.parent; if(!p||!p.document) return;
+    var old = p.document.getElementById('occ-user-badge'); if(old) old.remove();
+    var d = p.document.createElement('div'); d.id='occ-user-badge';
+    d.style.cssText='position:fixed;top:7px;right:0.9rem;z-index:2147483640;'
+        +'display:flex;align-items:center;gap:8px;'
+        +'background:rgba(13,20,39,0.90);border:1px solid rgba(255,255,255,0.15);'
+        +'border-radius:20px;padding:4px 6px 4px 12px;'
+        +'font-family:system-ui,sans-serif;font-size:0.75rem;'
+        +'color:rgba(255,255,255,0.85);white-space:nowrap;'
+        +'box-shadow:0 2px 8px rgba(0,0,0,0.35);';
+    var sp = p.document.createElement('span');
+    sp.textContent = '👤 {_auth_email_badge}';
+    var a = p.document.createElement('a');
+    a.textContent='Salir'; a.href='?_lo=1';
+    a.style.cssText='background:rgba(255,255,255,0.13);'
+        +'border:1px solid rgba(255,255,255,0.25);border-radius:12px;'
+        +'padding:2px 10px;text-decoration:none;color:#fff;'
+        +'font-size:0.72rem;font-weight:500;cursor:pointer;';
+    d.appendChild(sp); d.appendChild(a);
+    p.document.body.appendChild(d);
+}})();
+</script>""", height=0)
 
 # Colores de tema para HTML inline — evita hardcodear colores claros en dark mode
 _t = {
