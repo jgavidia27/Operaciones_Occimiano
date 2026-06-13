@@ -930,29 +930,33 @@ with st.sidebar:
 
     _sidebar_load_slot = st.empty()   # placeholder para la barra de carga
 
-# ── Botón flotante ☰ para móvil — abre/cierra el sidebar ─────────────────────
-# CSS del botón (el <button> lo crea el JS del componente directamente en el DOM padre)
+# ── Menú móvil — toggle CSS puro con :has() (sin JavaScript) ─────────────────
+# Truco: checkbox oculto + label como botón ☰.
+# body:has(#_occ_toggle:checked) detecta el estado y el CSS mueve el sidebar.
+# No requiere JS — funciona dentro del sandbox de Streamlit.
 st.markdown("""
+<input type="checkbox" id="_occ_toggle" style="display:none!important;position:absolute;opacity:0;pointer-events:none;">
 <style>
-/* Sidebar móvil: overlay deslizable, oculto por defecto */
 @media (max-width: 767px) {
+    /* Sidebar: overlay oculto por defecto */
     section[data-testid="stSidebar"] {
         position: fixed !important;
         top: 0 !important; left: 0 !important;
         height: 100dvh !important;
         z-index: 9998 !important;
         transform: translateX(-110%) !important;
-        min-width: 80vw !important;
-        max-width: 88vw !important;
+        min-width: 82vw !important;
+        max-width: 90vw !important;
         overflow-y: auto !important;
         transition: transform 0.28s ease !important;
-        box-shadow: 4px 0 20px rgba(0,0,0,0.5) !important;
+        box-shadow: 4px 0 20px rgba(0,0,0,0.55) !important;
     }
-    section[data-testid="stSidebar"]._occ_open {
+    /* Sidebar visible cuando checkbox marcado */
+    body:has(#_occ_toggle:checked) section[data-testid="stSidebar"] {
         transform: translateX(0) !important;
     }
-    /* Botón ☰ flotante */
-    #_occ_mob_btn {
+    /* Label = botón ☰ flotante */
+    label[for="_occ_toggle"] {
         position: fixed !important;
         top: 10px !important; left: 10px !important;
         z-index: 99999 !important;
@@ -967,52 +971,23 @@ st.markdown("""
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
+        user-select: none !important;
     }
+    /* Cuando sidebar está abierto: mostrar × para cerrar */
+    body:has(#_occ_toggle:checked) label[for="_occ_toggle"]::before {
+        content: "✕" !important;
+    }
+    body:not(:has(#_occ_toggle:checked)) label[for="_occ_toggle"]::before {
+        content: "☰" !important;
+    }
+    label[for="_occ_toggle"] { font-size: 0 !important; }
 }
 @media (min-width: 768px) {
-    #_occ_mob_btn { display: none !important; }
+    label[for="_occ_toggle"] { display: none !important; }
 }
 </style>
+<label for="_occ_toggle"></label>
 """, unsafe_allow_html=True)
-
-# JS via componente iframe — único lugar donde los scripts se ejecutan en Streamlit
-st.components.v1.html("""
-<script>
-(function() {
-    var pdoc = window.parent.document;
-
-    function setup() {
-        // Crear botón si no existe
-        if (!pdoc.getElementById('_occ_mob_btn')) {
-            var btn = pdoc.createElement('button');
-            btn.id = '_occ_mob_btn';
-            btn.title = 'Menú';
-            btn.innerHTML = '&#9776;';
-            pdoc.body.appendChild(btn);
-        }
-
-        var btn = pdoc.getElementById('_occ_mob_btn');
-        var sb  = pdoc.querySelector('[data-testid="stSidebar"]');
-        if (!btn || !sb) return;
-
-        // Evitar doble registro
-        if (btn.dataset.occ) return;
-        btn.dataset.occ = '1';
-
-        btn.addEventListener('click', function() {
-            var sb2 = pdoc.querySelector('[data-testid="stSidebar"]');
-            if (!sb2) return;
-            sb2.classList.toggle('_occ_open');
-        });
-    }
-
-    // Intentar al cargar y con retraso por si el DOM aún no está listo
-    setup();
-    setTimeout(setup, 400);
-    setTimeout(setup, 1200);
-})();
-</script>
-""", height=0)
 
 # ── Carga de datos base (barra de progreso en sidebar, no en área principal) ──
 # Páginas que necesitan los llamados de Excel (COPEC / ESMAX / Shell).
