@@ -891,6 +891,10 @@ st.markdown("""
     [data-testid="stSidebarContent"] {
         overflow: hidden !important;
         width: 100% !important;
+        padding-top: 0.5rem !important;
+    }
+    [data-testid="stSidebarUserContent"] {
+        padding-top: 0 !important;
     }
 
     /* ── Navigation radio buttons styled as menu items ─────────────────────── */
