@@ -1041,13 +1041,16 @@ section[data-testid="stSidebar"] {
     padding-left: 0.5rem !important; padding-right: 0.5rem !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-    padding: 10px 14px !important; font-size: 1.7rem !important;
+    padding: 10px 14px !important; font-size: 1.1rem !important;
+    white-space: normal !important; overflow: visible !important;
+    height: auto !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
-    display: flex !important;
+    display: flex !important; flex-shrink: 0 !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
     max-width: none !important; overflow: visible !important;
+    white-space: normal !important; word-break: break-word !important;
 }
 [data-testid="stSidebar"] .stButton > button {
     max-width: none !important; font-size: 1.0rem !important;
@@ -1101,7 +1104,7 @@ section[data-testid="stSidebar"] img { opacity: 0 !important; }
 with st.sidebar:
     # ── Botón toggle: expande / colapsa el sidebar ────────────────────────────
     if _sb_open:
-        _c_sp, _c_tog = st.columns([3, 1])
+        _c_sp, _c_tog = st.columns([2, 1])
         with _c_tog:
             if st.button("◀", key="_sb_toggle"):
                 st.session_state["_sb_open"] = False
