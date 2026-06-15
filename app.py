@@ -244,7 +244,14 @@ def _inject_theme(theme: str) -> None:
         [data-testid="stAppViewContainer"] > section.main > div.block-container {{
             background-color: transparent !important;
             background-image: none !important;
-            padding-top: 1.5rem !important;
+            padding-top: 0.5rem !important;
+        }}
+        /* Selector adicional para Streamlit ≥1.32 */
+        [data-testid="stMainBlockContainer"] {{
+            padding-top: 0.5rem !important;
+        }}
+        .main .block-container, div.block-container {{
+            padding-top: 0.5rem !important;
         }}
 
         /* Texto general */
@@ -1067,7 +1074,7 @@ section[data-testid="stSidebar"] {
     display: none !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-    padding: 10px 0 !important; font-size: 1.3rem !important;
+    padding: 10px 0 !important; font-size: 1.7rem !important;
     justify-content: center !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
@@ -1087,9 +1094,51 @@ section[data-testid="stSidebar"] img { opacity: 0 !important; }
 
 with st.sidebar:
     # ── Botón toggle: expande / colapsa el sidebar ────────────────────────────
-    if st.button("◀  Colapsar" if _sb_open else "▶", key="_sb_toggle",
-                 use_container_width=True):
-        st.session_state["_sb_open"] = not _sb_open
+    if _sb_open:
+        _c_sp, _c_tog = st.columns([5, 1])
+        with _c_tog:
+            if st.button("◀", key="_sb_toggle"):
+                st.session_state["_sb_open"] = False
+                st.rerun()
+    else:
+        if st.button("▶", key="_sb_toggle", use_container_width=True):
+            st.session_state["_sb_open"] = True
+            st.rerun()
+    # ── Modo oscuro / claro — siempre visible al tope ─────────────────────────
+    _toggle_lbl_full = "☀️  Modo claro" if _current_theme == "dark" else "🌙  Modo oscuro"
+    _toggle_lbl_icon = "☀️" if _current_theme == "dark" else "🌙"
+    _toggle_lbl = _toggle_lbl_full if _sb_open else _toggle_lbl_icon
+    if st.button(_toggle_lbl, use_container_width=True, key="theme_toggle"):
+        _new_theme = "light" if _current_theme == "dark" else "dark"
+        st.session_state["_theme"] = _new_theme
+        # ── Reutilizar figuras cacheadas sin reconstruirlas ─────────────────
+        import plotly.graph_objects as _pgo
+        _old_pfx = f"_{_current_theme}_"
+        _new_pfx = f"_{_new_theme}_"
+        _figs_to_rename = {
+            k: v for k, v in st.session_state.items()
+            if k.startswith("_fig_") and isinstance(v, _pgo.Figure)
+        }
+        _nt = {
+            "text":   "#e2e8f0" if _new_theme == "dark" else "#1e293b",
+            "border": "#1e3356" if _new_theme == "dark" else "#e2e8f0",
+            "pbg":    "rgba(255,255,255,0.04)" if _new_theme == "dark" else "rgba(0,0,0,0)",
+        }
+        for _fk, _fv in _figs_to_rename.items():
+            _fv.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor=_nt["pbg"],
+                font=dict(color=_nt["text"]),
+                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=_nt["text"])),
+            )
+            _fv.update_xaxes(gridcolor=_nt["border"], zerolinecolor=_nt["border"],
+                             tickfont=dict(color=_nt["text"]), title_font=dict(color=_nt["text"]))
+            _fv.update_yaxes(gridcolor=_nt["border"], zerolinecolor=_nt["border"],
+                             tickfont=dict(color=_nt["text"]), title_font=dict(color=_nt["text"]))
+            _new_fk = _fk.replace(_old_pfx, _new_pfx, 1)
+            if _new_fk != _fk:
+                st.session_state.pop(_fk, None)
+                st.session_state[_new_fk] = _fv
         st.rerun()
     # Logo Occimiano (solo en modo expandido)
     if _sb_open:
@@ -1155,48 +1204,6 @@ with st.sidebar:
         st.rerun()
     if _sb_open:
         st.caption(f"Cache: 30 min · disco  |  {datetime.now().strftime('%H:%M:%S')}")
-    _toggle_lbl_full = "☀️  Modo claro" if _current_theme == "dark" else "🌙  Modo oscuro"
-    _toggle_lbl_icon = "☀️" if _current_theme == "dark" else "🌙"
-    _toggle_lbl = _toggle_lbl_full if _sb_open else _toggle_lbl_icon
-    if st.button(_toggle_lbl, use_container_width=True, key="theme_toggle"):
-        _new_theme = "light" if _current_theme == "dark" else "dark"
-        st.session_state["_theme"] = _new_theme
-
-        # ── Reutilizar figuras cacheadas sin reconstruirlas ─────────────────
-        # En vez de descartar todas las figuras (lo que las fuerza a reconstruirse,
-        # tardando 10-20 s), las renombramos a la nueva clave de tema y les aplicamos
-        # los nuevos colores in-place.  El próximo render las encuentra listas → instantáneo.
-        import plotly.graph_objects as _pgo
-        _old_pfx = f"_{_current_theme}_"
-        _new_pfx = f"_{_new_theme}_"
-        _figs_to_rename = {
-            k: v for k, v in st.session_state.items()
-            if k.startswith("_fig_") and isinstance(v, _pgo.Figure)
-        }
-        # Pre-calcular colores del nuevo tema
-        _nt = {
-            "text":   "#e2e8f0" if _new_theme == "dark" else "#1e293b",
-            "border": "#1e3356" if _new_theme == "dark" else "#e2e8f0",
-            "pbg":    "rgba(255,255,255,0.04)" if _new_theme == "dark" else "rgba(0,0,0,0)",
-        }
-        for _fk, _fv in _figs_to_rename.items():
-            # Re-aplicar colores del nuevo tema a la figura existente
-            _fv.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor=_nt["pbg"],
-                font=dict(color=_nt["text"]),
-                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=_nt["text"])),
-            )
-            _fv.update_xaxes(gridcolor=_nt["border"], zerolinecolor=_nt["border"],
-                             tickfont=dict(color=_nt["text"]), title_font=dict(color=_nt["text"]))
-            _fv.update_yaxes(gridcolor=_nt["border"], zerolinecolor=_nt["border"],
-                             tickfont=dict(color=_nt["text"]), title_font=dict(color=_nt["text"]))
-            # Renombrar clave de tema (light→dark o dark→light)
-            _new_fk = _fk.replace(_old_pfx, _new_pfx, 1)
-            if _new_fk != _fk:
-                st.session_state.pop(_fk, None)
-                st.session_state[_new_fk] = _fv
-        st.rerun()
 
     st.divider()
 
