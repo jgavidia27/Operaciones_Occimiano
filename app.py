@@ -1063,7 +1063,7 @@ section[data-testid="stSidebar"] img { opacity: 1 !important; }
 else:
     st.markdown("""<style>
 section[data-testid="stSidebar"] {
-    min-width: 4.5rem !important; max-width: 4.5rem !important;
+    min-width: 5.2rem !important; max-width: 5.2rem !important;
 }
 [data-testid="stSidebar"] [data-testid="stSidebarContent"],
 [data-testid="stSidebar"] [data-testid="stSidebarContent"] > div,
