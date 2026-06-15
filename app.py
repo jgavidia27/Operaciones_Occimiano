@@ -871,38 +871,18 @@ st.markdown("""
         background: rgba(255,255,255,0.20) !important;
         border-color: rgba(255,255,255,0.38) !important;
     }
-    /* ── Sidebar: icono por defecto → expansión en hover ──────────────────── */
+    /* ── Sidebar: ancho controlado por _sb_open en session_state ────────────── */
     section[data-testid="stSidebar"] {
         transform: translateX(0) !important;
         visibility: visible !important;
         display: flex !important;
         overflow: hidden !important;
-        min-width: 4.5rem !important;
-        max-width: 4.5rem !important;
-        transition: min-width 0.3s ease, max-width 0.3s ease;
-    }
-    section[data-testid="stSidebar"]:hover {
-        min-width: 16rem !important;
-        max-width: 16rem !important;
+        transition: min-width 0.28s ease, max-width 0.28s ease;
     }
     [data-testid="stSidebarCollapseButton"] { display: none !important; }
     [data-testid="stSidebarContent"] {
         overflow: hidden !important;
         width: 100% !important;
-    }
-    /* Colapsado: eliminar padding interno en todas las capas del sidebar */
-    section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarContent"],
-    section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarContent"] > div,
-    section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarContent"] > div > div {
-        padding-left: 0.1rem !important;
-        padding-right: 0.1rem !important;
-    }
-    /* Móvil: sin hover-expand (no hay hover en touch; nav via selectbox) */
-    @media (max-width: 767px) {
-        section[data-testid="stSidebar"]:hover {
-            min-width: 4.5rem !important;
-            max-width: 4.5rem !important;
-        }
     }
 
     /* ── Navigation radio buttons styled as menu items ─────────────────────── */
@@ -911,12 +891,12 @@ st.markdown("""
         gap: 2px !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-        padding: 10px 14px !important;
         border-radius: 8px !important;
-        transition: background 0.15s, box-shadow 0.15s, padding 0.2s !important;
+        transition: background 0.15s, box-shadow 0.15s !important;
         width: 100%;
         white-space: nowrap !important;
         overflow: hidden !important;
+        cursor: pointer !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
         background: rgba(59,130,246,0.18) !important;
@@ -926,61 +906,16 @@ st.markdown("""
         background: rgba(59,130,246,0.35) !important;
         box-shadow: inset 3px 0 0 #60a5fa !important;
     }
-    /* ── Colapsado: ocultar indicador radio, mostrar solo el emoji ─────────── */
-    /* Sin el círculo, el emoji queda a la izquierda y el texto desborda a la
-       derecha (clipado por overflow:hidden del label). */
-    section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
-        display: none !important;
-    }
-    section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] {
-        padding: 10px 4px !important;
-        justify-content: flex-start !important;
-        font-size: 1.3rem !important;
-    }
-    /* Limitar el contenedor de texto al ancho del emoji para que no muestre texto */
-    section[data-testid="stSidebar"]:not(:hover) [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
-        max-width: 2em !important;
-        overflow: hidden !important;
-        display: block !important;
-    }
-    /* Al expandir: restaurar indicador y alineación */
-    section[data-testid="stSidebar"]:hover [data-testid="stRadio"] label[data-baseweb="radio"] {
-        justify-content: flex-start !important;
-        font-size: 1rem !important;
-    }
-    section[data-testid="stSidebar"]:hover [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
-        max-width: none !important;
-        overflow: visible !important;
-    }
 
-    /* ── Botones del sidebar: left-align para que el ícono quede visible ────── */
+    /* ── Botones del sidebar: base ──────────────────────────────────────────── */
     [data-testid="stSidebar"] .stButton > button {
         white-space: nowrap !important;
         overflow: hidden !important;
     }
-    section[data-testid="stSidebar"]:not(:hover) .stButton > button {
-        justify-content: flex-start !important;
-        text-align: left !important;
-        padding-left: 10px !important;
-        font-size: 1.2rem !important;
-        max-width: 3rem !important;
-    }
-    section[data-testid="stSidebar"]:hover .stButton > button {
-        max-width: none !important;
-        font-size: 0.9rem !important;
-    }
 
-    /* ── Logo y caption: desvanecen en colapsado, aparecen en hover ──────────── */
+    /* ── Logo: transición de opacidad ─────────────────────────────────────── */
     section[data-testid="stSidebar"] img {
         transition: opacity 0.25s !important;
-    }
-    section[data-testid="stSidebar"]:not(:hover) img {
-        opacity: 0 !important;
-    }
-    section[data-testid="stSidebar"]:not(:hover) small,
-    section[data-testid="stSidebar"]:not(:hover) [data-testid="stCaptionContainer"] {
-        opacity: 0 !important;
-        font-size: 0 !important;
     }
     /* Multiselect "Select all" → ocultar el inglés y simular "Seleccionar todos" */
     [data-testid="stMultiSelect"] li[role="option"]:first-child > div > span {
@@ -1085,30 +1020,100 @@ _NAV_PAGES = [
     "📩  Órdenes por Cliente",
 ]
 
+# ── CSS del sidebar: colapsado / expandido (controlado por _sb_open) ─────────
+_sb_open = st.session_state.get("_sb_open", False)
+if _sb_open:
+    st.markdown("""<style>
+section[data-testid="stSidebar"] {
+    min-width: 16rem !important; max-width: 16rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div,
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div > div {
+    padding-left: 0.5rem !important; padding-right: 0.5rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
+    padding: 10px 14px !important; font-size: 1rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
+    display: flex !important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
+    max-width: none !important; overflow: visible !important;
+}
+[data-testid="stSidebar"] .stButton > button {
+    max-width: none !important; font-size: 0.9rem !important;
+    justify-content: flex-start !important; text-align: left !important;
+    padding-left: 14px !important;
+}
+section[data-testid="stSidebar"] img { opacity: 1 !important; }
+[data-testid="stSidebar"] small,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    opacity: 1 !important; font-size: inherit !important; line-height: inherit !important;
+}
+</style>""", unsafe_allow_html=True)
+else:
+    st.markdown("""<style>
+section[data-testid="stSidebar"] {
+    min-width: 4.5rem !important; max-width: 4.5rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div,
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div > div {
+    padding-left: 0.1rem !important; padding-right: 0.1rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
+    display: none !important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
+    padding: 10px 0 !important; font-size: 1.3rem !important;
+    justify-content: center !important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
+    max-width: 2em !important; overflow: hidden !important; display: block !important;
+}
+[data-testid="stSidebar"] .stButton > button {
+    font-size: 1.25rem !important; justify-content: center !important;
+    padding: 0.35rem 0 !important; max-width: none !important;
+}
+section[data-testid="stSidebar"] img { opacity: 0 !important; }
+[data-testid="stSidebar"] small,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    opacity: 0 !important; font-size: 0 !important;
+    line-height: 0 !important; pointer-events: none !important;
+}
+</style>""", unsafe_allow_html=True)
+
 with st.sidebar:
-    # Logo Occimiano
-    _logo_uri = _load_logo_b64()
-    if _logo_uri:
-        st.markdown(
-            f'<div style="text-align:center;padding:10px 4px 4px;background:#0d1427;">'
-            f'<img src="{_logo_uri}" style="max-width:100%;max-height:90px;'
-            f'object-fit:contain;"/></div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<div style="text-align:center;padding:12px 0;">'
-            '<span style="font-size:1.6rem;font-weight:900;letter-spacing:2px;color:#fff;">OCCIM</span>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-    st.caption("Panel Operacional")
+    # ── Botón toggle: expande / colapsa el sidebar ────────────────────────────
+    if st.button("◀  Colapsar" if _sb_open else "▶", key="_sb_toggle",
+                 use_container_width=True):
+        st.session_state["_sb_open"] = not _sb_open
+        st.rerun()
+    # Logo Occimiano (solo en modo expandido)
+    if _sb_open:
+        _logo_uri = _load_logo_b64()
+        if _logo_uri:
+            st.markdown(
+                f'<div style="text-align:center;padding:10px 4px 4px;background:#0d1427;">'
+                f'<img src="{_logo_uri}" style="max-width:100%;max-height:90px;'
+                f'object-fit:contain;"/></div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="text-align:center;padding:12px 0;">'
+                '<span style="font-size:1.6rem;font-weight:900;letter-spacing:2px;color:#fff;">OCCIM</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        st.caption("Panel Operacional")
     st.divider()
 
     _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed", key="_nav_radio")
 
     st.divider()
-    if st.button("↺  Actualizar datos", use_container_width=True):  # noqa
+    if st.button("↺  Actualizar datos" if _sb_open else "↺", use_container_width=True):  # noqa
         # load_work_orders se limpia junto con todo lo demás.
         # Es necesario para que Calidad, Precisión y reincidencias muestren
         # los meses más recientes (junio, etc.) — sin esto, el caché de disco
@@ -1147,8 +1152,11 @@ with st.sidebar:
                                    "eds_enrich", "eds_fracttal")):
                 st.session_state.pop(_k, None)
         st.rerun()
-    st.caption(f"Cache: 30 min · disco  |  {datetime.now().strftime('%H:%M:%S')}")
-    _toggle_lbl = "☀️  Modo claro" if _current_theme == "dark" else "🌙  Modo oscuro"
+    if _sb_open:
+        st.caption(f"Cache: 30 min · disco  |  {datetime.now().strftime('%H:%M:%S')}")
+    _toggle_lbl_full = "☀️  Modo claro" if _current_theme == "dark" else "🌙  Modo oscuro"
+    _toggle_lbl_icon = "☀️" if _current_theme == "dark" else "🌙"
+    _toggle_lbl = _toggle_lbl_full if _sb_open else _toggle_lbl_icon
     if st.button(_toggle_lbl, use_container_width=True, key="theme_toggle"):
         _new_theme = "light" if _current_theme == "dark" else "dark"
         st.session_state["_theme"] = _new_theme
@@ -1194,53 +1202,54 @@ with st.sidebar:
     # ── Sesión activa: usuario y cierre de sesión ─────────────────────────────
     _auth_email = st.session_state.get("_auth_email", "")
     _auth_user  = _auth_email.split("@")[0] if _auth_email else "usuario"
-    st.markdown(
-        f'<div style="font-size:0.7rem;color:rgba(255,255,255,0.35);'
-        f'text-align:center;padding:2px 0 4px;">👤 {_auth_user}</div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("⎋  Cerrar sesión", use_container_width=True, key="logout_btn"):
+    if _sb_open:
+        st.markdown(
+            f'<div style="font-size:0.7rem;color:rgba(255,255,255,0.35);'
+            f'text-align:center;padding:2px 0 4px;">👤 {_auth_user}</div>',
+            unsafe_allow_html=True,
+        )
+    if st.button("⎋  Cerrar sesión" if _sb_open else "⎋", use_container_width=True, key="logout_btn"):
         logout()
         st.rerun()
 
-    st.divider()
-
-    # ── Auditor Dash 1.0: última revisión de calidad de datos ────────────────
-    _alerta_json = Path(__file__).parent / "alertas_resultado.json"
-    try:
-        if _alerta_json.exists():
-            _ar = json.loads(_alerta_json.read_text(encoding="utf-8"))
-            _ar_estado   = _ar.get("estado", "OK")
-            _ar_fecha    = (_ar.get("fecha_ejecucion") or "")[:16].replace("T", " ")
-            _ar_nc       = _ar.get("total_criticos", 0)
-            _ar_na       = _ar.get("total_advertencias", 0)
-            if _ar_estado == "CRÍTICO":
-                _ar_ico = "🔴"
-                _ar_txt = f"{_ar_nc} crítica(s)"
-                _ar_col = "#ef4444"
-            elif _ar_estado == "ADVERTENCIA":
-                _ar_ico = "🟡"
-                _ar_txt = f"{_ar_na} advertencia(s)"
-                _ar_col = "#f59e0b"
+    if _sb_open:
+        st.divider()
+        # ── Auditor Dash 1.0: última revisión de calidad de datos ────────────────
+        _alerta_json = Path(__file__).parent / "alertas_resultado.json"
+        try:
+            if _alerta_json.exists():
+                _ar = json.loads(_alerta_json.read_text(encoding="utf-8"))
+                _ar_estado   = _ar.get("estado", "OK")
+                _ar_fecha    = (_ar.get("fecha_ejecucion") or "")[:16].replace("T", " ")
+                _ar_nc       = _ar.get("total_criticos", 0)
+                _ar_na       = _ar.get("total_advertencias", 0)
+                if _ar_estado == "CRÍTICO":
+                    _ar_ico = "🔴"
+                    _ar_txt = f"{_ar_nc} crítica(s)"
+                    _ar_col = "#ef4444"
+                elif _ar_estado == "ADVERTENCIA":
+                    _ar_ico = "🟡"
+                    _ar_txt = f"{_ar_na} advertencia(s)"
+                    _ar_col = "#f59e0b"
+                else:
+                    _ar_ico = "✅"
+                    _ar_txt = "Datos OK"
+                    _ar_col = "#22c55e"
+                st.markdown(
+                    f'<div style="font-size:0.68rem;color:#64748b;text-align:center;'
+                    f'padding:2px 0 0 0;line-height:1.5;">'
+                    f'<span style="color:{_ar_col};">{_ar_ico} {_ar_txt}</span>'
+                    f'&nbsp;·&nbsp;{_ar_fecha}</div>',
+                    unsafe_allow_html=True,
+                )
             else:
-                _ar_ico = "✅"
-                _ar_txt = "Datos OK"
-                _ar_col = "#22c55e"
-            st.markdown(
-                f'<div style="font-size:0.68rem;color:#64748b;text-align:center;'
-                f'padding:2px 0 0 0;line-height:1.5;">'
-                f'<span style="color:{_ar_col};">{_ar_ico} {_ar_txt}</span>'
-                f'&nbsp;·&nbsp;{_ar_fecha}</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<div style="font-size:0.68rem;color:#475569;text-align:center;'
-                'padding:2px 0 0 0;">⚪ Sin revisión de datos</div>',
-                unsafe_allow_html=True,
-            )
-    except Exception:
-        pass   # nunca romper el sidebar por Auditor Dash 1.0
+                st.markdown(
+                    '<div style="font-size:0.68rem;color:#475569;text-align:center;'
+                    'padding:2px 0 0 0;">⚪ Sin revisión de datos</div>',
+                    unsafe_allow_html=True,
+                )
+        except Exception:
+            pass   # nunca romper el sidebar por Auditor Dash 1.0
 
     _sidebar_load_slot = st.empty()   # placeholder para la barra de carga
 
