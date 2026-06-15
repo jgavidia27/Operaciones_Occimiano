@@ -1055,7 +1055,8 @@ section[data-testid="stSidebar"] {
 [data-testid="stSidebar"] .stButton > button {
     max-width: none !important; font-size: 1.0rem !important;
     justify-content: flex-start !important; text-align: left !important;
-    padding-left: 14px !important;
+    padding-left: 14px !important; padding-top: 0.55rem !important;
+    padding-bottom: 0.55rem !important;
 }
 section[data-testid="stSidebar"] img { opacity: 1 !important; }
 [data-testid="stSidebar"] small,
@@ -1104,9 +1105,9 @@ section[data-testid="stSidebar"] img { opacity: 0 !important; }
 with st.sidebar:
     # ── Botón toggle: expande / colapsa el sidebar ────────────────────────────
     if _sb_open:
-        _c_sp, _c_tog = st.columns([2, 1])
+        _c_sp, _c_tog = st.columns([1, 1])
         with _c_tog:
-            if st.button("◀", key="_sb_toggle"):
+            if st.button("◀", key="_sb_toggle", use_container_width=True):
                 st.session_state["_sb_open"] = False
                 st.rerun()
     else:
