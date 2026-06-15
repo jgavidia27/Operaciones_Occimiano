@@ -210,13 +210,16 @@ def find_fracttal_ot(eds_code, equipment, fecha_str, window_days=3):
     return None
 
 
-def update_prioridad_calc(id_ot, prioridad):
-    """PATCH prioridad_calc en Supabase."""
+def update_prioridad_calc(id_ot, prioridad, n_cotalker=None):
+    """PATCH prioridad_calc (y opcionalmente n_cotalker) en Supabase."""
     url = f"{SUPABASE_URL}/rest/v1/ordenes_trabajo?id_ot=eq.{id_ot}"
+    payload = {"prioridad_calc": prioridad}
+    if n_cotalker is not None:
+        payload["n_cotalker"] = int(n_cotalker)
     r = requests.patch(
         url,
         headers={**_SB_HEADERS, "Prefer": "return=minimal"},
-        json={"prioridad_calc": prioridad},
+        json=payload,
         timeout=10,
     )
     return r.status_code in (200, 204)
@@ -330,10 +333,10 @@ def main():
         prev_prior = fracttal.get("prioridad_calc")
         print(f"    Match Fracttal: {id_ot}  (prioridad actual: {prev_prior})")
 
-        # Actualizar prioridad
-        ok = update_prioridad_calc(id_ot, prioridad)
+        # Actualizar prioridad y n_cotalker
+        ok = update_prioridad_calc(id_ot, prioridad, n_cotalker)
         if ok:
-            print(f"    [OK] {id_ot} → prioridad_calc = {prioridad}")
+            print(f"    [OK] {id_ot} → prioridad_calc={prioridad}, n_cotalker={n_cotalker}")
             stats["prioridad_ok"] += 1
         else:
             print(f"    [ERROR] No se pudo actualizar {id_ot}")

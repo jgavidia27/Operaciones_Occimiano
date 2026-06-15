@@ -308,3 +308,26 @@ def load_preventivas_supabase() -> list:
         "&order=fecha_programada.desc",
         limit=10_000,
     )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 7. ÍNDICE COTALKER  (N° Cotalker por OS Fracttal — solo ESMAX/Aramco)
+# ═════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_cotalker_index_supabase() -> dict:
+    """
+    Retorna {id_ot: n_cotalker (int)} para todas las OTs que tienen
+    el campo n_cotalker poblado en Supabase.
+    Solo aplica a ESMAX/Aramco (únicos que usan Cotalker).
+    """
+    rows = _query(
+        "ordenes_trabajo",
+        "select=id_ot,n_cotalker&n_cotalker=not.is.null",
+        limit=5_000,
+    )
+    return {
+        r["id_ot"]: int(r["n_cotalker"])
+        for r in rows
+        if r.get("id_ot") and r.get("n_cotalker")
+    }

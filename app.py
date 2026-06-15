@@ -47,6 +47,7 @@ from supabase_client import (
     load_preventivas_supabase,
     load_all_llamados_supabase,
     load_sla_umbrales_supabase,
+    load_cotalker_index_supabase,
 )
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
@@ -2327,7 +2328,18 @@ elif _page == _NAV_PAGES[1]:
                 else:
                     _df_sla_ot["ciudad"] = "—"
 
-                _sla_ot_base = [c for c in ["os_fracttal","fecha_llamado","fecha_atencion",
+                # Nº Cotalker — solo ESMAX/Aramco (los únicos que usan Cotalker)
+                _cotalker_idx = load_cotalker_index_supabase()
+                if _cotalker_idx and "os_fracttal" in _df_sla_ot.columns:
+                    _df_sla_ot["n_cotalker"] = (
+                        _df_sla_ot["os_fracttal"]
+                        .map(_cotalker_idx)
+                        .apply(lambda v: str(int(v)) if pd.notna(v) else "")
+                    )
+                else:
+                    _df_sla_ot["n_cotalker"] = ""
+
+                _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
                                             "wo_cierre_ot","eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_ot"] if c in _df_sla_ot.columns]
                 _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla"]].copy()
@@ -2338,7 +2350,8 @@ elif _page == _NAV_PAGES[1]:
                 _df_sla_ot_disp["fecha_llamado"]  = pd.to_datetime(_df_sla_ot_disp["fecha_llamado"],  errors="coerce").dt.strftime("%d/%m/%Y")
                 _df_sla_ot_disp["fecha_atencion"] = pd.to_datetime(_df_sla_ot_disp["fecha_atencion"], errors="coerce").dt.strftime("%d/%m/%Y")
                 _df_sla_ot_disp = _df_sla_ot_disp.sort_values("fecha_llamado", ascending=False).rename(
-                    columns={"os_fracttal":"OS Fracttal","fecha_llamado":"Fecha llamado",
+                    columns={"os_fracttal":"OS Fracttal","n_cotalker":"Nº Cotalker",
+                             "fecha_llamado":"Fecha llamado",
                              "fecha_atencion":"Fecha atención",
                              "wo_cierre_ot":"Cierre completo OT",
                              "eds_occim":"Cód. EDS",
@@ -2350,6 +2363,8 @@ elif _page == _NAV_PAGES[1]:
                 _show_df(_df_sla_ot_disp, width="stretch", hide_index=True,
                     column_config={
                         "OS Fracttal":          st.column_config.TextColumn(width=110),
+                        "Nº Cotalker":          st.column_config.TextColumn(width=105,
+                            help="Número único del llamado en el sistema Cotalker (solo ESMAX/Aramco)"),
                         "Fecha llamado":        st.column_config.TextColumn(width=110),
                         "Fecha atención":       st.column_config.TextColumn(width=110),
                         "Cierre completo OT":   st.column_config.TextColumn(width=140,
