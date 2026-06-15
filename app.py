@@ -244,6 +244,7 @@ def _inject_theme(theme: str) -> None:
         [data-testid="stAppViewContainer"] > section.main > div.block-container {{
             background-color: transparent !important;
             background-image: none !important;
+            padding-top: 1.5rem !important;
         }}
 
         /* Texto general */
@@ -4135,22 +4136,6 @@ elif _page == _NAV_PAGES[0]:
         if df_llamados.empty:
             st.warning("No se pudieron cargar los llamados de Google Drive.")
         else:
-            # ── Diagnóstico de fuente de datos ────────────────────────────────
-            with st.expander("🗂️ Diagnóstico — Fuente de datos cargada", expanded=False):
-                _diag_copec  = load_llamados_copec("2025-01-01")
-                _diag_esmax  = load_llamados_esmax("2025-01-01")
-                _diag_shell  = load_llamados_shell("2025-01-01")
-                _d1, _d2, _d3 = st.columns(3)
-                _d1.metric("COPEC (maestro 2024→hoy)", len(_diag_copec),  delta=f"cols: {list(_diag_copec.columns[:4])}")
-                _d2.metric("ESMAX",                  len(_diag_esmax),  delta=f"cols: {list(_diag_esmax.columns[:4])}")
-                _d3.metric("Shell",                  len(_diag_shell),  delta=f"cols: {list(_diag_shell.columns[:4])}")
-                st.caption(f"Total combinado: {len(df_llamados)} filas · "
-                           f"Con fecha atención: {df_llamados['fecha_atencion'].notna().sum()} · "
-                           f"Sin fecha atención (abiertos): {df_llamados['fecha_atencion'].isna().sum()}")
-                if not _diag_copec.empty and "tecnico" in _diag_copec.columns:
-                    st.markdown("**Técnicos únicos en COPEC 2026:**")
-                    st.write(sorted(_diag_copec["tecnico"].dropna().unique().tolist()))
-
             # ── Preprocessing cacheado en session_state ───────────────────────
             # Clave: tamaño de df_llamados; si cambian los datos se recalcula.
             # v3 — usa hora exacta (gdrive.py combina Fecha+Hora) y cumplimiento del Excel
