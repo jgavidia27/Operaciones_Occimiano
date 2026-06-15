@@ -1074,7 +1074,7 @@ section[data-testid="stSidebar"] {
     display: none !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-    padding: 10px 0 !important; font-size: 1.7rem !important;
+    padding: 10px 0 !important; font-size: 2.5rem !important;
     justify-content: center !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
@@ -1104,42 +1104,6 @@ with st.sidebar:
         if st.button("▶", key="_sb_toggle", use_container_width=True):
             st.session_state["_sb_open"] = True
             st.rerun()
-    # ── Modo oscuro / claro — siempre visible al tope ─────────────────────────
-    _toggle_lbl_full = "☀️  Modo claro" if _current_theme == "dark" else "🌙  Modo oscuro"
-    _toggle_lbl_icon = "☀️" if _current_theme == "dark" else "🌙"
-    _toggle_lbl = _toggle_lbl_full if _sb_open else _toggle_lbl_icon
-    if st.button(_toggle_lbl, use_container_width=True, key="theme_toggle"):
-        _new_theme = "light" if _current_theme == "dark" else "dark"
-        st.session_state["_theme"] = _new_theme
-        # ── Reutilizar figuras cacheadas sin reconstruirlas ─────────────────
-        import plotly.graph_objects as _pgo
-        _old_pfx = f"_{_current_theme}_"
-        _new_pfx = f"_{_new_theme}_"
-        _figs_to_rename = {
-            k: v for k, v in st.session_state.items()
-            if k.startswith("_fig_") and isinstance(v, _pgo.Figure)
-        }
-        _nt = {
-            "text":   "#e2e8f0" if _new_theme == "dark" else "#1e293b",
-            "border": "#1e3356" if _new_theme == "dark" else "#e2e8f0",
-            "pbg":    "rgba(255,255,255,0.04)" if _new_theme == "dark" else "rgba(0,0,0,0)",
-        }
-        for _fk, _fv in _figs_to_rename.items():
-            _fv.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor=_nt["pbg"],
-                font=dict(color=_nt["text"]),
-                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=_nt["text"])),
-            )
-            _fv.update_xaxes(gridcolor=_nt["border"], zerolinecolor=_nt["border"],
-                             tickfont=dict(color=_nt["text"]), title_font=dict(color=_nt["text"]))
-            _fv.update_yaxes(gridcolor=_nt["border"], zerolinecolor=_nt["border"],
-                             tickfont=dict(color=_nt["text"]), title_font=dict(color=_nt["text"]))
-            _new_fk = _fk.replace(_old_pfx, _new_pfx, 1)
-            if _new_fk != _fk:
-                st.session_state.pop(_fk, None)
-                st.session_state[_new_fk] = _fv
-        st.rerun()
     # Logo Occimiano (solo en modo expandido)
     if _sb_open:
         _logo_uri = _load_logo_b64()
@@ -1204,6 +1168,41 @@ with st.sidebar:
         st.rerun()
     if _sb_open:
         st.caption(f"Cache: 30 min · disco  |  {datetime.now().strftime('%H:%M:%S')}")
+    # ── Modo oscuro / claro ───────────────────────────────────────────────────
+    _toggle_lbl_full = "☀️  Modo claro" if _current_theme == "dark" else "🌙  Modo oscuro"
+    _toggle_lbl_icon = "☀️" if _current_theme == "dark" else "🌙"
+    _toggle_lbl = _toggle_lbl_full if _sb_open else _toggle_lbl_icon
+    if st.button(_toggle_lbl, use_container_width=True, key="theme_toggle"):
+        _new_theme = "light" if _current_theme == "dark" else "dark"
+        st.session_state["_theme"] = _new_theme
+        import plotly.graph_objects as _pgo
+        _old_pfx = f"_{_current_theme}_"
+        _new_pfx = f"_{_new_theme}_"
+        _figs_to_rename = {
+            k: v for k, v in st.session_state.items()
+            if k.startswith("_fig_") and isinstance(v, _pgo.Figure)
+        }
+        _nt = {
+            "text":   "#e2e8f0" if _new_theme == "dark" else "#1e293b",
+            "border": "#1e3356" if _new_theme == "dark" else "#e2e8f0",
+            "pbg":    "rgba(255,255,255,0.04)" if _new_theme == "dark" else "rgba(0,0,0,0)",
+        }
+        for _fk, _fv in _figs_to_rename.items():
+            _fv.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor=_nt["pbg"],
+                font=dict(color=_nt["text"]),
+                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=_nt["text"])),
+            )
+            _fv.update_xaxes(gridcolor=_nt["border"], zerolinecolor=_nt["border"],
+                             tickfont=dict(color=_nt["text"]), title_font=dict(color=_nt["text"]))
+            _fv.update_yaxes(gridcolor=_nt["border"], zerolinecolor=_nt["border"],
+                             tickfont=dict(color=_nt["text"]), title_font=dict(color=_nt["text"]))
+            _new_fk = _fk.replace(_old_pfx, _new_pfx, 1)
+            if _new_fk != _fk:
+                st.session_state.pop(_fk, None)
+                st.session_state[_new_fk] = _fv
+        st.rerun()
 
     st.divider()
 
