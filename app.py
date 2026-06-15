@@ -1041,7 +1041,7 @@ section[data-testid="stSidebar"] {
     padding-left: 0.5rem !important; padding-right: 0.5rem !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-    padding: 10px 14px !important; font-size: 1rem !important;
+    padding: 10px 14px !important; font-size: 1.7rem !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
     display: flex !important;
@@ -1074,7 +1074,7 @@ section[data-testid="stSidebar"] {
     display: none !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-    padding: 10px 0 !important; font-size: 2.5rem !important;
+    padding: 6px 0 !important; font-size: 4rem !important;
     justify-content: center !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
