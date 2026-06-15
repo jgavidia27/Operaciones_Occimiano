@@ -1080,7 +1080,8 @@ section[data-testid="stSidebar"] {
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
     font-size: 1.5rem !important; line-height: 1.5 !important;
-    max-width: 2em !important; overflow: visible !important; display: block !important;
+    max-width: 1.8em !important; overflow: hidden !important; display: block !important;
+    white-space: nowrap !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child * {
     font-size: 1.5rem !important; line-height: 1.5 !important;
