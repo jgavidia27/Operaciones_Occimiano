@@ -1075,15 +1075,15 @@ section[data-testid="stSidebar"] {
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
     padding: 6px 0 !important; font-size: 1.5rem !important;
-    justify-content: center !important; line-height: 1 !important;
-    height: auto !important;
+    justify-content: center !important; line-height: 1.5 !important;
+    height: auto !important; overflow: visible !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
-    font-size: 1.5rem !important; line-height: 1.4 !important;
-    max-width: 1.4em !important; overflow: hidden !important; display: block !important;
+    font-size: 1.5rem !important; line-height: 1.5 !important;
+    max-width: 2em !important; overflow: visible !important; display: block !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child * {
-    font-size: 1.5rem !important; line-height: 1.4 !important;
+    font-size: 1.5rem !important; line-height: 1.5 !important;
 }
 [data-testid="stSidebar"] .stButton > button {
     font-size: 1.25rem !important; justify-content: center !important;
