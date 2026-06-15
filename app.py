@@ -1074,16 +1074,16 @@ section[data-testid="stSidebar"] {
     display: none !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-    padding: 4px 0 !important; font-size: 2.2rem !important;
+    padding: 4px 0 !important; font-size: 1.5rem !important;
     justify-content: center !important; line-height: 1 !important;
     height: auto !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
-    font-size: 2.2rem !important; line-height: 1 !important;
+    font-size: 1.5rem !important; line-height: 1 !important;
     max-width: 1.4em !important; overflow: hidden !important; display: block !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child * {
-    font-size: 2.2rem !important; line-height: 1 !important;
+    font-size: 1.5rem !important; line-height: 1 !important;
 }
 [data-testid="stSidebar"] .stButton > button {
     font-size: 1.25rem !important; justify-content: center !important;
