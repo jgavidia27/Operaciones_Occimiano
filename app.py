@@ -1050,7 +1050,7 @@ section[data-testid="stSidebar"] {
     max-width: none !important; overflow: visible !important;
 }
 [data-testid="stSidebar"] .stButton > button {
-    max-width: none !important; font-size: 0.9rem !important;
+    max-width: none !important; font-size: 1.0rem !important;
     justify-content: flex-start !important; text-align: left !important;
     padding-left: 14px !important;
 }
@@ -1063,27 +1063,27 @@ section[data-testid="stSidebar"] img { opacity: 1 !important; }
 else:
     st.markdown("""<style>
 section[data-testid="stSidebar"] {
-    min-width: 5.5rem !important; max-width: 5.5rem !important;
+    min-width: 4.5rem !important; max-width: 4.5rem !important;
 }
 [data-testid="stSidebar"] [data-testid="stSidebarContent"],
 [data-testid="stSidebar"] [data-testid="stSidebarContent"] > div,
 [data-testid="stSidebar"] [data-testid="stSidebarContent"] > div > div {
-    padding-left: 0.15rem !important; padding-right: 0.15rem !important;
+    padding-left: 0.1rem !important; padding-right: 0.1rem !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
     display: none !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
-    padding: 4px 0 !important; font-size: 4rem !important;
+    padding: 4px 0 !important; font-size: 2.2rem !important;
     justify-content: center !important; line-height: 1 !important;
     height: auto !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child {
-    font-size: 4rem !important; line-height: 1 !important;
+    font-size: 2.2rem !important; line-height: 1 !important;
     max-width: 1.4em !important; overflow: hidden !important; display: block !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-child * {
-    font-size: 4rem !important; line-height: 1 !important;
+    font-size: 2.2rem !important; line-height: 1 !important;
 }
 [data-testid="stSidebar"] .stButton > button {
     font-size: 1.25rem !important; justify-content: center !important;
@@ -1100,7 +1100,7 @@ section[data-testid="stSidebar"] img { opacity: 0 !important; }
 with st.sidebar:
     # ── Botón toggle: expande / colapsa el sidebar ────────────────────────────
     if _sb_open:
-        _c_sp, _c_tog = st.columns([5, 1])
+        _c_sp, _c_tog = st.columns([3, 1])
         with _c_tog:
             if st.button("◀", key="_sb_toggle"):
                 st.session_state["_sb_open"] = False
