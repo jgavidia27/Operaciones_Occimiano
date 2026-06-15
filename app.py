@@ -1105,9 +1105,6 @@ with st.sidebar:
     st.caption("Panel Operacional")
     st.divider()
 
-    # Si el selectbox móvil solicitó un cambio de página, aplicarlo antes de crear el radio
-    if "_mob_nav_pending" in st.session_state:
-        st.session_state["_nav_radio"] = st.session_state.pop("_mob_nav_pending")
     _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed", key="_nav_radio")
 
     st.divider()
@@ -1336,39 +1333,6 @@ _CAPTION = (
     f"EDS activas: **{int(df_eds['activa'].sum()) if not df_eds.empty else '?'}**"
 )
 
-# ── Navegación rápida móvil ───────────────────────────────────────────────────
-# En móvil el sidebar queda pequeño; este selectbox permite navegar fácil.
-# En desktop se oculta con CSS para no duplicar la interfaz.
-#
-# Streamlit ignora el parámetro `index=` cuando ya existe session_state["_mob_nav"].
-# Sincronizamos manualmente cuando la página cambia desde el sidebar usando
-# _mob_nav_last_page como referencia de la última página conocida.
-if "_mob_nav_last_page" not in st.session_state:
-    st.session_state["_mob_nav_last_page"] = _page
-elif st.session_state["_mob_nav_last_page"] != _page:
-    st.session_state["_mob_nav"] = _page
-    st.session_state["_mob_nav_last_page"] = _page
-
-st.markdown('<div id="_mob_nav_wrap">', unsafe_allow_html=True)
-_mob_sel = st.selectbox(
-    "📱 Navegar:", _NAV_PAGES,
-    key="_mob_nav",
-    label_visibility="collapsed",
-)
-st.markdown('</div>', unsafe_allow_html=True)
-st.markdown("""
-<style>
-@media (min-width: 768px) {
-    div#_mob_nav_wrap, div#_mob_nav_wrap + div[data-testid="stVerticalBlock"] {
-        display: none !important;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
-if _mob_sel != _page:
-    st.session_state["_mob_nav_pending"] = _mob_sel
-    st.session_state["_mob_nav_last_page"] = _mob_sel  # pre-set para evitar sync inverso
-    st.rerun()
 
 # ── Helper: carga OTs con spinner nativo ────────────────────────────────────
 def _load_wo_con_progreso(label: str = "órdenes de trabajo") -> list:
