@@ -2339,10 +2339,10 @@ elif _page == _NAV_PAGES[1]:
                 else:
                     _df_sla_ot["n_cotalker"] = ""
 
-                _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
+                _sla_ot_base = [c for c in ["os_fracttal","fecha_llamado","fecha_atencion",
                                             "wo_cierre_ot","eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_ot"] if c in _df_sla_ot.columns]
-                _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla"]].copy()
+                _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla","n_cotalker"]].copy()
                 if "wo_cierre_ot" in _df_sla_ot_disp.columns:
                     _df_sla_ot_disp["wo_cierre_ot"] = pd.to_datetime(
                         _df_sla_ot_disp["wo_cierre_ot"], errors="coerce"
@@ -2350,7 +2350,7 @@ elif _page == _NAV_PAGES[1]:
                 _df_sla_ot_disp["fecha_llamado"]  = pd.to_datetime(_df_sla_ot_disp["fecha_llamado"],  errors="coerce").dt.strftime("%d/%m/%Y")
                 _df_sla_ot_disp["fecha_atencion"] = pd.to_datetime(_df_sla_ot_disp["fecha_atencion"], errors="coerce").dt.strftime("%d/%m/%Y")
                 _df_sla_ot_disp = _df_sla_ot_disp.sort_values("fecha_llamado", ascending=False).rename(
-                    columns={"os_fracttal":"OS Fracttal","n_cotalker":"Nº Cotalker",
+                    columns={"os_fracttal":"OS Fracttal",
                              "fecha_llamado":"Fecha llamado",
                              "fecha_atencion":"Fecha atención",
                              "wo_cierre_ot":"Cierre completo OT",
@@ -2358,13 +2358,12 @@ elif _page == _NAV_PAGES[1]:
                              "eds_nombre":"EDS","cliente":"Cliente","tecnico":"Técnico",
                              "prioridad":"Prioridad","ciudad":"Ciudad","zona_ot":"Zona",
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
-                             "pct_sla_ot":"% Uso SLA","estado_sla":"Estado SLA"})
+                             "pct_sla_ot":"% Uso SLA","estado_sla":"Estado SLA",
+                             "n_cotalker":"Nº Cotalker"})
                 st.caption(f"**{len(_df_sla_ot_disp):,}** OTs con fechas de apertura y cierre registradas")
                 _show_df(_df_sla_ot_disp, width="stretch", hide_index=True,
                     column_config={
                         "OS Fracttal":          st.column_config.TextColumn(width=110),
-                        "Nº Cotalker":          st.column_config.TextColumn(width=105,
-                            help="Número único del llamado en el sistema Cotalker (solo ESMAX/Aramco)"),
                         "Fecha llamado":        st.column_config.TextColumn(width=110),
                         "Fecha atención":       st.column_config.TextColumn(width=110),
                         "Cierre completo OT":   st.column_config.TextColumn(width=140,
@@ -2382,6 +2381,8 @@ elif _page == _NAV_PAGES[1]:
                             label="% Uso SLA", min_value=0, max_value=200, format="%.1f%%",
                             help=">100% = excedió el umbral SLA"),
                         "Estado SLA":        st.column_config.TextColumn(width=110),
+                        "Nº Cotalker":       st.column_config.TextColumn(width=105,
+                            help="N° único en Cotalker (sistema ESMAX/Aramco). Vacio = no aplica."),
                     })
             else:
                 st.info("No hay llamados con fechas de apertura y cierre registradas en el período seleccionado.")
