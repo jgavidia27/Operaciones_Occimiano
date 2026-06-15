@@ -5927,36 +5927,41 @@ elif _page == _NAV_PAGES[0]:
                     f'border-radius:8px;padding:12px 14px;text-align:center;">'
                     # Nombre técnico o equipo
                     f'<div style="font-weight:700;font-size:0.92rem;color:{_t["text"]};">{_card_titulo}</div>'
-                    f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:8px;">{_card_subtitulo}</div>'
-                    # Fila: OTs llenadas / erradas / correctas
-                    f'<div style="display:flex;justify-content:center;gap:10px;margin-bottom:4px;">'
-                    f'<div style="text-align:center;">'
-                    f'<div style="font-size:1.3rem;font-weight:800;color:{_t["text"]};">{_ots_llenadas}</div>'
-                    f'<div style="font-size:0.65rem;color:{_t["muted"]};">llenadas</div></div>'
-                    f'<div style="font-size:1.1rem;color:{_t["muted"]};padding-top:4px;">→</div>'
-                    f'<div style="text-align:center;">'
-                    f'<div style="font-size:1.3rem;font-weight:800;color:#ef4444;">{_ots_erradas}</div>'
-                    f'<div style="font-size:0.65rem;color:{_t["muted"]};">con error</div></div>'
-                    f'<div style="font-size:1.1rem;color:{_t["muted"]};padding-top:4px;">+</div>'
-                    f'<div style="text-align:center;">'
-                    f'<div style="font-size:1.3rem;font-weight:800;color:#22c55e;">{_ots_correctas}</div>'
-                    f'<div style="font-size:0.65rem;color:{_t["muted"]};">correctas</div></div>'
-                    f'</div>'
+                    f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:6px;">{_card_subtitulo}</div>'
+                    # ── CUMPLIMIENTO — protagonista ──
+                    f'<div style="font-size:2.6rem;font-weight:900;line-height:1;color:{_pbcol};">'
+                    f'{_cumpl_pct:.1f}%</div>'
+                    f'<div style="font-size:0.68rem;font-weight:600;letter-spacing:0.05em;'
+                    f'text-transform:uppercase;color:{_t["muted"]};margin-bottom:6px;">cumplimiento</div>'
                     # Barra de cumplimiento
-                    f'<div style="background:{_t["prog_bg"]};border-radius:4px;height:8px;margin-bottom:3px;">'
+                    f'<div style="background:{_t["prog_bg"]};border-radius:4px;height:8px;margin-bottom:6px;">'
                     f'<div style="background:{_bar_col};width:{_bar_w:.0f}%;height:8px;border-radius:4px;"></div></div>'
-                    f'<div style="font-size:0.72rem;color:{_t["muted"]};margin-bottom:4px;">'
-                    f'Cumplimiento: <b style="color:{_pbcol};">{_cumpl_pct:.1f}%</b>'
-                    f'</div>'
-                    # Desglose errores individuales (informativo)
-                    f'<div style="font-size:0.68rem;color:{_t["muted"]};margin-bottom:5px;">'
-                    f'Err. individuales: {_err_total_dim} &nbsp;'
-                    f'(⏱{_err_t} 🔍{_err_c} 🔢{_err_n} 🎯{_err_d})</div>'
                     # Chip bono
                     f'<div style="background:{_pbcol};color:#fff;border-radius:4px;'
-                    f'padding:2px 8px;font-size:0.80rem;font-weight:700;'
-                    f'margin:3px auto;display:inline-block;">{_pblbl}</div>'
-                    f'<div style="font-size:0.70rem;color:{_t["muted"]};margin-top:3px;">'
+                    f'padding:3px 10px;font-size:0.82rem;font-weight:700;'
+                    f'margin:0 auto 8px auto;display:inline-block;">{_pblbl}</div>'
+                    # Separador sutil
+                    f'<div style="border-top:1px solid {_t["muted"]}22;margin:6px 0;"></div>'
+                    # Fila: OTs llenadas / erradas / correctas  (secundario, más pequeño)
+                    f'<div style="display:flex;justify-content:center;gap:8px;margin-bottom:4px;">'
+                    f'<div style="text-align:center;">'
+                    f'<div style="font-size:1.0rem;font-weight:700;color:{_t["text"]};">{_ots_llenadas}</div>'
+                    f'<div style="font-size:0.60rem;color:{_t["muted"]};">llenadas</div></div>'
+                    f'<div style="font-size:0.9rem;color:{_t["muted"]};padding-top:3px;">→</div>'
+                    f'<div style="text-align:center;">'
+                    f'<div style="font-size:1.0rem;font-weight:700;color:#ef4444;">{_ots_erradas}</div>'
+                    f'<div style="font-size:0.60rem;color:{_t["muted"]};">con error</div></div>'
+                    f'<div style="font-size:0.9rem;color:{_t["muted"]};padding-top:3px;">+</div>'
+                    f'<div style="text-align:center;">'
+                    f'<div style="font-size:1.0rem;font-weight:700;color:#22c55e;">{_ots_correctas}</div>'
+                    f'<div style="font-size:0.60rem;color:{_t["muted"]};">correctas</div></div>'
+                    f'</div>'
+                    # Desglose errores individuales (informativo)
+                    f'<div style="font-size:0.64rem;color:{_t["muted"]};margin-bottom:5px;">'
+                    f'Err.: {_err_total_dim} &nbsp;'
+                    f'(⏱{_err_t} 🔍{_err_c} 🔢{_err_n} 🎯{_err_d})</div>'
+                    # Con bono
+                    f'<div style="font-size:0.68rem;color:{_t["muted"]};margin-top:2px;">'
                     f'{_con_bono_prec}/{_n_tecs_prec} con bono · ${_bono_sum_prec:,.0f}/sem</div>'
                     f'</div>',
                     unsafe_allow_html=True,
