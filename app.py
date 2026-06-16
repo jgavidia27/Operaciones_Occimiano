@@ -528,7 +528,7 @@ def _show_login_page() -> None:
         padding-bottom: 0 !important;
     }}
     .block-container {{
-        padding-top: clamp(3rem, calc(50vh - 270px), 14rem) !important;
+        padding-top: clamp(6rem, calc(50vh - 190px), 22rem) !important;
         padding-bottom: 3rem !important;
         max-width: 100% !important;
     }}
@@ -607,7 +607,7 @@ def _show_login_page() -> None:
     """, unsafe_allow_html=True)
 
     # ── Layout: espacio izquierdo (imagen) | form | padding derecho ────────
-    _, _col, _ = st.columns([2.0, 1, 0.05])
+    _, _col, _ = st.columns([3.2, 1, 0.05])
     with _col:
         _logo_path = _get_logo_path()
 
