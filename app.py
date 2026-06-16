@@ -7634,14 +7634,14 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             else:
                 _n_fallas_t = 0
 
-            # Prec
+            # Prec — misma fórmula que KPI screen: % OTs con 4/4 componentes correctos
+            # (binario all-or-nothing: score_total == 100 → correcta, cualquier fallo → mala)
             if not _df_ot_bono_filt.empty and "tecnico" in _df_ot_bono_filt.columns:
                 _prec_t = _df_ot_bono_filt[_df_ot_bono_filt["tecnico"] == tech_full]
-                if not _prec_t.empty and "score_total" in _prec_t.columns:
-                    _s_tot = _prec_t["score_total"].sum()
-                    _s_max = _prec_t["score_max"].sum() if "score_max" in _prec_t.columns else len(_prec_t) * 100
-                    _pct_prec = (_s_tot / _s_max * 100) if _s_max > 0 else None
-                    _n_ots_prec = len(_prec_t)
+                _n_ots_prec = len(_prec_t)
+                if _n_ots_prec > 0 and "score_total" in _prec_t.columns:
+                    _n_correctas_t = int((_prec_t["score_total"] >= 100).sum())
+                    _pct_prec = _n_correctas_t / _n_ots_prec * 100
                 else:
                     _pct_prec = None
                     _n_ots_prec = 0
@@ -7676,13 +7676,13 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             else:
                 _n_fallas_e = 0
 
-            # Prec
+            # Prec — misma fórmula que KPI screen: % OTs con 4/4 componentes correctos
             if not _df_ot_bono_filt.empty and "equipo" in _df_ot_bono_filt.columns:
                 _prec_e = _df_ot_bono_filt[_df_ot_bono_filt["equipo"] == equipo_key]
-                if not _prec_e.empty and "score_total" in _prec_e.columns:
-                    _s_tot = _prec_e["score_total"].sum()
-                    _s_max = _prec_e["score_max"].sum() if "score_max" in _prec_e.columns else len(_prec_e) * 100
-                    _pct_prec = (_s_tot / _s_max * 100) if _s_max > 0 else None
+                _n_ots_e = len(_prec_e)
+                if _n_ots_e > 0 and "score_total" in _prec_e.columns:
+                    _n_correctas_e = int((_prec_e["score_total"] >= 100).sum())
+                    _pct_prec = _n_correctas_e / _n_ots_e * 100
                 else:
                     _pct_prec = None
             else:
