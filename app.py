@@ -3928,7 +3928,7 @@ elif _page == _NAV_PAGES[0]:
     def _bono_prec(exactitud_pct: float) -> tuple[int, str, str, int]:
         """
         Retorna (% bono, etiqueta, color, CLP/trimestre) según cumplimiento de OTs correctas.
-        Escala oficial Precisión Info Fracttal — 30% bono terreno = $150.000/trim pool (7 niveles):
+        Escala oficial Precisión Fracttal — 30% bono terreno = $150.000/trim pool (7 niveles):
           ≥ 95%  → 100% → $150.000/trim
           ≥ 90%  →  90% → $135.000/trim
           ≥ 85%  →  80% → $120.000/trim
@@ -3954,7 +3954,7 @@ elif _page == _NAV_PAGES[0]:
         'Evaluado en 3 KPIs: '
         '<b>Productividad SLA</b> 40% ($200.000 pool) · '
         '<b>Efectividad MP</b> 30% ($150.000 pool) · '
-        '<b>Precisión Info Fracttal</b> 30% ($150.000 pool). '
+        '<b>Precisión Fracttal</b> 30% ($150.000 pool). '
         f'<span style="font-size:0.82rem;color:{_t["muted"]};">'
         'Eq.1 Luis Pinto · Eq.2 Victor Bahamonde · Eq.3 Juan Gallardo · '
         'Eq.4 Carlos Avila · Eq.5 Luis Lopez</span></div>',
@@ -4065,7 +4065,7 @@ elif _page == _NAV_PAGES[0]:
     tab_sla, tab_cal, tab_prec, tab_bono = st.tabs([
         "📊  Desempeño SLA",
         "🎯  Efectividad MP",
-        "📋  Precisión Info Fracttal",
+        "📋  Precisión Fracttal",
         "💲  Resumen Bono",
     ])
 
@@ -5507,7 +5507,7 @@ elif _page == _NAV_PAGES[0]:
                     st.info(
                         f"ℹ️ {_n_sin_info + _n_sin_dato:,} OTs tienen el campo 'Falla' vacío o sin información. "
                         "Al no poder descartar responsabilidad de Occimiano, se imputan al técnico del PM. "
-                        "Esto también penaliza el KPI de Precisión Info Fracttal."
+                        "Esto también penaliza el KPI de Precisión Fracttal."
                     )
 
             _df_rc_tec = _df_rc[_df_rc["es_reincidencia_tecnico"]] if not _df_rc.empty else pd.DataFrame()
@@ -5860,7 +5860,7 @@ elif _page == _NAV_PAGES[0]:
             st.markdown(
                 f'<div style="background:{_t["warn_bg"]};border-left:4px solid #01798A;'
                 f'border-radius:8px;padding:12px 16px;margin-bottom:12px;color:{_t["text"]};">'
-                '<b>KPI Precisión Info Fracttal</b> — Representa el <b>30% del bono de desempeño</b> '
+                '<b>KPI Precisión Fracttal</b> — Representa el <b>30% del bono de desempeño</b> '
                 '(<b>$105.000 bruto/trimestre</b> máximo, pago trimestral). '
                 'Mide <b>4 componentes</b> por OT (25 pts c/u = 100 total): '
                 '<b>Tiempo de ejecución</b>, '
@@ -7884,7 +7884,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             if _df_reinc_bono.empty and _df_pm_bono.empty:
                 _missing.append("Efectividad MP (visita la pestaña 'Efectividad MP')")
             if _df_ot_bono_filt.empty:
-                _missing.append("Precisión Fracttal (visita la pestaña 'Precisión Info Fracttal')")
+                _missing.append("Precisión Fracttal (visita la pestaña 'Precisión Fracttal')")
             if _missing:
                 st.info(
                     "Datos no disponibles para: **" + "**, **".join(_missing) + "**. "
