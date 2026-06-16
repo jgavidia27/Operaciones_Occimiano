@@ -3361,7 +3361,7 @@ elif _page == _NAV_PAGES[4]:
             # ── Agrupar tipo_tarea para el filtro ────────────────────────────────
             # Todas las variantes PREVENTIVA* → "PREVENTIVA" en el filtro
             # SOLICITUD COMERCIAL se excluye del filtro
-            _TIPO_EXCLUIR_VIVO = {"SOLICITUD COMERCIAL"}
+            _TIPO_EXCLUIR_VIVO = {"SOLICITUD COMERCIAL", "ENTR. FACTURADA A CLIENTE"}
             _df_vivo["tipo_tarea_grp"] = _df_vivo["tipo_tarea"].apply(
                 lambda x: "PREVENTIVA"
                 if str(x).upper().startswith("PREVENTIVA") else x
