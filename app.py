@@ -1182,7 +1182,7 @@ with st.sidebar:
         # También eds_enrich y eds_fracttal_items para que Listado de EDS se recalcule
         for _k in list(st.session_state.keys()):
             if str(_k).startswith(("_sla_proc", "_fig_", "_sc_sig_", "df_kpi",
-                                   "df_ot_all", "df_wo", "df_reinc",
+                                   "df_ot_all", "df_ot_bono", "df_wo", "df_reinc",
                                    "eds_enrich", "eds_fracttal")):
                 st.session_state.pop(_k, None)
         st.rerun()
@@ -7551,7 +7551,9 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     _df["mes"] = _cd.dt.to_period("M").astype(str)
             return _df
 
-        _df_ot_bono = _sc("df_ot_all_scores", _wo_sig, _build_ot_all_bono)
+        # Clave DISTINTA a "df_ot_all_scores" (usada por tab Precisión) para evitar
+        # que el builder del KPI screen sobrescriba estos datos sin _tech_norm.
+        _df_ot_bono = _sc("df_ot_bono_scores", _wo_sig, _build_ot_all_bono)
         if not _df_ot_bono.empty and "mes" in _df_ot_bono.columns:
             _df_ot_bono_filt = _df_ot_bono[
                 _df_ot_bono["mes"].astype(str).isin(_meses_bono_activos)
@@ -7652,14 +7654,16 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 else:
                     _pct_prec = None
                     _n_ots_prec = 0
+                    _n_correctas_t = 0
             else:
                 _pct_prec = None
                 _n_ots_prec = 0
+                _n_correctas_t = 0
 
             return {
                 "n_sla_ok": _n_sla_ok, "n_sla_total": _n_sla_total, "pct_sla": _pct_sla,
                 "n_fallas": _n_fallas_t, "n_pm": _n_pm_t,
-                "pct_prec": _pct_prec, "n_ots_prec": _n_ots_prec,
+                "pct_prec": _pct_prec, "n_ots_prec": _n_ots_prec, "n_correctas_prec": _n_correctas_t,
             }
 
         def _kpi_para_equipo(equipo_key: str):
@@ -7692,12 +7696,17 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     _pct_prec = _n_correctas_e / _n_ots_e * 100
                 else:
                     _pct_prec = None
+                    _n_ots_e = 0
+                    _n_correctas_e = 0
             else:
                 _pct_prec = None
+                _n_ots_e = 0
+                _n_correctas_e = 0
 
             return {
                 "n_sla_ok": _n_sla_ok, "n_sla_total": _n_sla_total, "pct_sla": _pct_sla,
-                "n_fallas": _n_fallas_e, "n_pm": _n_pm_e, "pct_prec": _pct_prec,
+                "n_fallas": _n_fallas_e, "n_pm": _n_pm_e,
+                "pct_prec": _pct_prec, "n_ots_prec": _n_ots_e, "n_correctas_prec": _n_correctas_e,
             }
 
         # ── Helpers de formato HTML para celdas ──────────────────────────────
@@ -7720,13 +7729,16 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 f'<span style="color:{col};font-weight:700;font-size:0.80rem;">→ {nivel}%</span>'
             )
 
-        def _cel_prec(pct, n_ots=None):
+        def _cel_prec(pct, n_correctas=None, n_ots=None):
             if pct is None:
                 return f'<span style="color:{_t["muted"]};font-size:0.78rem;">Sin datos</span>'
             nivel, _, col, _ = _bono_prec(pct)
-            sfx = f' ({n_ots} OTs)' if n_ots is not None else ''
+            if n_correctas is not None and n_ots is not None and n_ots > 0:
+                lbl = f'{n_correctas}/{n_ots} = {pct:.1f}%'
+            else:
+                lbl = f'{pct:.1f}%'
             return (
-                f'<span style="font-size:0.82rem;">{pct:.1f}%{sfx}</span><br>'
+                f'<span style="font-size:0.82rem;">{lbl}</span><br>'
                 f'<span style="color:{col};font-weight:700;font-size:0.80rem;">→ {nivel}%</span>'
             )
 
@@ -7894,12 +7906,12 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     _html += (
                         f'<td style="padding:8px 10px;text-align:center;'
                         f'border-bottom:1px solid {_t["border"]};">'
-                        f'{_cel_prec(_k["pct_prec"], _k.get("n_ots_prec"))}</td>'
+                        f'{_cel_prec(_k["pct_prec"], _k.get("n_correctas_prec"), _k.get("n_ots_prec"))}</td>'
                     )
                 _html += (
                     f'<td style="padding:8px 10px;text-align:center;'
                     f'border-bottom:1px solid {_t["border"]};font-style:italic;">'
-                    f'{_cel_prec(_eq_kpi.get("pct_prec"))}</td>'
+                    f'{_cel_prec(_eq_kpi.get("pct_prec"), _eq_kpi.get("n_correctas_prec"), _eq_kpi.get("n_ots_prec"))}</td>'
                     f'</tr>'
                 )
 
