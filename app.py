@@ -1038,7 +1038,7 @@ _NAV_PAGES = [
 ]
 
 # ── CSS del sidebar: colapsado / expandido (controlado por _sb_open) ─────────
-_sb_open = st.session_state.get("_sb_open", False)
+_sb_open = st.session_state.get("_sb_open", True)
 if _sb_open:
     st.markdown("""<style>
 section[data-testid="stSidebar"] {
@@ -1364,7 +1364,7 @@ def _hdr(title: str, caption=None) -> None:
         if _cap:
             st.caption(_cap)
     with _t_c:
-        _open = st.session_state.get("_sb_open", False)
+        _open = st.session_state.get("_sb_open", True)
         st.markdown("<div style='padding-top:20px;'>", unsafe_allow_html=True)
         if st.button("◀" if _open else "▶", key="_sb_toggle_main",
                      help="Colapsar/expandir menú lateral"):
