@@ -601,7 +601,7 @@ def _show_login_page() -> None:
 
             # Error
             if st.session_state.get("_login_failed"):
-                st.error("Correo o contraseña incorrectos.", icon="⚠️")
+                st.error("Correo no autorizado o contraseña incorrecta.", icon="⚠️")
 
             _login_email = st.text_input(
                 "Correo electrónico",
@@ -1023,13 +1023,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
-_NAV_PAGES = [
+_NAV_PAGES_BASE = [
     "🥇  Desempeño Servicio Tecnico",
     "✅  Cumplimiento SLA",
     "🛠️  Mantenciones Preventivas",
     "⛽  Estaciones de Servicio",
     "⌛  Utilización del Tiempo",
 ]
+# La página Admin solo aparece para usuarios con rol admin
+_is_admin   = st.session_state.get("_auth_rol", "usuario") == "admin"
+_NAV_PAGES  = _NAV_PAGES_BASE + (["🔐  Administración"] if _is_admin else [])
 
 # ── CSS del sidebar: colapsado / expandido (controlado por _sb_open) ─────────
 _sb_open = st.session_state.get("_sb_open", True)
@@ -1128,6 +1131,25 @@ with st.sidebar:
 
     _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed", key="_nav_radio")
 
+# ── Tracking de actividad de sesión (debounce 5 min) ─────────────────────────
+_session_id_track = st.session_state.get("_session_id", "")
+if _session_id_track:
+    import time as _time_mod
+    _now_ts = _time_mod.time()
+    _last_track = st.session_state.get("_last_activity_track", 0)
+    _last_page  = st.session_state.get("_last_activity_page", "")
+    _cur_page   = _page if "_page" in dir() else ""
+    # Actualizar si cambió de página O si pasaron más de 5 min
+    if _cur_page != _last_page or (_now_ts - _last_track) > 300:
+        try:
+            from supabase_client import update_session_activity
+            update_session_activity(_session_id_track, _cur_page)
+        except Exception:
+            pass
+        st.session_state["_last_activity_track"] = _now_ts
+        st.session_state["_last_activity_page"]  = _cur_page
+
+with st.sidebar:
     st.divider()
     if st.button("↺  Actualizar datos" if _sb_open else "↺", use_container_width=True):  # noqa
         # load_work_orders se limpia junto con todo lo demás.
@@ -1265,7 +1287,7 @@ with st.sidebar:
 # ── Carga de datos base (barra de progreso en sidebar, no en área principal) ──
 # Páginas que necesitan los llamados de Excel (COPEC / ESMAX / Shell).
 # En las demás páginas se omite esa carga para no bloquear el arranque.
-_PAGES_NEED_LLAMADOS = {_NAV_PAGES[0], _NAV_PAGES[1], _NAV_PAGES[3]}
+_PAGES_NEED_LLAMADOS = {_NAV_PAGES_BASE[0], _NAV_PAGES_BASE[1], _NAV_PAGES_BASE[3]}
 
 with _sidebar_load_slot.container():
     _base_prog = st.progress(0, text="📂 Cargando…")
@@ -1336,11 +1358,12 @@ else:
 
 # ── Títulos por página ────────────────────────────────────────────────────────
 _PAGE_TITLE = {
-    _NAV_PAGES[0]: "Desempeño Servicio Tecnico",
-    _NAV_PAGES[1]: "Cumplimiento SLA",
-    _NAV_PAGES[2]: "Mantenciones Preventivas",
-    _NAV_PAGES[3]: "Estaciones de Servicio",
-    _NAV_PAGES[4]: "Utilización del Tiempo",
+    _NAV_PAGES_BASE[0]: "Desempeño Servicio Tecnico",
+    _NAV_PAGES_BASE[1]: "Cumplimiento SLA",
+    _NAV_PAGES_BASE[2]: "Mantenciones Preventivas",
+    _NAV_PAGES_BASE[3]: "Estaciones de Servicio",
+    _NAV_PAGES_BASE[4]: "Utilización del Tiempo",
+    "🔐  Administración":  "Administración",
 }
 _n_ll = f"{len(df_llamados):,}" if not df_llamados.empty else "–"
 _CAPTION = (
@@ -8599,6 +8622,163 @@ elif _page == _NAV_PAGES[2]:
                     "Próx. Resp.":      st.column_config.TextColumn(width=160),
                 })
             st.caption(f"{len(_df_eds_show):,} activos únicos · ordenados por proximidad de próxima PM")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PÁGINA ADMINISTRACIÓN (solo admins)
+# ══════════════════════════════════════════════════════════════════════════════
+elif _page == "🔐  Administración":
+    if not _is_admin:
+        st.error("Acceso restringido — solo administradores.")
+        st.stop()
+    _hdr("Administración", "Gestión de usuarios y analítica de uso")
+
+    from supabase_client import (
+        get_usuarios_admin, get_sesiones_admin,
+        upsert_usuario_dashboard, _patch,
+    )
+
+    _adm_tab1, _adm_tab2 = st.tabs(["👥  Usuarios", "📊  Analítica de Uso"])
+
+    # ── TAB 1: Gestión de usuarios ────────────────────────────────────────────
+    with _adm_tab1:
+        st.markdown("#### Usuarios autorizados")
+
+        # Formulario agregar / editar usuario
+        with st.expander("➕ Agregar o actualizar usuario", expanded=False):
+            _ua_c1, _ua_c2, _ua_c3, _ua_c4 = st.columns([3, 2, 2, 1])
+            with _ua_c1:
+                _ua_email = st.text_input("Correo", placeholder="nombre@occimiano.cl",
+                                          key="ua_email")
+            with _ua_c2:
+                _ua_nombre = st.text_input("Nombre", key="ua_nombre")
+            with _ua_c3:
+                _ua_rol = st.selectbox("Rol", ["usuario", "admin"], key="ua_rol")
+            with _ua_c4:
+                _ua_activo = st.checkbox("Activo", value=True, key="ua_activo")
+            if st.button("💾 Guardar usuario", key="ua_save"):
+                if not _ua_email.strip():
+                    st.error("Ingresa un correo.")
+                else:
+                    ok = upsert_usuario_dashboard(
+                        _ua_email, _ua_nombre, _ua_rol, _ua_activo
+                    )
+                    if ok:
+                        st.success(f"✅ Usuario **{_ua_email}** guardado con rol **{_ua_rol}**.")
+                        get_usuarios_admin.clear()
+                        st.rerun()
+                    else:
+                        st.error("Error al guardar. Verifica los datos.")
+
+        # Tabla de usuarios
+        _df_usr = get_usuarios_admin()
+        if _df_usr.empty:
+            st.info("No hay usuarios en la tabla usuarios_dashboard.")
+        else:
+            _df_usr_show = _df_usr.copy()
+            for _dc in ["creado_en", "ultimo_acceso"]:
+                if _dc in _df_usr_show.columns:
+                    _df_usr_show[_dc] = pd.to_datetime(
+                        _df_usr_show[_dc], errors="coerce", utc=True
+                    ).dt.tz_convert("America/Santiago").dt.strftime("%d/%m/%Y %H:%M").fillna("—")
+            _df_usr_show = _df_usr_show.rename(columns={
+                "email": "Correo", "nombre": "Nombre", "rol": "Rol",
+                "activo": "Activo", "creado_en": "Creado", "ultimo_acceso": "Último acceso",
+            })
+            st.dataframe(
+                _df_usr_show,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Correo":        st.column_config.TextColumn(width=250),
+                    "Nombre":        st.column_config.TextColumn(width=180),
+                    "Rol":           st.column_config.TextColumn(width=90),
+                    "Activo":        st.column_config.CheckboxColumn(width=70),
+                    "Creado":        st.column_config.TextColumn(width=130),
+                    "Último acceso": st.column_config.TextColumn(width=130),
+                },
+            )
+            st.caption(f"{len(_df_usr_show)} usuarios registrados")
+
+    # ── TAB 2: Analítica de uso ───────────────────────────────────────────────
+    with _adm_tab2:
+        st.markdown("#### Sesiones del dashboard")
+        _df_ses = get_sesiones_admin()
+        if _df_ses.empty:
+            st.info("No hay sesiones registradas todavía.")
+        else:
+            # Calcular duración de sesión
+            for _dc in ["fecha_inicio", "ultima_actividad"]:
+                if _dc in _df_ses.columns:
+                    _df_ses[_dc] = pd.to_datetime(
+                        _df_ses[_dc], errors="coerce", utc=True
+                    )
+            if "fecha_inicio" in _df_ses.columns and "ultima_actividad" in _df_ses.columns:
+                _df_ses["duracion_min"] = (
+                    (_df_ses["ultima_actividad"] - _df_ses["fecha_inicio"])
+                    .dt.total_seconds() / 60
+                ).round(1).clip(lower=0)
+            else:
+                _df_ses["duracion_min"] = None
+
+            # Resumen por usuario
+            st.markdown("##### Resumen por usuario")
+            _df_res = (
+                _df_ses.groupby("email")
+                .agg(
+                    sesiones      = ("id", "count"),
+                    ultima_visita = ("fecha_inicio", "max"),
+                    min_totales   = ("duracion_min", "sum"),
+                )
+                .reset_index()
+                .sort_values("ultima_visita", ascending=False)
+            )
+            _df_res["ultima_visita"] = (
+                _df_res["ultima_visita"]
+                .dt.tz_convert("America/Santiago")
+                .dt.strftime("%d/%m/%Y %H:%M")
+            )
+            _df_res["min_totales"] = _df_res["min_totales"].round(0).astype(int)
+            _df_res = _df_res.rename(columns={
+                "email": "Correo", "sesiones": "Sesiones",
+                "ultima_visita": "Última visita", "min_totales": "Min. totales",
+            })
+            st.dataframe(_df_res, use_container_width=True, hide_index=True)
+
+            st.divider()
+            st.markdown("##### Detalle de sesiones")
+            _df_ses_show = _df_ses.copy()
+            _df_ses_show["fecha_inicio"] = (
+                _df_ses_show["fecha_inicio"]
+                .dt.tz_convert("America/Santiago")
+                .dt.strftime("%d/%m/%Y %H:%M")
+            )
+            _df_ses_show["ultima_actividad"] = (
+                _df_ses_show["ultima_actividad"]
+                .dt.tz_convert("America/Santiago")
+                .dt.strftime("%d/%m/%Y %H:%M")
+            )
+            _df_ses_show = _df_ses_show[
+                [c for c in ["email", "fecha_inicio", "ultima_actividad",
+                              "duracion_min", "pagina_actual"] if c in _df_ses_show.columns]
+            ].rename(columns={
+                "email": "Correo", "fecha_inicio": "Inicio",
+                "ultima_actividad": "Última actividad",
+                "duracion_min": "Duración (min)", "pagina_actual": "Última página",
+            })
+            st.dataframe(
+                _df_ses_show,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Correo":           st.column_config.TextColumn(width=230),
+                    "Inicio":           st.column_config.TextColumn(width=130),
+                    "Última actividad": st.column_config.TextColumn(width=130),
+                    "Duración (min)":   st.column_config.NumberColumn(width=110, format="%.1f min"),
+                    "Última página":    st.column_config.TextColumn(width=230),
+                },
+            )
+            st.caption(f"{len(_df_ses_show)} sesiones registradas en total")
+
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()

@@ -48,8 +48,10 @@ def _get_creds() -> tuple[str, str]:
         key = os.getenv("SUPABASE_KEY", "")
     return url, key
 
+import uuid as _uuid_mod
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Helper base
+# Helpers base (GET / POST / PATCH)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _query(tabla: str, params: str = "", limit: int = 10_000) -> list:
@@ -76,6 +78,122 @@ def _query(tabla: str, params: str = "", limit: int = 10_000) -> list:
             break
         offset += page
     return results[:limit]
+
+
+def _post(tabla: str, data: dict) -> bool:
+    """INSERT / upsert un registro."""
+    supabase_url, supabase_key = _get_creds()
+    r = requests.post(
+        f"{supabase_url}/rest/v1/{tabla}",
+        headers={
+            "apikey":        supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type":  "application/json",
+            "Prefer":        "resolution=merge-duplicates,return=minimal",
+        },
+        json=data,
+        timeout=10,
+    )
+    return r.status_code in (200, 201)
+
+
+def _patch(tabla: str, filtro: str, data: dict) -> bool:
+    """PATCH (UPDATE parcial) con filtro tipo 'col=eq.valor'."""
+    supabase_url, supabase_key = _get_creds()
+    r = requests.patch(
+        f"{supabase_url}/rest/v1/{tabla}?{filtro}",
+        headers={
+            "apikey":        supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type":  "application/json",
+            "Prefer":        "return=minimal",
+        },
+        json=data,
+        timeout=10,
+    )
+    return r.status_code in (200, 204)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# AUTH — Whitelist de usuarios y sesiones
+# ═════════════════════════════════════════════════════════════════════════════
+
+def get_usuario_dashboard(email: str) -> "dict | None":
+    """Retorna el usuario si está en la whitelist y activo, None si no."""
+    rows = _query(
+        "usuarios_dashboard",
+        f"select=email,nombre,rol,activo&email=eq.{email.lower()}",
+        limit=1,
+    )
+    if rows and rows[0].get("activo"):
+        return rows[0]
+    return None
+
+
+def log_session_start(email: str, session_id: str) -> None:
+    """Registra inicio de sesión y actualiza ultimo_acceso del usuario."""
+    try:
+        _post("sesiones_dashboard", {
+            "id":            session_id,
+            "email":         email.lower(),
+            "pagina_actual": "Inicio",
+        })
+        _patch(
+            "usuarios_dashboard",
+            f"email=eq.{email.lower()}",
+            {"ultimo_acceso": datetime.now(timezone.utc).isoformat()},
+        )
+    except Exception:
+        pass
+
+
+def update_session_activity(session_id: str, pagina: str) -> None:
+    """Actualiza última actividad (llamar con debounce desde app.py)."""
+    try:
+        _patch(
+            "sesiones_dashboard",
+            f"id=eq.{session_id}",
+            {
+                "ultima_actividad": datetime.now(timezone.utc).isoformat(),
+                "pagina_actual":    pagina,
+            },
+        )
+    except Exception:
+        pass
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_sesiones_admin() -> pd.DataFrame:
+    """Sesiones para el panel admin (TTL 30 s = casi tiempo real)."""
+    rows = _query(
+        "sesiones_dashboard",
+        "select=*&order=fecha_inicio.desc",
+        limit=2000,
+    )
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def get_usuarios_admin() -> pd.DataFrame:
+    """Usuarios para el panel admin."""
+    rows = _query(
+        "usuarios_dashboard",
+        "select=*&order=creado_en.desc",
+        limit=500,
+    )
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def upsert_usuario_dashboard(
+    email: str, nombre: str, rol: str, activo: bool
+) -> bool:
+    """Crea o actualiza un usuario en la whitelist."""
+    return _post("usuarios_dashboard", {
+        "email":  email.strip().lower(),
+        "nombre": nombre.strip(),
+        "rol":    rol,
+        "activo": activo,
+    })
 
 
 # ═════════════════════════════════════════════════════════════════════════════

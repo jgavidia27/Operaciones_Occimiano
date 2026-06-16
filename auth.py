@@ -1,12 +1,14 @@
 """
-auth.py — Autenticación con sesión persistente (sin dependencias externas).
+auth.py — Autenticación con whitelist Supabase + roles admin/usuario.
 
-Cómo funciona:
-- Al hacer login se genera un token aleatorio y se guarda en la URL (?s=TOKEN)
-  y en un dict del servidor (cache_resource).
-- Al refrescar la página la URL mantiene el token → sesión restaurada.
-- Al presionar Salir el token se elimina del servidor → sesión cerrada.
-- Expira automáticamente tras SESSION_HOURS horas.
+Flujo de login:
+1. Usuario ingresa email + contraseña maestra
+2. Se valida la contraseña (DASHBOARD_PASSWORD en secrets)
+3. Se consulta tabla usuarios_dashboard en Supabase:
+   - El email debe existir Y tener activo=true
+   - Si no está en la tabla → acceso denegado (aunque conozca la clave)
+4. Se crea token de sesión en URL + se almacena rol y session_id
+5. La sesión se registra en sesiones_dashboard para analítica
 
 Requiere en Streamlit Cloud Secrets:
     DASHBOARD_PASSWORD = "tu_clave"
@@ -14,22 +16,22 @@ Requiere en Streamlit Cloud Secrets:
 import os
 import hashlib
 import time
+import uuid
 import streamlit as st
 
-DOMAIN        = "@occimiano.cl"
 SESSION_HOURS = 8
-_PARAM        = "s"          # nombre del query param en la URL
+_PARAM        = "s"          # query param en la URL
 
 
-# ── Store de sesiones del servidor ───────────────────────────────────────────
+# ── Store de sesiones del servidor ────────────────────────────────────────────
 
 @st.cache_resource
 def _sessions() -> dict:
-    """Dict compartido en memoria: {token: {email, expires}}."""
+    """Dict en memoria: {token: {email, expires, rol, nombre, session_id}}."""
     return {}
 
 
-# ── Helpers internos ─────────────────────────────────────────────────────────
+# ── Helpers internos ──────────────────────────────────────────────────────────
 
 def _gen_token() -> str:
     return hashlib.sha256(os.urandom(32)).hexdigest()[:40]
@@ -66,32 +68,66 @@ def is_authenticated() -> bool:
         _sessions().pop(token, None)
         return False
 
-    # Restaurar sesión desde token
-    st.session_state["_auth_ok"]    = True
-    st.session_state["_auth_email"] = session["email"]
-    st.session_state["_auth_token"] = token
+    # Restaurar sesión completa desde token
+    st.session_state["_auth_ok"]     = True
+    st.session_state["_auth_email"]  = session["email"]
+    st.session_state["_auth_token"]  = token
+    st.session_state["_auth_rol"]    = session.get("rol", "usuario")
+    st.session_state["_auth_nombre"] = session.get("nombre", "")
+    if "_session_id" not in st.session_state:
+        st.session_state["_session_id"] = session.get("session_id", "")
     return True
 
 
 def try_login(email: str, password: str) -> bool:
-    """Valida credenciales, crea token y lo pone en la URL."""
+    """Valida credenciales + whitelist Supabase y crea token de sesión."""
     email = email.strip().lower()
-    if not email.endswith(DOMAIN):
-        return False
+
+    # 1. Validar contraseña maestra
     master = _get_password()
-    if not master:
-        return False
-    if password.strip() != master.strip():
+    if not master or password.strip() != master.strip():
         return False
 
-    token   = _gen_token()
-    expires = time.time() + SESSION_HOURS * 3600
-    _sessions()[token] = {"email": email, "expires": expires}
+    # 2. Validar email contra whitelist Supabase
+    try:
+        from supabase_client import get_usuario_dashboard, log_session_start
+        usuario = get_usuario_dashboard(email)
+    except Exception:
+        usuario = None
 
-    st.session_state["_auth_ok"]    = True
-    st.session_state["_auth_email"] = email
-    st.session_state["_auth_token"] = token
-    st.query_params[_PARAM]         = token
+    if usuario is None:
+        # Email no registrado o inactivo → acceso denegado
+        return False
+
+    # 3. Crear token y sesión
+    token      = _gen_token()
+    session_id = str(uuid.uuid4())
+    expires    = time.time() + SESSION_HOURS * 3600
+    rol        = usuario.get("rol", "usuario")
+    nombre     = usuario.get("nombre", "")
+
+    _sessions()[token] = {
+        "email":      email,
+        "expires":    expires,
+        "rol":        rol,
+        "nombre":     nombre,
+        "session_id": session_id,
+    }
+
+    st.session_state["_auth_ok"]     = True
+    st.session_state["_auth_email"]  = email
+    st.session_state["_auth_token"]  = token
+    st.session_state["_auth_rol"]    = rol
+    st.session_state["_auth_nombre"] = nombre
+    st.session_state["_session_id"]  = session_id
+    st.query_params[_PARAM]          = token
+
+    # 4. Registrar sesión en Supabase (no-blocking)
+    try:
+        log_session_start(email, session_id)
+    except Exception:
+        pass
+
     return True
 
 
@@ -101,7 +137,8 @@ def logout() -> None:
              or st.query_params.get(_PARAM, ""))
     if token:
         _sessions().pop(token, None)
-    for k in ("_auth_ok", "_auth_email", "_login_failed", "_auth_token"):
+    for k in ("_auth_ok", "_auth_email", "_login_failed", "_auth_token",
+              "_auth_rol", "_auth_nombre", "_session_id"):
         st.session_state.pop(k, None)
     try:
         del st.query_params[_PARAM]
