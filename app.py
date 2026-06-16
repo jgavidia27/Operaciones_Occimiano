@@ -695,21 +695,15 @@ components.html(f"""<script>
     var old = p.document.getElementById('occ-user-badge'); if(old) old.remove();
     var d = p.document.createElement('div'); d.id='occ-user-badge';
     d.style.cssText='position:fixed;top:7px;right:0.9rem;z-index:2147483640;'
-        +'display:flex;align-items:center;gap:8px;'
+        +'display:flex;align-items:center;'
         +'background:rgba(13,20,39,0.90);border:1px solid rgba(255,255,255,0.15);'
-        +'border-radius:20px;padding:4px 6px 4px 12px;'
+        +'border-radius:20px;padding:4px 14px;'
         +'font-family:system-ui,sans-serif;font-size:0.75rem;'
         +'color:rgba(255,255,255,0.85);white-space:nowrap;'
         +'box-shadow:0 2px 8px rgba(0,0,0,0.35);';
     var sp = p.document.createElement('span');
     sp.textContent = '👤 {_auth_email_badge}';
-    var a = p.document.createElement('a');
-    a.textContent='Salir'; a.href='?_lo=1';
-    a.style.cssText='background:rgba(255,255,255,0.13);'
-        +'border:1px solid rgba(255,255,255,0.25);border-radius:12px;'
-        +'padding:2px 10px;text-decoration:none;color:#fff;'
-        +'font-size:0.72rem;font-weight:500;cursor:pointer;';
-    d.appendChild(sp); d.appendChild(a);
+    d.appendChild(sp);
     p.document.body.appendChild(d);
 }})();
 </script>""", height=0)
