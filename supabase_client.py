@@ -468,7 +468,7 @@ def load_ots_en_vivo_supabase() -> list:
         "select=id_ot,estado,estado_tarea,tipo_tarea,nombre_tarea,"
         "responsable,codigo_activo,nombre_activo,ubicacion,cliente,estacion,codigo_eds,"
         "prioridad,prioridad_calc,fecha_creacion,fecha_inicio,fecha_programada,"
-        "duracion_real_seg,duracion_estim_seg,tiene_numeral,tiene_recursos"
+        "fecha_finalizacion,duracion_estim_seg,tiene_numeral,tiene_recursos"
         "&estado=in.(En Progreso,Por Validar,Por Iniciar)"
         "&fecha_creacion=gte.2025-12-20",
         limit=500,

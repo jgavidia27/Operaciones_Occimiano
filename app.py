@@ -3279,9 +3279,61 @@ elif _page == _NAV_PAGES[4]:
             if "estado_tarea" in _df_vivo.columns:
                 _df_vivo["estado_tarea"] = _df_vivo["estado_tarea"].replace(_TAREA_MAP_VIVO)
 
-            _df_vivo["t_real"]      = _df_vivo["duracion_real_seg"].apply(_vivo_seg_fmt)
-            _df_vivo["t_est"]       = _df_vivo["duracion_estim_seg"].apply(_vivo_seg_fmt)
-            _df_vivo["avance_pct"]  = _df_vivo.apply(_vivo_avance, axis=1)
+            # T.Prog = duración planificada de la tarea (lo que Fracttal llama "duración")
+            # T.Real de Fracttal = mismo valor que T.Prog (no hay tracking real por API)
+            # → se elimina T.Real y se agrega T.Transcurrido calculado desde fecha_inicio
+            _df_vivo["t_prog"]      = _df_vivo["duracion_estim_seg"].apply(_vivo_seg_fmt)
+
+            def _vivo_transcurrido(row):
+                """Tiempo transcurrido desde inicio hasta fin (o ahora si sigue abierta)."""
+                try:
+                    t_ini = pd.Timestamp(str(row.get("fecha_inicio") or ""))
+                    if pd.isna(t_ini):
+                        return "—"
+                    t_fin_raw = row.get("fecha_finalizacion")
+                    if t_fin_raw and str(t_fin_raw).strip() not in ("", "None", "null"):
+                        t_fin = pd.Timestamp(str(t_fin_raw))
+                    else:
+                        t_fin = pd.Timestamp.utcnow()
+                    if t_ini.tzinfo:
+                        t_ini = t_ini.tz_localize(None)
+                    if t_fin.tzinfo:
+                        t_fin = t_fin.tz_localize(None)
+                    secs = int((t_fin - t_ini).total_seconds())
+                    if secs < 0:
+                        return "—"
+                    h, rem = divmod(secs, 3600)
+                    m = rem // 60
+                    return f"{h}h {m:02d}m" if h else f"{m}m"
+                except Exception:
+                    return "—"
+
+            _df_vivo["t_transcurrido"] = _df_vivo.apply(_vivo_transcurrido, axis=1)
+
+            def _vivo_avance_prog(row):
+                """Avance = t_transcurrido / t_programado × 100."""
+                try:
+                    e = float(row.get("duracion_estim_seg") or 0)
+                    if e <= 0:
+                        return None
+                    t_ini = pd.Timestamp(str(row.get("fecha_inicio") or ""))
+                    if pd.isna(t_ini):
+                        return None
+                    t_fin_raw = row.get("fecha_finalizacion")
+                    if t_fin_raw and str(t_fin_raw).strip() not in ("", "None", "null"):
+                        t_fin = pd.Timestamp(str(t_fin_raw))
+                    else:
+                        t_fin = pd.Timestamp.utcnow()
+                    if t_ini.tzinfo:
+                        t_ini = t_ini.tz_localize(None)
+                    if t_fin.tzinfo:
+                        t_fin = t_fin.tz_localize(None)
+                    r = max((t_fin - t_ini).total_seconds(), 0)
+                    return min(round(r / e * 100, 1), 999.0)
+                except Exception:
+                    return None
+
+            _df_vivo["avance_pct"]  = _df_vivo.apply(_vivo_avance_prog, axis=1)
             _df_vivo["inicio_fmt"]  = _df_vivo["fecha_inicio"].apply(_vivo_fmt_dt)
             _df_vivo["creacion_fmt"]= _df_vivo["fecha_creacion"].apply(_vivo_fmt_dt)
             _df_vivo["ubi_limpia"]  = _df_vivo["ubicacion"].apply(_vivo_limpiar_ubi)
@@ -3336,14 +3388,14 @@ elif _page == _NAV_PAGES[4]:
                 )
             else:
                 _ahora_cols = ["id_ot", "responsable", "tipo_tarea", "cliente",
-                               "ubi_limpia", "inicio_fmt", "t_real", "t_est", "avance_pct"]
+                               "ubi_limpia", "inicio_fmt", "t_transcurrido", "t_prog", "avance_pct"]
                 _df_ahora_show = _df_ahora[
                     [c for c in _ahora_cols if c in _df_ahora.columns]
                 ].rename(columns={
                     "id_ot": "OT", "responsable": "Técnico", "tipo_tarea": "Tipo",
                     "cliente": "Cliente", "ubi_limpia": "Ubicación",
-                    "inicio_fmt": "Inicio", "t_real": "T. Real",
-                    "t_est": "T. Est.", "avance_pct": "Avance %",
+                    "inicio_fmt": "Inicio", "t_transcurrido": "T. Transcurrido",
+                    "t_prog": "T. Prog.", "avance_pct": "Avance %",
                 })
                 st.dataframe(
                     _df_ahora_show,
@@ -3422,7 +3474,7 @@ elif _page == _NAV_PAGES[4]:
                 "id_ot", "estado", "estado_tarea_lbl", "tipo_tarea_grp",
             ] + (["sub_tipo_prev"] if _mostrar_subtipo else []) + [
                 "responsable", "cliente", "nombre_activo", "ubi_limpia",
-                "inicio_fmt", "creacion_fmt", "t_real", "t_est", "avance_pct",
+                "inicio_fmt", "creacion_fmt", "t_transcurrido", "t_prog", "avance_pct",
             ]
             _df_vivo_show = _df_vf[[c for c in _vivo_cols_disp if c in _df_vf.columns]].copy()
             _df_vivo_show = _df_vivo_show.rename(columns={
@@ -3437,8 +3489,8 @@ elif _page == _NAV_PAGES[4]:
                 "ubi_limpia":       "Ubicación",
                 "inicio_fmt":       "Inicio",
                 "creacion_fmt":     "Creación",
-                "t_real":           "T. Real",
-                "t_est":            "T. Est.",
+                "t_transcurrido":   "T. Transcurrido",
+                "t_prog":           "T. Prog.",
                 "avance_pct":       "Avance %",
             })
 
@@ -3458,8 +3510,8 @@ elif _page == _NAV_PAGES[4]:
                     "Ubicación":    st.column_config.TextColumn(width=200),
                     "Inicio":       st.column_config.TextColumn(width=90),
                     "Creación":     st.column_config.TextColumn(width=90),
-                    "T. Real":      st.column_config.TextColumn(width=75),
-                    "T. Est.":      st.column_config.TextColumn(width=75),
+                    "T. Transcurrido": st.column_config.TextColumn(width=110),
+                    "T. Prog.":     st.column_config.TextColumn(width=75),
                     "Avance %":     st.column_config.ProgressColumn(
                         min_value=0, max_value=100, format="%.0f%%", width=100
                     ),
