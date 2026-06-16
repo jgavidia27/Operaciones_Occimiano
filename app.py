@@ -480,74 +480,108 @@ def _get_logo_path() -> str:
 
 
 def _show_login_page() -> None:
-    """Pantalla de login: card blanco centrado sobre fondo oscuro."""
+    """Pantalla de login: imagen hero a la izquierda + card de login a la derecha."""
+    import base64 as _b64
 
-    st.markdown("""
+    # ── Cargar imagen hero como base64 ─────────────────────────────────────
+    _hero_data = ""
+    for _hname in ("imagen_inicio.jpg", "imagen_inicio.png"):
+        _hpath = os.path.join(_APP_DIR, _hname)
+        if os.path.exists(_hpath):
+            _mime = "jpeg" if _hname.endswith(".jpg") else "png"
+            with open(_hpath, "rb") as _hf:
+                _hero_data = f"data:image/{_mime};base64,{_b64.b64encode(_hf.read()).decode()}"
+            break
+
+    # Fondo: imagen real + gradiente oscuro hacia la derecha
+    if _hero_data:
+        _bg = (
+            "background-image: "
+            "linear-gradient(to right, transparent 0%, transparent 28%, "
+            "rgba(13,20,39,0.4) 44%, rgba(13,20,39,0.92) 61%, #0d1427 75%), "
+            f'url("{_hero_data}"); '
+            "background-size: cover; background-position: center; "
+            "background-repeat: no-repeat;"
+        )
+    else:
+        _bg = "background: #0d1427;"
+
+    st.markdown(f"""
     <style>
-    /* Ocultar chrome de Streamlit */
+    /* ── Ocultar chrome de Streamlit ── */
     [data-testid="stSidebar"], [data-testid="stHeader"],
     [data-testid="stToolbar"], [data-testid="stMainMenu"],
-    footer, .stDeployButton { display: none !important; }
+    footer, .stDeployButton {{ display: none !important; }}
 
-    /* Fondo oscuro navy */
-    .stApp, [data-testid="stAppViewContainer"] {
-        background: #0d1427 !important;
-    }
+    /* ── Imagen hero pantalla completa ── */
+    .stApp {{
+        {_bg}
+        background-color: #0d1427 !important;
+    }}
+    [data-testid="stAppViewContainer"] {{
+        background: transparent !important;
+    }}
 
-    /* Centrar el contenido principal */
-    [data-testid="stMain"] > div {
-        padding: 6vh 1rem 4vh !important;
-    }
+    /* ── Centrado vertical del form ── */
+    [data-testid="stMain"] > div {{
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }}
+    .block-container {{
+        padding-top: clamp(3rem, calc(50vh - 270px), 14rem) !important;
+        padding-bottom: 3rem !important;
+        max-width: 100% !important;
+    }}
 
     /* ── Card blanco ── */
-    [data-testid="stForm"] {
+    [data-testid="stForm"] {{
         background: #ffffff !important;
         border-radius: 18px !important;
         border: none !important;
         padding: 2.75rem 2.5rem 2.25rem !important;
-        box-shadow: 0 24px 60px rgba(0,0,0,0.45) !important;
+        box-shadow: 0 24px 80px rgba(0,0,0,0.65) !important;
         max-width: 420px !important;
         margin: 0 auto !important;
-    }
+    }}
 
-    /* Logo centrado */
-    [data-testid="stForm"] [data-testid="stImage"] {
+    /* ── Logo centrado dentro del card ── */
+    [data-testid="stForm"] [data-testid="stImage"] {{
         display: flex !important;
         justify-content: center !important;
         margin-bottom: 0.25rem !important;
-    }
-    [data-testid="stForm"] [data-testid="stImage"] img {
+    }}
+    [data-testid="stForm"] [data-testid="stImage"] img {{
         max-height: 56px !important;
         width: auto !important;
         object-fit: contain !important;
-    }
+    }}
 
-    /* Labels */
-    [data-testid="stForm"] label {
+    /* ── Labels ── */
+    [data-testid="stForm"] label {{
         color: #374151 !important;
         font-size: 0.8rem !important;
         font-weight: 600 !important;
         letter-spacing: 0.4px !important;
         text-transform: uppercase !important;
-    }
+    }}
 
-    /* Inputs */
-    [data-testid="stForm"] input {
+    /* ── Inputs ── */
+    [data-testid="stForm"] input {{
         background: #f9fafb !important;
         border: 1.5px solid #e5e7eb !important;
         color: #111827 !important;
         border-radius: 8px !important;
         font-size: 0.95rem !important;
-    }
-    [data-testid="stForm"] input:focus {
+    }}
+    [data-testid="stForm"] input:focus {{
         border-color: #0d1427 !important;
         box-shadow: 0 0 0 3px rgba(13,26,39,0.1) !important;
-    }
-    [data-testid="stForm"] input::placeholder { color: #9ca3af !important; }
+    }}
+    [data-testid="stForm"] input::placeholder {{ color: #9ca3af !important; }}
 
-    /* Botón submit — navy oscuro */
+    /* ── Botón submit ── */
     [data-testid="stForm"] button[kind="primaryFormSubmit"],
-    [data-testid="stForm"] button[data-testid="baseButton-primaryFormSubmit"] {
+    [data-testid="stForm"] button[data-testid="baseButton-primaryFormSubmit"] {{
         background: #0d1427 !important;
         border: none !important;
         color: #fff !important;
@@ -557,23 +591,23 @@ def _show_login_page() -> None:
         border-radius: 9px !important;
         letter-spacing: 0.3px !important;
         transition: background 0.2s !important;
-    }
-    [data-testid="stForm"] button[kind="primaryFormSubmit"]:hover {
+    }}
+    [data-testid="stForm"] button[kind="primaryFormSubmit"]:hover {{
         background: #1a3066 !important;
-    }
+    }}
 
-    /* Error dentro del card */
-    [data-testid="stForm"] [data-testid="stAlert"] {
+    /* ── Error dentro del card ── */
+    [data-testid="stForm"] [data-testid="stAlert"] {{
         background: #fef2f2 !important;
         border: 1px solid #fecaca !important;
         border-radius: 8px !important;
         color: #991b1b !important;
-    }
+    }}
     </style>
     """, unsafe_allow_html=True)
 
-    # Columna centrada
-    _, _col, _ = st.columns([0.6, 1, 0.6])
+    # ── Layout: espacio izquierdo (imagen) | form | padding derecho ────────
+    _, _col, _ = st.columns([1.3, 1, 0.15])
     with _col:
         _logo_path = _get_logo_path()
 
