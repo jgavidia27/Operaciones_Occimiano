@@ -631,7 +631,7 @@ def _show_login_page() -> None:
 
 
 st.set_page_config(
-    page_title="Occimiano - Indicadores de Gestión",
+    page_title="Occimiano - Indicadores de Gestión Operacional",
     page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1129,7 +1129,7 @@ with st.sidebar:
                 '</div>',
                 unsafe_allow_html=True,
             )
-        st.caption("Indicadores de Gestión")
+        st.caption("Indicadores de Gestión Operacional")
     st.divider()
 
     _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed", key="_nav_radio")
@@ -8506,7 +8506,7 @@ else:
     _session_str = "—"
 _footer_col1, _footer_col2 = st.columns([5, 5])
 with _footer_col1:
-    st.caption("Occimiano — Indicadores de Gestión v1.2 | Fracttal One API + Supabase")
+    st.caption("Occimiano — Indicadores de Gestión Operacional v1.2 | Fracttal One API + Supabase")
 with _footer_col2:
     st.markdown(
         f'<div style="text-align:right;color:#94a3b8;font-size:0.72rem;line-height:1.6;">'
