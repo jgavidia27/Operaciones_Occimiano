@@ -1210,8 +1210,6 @@ with st.sidebar:
                 st.session_state[_new_fk] = _fv
         st.rerun()
 
-    st.divider()
-
     # ── Sesión activa: usuario y cierre de sesión ─────────────────────────────
     _auth_email = st.session_state.get("_auth_email", "")
     _auth_user  = _auth_email.split("@")[0] if _auth_email else "usuario"
