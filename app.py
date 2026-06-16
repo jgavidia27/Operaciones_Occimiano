@@ -3358,11 +3358,25 @@ elif _page == _NAV_PAGES[4]:
 
             st.divider()
 
+            # ── Agrupar tipo_tarea para el filtro ────────────────────────────────
+            # Todas las variantes PREVENTIVA* → "PREVENTIVA" en el filtro
+            # SOLICITUD COMERCIAL se excluye del filtro
+            _TIPO_EXCLUIR_VIVO = {"SOLICITUD COMERCIAL"}
+            _df_vivo["tipo_tarea_grp"] = _df_vivo["tipo_tarea"].apply(
+                lambda x: "PREVENTIVA"
+                if str(x).upper().startswith("PREVENTIVA") else x
+            )
+
             # ── Filtros ───────────────────────────────────────────────────────────
             _fvc1, _fvc2, _fvc3, _fvc4 = st.columns(4)
             with _fvc1:
-                _ev_tipos = ["Todos"] + sorted(_df_vivo["tipo_tarea"].unique().tolist())
-                _ev_sel_tipo = st.selectbox("Tipo OT", _ev_tipos, key="ev_tipo")
+                _ev_tipos_opts = sorted(
+                    t for t in _df_vivo["tipo_tarea_grp"].unique().tolist()
+                    if t not in _TIPO_EXCLUIR_VIVO and t not in ("—",)
+                )
+                _ev_sel_tipo = st.selectbox(
+                    "Tipo OT", ["Todos"] + _ev_tipos_opts, key="ev_tipo"
+                )
             with _fvc2:
                 _ev_tecs = ["Todos"] + sorted(
                     t for t in _df_vivo["responsable"].unique().tolist() if t != "—"
@@ -3379,7 +3393,7 @@ elif _page == _NAV_PAGES[4]:
 
             _df_vf = _df_vivo.copy()
             if _ev_sel_tipo != "Todos":
-                _df_vf = _df_vf[_df_vf["tipo_tarea"] == _ev_sel_tipo]
+                _df_vf = _df_vf[_df_vf["tipo_tarea_grp"] == _ev_sel_tipo]
             if _ev_sel_tec != "Todos":
                 _df_vf = _df_vf[_df_vf["responsable"] == _ev_sel_tec]
             if _ev_sel_cli != "Todos":
@@ -3387,11 +3401,21 @@ elif _page == _NAV_PAGES[4]:
             if _ev_sel_est != "Todos":
                 _df_vf = _df_vf[_df_vf["estado"] == _ev_sel_est]
 
+            # Sub-tipo preventiva: extrae MENSUAL, SEMESTRAL, etc.
+            _df_vf = _df_vf.copy()
+            _df_vf["sub_tipo_prev"] = _df_vf["tipo_tarea"].apply(
+                lambda x: str(x).replace("PREVENTIVA", "").strip().title()
+                if str(x).upper().startswith("PREVENTIVA") else ""
+            )
+
             # ── Tabla principal ───────────────────────────────────────────────────
             st.subheader(f"Órdenes activas — {len(_df_vf):,} OT(s)")
 
+            # Incluir columna Sub-tipo solo cuando se filtra por PREVENTIVA
+            _mostrar_subtipo = (_ev_sel_tipo == "PREVENTIVA")
             _vivo_cols_disp = [
-                "id_ot", "estado", "estado_tarea_lbl", "tipo_tarea",
+                "id_ot", "estado", "estado_tarea_lbl", "tipo_tarea_grp",
+            ] + (["sub_tipo_prev"] if _mostrar_subtipo else []) + [
                 "responsable", "cliente", "nombre_activo", "ubi_limpia",
                 "inicio_fmt", "creacion_fmt", "t_real", "t_est", "avance_pct",
             ]
@@ -3400,7 +3424,8 @@ elif _page == _NAV_PAGES[4]:
                 "id_ot":            "OT",
                 "estado":           "Estado OT",
                 "estado_tarea_lbl": "Estado Tarea",
-                "tipo_tarea":       "Tipo",
+                "tipo_tarea_grp":   "Tipo",
+                "sub_tipo_prev":    "Sub-tipo",
                 "responsable":      "Técnico",
                 "cliente":          "Cliente",
                 "nombre_activo":    "Activo / Equipo",
@@ -3421,6 +3446,7 @@ elif _page == _NAV_PAGES[4]:
                     "Estado OT":    st.column_config.TextColumn(width=110),
                     "Estado Tarea": st.column_config.TextColumn(width=150),
                     "Tipo":         st.column_config.TextColumn(width=120),
+                    "Sub-tipo":     st.column_config.TextColumn(width=110),
                     "Técnico":      st.column_config.TextColumn(width=180),
                     "Cliente":      st.column_config.TextColumn(width=95),
                     "Activo / Equipo": st.column_config.TextColumn(width=240),
