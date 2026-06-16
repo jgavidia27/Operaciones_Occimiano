@@ -607,7 +607,7 @@ def _show_login_page() -> None:
     """, unsafe_allow_html=True)
 
     # ── Layout: espacio izquierdo (imagen) | form | padding derecho ────────
-    _, _col, _ = st.columns([3.2, 1, 0.05])
+    _, _col, _ = st.columns([4.8, 1, 0.05])
     with _col:
         # Espaciador para centrado vertical (~25% desde arriba)
         st.markdown("<div style='height:22vh; min-height:60px;'></div>", unsafe_allow_html=True)
