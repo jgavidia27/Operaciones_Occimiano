@@ -3370,9 +3370,14 @@ elif _page == _NAV_PAGES[4]:
             # ── Filtros ───────────────────────────────────────────────────────────
             _fvc1, _fvc2, _fvc3, _fvc4 = st.columns(4)
             with _fvc1:
-                _ev_tipos_opts = sorted(
+                _TIPO_PRIO = ["CORRECTIVA", "PREVENTIVA"]
+                _ev_tipos_all = sorted(
                     t for t in _df_vivo["tipo_tarea_grp"].unique().tolist()
                     if t not in _TIPO_EXCLUIR_VIVO and t not in ("—",)
+                )
+                _ev_tipos_opts = (
+                    [t for t in _TIPO_PRIO if t in _ev_tipos_all] +
+                    [t for t in _ev_tipos_all if t not in _TIPO_PRIO]
                 )
                 _ev_sel_tipo = st.selectbox(
                     "Tipo OT", ["Todos"] + _ev_tipos_opts, key="ev_tipo"
