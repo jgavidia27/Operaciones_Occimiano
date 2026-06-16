@@ -7960,8 +7960,8 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 _html += (
                     f'<tr style="background:{_tr_bg(4)};">'
                     f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
-                    f'Bono individual est. <span style="color:{_t["muted"]};font-size:0.76rem;">'
-                    f'(máx {_clp_fmt(_pp_ind)})</span></td>'
+                    f'Terreno individual <span style="color:{_t["muted"]};font-size:0.76rem;">'
+                    f'({_clp_fmt(_pp_ind)} × cumpl. personal)</span></td>'
                 )
                 for _tf in _miembros_full:
                     _k = _tec_kpis[_tf]
@@ -8005,11 +8005,12 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     _eq_bc = _nivel_color(int(0.40 * _eq_niv_sla + 0.30 * _eq_niv_mp + 0.30 * _eq_niv_prec))
                     _be_val_cell = f'<span style="color:{_eq_bc};font-weight:700;">{_clp_fmt(_bono_eq_est)}</span>'
 
+                _eq_pond_lbl = f'{_eq_pond:.0f}% eq.' if _eq_pond is not None else '% eq.'
                 _html += (
                     f'<tr style="background:{_tr_bg(5)};">'
                     f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
-                    f'Bono equipo est. <span style="color:{_t["muted"]};font-size:0.76rem;">'
-                    f'(máx {_clp_fmt(_pp_eq)})</span></td>'
+                    f'Terreno colectivo <span style="color:{_t["muted"]};font-size:0.76rem;">'
+                    f'({_clp_fmt(_pp_eq)} × {_eq_pond_lbl})</span></td>'
                 )
                 for _tf in _miembros_full:
                     _html += (
@@ -8022,11 +8023,12 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     f'{_be_val_cell}</td></tr>'
                 )
 
-                # Fila 7: TOTAL (individual + equipo)
+                # Fila 7: TOTAL trimestral (individual + equipo)
+                _totales_trim = {}
                 _html += (
                     f'<tr style="background:{_t.get("info_bg", "#eff6ff")};">'
                     f'<td style="padding:9px 10px;font-weight:800;font-size:0.90rem;'
-                    f'border-top:2px solid {_t["border"]};">TOTAL estimado</td>'
+                    f'border-top:2px solid {_t["border"]};">TOTAL trimestral</td>'
                 )
                 for _tf in _miembros_full:
                     _k = _tec_kpis[_tf]
@@ -8040,6 +8042,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     )
                     _total_t = _bono_ind_t + _bono_eq_est
                     _has_any_t = _k["pct_sla"] is not None or _k["n_pm"] > 0 or _k["pct_prec"] is not None
+                    _totales_trim[_tf] = (_total_t, _has_any_t)
                     if not _has_any_t and not _eq_has_any:
                         _tot_cell = f'<span style="color:{_t["muted"]};font-size:0.78rem;">Sin datos</span>'
                     else:
@@ -8061,6 +8064,29 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     f'<td style="padding:9px 10px;text-align:center;'
                     f'border-top:2px solid {_t["border"]};color:{_t["muted"]};'
                     f'font-style:italic;font-size:0.80rem;">—</td></tr>'
+                )
+
+                # Fila 8: Promedio mensual (trimestral ÷ 3)
+                _html += (
+                    f'<tr style="background:{_t.get("info_bg", "#eff6ff")};">'
+                    f'<td style="padding:8px 10px;font-weight:700;font-size:0.87rem;">'
+                    f'Promedio mensual <span style="color:{_t["muted"]};font-size:0.76rem;">(÷ 3)</span></td>'
+                )
+                for _tf in _miembros_full:
+                    _tot_v, _has_v = _totales_trim[_tf]
+                    if not _has_v and not _eq_has_any:
+                        _mens_cell = f'<span style="color:{_t["muted"]};font-size:0.78rem;">—</span>'
+                    else:
+                        _mens_cell = (
+                            f'<span style="font-weight:700;font-size:0.92rem;">'
+                            f'{_clp_fmt(_tot_v // 3)}</span>'
+                        )
+                    _html += (
+                        f'<td style="padding:8px 10px;text-align:center;">{_mens_cell}</td>'
+                    )
+                _html += (
+                    f'<td style="padding:8px 10px;text-align:center;'
+                    f'color:{_t["muted"]};font-style:italic;font-size:0.80rem;">—</td></tr>'
                 )
 
                 _html += '</tbody></table></div>'
