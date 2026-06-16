@@ -631,7 +631,7 @@ def _show_login_page() -> None:
 
 
 st.set_page_config(
-    page_title="Occimiano - Panel Operacional",
+    page_title="Occimiano - Gestión de Indicadores",
     page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1130,7 +1130,7 @@ with st.sidebar:
                 '</div>',
                 unsafe_allow_html=True,
             )
-        st.caption("Panel Operacional")
+        st.caption("Gestión de Indicadores")
     st.divider()
 
     _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed", key="_nav_radio")
@@ -8710,4 +8710,4 @@ elif _page == _NAV_PAGES[2]:
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
-st.caption("Occimiano — Panel Operacional v1.2 | Fracttal One API + Supabase")
+st.caption("Occimiano — Gestión de Indicadores v1.2 | Fracttal One API + Supabase")
