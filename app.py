@@ -1113,17 +1113,6 @@ section[data-testid="stSidebar"] img { opacity: 0 !important; }
 </style>""", unsafe_allow_html=True)
 
 with st.sidebar:
-    # ── Botón toggle: expande / colapsa el sidebar ────────────────────────────
-    if _sb_open:
-        _c_sp, _c_tog = st.columns([1, 1])
-        with _c_tog:
-            if st.button("◀", key="_sb_toggle", use_container_width=True):
-                st.session_state["_sb_open"] = False
-                st.rerun()
-    else:
-        if st.button("▶", key="_sb_toggle", use_container_width=True):
-            st.session_state["_sb_open"] = True
-            st.rerun()
     # Logo Occimiano (solo en modo expandido)
     if _sb_open:
         _logo_uri = _load_logo_b64()
@@ -1370,6 +1359,24 @@ _CAPTION = (
 )
 
 
+def _hdr(title: str, caption=None) -> None:
+    """Renderiza título de página con botón toggle del sidebar al lado derecho."""
+    _cap = caption if caption is not None else _CAPTION
+    _h_c, _t_c = st.columns([11, 1])
+    with _h_c:
+        st.title(title)
+        if _cap:
+            st.caption(_cap)
+    with _t_c:
+        _open = st.session_state.get("_sb_open", False)
+        st.markdown("<div style='padding-top:20px;'>", unsafe_allow_html=True)
+        if st.button("◀" if _open else "▶", key="_sb_toggle_main",
+                     help="Colapsar/expandir menú lateral"):
+            st.session_state["_sb_open"] = not _open
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
 # ── Helper: carga OTs con spinner nativo ────────────────────────────────────
 def _load_wo_con_progreso(label: str = "órdenes de trabajo") -> list:
     """
@@ -1400,8 +1407,7 @@ def _load_wo_con_progreso(label: str = "órdenes de trabajo") -> list:
 # PÁGINA 1: HISTORIAL FRACTTAL
 # ─────────────────────────────────────────────────────────────────────────────
 if _page == _NAV_PAGES[5]:
-    st.title(_PAGE_TITLE[_NAV_PAGES[5]])
-    st.caption(_CAPTION)
+    _hdr(_PAGE_TITLE[_NAV_PAGES[5]])
     st.divider()
     # ── Cargar OTs: Supabase (rapido) o Fracttal API (lento) ─────────────────
     if _USE_SUPABASE:
@@ -1656,8 +1662,7 @@ if _page == _NAV_PAGES[5]:
 # PÁGINA 2: CUMPLIMIENTO DE SLA 2026
 # ─────────────────────────────────────────────────────────────────────────────
 elif _page == _NAV_PAGES[1]:
-    st.title(_PAGE_TITLE[_NAV_PAGES[1]])
-    st.caption(_CAPTION)
+    _hdr(_PAGE_TITLE[_NAV_PAGES[1]])
     st.divider()
     if df_llamados.empty:
         st.warning("No se encontraron llamados 2026. Verifica que Google Drive está sincronizado (G:).")
@@ -2947,8 +2952,7 @@ elif _page == _NAV_PAGES[3]:
     }
 
     # ── Título y tabs ────────────────────────────────────────────────────────
-    st.title("Estaciones de Servicio")
-    st.caption(_CAPTION)
+    _hdr("Estaciones de Servicio")
     st.divider()
 
     _tabs_eds = st.tabs([
@@ -3431,8 +3435,7 @@ elif _page == _NAV_PAGES[3]:
 # PÁGINA 4: UTILIZACIÓN DEL TIEMPO
 # ─────────────────────────────────────────────────────────────────────────────
 elif _page == _NAV_PAGES[4]:
-    st.title(_PAGE_TITLE[_NAV_PAGES[4]])
-    st.caption(_CAPTION)
+    _hdr(_PAGE_TITLE[_NAV_PAGES[4]])
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
     _util_sub_tab = st.radio(
         "",
@@ -4072,8 +4075,7 @@ elif _page == _NAV_PAGES[4]:
 # PÁGINA 5: DESEMPEÑO TERRENO
 # ─────────────────────────────────────────────────────────────────────────────
 elif _page == _NAV_PAGES[0]:
-    st.title(_PAGE_TITLE[_NAV_PAGES[0]])
-    st.caption(_CAPTION)
+    _hdr(_PAGE_TITLE[_NAV_PAGES[0]])
     st.divider()
 
     # ── Técnicos: Supabase o Excel ────────────────────────────────────────────
@@ -8118,8 +8120,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
 # PÁGINA 5: MANTENCIONES PREVENTIVAS
 # ─────────────────────────────────────────────────────────────────────────────
 elif _page == _NAV_PAGES[2]:
-    st.title(_PAGE_TITLE[_NAV_PAGES[2]])
-    st.caption("Órdenes de mantenimiento preventivo — Fracttal One · 2026")
+    _hdr(_PAGE_TITLE[_NAV_PAGES[2]], "Órdenes de mantenimiento preventivo — Fracttal One · 2026")
     st.divider()
 
     # ── Carga ─────────────────────────────────────────────────────────────
