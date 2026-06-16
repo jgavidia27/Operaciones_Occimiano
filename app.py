@@ -48,6 +48,7 @@ from supabase_client import (
     load_all_llamados_supabase,
     load_sla_umbrales_supabase,
     load_cotalker_index_supabase,
+    load_ots_en_vivo_supabase,
 )
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
@@ -885,13 +886,17 @@ st.markdown("""
         transform: translateX(0) !important;
         visibility: visible !important;
         display: flex !important;
-        overflow: hidden !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
         transition: min-width 0.28s ease, max-width 0.28s ease;
     }
     [data-testid="stSidebarCollapseButton"] { display: none !important; }
     [data-testid="stSidebarContent"] {
-        overflow: hidden !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
         width: 100% !important;
+        height: 100% !important;
+        max-height: 100vh !important;
         padding-top: 0.5rem !important;
     }
     [data-testid="stSidebarUserContent"] {
@@ -1029,7 +1034,7 @@ _NAV_PAGES = [
     "✅  Cumplimiento SLA",
     "🛠️  Mantenciones Preventivas",
     "⛽  Estaciones de Servicio",
-    "⌛  Planificación Semanal",
+    "⌛  Utilización del Tiempo",
     "📩  Órdenes por Cliente",
 ]
 
@@ -1181,8 +1186,6 @@ with st.sidebar:
                                    "eds_enrich", "eds_fracttal")):
                 st.session_state.pop(_k, None)
         st.rerun()
-    if _sb_open:
-        st.caption(f"Cache: 30 min · disco  |  {datetime.now().strftime('%H:%M:%S')}")
     # ── Modo oscuro / claro ───────────────────────────────────────────────────
     _toggle_lbl_full = "☀️  Modo claro" if _current_theme == "dark" else "🌙  Modo oscuro"
     _toggle_lbl_icon = "☀️" if _current_theme == "dark" else "🌙"
@@ -1233,6 +1236,8 @@ with st.sidebar:
     if st.button("⎋  Cerrar sesión" if _sb_open else "⎋", use_container_width=True, key="logout_btn"):
         logout()
         st.rerun()
+    if _sb_open:
+        st.caption(f"Cache: 30 min · disco  |  {datetime.now().strftime('%H:%M:%S')}")
 
     if _sb_open:
         st.divider()
@@ -1355,7 +1360,7 @@ _PAGE_TITLE = {
     _NAV_PAGES[1]: "Cumplimiento SLA",
     _NAV_PAGES[2]: "Mantenciones Preventivas",
     _NAV_PAGES[3]: "Estaciones de Servicio",
-    _NAV_PAGES[4]: "Planificación Semanal",
+    _NAV_PAGES[4]: "Utilización del Tiempo",
     _NAV_PAGES[5]: "Órdenes por Cliente",
 }
 _n_ll = f"{len(df_llamados):,}" if not df_llamados.empty else "–"
@@ -2176,21 +2181,29 @@ elif _page == _NAV_PAGES[1]:
                        if c in _eds_act.columns]
                 _eds_base = _eds_act[_bc].drop_duplicates("eds_occim")
                 if not _kpis_raw_c.empty:
-                    kpis_ll = _eds_base.merge(_kpis_raw_c.drop(columns=["cliente"],errors="ignore"),
-                                              on="eds_occim", how="left")
+                    # Partir desde los llamados reales (no desde el listado completo de EDS)
+                    # → garantiza que aparecen todos los llamados aunque su código no esté en df_eds
+                    kpis_ll = _kpis_raw_c.merge(
+                        _eds_base.drop(columns=["cliente"], errors="ignore"),
+                        on="eds_occim", how="left")
                 else:
-                    kpis_ll = _eds_base.copy()
+                    kpis_ll = pd.DataFrame()
                 for _col in ["total_llamados","p1","p2","p3","p4","cumple","no_cumple"]:
                     if _col in kpis_ll.columns:
                         kpis_ll[_col] = kpis_ll[_col].fillna(0).astype(int)
                 if "pct_cumplimiento" in kpis_ll.columns:
                     kpis_ll["pct_cumplimiento"] = kpis_ll["pct_cumplimiento"].fillna(0.0)
+                # Solo EDS que han tenido al menos 1 llamado
+                if not kpis_ll.empty and "total_llamados" in kpis_ll.columns:
+                    kpis_ll = kpis_ll[kpis_ll["total_llamados"] > 0]
                 # Unir % promedio de uso SLA (tiempo real / umbral × 100)
-                kpis_ll = kpis_ll.merge(_eds_avg_pct, on="eds_occim", how="left")
+                if not kpis_ll.empty:
+                    kpis_ll = kpis_ll.merge(_eds_avg_pct, on="eds_occim", how="left")
             else:
                 kpis_ll = _kpis_raw_c
                 kpis_ll = kpis_ll.merge(_eds_avg_pct, on="eds_occim", how="left")
             if not kpis_ll.empty:
+                # Nombre para mostrar: nombre comercial → dirección → código
                 kpis_ll["nombre"] = kpis_ll["eds_occim"].astype(str).map(station_name_map)
                 kpis_ll["nombre"] = kpis_ll.apply(
                     lambda r: r["nombre"] if pd.notna(r.get("nombre")) and str(r.get("nombre","")).strip()
@@ -2198,6 +2211,11 @@ elif _page == _NAV_PAGES[1]:
                 if "ultimo_llamado" in kpis_ll.columns:
                     kpis_ll["ultimo_llamado"] = (pd.to_datetime(kpis_ll["ultimo_llamado"],errors="coerce")
                                                  .dt.strftime("%d/%m/%Y"))
+                # Filtro definitivo: solo EDS con al menos 1 llamado real
+                # (doble garantía: el filtro previo pudo no alcanzar si total_llamados llegó como NaN)
+                if "total_llamados" in kpis_ll.columns:
+                    kpis_ll = kpis_ll[kpis_ll["total_llamados"].fillna(0).astype(int) > 0]
+
                 _ll_buscar = st.text_input("🔍 Buscar estación (código, dirección, comuna)",
                                            key="ll_buscar", placeholder="ej: Talagante, 60783, SH_647")
                 if _ll_buscar:
@@ -2210,42 +2228,44 @@ elif _page == _NAV_PAGES[1]:
                         | kpis_ll.get("comuna",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
                     )
                     kpis_ll = kpis_ll[_mask]
-                _dc = [c for c in ["eds_occim","eds_cliente","nombre","cliente","comuna",
-                                   "total_llamados","p1","p2","p3","p4","cumple","no_cumple",
-                                   "pct_cumplimiento","pct_sla_uso","ultimo_llamado","ultimo_tecnico"]
+
+                # Columnas a mostrar: solo las relevantes (sin desglose de prioridad)
+                _dc = [c for c in ["eds_occim", "nombre", "cliente", "comuna",
+                                   "total_llamados", "pct_cumplimiento",
+                                   "ultimo_llamado", "ultimo_tecnico"]
                        if c in kpis_ll.columns]
-                _kpis_disp = kpis_ll[_dc].sort_values("total_llamados", ascending=False).rename(
-                    columns={"eds_occim":"Cód. Occim","eds_cliente":"Cód. Cliente",
-                             "nombre":"Nombre / Dirección","cliente":"Cliente","comuna":"Comuna",
-                             "total_llamados":"Total Llamados","p1":"P1","p2":"P2","p3":"P3","p4":"P4",
-                             "cumple":"Cumple","no_cumple":"No Cumple",
-                             "pct_cumplimiento":"% Cumple","pct_sla_uso":"% Uso SLA",
-                             "ultimo_llamado":"Último Llamado","ultimo_tecnico":"Último Técnico"})
-                _show_df(_kpis_disp, width="stretch", hide_index=True,
-                    column_config={
-                        "Cód. Occim":         st.column_config.TextColumn(width=100),
-                        "Cód. Cliente":       st.column_config.TextColumn(width=110),
-                        "Nombre / Dirección": st.column_config.TextColumn(width=260),
-                        "Total Llamados":     st.column_config.NumberColumn(format="%d"),
-                        "% Cumple":           st.column_config.ProgressColumn(
-                            label="% Cumple", min_value=0, max_value=100, format="%.1f%%"),
-                        "% Uso SLA":          st.column_config.ProgressColumn(
-                            label="% Uso SLA (real/umbral)",
-                            min_value=0, max_value=200, format="%.1f%%",
-                            help="Promedio de tiempo real / umbral SLA × 100. >100% = excedido."),
-                        "P1": st.column_config.NumberColumn(format="%d"),
-                        "P2": st.column_config.NumberColumn(format="%d"),
-                        "P3": st.column_config.NumberColumn(format="%d"),
-                        "P4": st.column_config.NumberColumn(format="%d"),
-                        "Cumple":    st.column_config.NumberColumn(format="%d"),
-                        "No Cumple": st.column_config.NumberColumn(format="%d"),
+                _kpis_disp = (
+                    kpis_ll[_dc]
+                    .sort_values("total_llamados", ascending=False)
+                    .rename(columns={
+                        "eds_occim":        "Cód. Occim",
+                        "nombre":           "Nombre / Dirección",
+                        "cliente":          "Cliente",
+                        "comuna":           "Comuna",
+                        "total_llamados":   "Llamados",
+                        "pct_cumplimiento": "% Cumpl. SLA",
+                        "ultimo_llamado":   "Último Llamado",
+                        "ultimo_tecnico":   "Último Técnico",
                     })
-                st.caption(
-                    "ℹ️ **P1–P4 = 0 con Total > 0**: esos llamados existen en el archivo Excel "
-                    "pero sin prioridad registrada (columna vacía o con un valor no reconocido). "
-                    "Cuentan en 'Total Llamados' pero no en P1/P2/P3/P4. "
-                    "Para corregirlo, el cliente debe completar la columna de prioridad en su Excel."
                 )
+                if not _kpis_disp.empty:
+                    _show_df(_kpis_disp, width="stretch", hide_index=True,
+                        column_config={
+                            "Cód. Occim":         st.column_config.TextColumn(width=100),
+                            "Nombre / Dirección": st.column_config.TextColumn(width=280),
+                            "Cliente":            st.column_config.TextColumn(width=110),
+                            "Comuna":             st.column_config.TextColumn(width=120),
+                            "Llamados":           st.column_config.NumberColumn(
+                                                    format="%d", width=90),
+                            "% Cumpl. SLA":       st.column_config.ProgressColumn(
+                                                    label="% Cumpl. SLA",
+                                                    min_value=0, max_value=100,
+                                                    format="%.1f%%"),
+                            "Último Llamado":     st.column_config.TextColumn(width=110),
+                            "Último Técnico":     st.column_config.TextColumn(width=140),
+                        })
+                else:
+                    st.info("Sin llamados en el período seleccionado.")
 
             st.divider()
             st.markdown('<div class="section-header">⏱ Cumplimiento de SLA por OT</div>', unsafe_allow_html=True)
@@ -2328,21 +2348,21 @@ elif _page == _NAV_PAGES[1]:
                 else:
                     _df_sla_ot["ciudad"] = "—"
 
-                # Nº Cotalker — solo ESMAX/Aramco (los únicos que usan Cotalker)
+                # N° Aviso cliente — Aramco: N° Cotalker / COPEC: N° Aviso del email
                 _cotalker_idx = load_cotalker_index_supabase()
                 if _cotalker_idx and "os_fracttal" in _df_sla_ot.columns:
                     _df_sla_ot["n_cotalker"] = (
                         _df_sla_ot["os_fracttal"]
                         .map(_cotalker_idx)
-                        .apply(lambda v: str(int(v)) if pd.notna(v) else "")
+                        .apply(lambda v: str(v) if pd.notna(v) and str(v) not in ("", "nan") else "")
                     )
                 else:
                     _df_sla_ot["n_cotalker"] = ""
 
-                _sla_ot_base = [c for c in ["os_fracttal","fecha_llamado","fecha_atencion",
+                _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
                                             "wo_cierre_ot","eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_ot"] if c in _df_sla_ot.columns]
-                _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla","n_cotalker"]].copy()
+                _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla"]].copy()
                 if "wo_cierre_ot" in _df_sla_ot_disp.columns:
                     _df_sla_ot_disp["wo_cierre_ot"] = pd.to_datetime(
                         _df_sla_ot_disp["wo_cierre_ot"], errors="coerce"
@@ -2359,11 +2379,13 @@ elif _page == _NAV_PAGES[1]:
                              "prioridad":"Prioridad","ciudad":"Ciudad","zona_ot":"Zona",
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
                              "pct_sla_ot":"% Uso SLA","estado_sla":"Estado SLA",
-                             "n_cotalker":"Nº Cotalker"})
+                             "n_cotalker":"N° Aviso"})
                 st.caption(f"**{len(_df_sla_ot_disp):,}** OTs con fechas de apertura y cierre registradas")
                 _show_df(_df_sla_ot_disp, width="stretch", hide_index=True,
                     column_config={
                         "OS Fracttal":          st.column_config.TextColumn(width=110),
+                        "N° Aviso":             st.column_config.TextColumn(width=105,
+                            help="N° de referencia del cliente: 'No. Aviso' para COPEC / N° Cotalker para ESMAX-Aramco. Vacío = sin referencia registrada."),
                         "Fecha llamado":        st.column_config.TextColumn(width=110),
                         "Fecha atención":       st.column_config.TextColumn(width=110),
                         "Cierre completo OT":   st.column_config.TextColumn(width=140,
@@ -2381,8 +2403,6 @@ elif _page == _NAV_PAGES[1]:
                             label="% Uso SLA", min_value=0, max_value=200, format="%.1f%%",
                             help=">100% = excedió el umbral SLA"),
                         "Estado SLA":        st.column_config.TextColumn(width=110),
-                        "Nº Cotalker":       st.column_config.TextColumn(width=105,
-                            help="N° único en Cotalker (sistema ESMAX/Aramco). Vacio = no aplica."),
                     })
             else:
                 st.info("No hay llamados con fechas de apertura y cierre registradas en el período seleccionado.")
@@ -2892,7 +2912,7 @@ elif _page == _NAV_PAGES[3]:
     df_wo_eds_full = _sc("df_wo_eds_v1", _wo_eds_sig, _build_wo_eds)
 
     # Filtrar a clientes EDS y año actual ────────────────────────────────────
-    _EDS_CLIENTS = {"COPEC", "ESMAX (Aramco)", "SHELL (Enex)"}
+    _EDS_CLIENTS = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
     df_wo_cur = df_wo_eds_full[
         df_wo_eds_full["client"].isin(_EDS_CLIENTS) &
         (df_wo_eds_full["year"] == _cur_year)
@@ -2922,7 +2942,8 @@ elif _page == _NAV_PAGES[3]:
     _CL_COLORS = {
         "COPEC":          {"tab":"🔴","pm":"#CC0000","cm":"#F4A7A9","accent":"#CC0000","label":"COPEC"},
         "SHELL (Enex)":   {"tab":"🟡","pm":"#D4A800","cm":"#FAE57A","accent":"#D4A800","label":"Shell (Enex)"},
-        "ESMAX (Aramco)": {"tab":"🟢","pm":"#16A34A","cm":"#86EFAC","accent":"#16A34A","label":"Aramco (Esmax)"},
+        "Aramco (Esmax)": {"tab":"🟢","pm":"#16A34A","cm":"#86EFAC","accent":"#16A34A","label":"Aramco (Esmax)"},
+        "ESMAX (Aramco)": {"tab":"🟢","pm":"#16A34A","cm":"#86EFAC","accent":"#16A34A","label":"Aramco (Esmax)"},  # alias legacy
     }
 
     # ── Título y tabs ────────────────────────────────────────────────────────
@@ -3400,7 +3421,7 @@ elif _page == _NAV_PAGES[3]:
     with _tabs_eds[0]:
         _render_eds_tab("COPEC", 0)
     with _tabs_eds[1]:
-        _render_eds_tab("ESMAX (Aramco)", 1)
+        _render_eds_tab("Aramco (Esmax)", 1)
     with _tabs_eds[2]:
         _render_eds_tab("SHELL (Enex)", 2)
 
@@ -3412,7 +3433,250 @@ elif _page == _NAV_PAGES[3]:
 elif _page == _NAV_PAGES[4]:
     st.title(_PAGE_TITLE[_NAV_PAGES[4]])
     st.caption(_CAPTION)
+    # ── Sub-tabs ──────────────────────────────────────────────────────────────
+    _util_sub_tab = st.radio(
+        "",
+        ["📊 Utilización del tiempo", "📡 En Vivo"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="util_sub_tab",
+    )
     st.divider()
+
+    if _util_sub_tab == "📡 En Vivo":
+        from datetime import datetime as _dt_vivo
+
+        # ── Título + botón actualizar ─────────────────────────────────────────────
+        _col_tit, _col_btn = st.columns([6, 1])
+        with _col_tit:
+            st.title("📡 En Vivo — Órdenes en Ejecución")
+        with _col_btn:
+            st.write("")
+            if st.button("🔄 Actualizar", key="btn_envivo_refresh", use_container_width=True):
+                load_ots_en_vivo_supabase.clear()
+                st.rerun()
+
+        _vivo_ts = _dt_vivo.now().strftime("%d/%m/%Y %H:%M")
+        st.caption(
+            f"Última actualización: **{_vivo_ts}** · "
+            "caché renovado cada **2 min** automáticamente · "
+            "incluye OTs *En Progreso*, *Por Validar* y *Por Iniciar*"
+        )
+        st.divider()
+
+        # ── Carga de datos ────────────────────────────────────────────────────────
+        with st.spinner("Cargando órdenes en curso…"):
+            _raw_vivo = load_ots_en_vivo_supabase()
+
+        if not _raw_vivo:
+            st.info("✅ No hay órdenes activas en este momento.")
+        else:
+            _df_vivo = pd.DataFrame(_raw_vivo)
+
+            # ── Helpers internos ─────────────────────────────────────────────────
+            def _vivo_seg_fmt(s):
+                try:
+                    s = int(float(s or 0))
+                    if s <= 0:
+                        return "—"
+                    h, rem = divmod(s, 3600)
+                    m = rem // 60
+                    return f"{h}h {m:02d}m" if h else f"{m}m"
+                except Exception:
+                    return "—"
+
+            def _vivo_avance(row):
+                try:
+                    r = float(row.get("duracion_real_seg") or 0)
+                    e = float(row.get("duracion_estim_seg") or 0)
+                    if e <= 0:
+                        return None
+                    return min(round(r / e * 100, 1), 999.0)
+                except Exception:
+                    return None
+
+            def _vivo_fmt_dt(x):
+                if not x or str(x).strip() in ("", "None", "null"):
+                    return "—"
+                try:
+                    t = pd.Timestamp(str(x))
+                    if t.tzinfo:
+                        t = t.tz_convert(None)
+                    return t.strftime("%d/%m %H:%M")
+                except Exception:
+                    return "—"
+
+            def _vivo_limpiar_ubi(s):
+                """'// COPEC/ COPEC LAMPA/' → 'COPEC LAMPA'"""
+                if not s or str(s).strip() in ("", "None"):
+                    return "—"
+                partes = [p.strip() for p in str(s).split("/") if p.strip()]
+                return partes[-1] if partes else str(s)
+
+            # ── Normalizar columnas ───────────────────────────────────────────────
+            for _col in ["estado", "estado_tarea", "tipo_tarea", "responsable", "cliente"]:
+                if _col in _df_vivo.columns:
+                    _df_vivo[_col] = _df_vivo[_col].fillna("—")
+
+            _df_vivo["t_real"]      = _df_vivo["duracion_real_seg"].apply(_vivo_seg_fmt)
+            _df_vivo["t_est"]       = _df_vivo["duracion_estim_seg"].apply(_vivo_seg_fmt)
+            _df_vivo["avance_pct"]  = _df_vivo.apply(_vivo_avance, axis=1)
+            _df_vivo["inicio_fmt"]  = _df_vivo["fecha_inicio"].apply(_vivo_fmt_dt)
+            _df_vivo["creacion_fmt"]= _df_vivo["fecha_creacion"].apply(_vivo_fmt_dt)
+            _df_vivo["ubi_limpia"]  = _df_vivo["ubicacion"].apply(_vivo_limpiar_ubi)
+
+            _ESTADO_T_ICON = {
+                "En Proceso":  "🟢 En Proceso",
+                "En Revisión": "🟡 En Revisión",
+                "No Iniciada": "⚫ No Iniciada",
+                "En Espera":   "🔵 En Espera",
+                "Finalizada":  "✅ Finalizada",
+            }
+            _df_vivo["estado_tarea_lbl"] = _df_vivo["estado_tarea"].map(
+                lambda x: _ESTADO_T_ICON.get(x, f"⚪ {x}")
+            )
+
+            # ── KPI cards ─────────────────────────────────────────────────────────
+            _n_prog = int((_df_vivo["estado"] == "En Progreso").sum())
+            _n_val  = int((_df_vivo["estado"] == "Por Validar").sum())
+            _n_ini  = int((_df_vivo["estado"] == "Por Iniciar").sum())
+            _n_tec  = int(
+                _df_vivo.loc[_df_vivo["estado"] == "En Progreso", "responsable"]
+                .replace("—", pd.NA).dropna().nunique()
+            )
+            _n_cm   = int(_df_vivo["tipo_tarea"].str.contains("CORREC", na=False, case=False).sum())
+            _n_pm   = int(_df_vivo["tipo_tarea"].str.contains("PREVEN", na=False, case=False).sum())
+
+            _kc1, _kc2, _kc3, _kc4, _kc5, _kc6 = st.columns(6)
+            _kc1.metric("🔧 En Progreso", _n_prog)
+            _kc2.metric("🔍 Por Validar", _n_val)
+            _kc3.metric("⏳ Por Iniciar", _n_ini)
+            _kc4.metric("👷 Técnicos activos", _n_tec)
+            _kc5.metric("🚨 Correctivas", _n_cm)
+            _kc6.metric("🛠️ Preventivas", _n_pm)
+
+            st.divider()
+
+            # ── Filtros ───────────────────────────────────────────────────────────
+            _fvc1, _fvc2, _fvc3, _fvc4 = st.columns(4)
+            with _fvc1:
+                _ev_tipos = ["Todos"] + sorted(_df_vivo["tipo_tarea"].unique().tolist())
+                _ev_sel_tipo = st.selectbox("Tipo OT", _ev_tipos, key="ev_tipo")
+            with _fvc2:
+                _ev_tecs = ["Todos"] + sorted(
+                    t for t in _df_vivo["responsable"].unique().tolist() if t != "—"
+                )
+                _ev_sel_tec = st.selectbox("Técnico", _ev_tecs, key="ev_tec")
+            with _fvc3:
+                _ev_clis = ["Todos"] + sorted(
+                    c for c in _df_vivo["cliente"].unique().tolist() if c != "—"
+                )
+                _ev_sel_cli = st.selectbox("Cliente", _ev_clis, key="ev_cli")
+            with _fvc4:
+                _ev_ests = ["Todos"] + sorted(_df_vivo["estado"].unique().tolist())
+                _ev_sel_est = st.selectbox("Estado OT", _ev_ests, key="ev_est")
+
+            _df_vf = _df_vivo.copy()
+            if _ev_sel_tipo != "Todos":
+                _df_vf = _df_vf[_df_vf["tipo_tarea"] == _ev_sel_tipo]
+            if _ev_sel_tec != "Todos":
+                _df_vf = _df_vf[_df_vf["responsable"] == _ev_sel_tec]
+            if _ev_sel_cli != "Todos":
+                _df_vf = _df_vf[_df_vf["cliente"] == _ev_sel_cli]
+            if _ev_sel_est != "Todos":
+                _df_vf = _df_vf[_df_vf["estado"] == _ev_sel_est]
+
+            # ── Tabla principal ───────────────────────────────────────────────────
+            st.subheader(f"Órdenes activas — {len(_df_vf):,} OT(s)")
+
+            _vivo_cols_disp = [
+                "id_ot", "estado", "estado_tarea_lbl", "tipo_tarea",
+                "responsable", "cliente", "nombre_activo", "ubi_limpia",
+                "inicio_fmt", "creacion_fmt", "t_real", "t_est", "avance_pct",
+            ]
+            _df_vivo_show = _df_vf[[c for c in _vivo_cols_disp if c in _df_vf.columns]].copy()
+            _df_vivo_show = _df_vivo_show.rename(columns={
+                "id_ot":            "OT",
+                "estado":           "Estado OT",
+                "estado_tarea_lbl": "Estado Tarea",
+                "tipo_tarea":       "Tipo",
+                "responsable":      "Técnico",
+                "cliente":          "Cliente",
+                "nombre_activo":    "Activo / Equipo",
+                "ubi_limpia":       "Ubicación",
+                "inicio_fmt":       "Inicio",
+                "creacion_fmt":     "Creación",
+                "t_real":           "T. Real",
+                "t_est":            "T. Est.",
+                "avance_pct":       "Avance %",
+            })
+
+            st.dataframe(
+                _df_vivo_show,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "OT":           st.column_config.TextColumn(width=100),
+                    "Estado OT":    st.column_config.TextColumn(width=110),
+                    "Estado Tarea": st.column_config.TextColumn(width=150),
+                    "Tipo":         st.column_config.TextColumn(width=120),
+                    "Técnico":      st.column_config.TextColumn(width=180),
+                    "Cliente":      st.column_config.TextColumn(width=95),
+                    "Activo / Equipo": st.column_config.TextColumn(width=240),
+                    "Ubicación":    st.column_config.TextColumn(width=200),
+                    "Inicio":       st.column_config.TextColumn(width=90),
+                    "Creación":     st.column_config.TextColumn(width=90),
+                    "T. Real":      st.column_config.TextColumn(width=75),
+                    "T. Est.":      st.column_config.TextColumn(width=75),
+                    "Avance %":     st.column_config.ProgressColumn(
+                        min_value=0, max_value=100, format="%.0f%%", width=100
+                    ),
+                },
+            )
+
+            # ── Desglose por técnico ──────────────────────────────────────────────
+            if not _df_vf.empty:
+                st.divider()
+                st.subheader("👷 Carga actual por técnico")
+
+                _vivo_by_tec = (
+                    _df_vf[_df_vf["responsable"] != "—"]
+                    .groupby("responsable")
+                    .agg(
+                        total      =("id_ot",        "count"),
+                        en_proceso =("estado_tarea",  lambda x: (x == "En Proceso").sum()),
+                        correctivas=("tipo_tarea",
+                                     lambda x: x.str.contains("CORREC", na=False, case=False).sum()),
+                        preventivas=("tipo_tarea",
+                                     lambda x: x.str.contains("PREVEN", na=False, case=False).sum()),
+                        clientes   =("cliente",       lambda x: ", ".join(sorted(x[x != "—"].unique()))),
+                    )
+                    .reset_index()
+                    .sort_values("total", ascending=False)
+                    .rename(columns={
+                        "responsable": "Técnico",
+                        "total":       "Total OTs",
+                        "en_proceso":  "🟢 En Proceso",
+                        "correctivas": "🚨 Correctivas",
+                        "preventivas": "🛠️ Preventivas",
+                        "clientes":    "Clientes",
+                    })
+                )
+                st.dataframe(
+                    _vivo_by_tec,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Técnico":       st.column_config.TextColumn(width=200),
+                        "Total OTs":     st.column_config.NumberColumn(width=85),
+                        "🟢 En Proceso": st.column_config.NumberColumn(width=100),
+                        "🚨 Correctivas":st.column_config.NumberColumn(width=100),
+                        "🛠️ Preventivas":st.column_config.NumberColumn(width=100),
+                        "Clientes":      st.column_config.TextColumn(width=200),
+                    },
+                )
+
+        st.stop()
 
     # ── Carga lazy: solo se ejecuta al visitar esta página ────────────────────
     with st.spinner("📂 Cargando planificación del tiempo…"):
@@ -3851,13 +4115,13 @@ elif _page == _NAV_PAGES[0]:
     }
 
     # ── Constantes de bono ────────────────────────────────────────────────────
-    _BONO_TOTAL      = 350_000   # CLP/trimestre imponible
+    _BONO_TOTAL      = 500_000   # CLP/trimestre · pool equipo completo (seniors incluidos)
     _W_SLA           = 0.40      # 40 %
     _W_CAL           = 0.30      # 30 %
     _W_PREC          = 0.30      # 30 %  (trimestral, igual que SLA y Calidad)
-    _MAX_SLA_CLP     = int(_BONO_TOTAL * _W_SLA)   # 140.000
-    _MAX_CAL_CLP     = int(_BONO_TOTAL * _W_CAL)   # 105.000
-    _MAX_PREC_TRM    = int(_BONO_TOTAL * _W_PREC)  # 105.000 (trimestral)
+    _MAX_SLA_CLP     = int(_BONO_TOTAL * _W_SLA)   # 200.000
+    _MAX_CAL_CLP     = int(_BONO_TOTAL * _W_CAL)   # 150.000
+    _MAX_PREC_TRM    = int(_BONO_TOTAL * _W_PREC)  # 150.000 (trimestral)
 
     def _score_level(score: float) -> tuple[str, str]:
         """Color/label informativo para score promedio (display, no bono)."""
@@ -3868,11 +4132,11 @@ elif _page == _NAV_PAGES[0]:
     def _bono_sla(pct: float) -> tuple[int, str, str, int]:
         """
         Retorna (% bono, etiqueta, color, CLP/trimestre) según escala KPI Productividad SLA.
-        Escala oficial — 40% bono = $140.000/trim (5 niveles):
-          ≥ 95%        → 100% → $140.000
-          93 a <95%    →  90% → $126.000
-          90 a <93%    →  80% → $112.000
-          85 a <90%    →  50% →  $70.000
+        Escala oficial — 40% bono = $200.000/trim pool (5 niveles):
+          ≥ 95%        → 100% → $200.000
+          93 a <95%    →  90% → $180.000
+          90 a <93%    →  80% → $160.000
+          85 a <90%    →  50% → $100.000
           < 85%        →   0% →       $0
         """
         m = _MAX_SLA_CLP  # 140.000
@@ -3886,12 +4150,12 @@ elif _page == _NAV_PAGES[0]:
         """
         Retorna (% bono, etiqueta, color, CLP/trimestre) según exactitud porcentual.
         Exactitud = (PMs sin reincidencia) / total PMs × 100.
-        Escala oficial Tasa de Reproceso — 30% bono = $105.000/trim (6 niveles):
-          ≥ 98%        → 100% → $105.000
-          96 a <98%    →  90% →  $94.500
-          94 a <96%    →  80% →  $84.000
-          92 a <94%    →  70% →  $73.500
-          90 a <92%    →  60% →  $63.000
+        Escala oficial Tasa de Reproceso — 30% bono = $150.000/trim pool (6 niveles):
+          ≥ 98%        → 100% → $150.000
+          96 a <98%    →  90% → $135.000
+          94 a <96%    →  80% → $120.000
+          92 a <94%    →  70% → $105.000
+          90 a <92%    →  60% →  $90.000
           < 90%        →   0% →       $0
         """
         if n_pms > 0:
@@ -3910,13 +4174,13 @@ elif _page == _NAV_PAGES[0]:
     def _bono_prec(exactitud_pct: float) -> tuple[int, str, str, int]:
         """
         Retorna (% bono, etiqueta, color, CLP/trimestre) según cumplimiento de OTs correctas.
-        Escala oficial Precisión Info Fracttal — 30% bono terreno = $105.000/trim (7 niveles):
-          ≥ 95%  → 100% → $105.000/trim
-          ≥ 90%  →  90% →  $94.500/trim
-          ≥ 85%  →  80% →  $84.000/trim
-          ≥ 80%  →  70% →  $73.500/trim
-          ≥ 75%  →  60% →  $63.000/trim
-          ≥ 70%  →  50% →  $52.500/trim
+        Escala oficial Precisión Info Fracttal — 30% bono terreno = $150.000/trim pool (7 niveles):
+          ≥ 95%  → 100% → $150.000/trim
+          ≥ 90%  →  90% → $135.000/trim
+          ≥ 85%  →  80% → $120.000/trim
+          ≥ 80%  →  70% → $105.000/trim
+          ≥ 75%  →  60% →  $90.000/trim
+          ≥ 70%  →  50% →  $75.000/trim
           < 70%  →   0% →       $0
         """
         _m = _MAX_PREC_TRM
@@ -3931,11 +4195,12 @@ elif _page == _NAV_PAGES[0]:
     st.markdown(
         f'<div style="background:{_t["info_bg"]};border-left:4px solid #3b82f6;'
         f'border-radius:8px;padding:12px 16px;margin-bottom:12px;color:{_t["text"]};">'
-        '<b>🏆 Desempeño Terreno</b> — Bono <b>$350.000 CLP/trimestre</b> (imponible). '
+        '<b>🏆 Desempeño Terreno</b> — Bono <b>$500.000 CLP/trimestre</b> (imponible) · '
+        'pool compartido por todos los integrantes del equipo (seniors incluidos). '
         'Evaluado en 3 KPIs: '
-        '<b>Productividad SLA</b> 40% ($140.000 max) · '
-        '<b>Efectividad MP</b> 30% ($105.000 max) · '
-        '<b>Precisión Info Fracttal</b> 30% ($105.000 max). '
+        '<b>Productividad SLA</b> 40% ($200.000 pool) · '
+        '<b>Efectividad MP</b> 30% ($150.000 pool) · '
+        '<b>Precisión Info Fracttal</b> 30% ($150.000 pool). '
         f'<span style="font-size:0.82rem;color:{_t["muted"]};">'
         'Eq.1 Luis Pinto · Eq.2 Victor Bahamonde · Eq.3 Juan Gallardo · '
         'Eq.4 Carlos Avila · Eq.5 Luis Lopez</span></div>',
@@ -4062,10 +4327,10 @@ elif _page == _NAV_PAGES[0]:
                 f'line-height:1.75;margin-top:2px;">'
                 f'<div style="font-weight:700;color:{_t["muted"]};font-size:0.78rem;'
                 f'margin-bottom:4px;letter-spacing:0.04em;">📊 ESCALA BONO SLA</div>'
-                f'<span style="color:#22c55e;">≥ 95%</span> → <b>100%</b> · $140.000/trim<br>'
-                f'<span style="color:#16a34a;">≥ 93%</span> → <b>90%</b> · $126.000/trim<br>'
-                f'<span style="color:#4ade80;">≥ 90%</span> → <b>80%</b> · $112.000/trim<br>'
-                f'<span style="color:#f59e0b;">≥ 85%</span> → <b>50%</b> · $70.000/trim<br>'
+                f'<span style="color:#22c55e;">≥ 95%</span> → <b>100%</b> · $200.000/trim<br>'
+                f'<span style="color:#16a34a;">≥ 93%</span> → <b>90%</b> · $180.000/trim<br>'
+                f'<span style="color:#4ade80;">≥ 90%</span> → <b>80%</b> · $160.000/trim<br>'
+                f'<span style="color:#f59e0b;">≥ 85%</span> → <b>50%</b> · $100.000/trim<br>'
                 f'<span style="color:#ef4444;">&lt; 85%</span> → <b>Sin bono</b>'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -4807,7 +5072,7 @@ elif _page == _NAV_PAGES[0]:
                 )
 
                 _cols_final = [c for c in [
-                    "n_llamado", "os_fracttal", "eds_occim",
+                    "os_fracttal", "eds_occim",
                     "equipo_label", "tecnico", "cliente", "eds_nombre",
                     "_fecha_exacta", "_hora_inicio", "_hora_cierre",
                     "prioridad", "zona_norm",
@@ -4817,7 +5082,6 @@ elif _page == _NAV_PAGES[0]:
 
                 _df_sla_disp = _df_sla_disp[_cols_final].copy()
                 _df_sla_disp.rename(columns={
-                    "n_llamado":       "N° Llamado",
                     "os_fracttal":     "OT (OS-XXXXX)",
                     "eds_occim":       "Cód. EDS",
                     "equipo_label":    "Equipo",
@@ -4901,7 +5165,7 @@ elif _page == _NAV_PAGES[0]:
         # .copy() evita mutar el objeto cacheado al añadir columnas (fecha_cm_dt, mes)
         # NOTA: solo COPEC/ESMAX/SHELL entran al cálculo de reincidencias.
         # Abastible y otros clientes se excluyen aquí para no contaminar el KPI.
-        _CLIENTES_SLA = {"COPEC", "ESMAX (Aramco)", "SHELL (Enex)"}
+        _CLIENTES_SLA = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
         _df_wo_reinc = df_wo[df_wo["client"].isin(_CLIENTES_SLA)].copy() \
                        if "client" in df_wo.columns else df_wo
         try:
@@ -5115,15 +5379,22 @@ elif _page == _NAV_PAGES[0]:
         else:
             _eq_label_cal_iter = _EQUIPO_LABEL_CAL
 
+        # Clientes evaluados en reincidencias (COPEC/ESMAX/SHELL) — para nota de transparencia
+        _CLIENTES_SLA_RC = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
+
         _cal_cols = st.columns(len(_eq_label_cal_iter))
         for _ci, (_gk, _gl) in enumerate(zip(_eq_label_cal_iter.keys(), _eq_label_cal_iter.values())):
             _senior_cal = GRUPOS_TERRENO.get(_gk, {}).get("senior", "")
-            # PMs de este equipo (denominador histórico, no filtrado por mes)
+            # PMs de este equipo (denominador total — todos los clientes)
             _pm_equipo = df_wo[
                 (df_wo["maint_type"] == "Preventiva") &
                 (df_wo["equipo"] == _gk)
             ]
             _n_pm = _pm_equipo["folio"].nunique() if "folio" in _pm_equipo.columns else len(_pm_equipo)
+            # PMs de este equipo SOLO en clientes evaluados (COPEC/ESMAX/SHELL) — para transparencia
+            _pm_sla = _pm_equipo[_pm_equipo["client"].isin(_CLIENTES_SLA_RC)] \
+                if "client" in _pm_equipo.columns else pd.DataFrame()
+            _n_pm_sla = _pm_sla["folio"].nunique() if not _pm_sla.empty and "folio" in _pm_sla.columns else 0
             # Fallas post-PM del período filtrado
             # nunique(folio_cm) = OTs correctivas únicas = 1 OT = 1 error
             if not _df_rc.empty and "folio_cm" in _df_rc.columns:
@@ -5150,6 +5421,23 @@ elif _page == _NAV_PAGES[0]:
             # % exactitud para mostrar prominente
             _exactitud_cal = round((1 - _fallas_eq / _n_pm) * 100, 1) if _n_pm > 0 else 100.0
 
+            # Nota de cobertura: si 100% y pocos PMs SLA, advertir
+            if _exactitud_cal == 100.0 and _n_pm_sla == 0:
+                _cobertura_nota = (
+                    f'<div style="font-size:0.65rem;color:#f59e0b;margin-top:3px;">'
+                    f'⚠️ 0 PMs en COPEC/ESMAX/SHELL — sin cobertura de evaluación</div>'
+                )
+            elif _exactitud_cal == 100.0:
+                _cobertura_nota = (
+                    f'<div style="font-size:0.65rem;color:{_t["muted"]};margin-top:3px;">'
+                    f'Verificados {_n_pm_sla} PMs en COPEC/ESMAX/SHELL</div>'
+                )
+            else:
+                _cobertura_nota = (
+                    f'<div style="font-size:0.65rem;color:{_t["muted"]};margin-top:3px;">'
+                    f'{_n_pm_sla} PMs en COPEC/ESMAX/SHELL</div>'
+                )
+
             _cal_cols[_ci].markdown(
                 f'<div style="background:{_t["card"]};border:2px solid {_bcol}33;'
                 f'border-radius:8px;padding:14px 16px;text-align:center;">'
@@ -5171,6 +5459,8 @@ elif _page == _NAV_PAGES[0]:
                 f'fallas post-PM &nbsp;·&nbsp; {_n_pm} PMs</div>'
                 f'<div style="font-size:0.72rem;color:{_ratio_clr};font-weight:600;margin-top:2px;">'
                 f'{_ratio_lbl}</div>'
+                # Cobertura de evaluación
+                + _cobertura_nota +
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -5182,8 +5472,112 @@ elif _page == _NAV_PAGES[0]:
             f"≥94%→${int(_MAX_CAL_CLP*.80):,} · "
             f"≥92%→${int(_MAX_CAL_CLP*.70):,} · "
             f"≥90%→${int(_MAX_CAL_CLP*.60):,} · "
-            f"<90%→$0 · Período: **{_periodo_lbl}**."
+            f"<90%→$0 · Período: **{_periodo_lbl}**. "
+            f"Reincidencias evaluadas solo en COPEC, ESMAX y SHELL."
         )
+
+        # ── Expander de verificación de datos ─────────────────────────────────
+        with st.expander("🔬 Verificar datos del algoritmo (diagnóstico)", expanded=False):
+            st.markdown(
+                f'<div style="font-size:0.82rem;color:{_t["muted"]};margin-bottom:8px;">'
+                f'Esto permite confirmar que el algoritmo está evaluando correctamente. '
+                f'Si un equipo muestra <b>0 PMs en COPEC/ESMAX/SHELL</b>, el 100% es por '
+                f'falta de cobertura (ese equipo no atiende esos clientes), no por excelencia real.'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            # Construir tabla diagnóstico por equipo
+            _diag_rows = []
+            _prev_sla = _df_wo_reinc[_df_wo_reinc["maint_type"] == "Preventiva"].copy() \
+                if not _df_wo_reinc.empty else pd.DataFrame()
+            _corr_sla = _df_wo_reinc[_df_wo_reinc["maint_type"] == "Correctiva"].copy() \
+                if not _df_wo_reinc.empty else pd.DataFrame()
+
+            _pm_sla_codes = set(_prev_sla["equipment_code"].dropna().unique()) \
+                if not _prev_sla.empty else set()
+            _cm_sla_codes = set(_corr_sla["equipment_code"].dropna().unique()) \
+                if not _corr_sla.empty else set()
+            _codigos_comunes = _pm_sla_codes & _cm_sla_codes
+
+            for _gk2, _gl2 in _eq_label_cal_iter.items():
+                _pm_eq2 = _prev_sla[_prev_sla["equipo"] == _gk2] \
+                    if not _prev_sla.empty and "equipo" in _prev_sla.columns else pd.DataFrame()
+                _n_pm_eq2    = len(_pm_eq2)
+                _n_pm_eq2_ok = int((_pm_eq2["equipment_code"].str.strip() != "").sum()) \
+                    if not _pm_eq2.empty else 0
+                _fallas_diag = _df_rc[_df_rc["grupo_responsable"] == _gk2]["folio_cm"].nunique() \
+                    if not _df_rc.empty and "folio_cm" in _df_rc.columns else 0
+                _pm_codes_eq2 = set(_pm_eq2["equipment_code"].dropna().unique()) \
+                    if not _pm_eq2.empty else set()
+                _cms_matcheables = len(_corr_sla[_corr_sla["equipment_code"].isin(_pm_codes_eq2)]) \
+                    if not _corr_sla.empty and _pm_codes_eq2 else 0
+                _diag_rows.append({
+                    "Equipo":                    _gl2,
+                    "PMs COPEC/ESMAX/SHELL":     _n_pm_eq2,
+                    "PMs con código activo":      _n_pm_eq2_ok,
+                    "CMs matcheables":            _cms_matcheables,
+                    "Reincidencias detectadas":   _fallas_diag,
+                    "Cobertura real":             "✅" if _n_pm_eq2 > 0 else "⚠️ Sin evaluación",
+                })
+            _df_diag = pd.DataFrame(_diag_rows)
+
+            # Resumen global
+            _n_prev_total_sla = len(_prev_sla)
+            _n_corr_total_sla = len(_corr_sla)
+            _n_codigos_comunes = len(_codigos_comunes)
+
+            _c1d, _c2d, _c3d = st.columns(3)
+            _c1d.metric("PMs COPEC/ESMAX/SHELL", _n_prev_total_sla)
+            _c2d.metric("CMs COPEC/ESMAX/SHELL", _n_corr_total_sla)
+            _c3d.metric("Equipos con código común (matcheables)", _n_codigos_comunes)
+
+            if _n_codigos_comunes == 0 and _n_prev_total_sla > 0 and _n_corr_total_sla > 0:
+                st.error(
+                    "⚠️ **Sin códigos comunes entre PMs y CMs** — el `equipment_code` "
+                    "(campo `codigo_activo` en Supabase) no coincide entre preventivas y "
+                    "correctivas. El algoritmo no puede detectar reincidencias aunque existan. "
+                    "Revisar que `codigo_activo` esté poblado en ambos tipos de OT."
+                )
+            elif _n_prev_total_sla == 0:
+                st.warning(
+                    "⚠️ No se encontraron PMs de COPEC/ESMAX/SHELL en el período. "
+                    "El 100% es por falta de datos, no por excelencia."
+                )
+            else:
+                st.success(
+                    f"✅ El algoritmo tiene cobertura: {_n_prev_total_sla} PMs y "
+                    f"{_n_corr_total_sla} CMs de COPEC/ESMAX/SHELL, "
+                    f"{_n_codigos_comunes} equipos matcheables."
+                )
+
+            st.dataframe(
+                _df_diag,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # Mostrar en qué meses hay reincidencias (si existen)
+            if not df_reinc.empty and "fecha_cm" in df_reinc.columns:
+                _df_reinc_mes = df_reinc.copy()
+                _df_reinc_mes["mes"] = pd.to_datetime(
+                    _df_reinc_mes["fecha_cm"], errors="coerce"
+                ).dt.to_period("M").astype(str)
+                _reinc_por_mes = _df_reinc_mes["mes"].value_counts().sort_index()
+                if not _reinc_por_mes.empty:
+                    st.markdown(
+                        f'<div style="font-size:0.8rem;color:{_t["muted"]};margin-top:6px;">'
+                        f'<b>Reincidencias detectadas por mes (todos los equipos):</b> '
+                        + " · ".join(f"{m}: {n}" for m, n in _reinc_por_mes.items())
+                        + f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            elif df_reinc.empty:
+                st.markdown(
+                    f'<div style="font-size:0.8rem;color:{_t["muted"]};margin-top:6px;">'
+                    f'df_reinc vacío — no se detectó ninguna reincidencia en todo el período cargado.'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
         # ── Gráfico: PMs realizados vs Correctivos ≤5d ───────────────────────
         st.divider()
@@ -5954,7 +6348,7 @@ elif _page == _NAV_PAGES[0]:
                     f'<div style="font-weight:700;font-size:0.92rem;color:{_t["text"]};">{_card_titulo}</div>'
                     f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:6px;">{_card_subtitulo}</div>'
                     # ── CUMPLIMIENTO — protagonista ──
-                    f'<div style="font-size:2.6rem;font-weight:900;line-height:1;color:{_pbcol};">'
+                    f'<div style="font-size:2rem;font-weight:800;line-height:1.1;color:{_pbcol};">'
                     f'{_cumpl_pct:.1f}%</div>'
                     f'<div style="font-size:0.68rem;font-weight:600;letter-spacing:0.05em;'
                     f'text-transform:uppercase;color:{_t["muted"]};margin-bottom:6px;">cumplimiento</div>'
@@ -7009,8 +7403,9 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 f'<div style="background:{_t["info_bg"]};border-left:4px solid #f59e0b;'
                 f'border-radius:8px;padding:12px 16px;margin-bottom:14px;color:{_t["text"]};">'
                 f'<b>🏆 Resumen de Bono Trimestral</b> — Estimación consolidada por técnico y equipo.<br>'
-                f'<span style="font-size:0.85rem;">Bono total: <b>$350.000 CLP/trimestre</b> · '
-                f'Componente individual: <b>$175.000 (50%)</b> · Componente equipo: <b>$175.000 (50%)</b><br>'
+                f'<span style="font-size:0.85rem;">Pool equipo: <b>$500.000 CLP/trimestre</b> · '
+                f'Dividido entre todos los integrantes (seniors incluidos) → monto por persona varía según tamaño del equipo.<br>'
+                f'50% por KPIs individuales · 50% por KPIs del equipo · '
                 f'Ponderación: SLA <b>40%</b> · Efectividad MP <b>30%</b> · Precisión Fracttal <b>30%</b></span>'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -7024,7 +7419,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 f'color:{_t["muted"]};letter-spacing:0.04em;">📊 ESCALA DE BONOS</div>'
                 f'<div style="margin-bottom:5px;">'
                 f'<span style="font-weight:600;">SLA</span> '
-                f'<span style="color:{_t["muted"]};">40% · $140.000/trim</span><br>'
+                f'<span style="color:{_t["muted"]};">40% · $200.000/trim (pool)</span><br>'
                 f'<span style="color:#22c55e;">≥95%→100%</span> &nbsp;'
                 f'<span style="color:#16a34a;">93→90%</span> &nbsp;'
                 f'<span style="color:#4ade80;">90→80%</span> &nbsp;'
@@ -7033,7 +7428,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 f'</div>'
                 f'<div style="margin-bottom:5px;">'
                 f'<span style="font-weight:600;">Calidad MP</span> '
-                f'<span style="color:{_t["muted"]};">30% · $105.000/trim</span><br>'
+                f'<span style="color:{_t["muted"]};">30% · $150.000/trim (pool)</span><br>'
                 f'<span style="color:#22c55e;">≥98%→100%</span> &nbsp;'
                 f'<span style="color:#16a34a;">96→90%</span> &nbsp;'
                 f'<span style="color:#4ade80;">94→80%</span> &nbsp;'
@@ -7043,7 +7438,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 f'</div>'
                 f'<div>'
                 f'<span style="font-weight:600;">Precisión</span> '
-                f'<span style="color:{_t["muted"]};">30% · $105.000/trim</span><br>'
+                f'<span style="color:{_t["muted"]};">30% · $150.000/trim (pool)</span><br>'
                 f'<span style="color:#22c55e;">≥95%→100%</span> &nbsp;'
                 f'<span style="color:#16a34a;">90→90%</span> &nbsp;'
                 f'<span style="color:#4ade80;">85→80%</span> &nbsp;'
@@ -7394,13 +7789,18 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 _tec_kpis = {t: _kpi_para_tecnico(t, _grp_key) for t in _miembros_full}
                 _eq_kpi = _kpi_para_equipo(_grp_key)
 
-                # ── Bono individual max por KPI ──
-                _MAX_IND_SLA  = 70_000   # 40% × $175K
-                _MAX_IND_MP   = 52_500   # 30% × $175K
-                _MAX_IND_PREC = 52_500   # 30% × $175K
-                _MAX_EQ_SLA   = 70_000
-                _MAX_EQ_MP    = 52_500
-                _MAX_EQ_PREC  = 52_500
+                # ── Bono por persona: pool / n_integrantes (seniors incluidos) ──
+                # 50 % individual (KPIs propios) · 50 % equipo (KPIs agregados)
+                _n_pool       = len(_miembros_full)
+                _pp_max       = int(_BONO_TOTAL / _n_pool) if _n_pool > 0 else _BONO_TOTAL
+                _pp_ind       = int(_pp_max * 0.50)   # parte individual
+                _pp_eq        = int(_pp_max * 0.50)   # parte equipo
+                _MAX_IND_SLA  = int(_pp_ind * 0.40)
+                _MAX_IND_MP   = int(_pp_ind * 0.30)
+                _MAX_IND_PREC = int(_pp_ind * 0.30)
+                _MAX_EQ_SLA   = int(_pp_eq  * 0.40)
+                _MAX_EQ_MP    = int(_pp_eq  * 0.30)
+                _MAX_EQ_PREC  = int(_pp_eq  * 0.30)
 
                 # ── Construir tabla HTML ──────────────────────────────────────
                 _hdr_teal = "#01798A"
@@ -7542,7 +7942,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     f'<tr style="background:{_tr_bg(4)};">'
                     f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
                     f'Bono individual est. <span style="color:{_t["muted"]};font-size:0.76rem;">'
-                    f'(máx $175.000)</span></td>'
+                    f'(máx {_clp_fmt(_pp_ind)})</span></td>'
                 )
                 for _tf in _miembros_full:
                     _k = _tec_kpis[_tf]
@@ -7590,7 +7990,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     f'<tr style="background:{_tr_bg(5)};">'
                     f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
                     f'Bono equipo est. <span style="color:{_t["muted"]};font-size:0.76rem;">'
-                    f'(máx $175.000)</span></td>'
+                    f'(máx {_clp_fmt(_pp_eq)})</span></td>'
                 )
                 for _tf in _miembros_full:
                     _html += (
@@ -7691,6 +8091,33 @@ elif _page == _NAV_PAGES[2]:
     df_prev["_mes"]   = _fc_prev.dt.to_period("M").astype(str)
     df_prev["_month"] = _fc_prev.dt.month.astype("Int64")
 
+    # ── Normalizar estado_tarea (Fracttal devuelve valores en inglés) ─────────
+    _ESTADO_TAREA_MAP = {"DONE": "Finalizada", "NO_STARTED": "No Iniciada"}
+    df_prev["estado_tarea"] = df_prev["estado_tarea"].replace(_ESTADO_TAREA_MAP)
+
+    # ── Formatear duración (segundos → "HH:MM") ───────────────────────────────
+    def _seg_a_hhmm(seg) -> str:
+        try:
+            s = int(seg)
+            if s <= 0: return "—"
+            h, m = divmod(s, 3600)
+            return f"{h:02d}:{m // 60:02d}"
+        except Exception:
+            return "—"
+
+    df_prev["dur_est_fmt"]  = df_prev["duracion_estim_seg"].apply(_seg_a_hhmm) \
+        if "duracion_estim_seg" in df_prev.columns else "—"
+    df_prev["dur_real_fmt"] = df_prev["duracion_real_seg"].apply(_seg_a_hhmm) \
+        if "duracion_real_seg" in df_prev.columns else "—"
+
+    # ── Fecha de inicio (local, sin tz) ──────────────────────────────────────
+    if "fecha_inicio" in df_prev.columns:
+        df_prev["fecha_inicio_fmt"] = (
+            pd.to_datetime(df_prev["fecha_inicio"], errors="coerce", utc=True)
+            .dt.tz_convert(None)
+            .dt.strftime("%d/%m/%Y %H:%M")
+        )
+
     # ── Rango fijo: Ene 2026 → hoy ────────────────────────────────────────
     _rango_inicio = pd.Timestamp("2026-01-01")
     _rango_fin    = pd.Timestamp.today().normalize()
@@ -7724,7 +8151,7 @@ elif _page == _NAV_PAGES[2]:
     # ── Filtros fila 2 ────────────────────────────────────────────────────
     _pf6, _pf7, _pf8, _pf9, _ = st.columns([1.1, 1.3, 1.5, 1.5, 1.5])
     with _pf6:
-        sel_pestado = st.selectbox("Estado OT",
+        sel_pestado = st.selectbox("Estado",
             ["Todos"] + sorted(df_prev["estado"].dropna().unique().tolist()), key="prev_estado")
     with _pf7:
         sel_pestarea = st.selectbox("Estado tarea",
@@ -7763,9 +8190,11 @@ elif _page == _NAV_PAGES[2]:
 
     # ── KPIs ──────────────────────────────────────────────────────────────
     _ptot   = len(dfp)
-    _pfin   = int((dfp["estado"] == "Finalizadas").sum())
-    _pproc  = int(dfp["estado"].isin(["En Proceso", "En Revisión"]).sum())
-    _pnoi   = int((dfp["estado"] == "No Iniciada").sum())
+    _fin_mask = dfp["estado_tarea"].isin(["Finalizada"]) | dfp["estado"].isin(["Finalizadas"])
+    _noi_mask = dfp["estado_tarea"].isin(["No Iniciada"]) & ~dfp["estado"].isin(["Finalizadas"])
+    _pfin   = int(_fin_mask.sum())
+    _pproc  = int((~_fin_mask & ~_noi_mask & ~dfp["estado"].isin(["Cancelado"])).sum())
+    _pnoi   = int(_noi_mask.sum())
     _ppct   = round(_pfin / _ptot * 100, 1) if _ptot > 0 else 0.0
     pk1,pk2,pk3,pk4,pk5 = st.columns(5)
     pk1.metric("Total OTs",              f"{_ptot:,}")
@@ -7776,8 +8205,8 @@ elif _page == _NAV_PAGES[2]:
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
-    _ptab_lista, _ptab_tipo, _ptab_tec, _ptab_plan, _ptab_eds = st.tabs([
-        "📋  Listado", "🔧  Por Tipo", "👷  Por Técnico", "📅  Planificación", "🏭  Por Activo/EDS"
+    _ptab_plan, _ptab_lista, _ptab_tipo, _ptab_tec, _ptab_eds = st.tabs([
+        "📅  Planificación", "📋  Listado", "🔧  Por Tipo", "👷  Por Técnico", "🏭  Por Activo/EDS"
     ])
 
     # ── Tab 1: Listado ────────────────────────────────────────────────────
@@ -7788,13 +8217,14 @@ elif _page == _NAV_PAGES[2]:
             _pcols = {
                 "id_ot":             "OT",
                 "fecha_programada":  "F. Programada",
+                "fecha_inicio_fmt":  "F. Inicio",
                 "activador":         "Activador",
                 "nombre_tarea":      "Tarea",
                 "tipo_tarea":        "Tipo",
-                "estado":            "Estado OT",
                 "estado_tarea":      "Estado Tarea",
-                "duracion_estimada": "Dur. Est.",
-                "tiempo_ejecucion":  "T. Real",
+                "estado":            "Estado",
+                "dur_est_fmt":       "Dur. Est.",
+                "dur_real_fmt":      "T. Ejec.",
                 "codigo_activo":     "Código",
                 "nombre_activo":     "Activo",
                 "clasificacion_2":   "Clasif. 2",
@@ -7812,13 +8242,14 @@ elif _page == _NAV_PAGES[2]:
                 column_config={
                     "OT":            st.column_config.TextColumn(width=90),
                     "F. Programada": st.column_config.TextColumn(width=100),
+                    "F. Inicio":     st.column_config.TextColumn(width=120),
                     "Activador":     st.column_config.TextColumn(width=100),
                     "Tarea":         st.column_config.TextColumn(width=200),
                     "Tipo":          st.column_config.TextColumn(width=200),
-                    "Estado OT":     st.column_config.TextColumn(width=100),
                     "Estado Tarea":  st.column_config.TextColumn(width=100),
+                    "Estado":        st.column_config.TextColumn(width=100),
                     "Dur. Est.":     st.column_config.TextColumn(width=75),
-                    "T. Real":       st.column_config.TextColumn(width=75),
+                    "T. Ejec.":      st.column_config.TextColumn(width=75),
                     "Código":        st.column_config.TextColumn(width=80),
                     "Clasif. 2":     st.column_config.TextColumn(width=80),
                     "Responsable":   st.column_config.TextColumn(width=160),
@@ -7888,16 +8319,12 @@ elif _page == _NAV_PAGES[2]:
         else:
             st.markdown('<div class="section-header">👷  Desempeño por responsable</div>',
                         unsafe_allow_html=True)
-            def _hhmm_to_min(hhmm):
-                """Convierte 'HH:MM' a minutos (float), o None."""
-                try:
-                    h, m = str(hhmm).split(":")
-                    return int(h) * 60 + int(m)
-                except Exception:
-                    return None
             _pt_resp = dfp.copy()
-            _pt_resp["_dur_est_min"]  = _pt_resp["duracion_estimada"].apply(_hhmm_to_min)
-            _pt_resp["_dur_real_min"] = _pt_resp["tiempo_ejecucion"].apply(_hhmm_to_min)
+            # duracion_estim_seg / duracion_real_seg están en segundos → convertir a minutos
+            _pt_resp["_dur_est_min"]  = pd.to_numeric(_pt_resp["duracion_estim_seg"],  errors="coerce") / 60 \
+                if "duracion_estim_seg"  in _pt_resp.columns else None
+            _pt_resp["_dur_real_min"] = pd.to_numeric(_pt_resp["duracion_real_seg"], errors="coerce") / 60 \
+                if "duracion_real_seg" in _pt_resp.columns else None
             _pt_resp_g = _pt_resp.groupby("responsable").agg(
                 Total      =("id_ot","count"),
                 Finaliz    =("estado_tarea", lambda s: (s == "Finalizada").sum()),
@@ -8012,14 +8439,18 @@ elif _page == _NAV_PAGES[2]:
         else:
             _df_semana_show = _df_semana[[c for c in [
                 "fecha_programada","id_ot","responsable","nombre_tarea",
-                "tipo_tarea","activador","estado","estado_tarea","clasificacion_2"
+                "tipo_tarea","activador","estado_tarea","estado",
+                "fecha_inicio_fmt","dur_est_fmt","dur_real_fmt","clasificacion_2"
             ] if c in _df_semana.columns]].copy()
             _df_semana_show["fecha_programada"] = pd.to_datetime(
                 _df_semana_show["fecha_programada"], errors="coerce").dt.strftime("%d/%m/%Y")
             _df_semana_show.rename(columns={
                 "fecha_programada":"F.Prog.","id_ot":"OT","responsable":"Responsable",
                 "nombre_tarea":"Tarea","tipo_tarea":"Tipo","activador":"Activador",
-                "estado":"Estado OT","estado_tarea":"Estado Tarea","clasificacion_2":"Clasif."
+                "estado_tarea":"Estado Tarea","estado":"Estado",
+                "fecha_inicio_fmt":"F. Inicio",
+                "dur_est_fmt":"Dur. Est.","dur_real_fmt":"T. Ejec.",
+                "clasificacion_2":"Clasif."
             }, inplace=True)
             _show_df(_df_semana_show.reset_index(drop=True), hide_index=True, use_container_width=True,
                 column_config={
@@ -8027,15 +8458,20 @@ elif _page == _NAV_PAGES[2]:
                     "OT":           st.column_config.TextColumn(width=90),
                     "Responsable":  st.column_config.TextColumn(width=180),
                     "Tarea":        st.column_config.TextColumn(width=200),
-                    "Tipo":         st.column_config.TextColumn(width=170),
+                    "Tipo":         st.column_config.TextColumn(width=160),
                     "Activador":    st.column_config.TextColumn(width=100),
-                    "Estado OT":    st.column_config.TextColumn(width=100),
-                    "Estado Tarea": st.column_config.TextColumn(width=110),
+                    "Estado Tarea": st.column_config.TextColumn(width=100),
+                    "Estado":       st.column_config.TextColumn(width=100),
+                    "F. Inicio":    st.column_config.TextColumn(width=130),
+                    "Dur. Est.":    st.column_config.TextColumn(width=75),
+                    "T. Ejec.":     st.column_config.TextColumn(width=75),
                     "Clasif.":      st.column_config.TextColumn(width=80),
                 })
-            _sfin  = int((_df_semana["estado"] == "Finalizadas").sum())
-            _sproc = int(_df_semana["estado"].isin(["En Proceso","En Revisión"]).sum())
-            _snoi  = int((_df_semana["estado"] == "No Iniciada").sum())
+            _sfin_m  = _df_semana["estado_tarea"].isin(["Finalizada"]) | _df_semana["estado"].isin(["Finalizadas"])
+            _snoi_m  = _df_semana["estado_tarea"].isin(["No Iniciada"]) & ~_df_semana["estado"].isin(["Finalizadas"])
+            _sfin    = int(_sfin_m.sum())
+            _sproc   = int((~_sfin_m & ~_snoi_m & ~_df_semana["estado"].isin(["Cancelado"])).sum())
+            _snoi    = int(_snoi_m.sum())
             st.caption(f"{len(_df_semana_show):,} OTs en el período — "
                        f"{_sfin} finalizadas · {_sproc} en proceso · {_snoi} no iniciadas")
         st.divider()
@@ -8045,7 +8481,8 @@ elif _page == _NAV_PAGES[2]:
                     unsafe_allow_html=True)
         _df_venc = _dfplan[
             (_dfplan["_fp_dt"] < _hoy) &
-            (~_dfplan["estado"].isin(["Finalizadas","Cancelado"]))
+            (~_dfplan["estado"].isin(["Finalizadas","Cancelado"])) &
+            (~_dfplan["estado_tarea"].isin(["Finalizada"]))   # excluir DONE normalizados
         ].copy()
         _df_venc["_atraso"] = (_hoy - _df_venc["_fp_dt"]).dt.days
         _df_venc = _df_venc.sort_values("_atraso", ascending=False)
@@ -8061,7 +8498,7 @@ elif _page == _NAV_PAGES[2]:
             _df_venc_show.rename(columns={
                 "fecha_programada":"F.Prog.","_atraso":"Atraso (días)","id_ot":"OT",
                 "responsable":"Responsable","nombre_tarea":"Tarea","tipo_tarea":"Tipo",
-                "activador":"Activador","estado":"Estado OT","estado_tarea":"Estado Tarea"
+                "activador":"Activador","estado":"Estado","estado_tarea":"Estado Tarea"
             }, inplace=True)
             _show_df(_df_venc_show.reset_index(drop=True), hide_index=True, use_container_width=True,
                 column_config={
@@ -8072,7 +8509,7 @@ elif _page == _NAV_PAGES[2]:
                     "Tarea":         st.column_config.TextColumn(width=200),
                     "Tipo":          st.column_config.TextColumn(width=170),
                     "Activador":     st.column_config.TextColumn(width=100),
-                    "Estado OT":     st.column_config.TextColumn(width=100),
+                    "Estado":        st.column_config.TextColumn(width=100),
                     "Estado Tarea":  st.column_config.TextColumn(width=110),
                 })
             st.caption(f"⚠️ {len(_df_venc_show):,} OTs preventivas vencidas sin finalizar")
@@ -8083,7 +8520,8 @@ elif _page == _NAV_PAGES[2]:
                     unsafe_allow_html=True)
         _df_fut = _dfplan[
             (_dfplan["_fp_dt"] >= _hoy) &
-            (~_dfplan["estado"].isin(["Finalizadas","Cancelado"]))
+            (~_dfplan["estado"].isin(["Finalizadas","Cancelado"])) &
+            (~_dfplan["estado_tarea"].isin(["Finalizada"]))
         ].sort_values("_fp_dt").head(50)
         if _df_fut.empty:
             st.info("No hay OTs preventivas futuras registradas.")
@@ -8203,4 +8641,4 @@ elif _page == _NAV_PAGES[2]:
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
-st.caption("Occimiano — Panel Operacional v1.2 | Fracttal One API + Google Drive")
+st.caption("Occimiano — Panel Operacional v1.2 | Fracttal One API + Supabase")

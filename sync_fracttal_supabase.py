@@ -182,11 +182,18 @@ def map_record(wo: dict) -> dict | None:
     nota_tarea= _str(wo.get("task_note"), 3000)
 
     # Estado legible
+    # NOTA: id_status_work_order es la fuente de verdad para estados terminales.
+    # Fracttal puede dejar una descripción custom obsoleta (ej. "En Revisión") cuando
+    # una OT se cancela, por eso los estados terminales tienen prioridad sobre la custom.
     estado_id = wo.get("id_status_work_order")
     estado_map = {1:"Por Iniciar", 2:"En Progreso", 3:"Finalizadas",
                   4:"Por Validar", 5:"Canceladas"}
-    estado_raw = wo.get("work_orders_status_custom_description")
-    estado = _str(estado_raw) or estado_map.get(estado_id, _str(estado_id))
+    _ESTADOS_TERMINAL = {3, 5}   # Finalizadas y Canceladas — no pisar con custom
+    if estado_id in _ESTADOS_TERMINAL:
+        estado = estado_map[estado_id]
+    else:
+        estado_raw = wo.get("work_orders_status_custom_description")
+        estado = _str(estado_raw) or estado_map.get(estado_id, _str(estado_id))
 
     return {
         # Identificador principal

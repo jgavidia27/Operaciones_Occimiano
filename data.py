@@ -196,17 +196,18 @@ def get_grupo_tecnico(nombre_corto: str) -> str | None:
 # ── Clientes reconocidos ─────────────────────────────────────────────────────
 CLIENT_MAP = {
     "COPEC": "COPEC",
-    "ESMAX": "ESMAX (Aramco)",
+    "ESMAX": "Aramco (Esmax)",
     "SHELL": "SHELL (Enex)",
     "ABAST": "ABASTIBLE",
     "ENEX": "SHELL (Enex)",
-    "ARAMCO": "ESMAX (Aramco)",
+    "ARAMCO": "Aramco (Esmax)",
     "PARTICULAR": "PARTICULAR",
 }
 
 CLIENT_COLORS = {
     "COPEC": "#E31837",
-    "ESMAX (Aramco)": "#00A650",
+    "Aramco (Esmax)": "#00A650",
+    "ESMAX (Aramco)": "#00A650",  # alias legacy por si queda algún dato antiguo
     "SHELL (Enex)": "#FFC72C",
     "ABASTIBLE": "#0055A5",
     "PARTICULAR": "#7C3AED",
@@ -1086,8 +1087,18 @@ def build_reincidencias(df_wo: pd.DataFrame, excel_to_full: dict = None) -> pd.D
                     return True
         return False
 
+    # REGLA DE AUDITORÍA:
+    # ┌─ PM por técnico externo (AUTEC, ELECONS/Jaime Ocampo, etc.) ──────────────
+    # │  → EXCLUIDO de prev.  Un correctivo posterior NO se imputa a nadie:
+    # │    no evaluamos a terceros, y no es justo culpar al técnico Occimiano
+    # │    si fue el externo quien hizo el PM más reciente.
+    # └─ CM por técnico externo ──────────────────────────────────────────────────
+    #    → INCLUIDO en corr.  Actúa como AUDITOR: si AUTEC/ELECONS realizaron
+    #      un correctivo dentro de 5 días de un PM hecho por un técnico Occimiano,
+    #      eso sí se imputa al técnico Occimiano que hizo el PM (su mantención
+    #      no fue suficiente para evitar la falla).
     prev = prev_all[~prev_all["technician"].apply(_es_excl_local)].copy()
-    corr = corr_raw.copy()
+    corr = corr_raw.copy()   # Sin filtro de técnico: externos son auditores
 
     if prev.empty or corr.empty:
         return pd.DataFrame()

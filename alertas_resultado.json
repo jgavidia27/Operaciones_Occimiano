@@ -1,6 +1,6 @@
 {
-  "fecha_ejecucion": "2026-06-12T15:34:28",
-  "duracion_seg": 71.0,
+  "fecha_ejecucion": "2026-06-16T10:13:10",
+  "duracion_seg": 141.7,
   "estado": "CRÍTICO",
   "total_criticos": 4,
   "total_advertencias": 6,
@@ -8,107 +8,23 @@
   "total_errores_check": 0,
   "metricas": {
     "total_eds_activas": 419,
-    "total_ots_año": 4188,
-    "total_llamados_año": 1569,
-    "total_checks_ejecutados": 25
+    "total_ots_año": 4264,
+    "total_llamados_año": 1603,
+    "total_checks_ejecutados": 29
   },
   "alertas": [
     {
       "check_id": "CHK-002",
       "nivel": "CRÍTICO",
       "categoria": "NULOS",
-      "descripcion": "275 OTs activas en Fracttal con más de 30 días sin cerrar — KPI Llenado incompleto para esas OTs; la duración real no puede calcularse. (El SLA usa fecha_atencion del llamado, no fecha_finalizacion de la OT.)",
-      "n_afectados": 275,
+      "descripcion": "1 OTs activas en Fracttal con más de 30 días sin cerrar — KPI Llenado incompleto para esas OTs; la duración real no puede calcularse. (El SLA usa fecha_atencion del llamado, no fecha_finalizacion de la OT.)",
+      "n_afectados": 1,
       "detalle": [
         {
-          "id_ot": "OS-32208",
-          "responsable": "Juan Antonio Gallardo Romero",
+          "id_ot": "OS-37239",
+          "responsable": "Jaime Ocampo",
           "tipo": "CORRECTIVA",
-          "dias": "223 días"
-        },
-        {
-          "id_ot": "OS-32223",
-          "responsable": "AUTEC LTDA",
-          "tipo": "PREVENTIVA POR HORAS DE FUNCIONAMIENTO",
-          "dias": "221 días"
-        },
-        {
-          "id_ot": "OS-32242",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "tipo": "CORRECTIVA",
-          "dias": "221 días"
-        },
-        {
-          "id_ot": "OS-32243",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "tipo": "CORRECTIVA",
-          "dias": "221 días"
-        },
-        {
-          "id_ot": "OS-32248",
-          "responsable": "Luis Joel Lopez Isla",
-          "tipo": "PREVENTIVA MENSUAL",
-          "dias": "220 días"
-        },
-        {
-          "id_ot": "OS-32303",
-          "responsable": "Breyans Andrés Toledo Quintana",
-          "tipo": "INSTALACIÓN",
-          "dias": "219 días"
-        },
-        {
-          "id_ot": "OS-32311",
-          "responsable": "Victor Hugo Bahamonde Bustamante",
-          "tipo": "CORRECTIVA",
-          "dias": "219 días"
-        },
-        {
-          "id_ot": "OS-32313",
-          "responsable": "Iván Ignacio Vergara Ferrari",
-          "tipo": "INSTALACIÓN",
-          "dias": "219 días"
-        },
-        {
-          "id_ot": "OS-32315",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "tipo": "PREVENTIVA POR HORAS DE FUNCIONAMIENTO",
-          "dias": "219 días"
-        },
-        {
-          "id_ot": "OS-32336",
-          "responsable": "Jorge Cáceres Hormaechea",
-          "tipo": "CORRECTIVA",
-          "dias": "218 días"
-        },
-        {
-          "id_ot": "OS-32345",
-          "responsable": "Javier Hein Pacheco",
-          "tipo": "PREVENTIVA POR HORAS DE FUNCIONAMIENTO",
-          "dias": "218 días"
-        },
-        {
-          "id_ot": "OS-32358",
-          "responsable": "Juan Francisco Toro Jimenez",
-          "tipo": "PREVENTIVA POR HORAS DE FUNCIONAMIENTO",
-          "dias": "218 días"
-        },
-        {
-          "id_ot": "OS-32367",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "tipo": "FICHERO NUEVO",
-          "dias": "217 días"
-        },
-        {
-          "id_ot": "OS-32368",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "tipo": "PREVENTIVA POR HORAS DE FUNCIONAMIENTO",
-          "dias": "217 días"
-        },
-        {
-          "id_ot": "OS-32369",
-          "responsable": "Iván Ignacio Vergara Ferrari",
-          "tipo": "PREVENTIVA MENSUAL",
-          "dias": "217 días"
+          "dias": "36 días"
         }
       ]
     },
@@ -116,22 +32,22 @@
       "check_id": "CHK-050",
       "nivel": "CRÍTICO",
       "categoria": "TEMPORAL",
-      "descripcion": "12 OTs con fechas imposibles (fin o inicio anterior a creación) — produce horas_resolución negativas → SLA siempre aparece como CUMPLE.",
-      "n_afectados": 12,
+      "descripcion": "8 OTs con fechas imposibles (fin o inicio anterior a creación) — produce horas_resolución negativas → SLA siempre aparece como CUMPLE.",
+      "n_afectados": 8,
       "detalle": [
-        {
-          "id_ot": "OS-34546",
-          "responsable": "Carlos Alberto Avila Palacios",
-          "problema": "finalización < creación",
-          "creacion": "2026-01-26",
-          "finalizacion": "2026-01-25"
-        },
         {
           "id_ot": "OS-34539",
           "responsable": "Edison Jhon Carrasco Navarro",
           "problema": "inicio < creación",
           "creacion": "2026-01-26",
           "inicio": "2026-01-16"
+        },
+        {
+          "id_ot": "OS-36914",
+          "responsable": "Erwin Maximiliano Rivera Talamilla",
+          "problema": "inicio < creación",
+          "creacion": "2026-04-24",
+          "inicio": "2026-04-23"
         },
         {
           "id_ot": "OS-34440",
@@ -141,25 +57,11 @@
           "finalizacion": "2026-01-16"
         },
         {
-          "id_ot": "OS-36425",
-          "responsable": "Erwin Maximiliano Rivera Talamilla",
-          "problema": "inicio < creación",
-          "creacion": "2026-04-07",
-          "inicio": "2026-04-06"
-        },
-        {
-          "id_ot": "OS-36914",
+          "id_ot": "OS-36461",
           "responsable": "Erwin Maximiliano Rivera Talamilla",
           "problema": "finalización < creación",
-          "creacion": "2026-04-24",
-          "finalizacion": "2026-04-23"
-        },
-        {
-          "id_ot": "OS-35886",
-          "responsable": "Iván Ignacio Vergara Ferrari",
-          "problema": "inicio < creación",
-          "creacion": "2026-03-17",
-          "inicio": "2026-03-11"
+          "creacion": "2026-04-08",
+          "finalizacion": "2026-04-07"
         },
         {
           "id_ot": "OS-36534",
@@ -169,39 +71,25 @@
           "finalizacion": "2026-04-09"
         },
         {
-          "id_ot": "OS-33584",
-          "responsable": "Juan Pablo Valle Guerrero",
+          "id_ot": "OS-36425",
+          "responsable": "Erwin Maximiliano Rivera Talamilla",
           "problema": "inicio < creación",
-          "creacion": "2025-12-18",
-          "inicio": "2025-12-17"
+          "creacion": "2026-04-07",
+          "inicio": "2026-04-06"
         },
         {
-          "id_ot": "OS-33457",
-          "responsable": "Erwin Maximiliano Rivera Talamilla",
+          "id_ot": "OS-34546",
+          "responsable": "Carlos Alberto Avila Palacios",
           "problema": "finalización < creación",
-          "creacion": "2025-12-15",
-          "finalizacion": "2025-12-13"
+          "creacion": "2026-01-26",
+          "finalizacion": "2026-01-25"
         },
         {
-          "id_ot": "OS-36461",
-          "responsable": "Erwin Maximiliano Rivera Talamilla",
-          "problema": "finalización < creación",
-          "creacion": "2026-04-08",
-          "finalizacion": "2026-04-07"
-        },
-        {
-          "id_ot": "OS-32476",
-          "responsable": "Erwin Maximiliano Rivera Talamilla",
-          "problema": "finalización < creación",
-          "creacion": "2025-11-11",
-          "finalizacion": "2025-11-10"
-        },
-        {
-          "id_ot": "OS-33081",
-          "responsable": "Juan Antonio Gallardo Romero",
-          "problema": "finalización < creación",
-          "creacion": "2025-12-01",
-          "finalizacion": "2025-11-28"
+          "id_ot": "OS-35886",
+          "responsable": "Iván Ignacio Vergara Ferrari",
+          "problema": "inicio < creación",
+          "creacion": "2026-03-17",
+          "inicio": "2026-03-11"
         }
       ]
     },
@@ -209,33 +97,33 @@
       "check_id": "CHK-011",
       "nivel": "INFO",
       "categoria": "NULOS",
-      "descripcion": "98 OTs correctivas sin tipo de falla (F.N.A.O / F.A.O / etc.) — afecta análisis de reincidencias y KPI Llenado. Solo el técnico puede completar este campo.",
-      "n_afectados": 98,
+      "descripcion": "69 OTs correctivas sin tipo de falla (F.N.A.O / F.A.O / etc.) — afecta análisis de reincidencias y KPI Llenado. Solo el técnico puede completar este campo.",
+      "n_afectados": 69,
       "detalle": [
         {
-          "id_ot": "OS-34642",
-          "responsable": "Jaime Ocampo",
-          "fecha": "2026-01-28"
+          "id_ot": "OS-38154",
+          "responsable": "Edson José Pérez Henríquez",
+          "fecha": "2026-06-16"
         },
         {
-          "id_ot": "OS-33047",
-          "responsable": "Juan Francisco Toro Jimenez",
-          "fecha": "2025-11-28"
+          "id_ot": "OS-38021",
+          "responsable": "Walter Mauricio Soto Curilen",
+          "fecha": "2026-06-10"
         },
         {
-          "id_ot": "OS-36327",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "fecha": "2026-04-02"
+          "id_ot": "OS-35272",
+          "responsable": "Victor Hugo Bahamonde Bustamante",
+          "fecha": "2026-02-20"
         },
         {
-          "id_ot": "OS-34619",
-          "responsable": "Juan Antonio Gallardo Romero",
-          "fecha": "2026-01-27"
+          "id_ot": "OS-34121",
+          "responsable": "Luis Alberto Pinto Jofre",
+          "fecha": "2026-01-11"
         },
         {
-          "id_ot": "OS-36299",
-          "responsable": "Martín Ignacio Flores Galaz",
-          "fecha": "2026-04-02"
+          "id_ot": "OS-34801",
+          "responsable": "Victor Hugo Bahamonde Bustamante",
+          "fecha": "2026-02-02"
         },
         {
           "id_ot": "OS-34442",
@@ -243,42 +131,42 @@
           "fecha": "2026-01-21"
         },
         {
-          "id_ot": "OS-34440",
-          "responsable": "Victor Hugo Bahamonde Bustamante",
-          "fecha": "2026-01-21"
-        },
-        {
-          "id_ot": "OS-34367",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "fecha": "2026-01-19"
-        },
-        {
-          "id_ot": "OS-34337",
+          "id_ot": "OS-35256",
           "responsable": "Juan Francisco Toro Jimenez",
-          "fecha": "2026-01-19"
+          "fecha": "2026-02-20"
         },
         {
-          "id_ot": "OS-34310",
+          "id_ot": "OS-37735",
+          "responsable": "Juan Francisco Toro Jimenez",
+          "fecha": "2026-05-31"
+        },
+        {
+          "id_ot": "OS-33670",
+          "responsable": "Luis Joel Lopez Isla",
+          "fecha": "2025-12-21"
+        },
+        {
+          "id_ot": "OS-37923",
           "responsable": "Edson José Pérez Henríquez",
-          "fecha": "2026-01-17"
+          "fecha": "2026-06-07"
         },
         {
-          "id_ot": "OS-33177",
-          "responsable": "Iván Ignacio Vergara Ferrari",
-          "fecha": "2025-12-03"
+          "id_ot": "OS-36424",
+          "responsable": "Erwin Maximiliano Rivera Talamilla",
+          "fecha": "2026-04-07"
         },
         {
-          "id_ot": "OS-34250",
-          "responsable": "Victor Hugo Bahamonde Bustamante",
-          "fecha": "2026-01-14"
+          "id_ot": "OS-36423",
+          "responsable": "Erwin Maximiliano Rivera Talamilla",
+          "fecha": "2026-04-07"
         },
         {
           "top_responsables": {
-            "AUTEC LTDA": 12,
-            "Victor Hugo Bahamonde Bustamante": 10,
-            "Breyans Andrés Toledo Quintana": 9,
-            "Jorge Raúl  Rodríguez Fuentes": 8,
-            "Iván Ignacio Vergara Ferrari": 7
+            "AUTEC LTDA": 10,
+            "Victor Hugo Bahamonde Bustamante": 7,
+            "Edson José Pérez Henríquez": 5,
+            "Luis Alberto Pinto Jofre": 5,
+            "Luis Joel Lopez Isla": 5
           }
         }
       ]
@@ -287,33 +175,33 @@
       "check_id": "CHK-012",
       "nivel": "INFO",
       "categoria": "NULOS",
-      "descripcion": "98 OTs correctivas sin causa raíz — impacta KPI Llenado (score_causa = 0). Solo el técnico puede completar este campo.",
-      "n_afectados": 98,
+      "descripcion": "69 OTs correctivas sin causa raíz — impacta KPI Llenado (score_causa = 0). Solo el técnico puede completar este campo.",
+      "n_afectados": 69,
       "detalle": [
         {
-          "id_ot": "OS-34642",
-          "responsable": "Jaime Ocampo",
-          "fecha": "2026-01-28"
+          "id_ot": "OS-38154",
+          "responsable": "Edson José Pérez Henríquez",
+          "fecha": "2026-06-16"
         },
         {
-          "id_ot": "OS-33047",
-          "responsable": "Juan Francisco Toro Jimenez",
-          "fecha": "2025-11-28"
+          "id_ot": "OS-38021",
+          "responsable": "Walter Mauricio Soto Curilen",
+          "fecha": "2026-06-10"
         },
         {
-          "id_ot": "OS-36327",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "fecha": "2026-04-02"
+          "id_ot": "OS-35272",
+          "responsable": "Victor Hugo Bahamonde Bustamante",
+          "fecha": "2026-02-20"
         },
         {
-          "id_ot": "OS-34619",
-          "responsable": "Juan Antonio Gallardo Romero",
-          "fecha": "2026-01-27"
+          "id_ot": "OS-34121",
+          "responsable": "Luis Alberto Pinto Jofre",
+          "fecha": "2026-01-11"
         },
         {
-          "id_ot": "OS-36299",
-          "responsable": "Martín Ignacio Flores Galaz",
-          "fecha": "2026-04-02"
+          "id_ot": "OS-34801",
+          "responsable": "Victor Hugo Bahamonde Bustamante",
+          "fecha": "2026-02-02"
         },
         {
           "id_ot": "OS-34442",
@@ -321,42 +209,42 @@
           "fecha": "2026-01-21"
         },
         {
-          "id_ot": "OS-34440",
-          "responsable": "Victor Hugo Bahamonde Bustamante",
-          "fecha": "2026-01-21"
-        },
-        {
-          "id_ot": "OS-34367",
-          "responsable": "Jorge Raúl  Rodríguez Fuentes",
-          "fecha": "2026-01-19"
-        },
-        {
-          "id_ot": "OS-34337",
+          "id_ot": "OS-35256",
           "responsable": "Juan Francisco Toro Jimenez",
-          "fecha": "2026-01-19"
+          "fecha": "2026-02-20"
         },
         {
-          "id_ot": "OS-34310",
+          "id_ot": "OS-37735",
+          "responsable": "Juan Francisco Toro Jimenez",
+          "fecha": "2026-05-31"
+        },
+        {
+          "id_ot": "OS-33670",
+          "responsable": "Luis Joel Lopez Isla",
+          "fecha": "2025-12-21"
+        },
+        {
+          "id_ot": "OS-37923",
           "responsable": "Edson José Pérez Henríquez",
-          "fecha": "2026-01-17"
+          "fecha": "2026-06-07"
         },
         {
-          "id_ot": "OS-33177",
-          "responsable": "Iván Ignacio Vergara Ferrari",
-          "fecha": "2025-12-03"
+          "id_ot": "OS-36424",
+          "responsable": "Erwin Maximiliano Rivera Talamilla",
+          "fecha": "2026-04-07"
         },
         {
-          "id_ot": "OS-34250",
-          "responsable": "Victor Hugo Bahamonde Bustamante",
-          "fecha": "2026-01-14"
+          "id_ot": "OS-36423",
+          "responsable": "Erwin Maximiliano Rivera Talamilla",
+          "fecha": "2026-04-07"
         },
         {
           "top_responsables": {
-            "AUTEC LTDA": 12,
-            "Victor Hugo Bahamonde Bustamante": 10,
-            "Breyans Andrés Toledo Quintana": 9,
-            "Jorge Raúl  Rodríguez Fuentes": 8,
-            "Iván Ignacio Vergara Ferrari": 7
+            "AUTEC LTDA": 10,
+            "Victor Hugo Bahamonde Bustamante": 7,
+            "Edson José Pérez Henríquez": 5,
+            "Luis Alberto Pinto Jofre": 5,
+            "Luis Joel Lopez Isla": 5
           }
         }
       ]
@@ -365,14 +253,9 @@
       "check_id": "CHK-042",
       "nivel": "ADVERTENCIA",
       "categoria": "COBERTURA",
-      "descripcion": "140 EDS activas sin ningún PM en los últimos 45 días — posible incumplimiento contractual de frecuencia de mantenimiento.",
-      "n_afectados": 140,
+      "descripcion": "128 EDS activas sin ningún PM en los últimos 45 días — posible incumplimiento contractual de frecuencia de mantenimiento.",
+      "n_afectados": 128,
       "detalle": [
-        {
-          "eds_occim": "ABAS-03",
-          "nombre": "E/S Av.José Pedro Alessandri N° 1039, Ñuñoa (Macul Grecia)",
-          "cliente": "ABASTIBLE"
-        },
         {
           "eds_occim": "BLB",
           "nombre": "BODEGA LUCAS BLANDFORD",
@@ -416,6 +299,11 @@
         {
           "eds_occim": "10238",
           "nombre": "E/S Pedro Prado 2345  Iquique",
+          "cliente": "COPEC"
+        },
+        {
+          "eds_occim": "60141",
+          "nombre": "E/S San Pablo 2602/Cueto",
           "cliente": "COPEC"
         },
         {
@@ -464,19 +352,18 @@
           "cliente": "COPEC"
         },
         {
-          "eds_occim": "40021",
-          "nombre": "E/S Av. Valparaíso Nº 1160 /esq Limache, Viña del mar",
+          "eds_occim": "10421",
+          "nombre": "E/S Anibal Pinto 1377, Iquique",
           "cliente": "COPEC"
         },
         {
           "resumen_por_cliente": {
-            "COPEC": 43,
+            "COPEC": 36,
             "OCCIMIANO": 9,
-            "ESMAX (Aramco)": 43,
+            "ESMAX (Aramco)": 42,
             "PARTICULAR": 20,
             "TERPEL COL": 1,
-            "SHELL (Enex)": 22,
-            "ABASTIBLE": 1,
+            "SHELL (Enex)": 19,
             "BLANDFORD": 1
           }
         }
@@ -595,8 +482,8 @@
       "check_id": "CHK-122",
       "nivel": "ADVERTENCIA",
       "categoria": "PIPELINE",
-      "descripcion": "12 llamados con horas_resolución fuera de rango (11 negativos, 1 > 720h) — error en fechas de origen o en el cálculo del ETL.",
-      "n_afectados": 12,
+      "descripcion": "23 llamados con horas_resolución fuera de rango (23 negativos, 0 > 720h) — error en fechas de origen o en el cálculo del ETL.",
+      "n_afectados": 23,
       "detalle": [
         {
           "os_fracttal": "OS-34440",
@@ -611,22 +498,46 @@
           "horas": -22.5
         },
         {
+          "os_fracttal": "OS-34546",
+          "cliente": "COPEC",
+          "prioridad": "P1",
+          "horas": -21.0
+        },
+        {
+          "os_fracttal": "OS-36534",
+          "cliente": "ESMAX (Aramco)",
+          "prioridad": "P1",
+          "horas": -20.9
+        },
+        {
+          "os_fracttal": "OS-35257",
+          "cliente": "ESMAX (Aramco)",
+          "prioridad": "P3",
+          "horas": -11.8
+        },
+        {
           "os_fracttal": "OS-34209",
           "cliente": "ESMAX (Aramco)",
           "prioridad": "P2",
           "horas": -6.7
         },
         {
-          "os_fracttal": "OS-36534",
-          "cliente": "ESMAX (Aramco)",
-          "prioridad": "P1",
-          "horas": -4.8
-        },
-        {
           "os_fracttal": "OS-34667",
           "cliente": "COPEC",
           "prioridad": "P1",
+          "horas": -6.5
+        },
+        {
+          "os_fracttal": "OS-35878",
+          "cliente": "COPEC",
+          "prioridad": "P3",
           "horas": -3.9
+        },
+        {
+          "os_fracttal": "OS-34520",
+          "cliente": "COPEC",
+          "prioridad": "P3",
+          "horas": -3.7
         },
         {
           "os_fracttal": "OS-35175",
@@ -641,10 +552,16 @@
           "horas": -1.6
         },
         {
+          "os_fracttal": "OS-35924",
+          "cliente": "COPEC",
+          "prioridad": "P1",
+          "horas": -1.3
+        },
+        {
           "os_fracttal": "OS-35469",
           "cliente": "COPEC",
           "prioridad": "P3",
-          "horas": -1.1
+          "horas": -1.2
         },
         {
           "os_fracttal": "OS-36540",
@@ -657,38 +574,6 @@
           "cliente": "SHELL (Enex)",
           "prioridad": "P3",
           "horas": -0.8
-        },
-        {
-          "os_fracttal": "OS-37706",
-          "cliente": "COPEC",
-          "prioridad": "P3",
-          "horas": -0.5
-        },
-        {
-          "os_fracttal": "OS-36625",
-          "cliente": "COPEC",
-          "prioridad": "P2",
-          "horas": 1153.5
-        }
-      ]
-    },
-    {
-      "check_id": "CHK-131",
-      "nivel": "ADVERTENCIA",
-      "categoria": "INTEGRIDAD",
-      "descripcion": "1 OTs sin codigo_eds — no aparecen en ningún KPI por Estación ni en el mapa de cobertura.",
-      "n_afectados": 1,
-      "detalle": [
-        {
-          "id_ot": "OS-32382",
-          "responsable": "Ana María Guzman Doddis",
-          "tipo": "ENTREGA DE INSUMOS Y/O REPUESTOS",
-          "fecha": "2025-11-07"
-        },
-        {
-          "top_tipo_tarea": {
-            "ENTREGA DE INSUMOS Y/O REPUESTOS": 1
-          }
         }
       ]
     },
@@ -696,14 +581,14 @@
       "check_id": "CHK-200",
       "nivel": "CRÍTICO",
       "categoria": "PIPELINE",
-      "descripcion": "Fracttal tiene 2000 OTs en los últimos 30 días, Supabase tiene 748 — diferencia de +1252 OTs (62.6%). El sync podría estar perdiendo o retrasando registros.",
-      "n_afectados": 1252,
+      "descripcion": "Fracttal tiene 2000 OTs en los últimos 30 días, Supabase tiene 710 — diferencia de +1290 OTs (64.5%). El sync podría estar perdiendo o retrasando registros.",
+      "n_afectados": 1290,
       "detalle": [
         {
           "fracttal_ultimos_30d": 2000,
-          "supabase_ultimos_30d": 748,
-          "diferencia": 1252,
-          "porcentaje": "62.6%",
+          "supabase_ultimos_30d": 710,
+          "diferencia": 1290,
+          "porcentaje": "64.5%",
           "ventana_dias": 30
         }
       ]
@@ -712,68 +597,68 @@
       "check_id": "CHK-201",
       "nivel": "CRÍTICO",
       "categoria": "PIPELINE",
-      "descripcion": "187 OTs de los últimos 7 días existen en Fracttal pero NO en Supabase — el sync tiene un retraso o está perdiendo registros.",
-      "n_afectados": 187,
+      "descripcion": "179 OTs de los últimos 7 días existen en Fracttal pero NO en Supabase — el sync tiene un retraso o está perdiendo registros.",
+      "n_afectados": 179,
       "detalle": [
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37705"
+          "folio_fracttal_faltante_en_supabase": "OS-37789"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37706"
+          "folio_fracttal_faltante_en_supabase": "OS-37790"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37707"
+          "folio_fracttal_faltante_en_supabase": "OS-37791"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37708"
+          "folio_fracttal_faltante_en_supabase": "OS-37792"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37709"
+          "folio_fracttal_faltante_en_supabase": "OS-37793"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37710"
+          "folio_fracttal_faltante_en_supabase": "OS-37794"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37711"
+          "folio_fracttal_faltante_en_supabase": "OS-37795"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37712"
+          "folio_fracttal_faltante_en_supabase": "OS-37796"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37713"
+          "folio_fracttal_faltante_en_supabase": "OS-37797"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37714"
+          "folio_fracttal_faltante_en_supabase": "OS-37798"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37715"
+          "folio_fracttal_faltante_en_supabase": "OS-37799"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37716"
+          "folio_fracttal_faltante_en_supabase": "OS-37800"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37717"
+          "folio_fracttal_faltante_en_supabase": "OS-37801"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37718"
+          "folio_fracttal_faltante_en_supabase": "OS-37802"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37719"
+          "folio_fracttal_faltante_en_supabase": "OS-37803"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37720"
+          "folio_fracttal_faltante_en_supabase": "OS-37804"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37721"
+          "folio_fracttal_faltante_en_supabase": "OS-37805"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37722"
+          "folio_fracttal_faltante_en_supabase": "OS-37806"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37723"
+          "folio_fracttal_faltante_en_supabase": "OS-37807"
         },
         {
-          "folio_fracttal_faltante_en_supabase": "OS-37724"
+          "folio_fracttal_faltante_en_supabase": "OS-37808"
         }
       ]
     },
@@ -781,11 +666,11 @@
       "check_id": "CHK-300",
       "nivel": "ADVERTENCIA",
       "categoria": "EXPLORATORIO",
-      "descripcion": "COPEC — comparación Excel vs Supabase (referencia, no acción): 388 OS con prioridad distinta entre Excel y Supabase.",
-      "n_afectados": 388,
+      "descripcion": "COPEC — comparación Excel vs Supabase (referencia, no acción): 380 OS con prioridad distinta entre Excel y Supabase.",
+      "n_afectados": 380,
       "detalle": [
         {
-          "discrepancias_prioridad_count": 388,
+          "discrepancias_prioridad_count": 380,
           "nota": "verificar en Fracttal — la prioridad incorrecta cambia el umbral SLA"
         },
         {
@@ -854,8 +739,8 @@
       "check_id": "CHK-301",
       "nivel": "ADVERTENCIA",
       "categoria": "EXPLORATORIO",
-      "descripcion": "SHELL (Enex) — comparación Excel vs Supabase (referencia, no acción): 66 OS del Excel 2026 no encontradas en Supabase · 195 OS con prioridad distinta entre Excel y Supabase.",
-      "n_afectados": 261,
+      "descripcion": "SHELL (Enex) — comparación Excel vs Supabase (referencia, no acción): 66 OS del Excel 2026 no encontradas en Supabase · 197 OS con prioridad distinta entre Excel y Supabase.",
+      "n_afectados": 263,
       "detalle": [
         {
           "solo_en_excel_count": 66,
@@ -898,8 +783,14 @@
           "os_solo_en_excel": "OS-35061"
         },
         {
-          "discrepancias_prioridad_count": 195,
+          "discrepancias_prioridad_count": 197,
           "nota": "verificar en Fracttal — la prioridad incorrecta cambia el umbral SLA"
+        },
+        {
+          "os_fracttal": "OS-33911",
+          "prioridad_excel": "P2",
+          "prioridad_supabase": "P3",
+          "nota": "verificar en Fracttal cuál es la correcta"
         },
         {
           "os_fracttal": "OS-33910",
@@ -954,12 +845,6 @@
           "prioridad_excel": "P2",
           "prioridad_supabase": "P3",
           "nota": "verificar en Fracttal cuál es la correcta"
-        },
-        {
-          "os_fracttal": "OS-34167",
-          "prioridad_excel": "P2",
-          "prioridad_supabase": "P1",
-          "nota": "verificar en Fracttal cuál es la correcta"
         }
       ]
     },
@@ -967,11 +852,11 @@
       "check_id": "CHK-302",
       "nivel": "ADVERTENCIA",
       "categoria": "EXPLORATORIO",
-      "descripcion": "ESMAX (Aramco) — comparación Excel vs Supabase (referencia, no acción): 204 OS con prioridad distinta entre Excel y Supabase.",
-      "n_afectados": 204,
+      "descripcion": "ESMAX (Aramco) — comparación Excel vs Supabase (referencia, no acción): 206 OS con prioridad distinta entre Excel y Supabase.",
+      "n_afectados": 206,
       "detalle": [
         {
-          "discrepancias_prioridad_count": 204,
+          "discrepancias_prioridad_count": 206,
           "nota": "verificar en Fracttal — la prioridad incorrecta cambia el umbral SLA"
         },
         {
@@ -1033,6 +918,23 @@
           "prioridad_excel": "P1",
           "prioridad_supabase": "P2",
           "nota": "verificar en Fracttal cuál es la correcta"
+        }
+      ]
+    },
+    {
+      "check_id": "CHK-403",
+      "nivel": "ADVERTENCIA",
+      "categoria": "PREVENTIVAS",
+      "descripcion": "72 OTs preventivas con estado_tarea no reconocido (DONE, NO_STARTED) — agregar al mapeo en map_task_status() de sync_supabase.py.",
+      "n_afectados": 72,
+      "detalle": [
+        {
+          "estado_tarea_sin_mapear": "DONE",
+          "n_ots": 51
+        },
+        {
+          "estado_tarea_sin_mapear": "NO_STARTED",
+          "n_ots": 21
         }
       ]
     }

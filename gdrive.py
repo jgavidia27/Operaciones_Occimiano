@@ -708,7 +708,7 @@ def resolve_llamados_eds_codes(df_llamados: pd.DataFrame, df_eds: pd.DataFrame) 
 
     df = df_llamados.copy()
 
-    for client_label, search_key in [("ESMAX (Aramco)", "ESMAX"), ("SHELL (Enex)", "SHELL")]:
+    for client_label, search_key in [("Aramco (Esmax)", "ESMAX"), ("ESMAX (Aramco)", "ESMAX"), ("SHELL (Enex)", "SHELL")]:
         mask = df.get("cliente", pd.Series(dtype=str)) == client_label
         if not mask.any():
             continue
@@ -728,10 +728,11 @@ def resolve_llamados_eds_codes(df_llamados: pd.DataFrame, df_eds: pd.DataFrame) 
                 code_map[nid] = str(row["eds_occim"])
 
         def _translate(x: str) -> str:
-            try:
-                return code_map.get(int(str(x).strip()), x)
-            except (ValueError, TypeError):
-                return x
+            # Acepta tanto "38" (legacy) como "EE_S038" / "SH_36" (Supabase)
+            nid = _eds_numeric_id(x)
+            if nid > 0:
+                return code_map.get(nid, x)
+            return x
 
         df.loc[mask, "eds_occim"] = df.loc[mask, "eds_occim"].apply(_translate)
 

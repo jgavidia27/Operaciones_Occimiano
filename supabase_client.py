@@ -9,6 +9,7 @@ que las originales en api.py y gdrive.py para compatibilidad.
 """
 
 import os
+import re
 import requests
 import streamlit as st
 import pandas as pd
@@ -153,11 +154,19 @@ def load_listado_eds_supabase() -> pd.DataFrame:
         "zona":              "zona_occim",
         "loc_fracttal":      "_loc_code",
         "barcode_cliente":   "_cód_cliente_f",
-        "cod_occim_fracttal":"_cod_occim_frac",
+        # eds_occim_raw = código Fracttal original (EE_S###) — necesario para
+        # que resolve_llamados_eds_codes traduzca EE_S → PBR en llamados ESMAX
+        "cod_occim_fracttal":"eds_occim_raw",
     })
+    # Alias de compatibilidad para tablas que todavía usen el nombre antiguo
+    if "eds_occim_raw" in df.columns:
+        df["_cod_occim_frac"] = df["eds_occim_raw"]
     # Compatibilidad: campos que el dashboard espera
     if "nombre" in df.columns:
         df["direccion"] = df["nombre"]
+    # Normalizar etiqueta del cliente: "ESMAX (Aramco)" → "Aramco (Esmax)"
+    if "cliente" in df.columns:
+        df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
     return df
 
 
@@ -213,11 +222,56 @@ def load_equipos_supabase() -> dict:
 # 4. LLAMADOS SLA  (reemplaza load_all_llamados / Excel COPEC+Shell+ESMAX)
 # ═════════════════════════════════════════════════════════════════════════════
 
+_PAT_SLA_COPEC = re.compile(r"Tiempo\s+de\s+respuesta\s*:\s*(\d+)", re.IGNORECASE)
+
+# Umbral en horas: {prioridad: (horas_RM, horas_Regiones)}
+_COPEC_UMBRALES: dict[str, tuple[int, int]] = {
+    "P1": (18, 24),
+    "P2": (24, 48),
+    "P3": (36, 72),
+    "P4": (96, 96),
+}
+
+def _copec_prio_from_nota(nota: str, zona: str) -> "tuple[str, int] | None":
+    """
+    Deriva (prioridad, umbral_horas) para un OT COPEC leyendo nota_tarea.
+    Retorna None si no hay 'Tiempo de respuesta' en la nota.
+
+    Tabla SLA COPEC:
+      P1: Santiago=18h, Regiones=24h
+      P2: Santiago=24h, Regiones=48h
+      P3: Santiago=36h, Regiones=72h
+      P4: cualquier zona=96h
+
+    Mapeo inequívoco:   18h→P1  36h→P3  48h→P2  72h→P3  96h→P4
+    Ambiguo:            24h → P2 si Santiago, P1 si Regiones
+    """
+    m = _PAT_SLA_COPEC.search(nota or "")
+    if not m:
+        return None
+    sla_h = int(m.group(1))
+    es_reg = "santiago" not in (zona or "").lower()
+
+    # Derivar prioridad desde SLA declarado en el correo
+    _SLA_TO_PRIO: dict[int, str] = {18: "P1", 36: "P3", 48: "P2", 72: "P3", 96: "P4"}
+    if sla_h in _SLA_TO_PRIO:
+        prio = _SLA_TO_PRIO[sla_h]
+    elif sla_h == 24:
+        prio = "P1" if es_reg else "P2"   # ambiguo: necesita zona
+    else:
+        return None  # SLA desconocido → no modificar
+
+    umbral = _COPEC_UMBRALES[prio][1 if es_reg else 0]
+    return prio, umbral
+
+
 def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
     """No usa @st.cache_data — el dashboard lo cachea via _sc() para control total."""
     """
     Retorna DataFrame compatible con load_all_llamados().
     Lee desde v_llamados_sla (vista que replica estructura del Excel).
+    La prioridad COPEC se recalcula desde nota_tarea para que el sync
+    de Fracttal no distorsione los resultados.
     """
     rows = _query(
         "v_llamados_sla",
@@ -254,6 +308,10 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
     df["fecha_atencion"] = df["fecha_atencion"].apply(_safe_ts)
     df["fecha_llamado_dt"] = df["fecha_llamado"]
 
+    # Normalizar etiqueta del cliente: "ESMAX (Aramco)" → "Aramco (Esmax)"
+    if "cliente" in df.columns:
+        df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
+
     # Mapear cumplimiento al formato original
     df["cumplimiento"] = df["cumplimiento"].replace({
         "CUMPLE":    "CUMPLE",
@@ -265,6 +323,38 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
     # Campo Año y Mes (compatibilidad)
     df["Año"] = df["fecha_llamado"].dt.year
     df["Mes"] = df["fecha_llamado"].dt.month
+
+    # ── Corrección de prioridad COPEC desde nota_tarea ────────────────────────
+    # Fracttal sobreescribe prioridad_calc con su propio campo (poco confiable).
+    # Aquí leemos nota_tarea para COPEC y recalculamos prioridad + umbral
+    # en tiempo de lectura, garantizando datos correctos en el dashboard.
+    copec_idx = df.index[df["cliente"] == "COPEC"].tolist()
+    if copec_idx:
+        copec_ids = df.loc[copec_idx, "os_fracttal"].tolist()
+        # Cargar nota_tarea en lotes (máx 200 por URL)
+        notas: dict[str, str] = {}
+        chunk_size = 200
+        for i in range(0, len(copec_ids), chunk_size):
+            chunk = copec_ids[i : i + chunk_size]
+            nota_rows = _query(
+                "ordenes_trabajo",
+                f"select=id_ot,nota_tarea&id_ot=in.({','.join(chunk)})",
+                limit=len(chunk) + 1,
+            )
+            for r in nota_rows:
+                if r.get("nota_tarea"):
+                    notas[r["id_ot"]] = r["nota_tarea"]
+
+        # Recalcular prioridad y umbral fila a fila para COPEC
+        for idx in copec_idx:
+            ot   = df.at[idx, "os_fracttal"]
+            nota = notas.get(ot, "")
+            zona = str(df.at[idx, "zona"] or "")
+            result = _copec_prio_from_nota(nota, zona)
+            if result:
+                nueva_prio, nuevo_umbral = result
+                df.at[idx, "prioridad"]       = nueva_prio
+                df.at[idx, "tiempo_resp_esp"] = nuevo_umbral
 
     return df
 
@@ -300,7 +390,7 @@ def load_preventivas_supabase() -> list:
     return _query(
         "ordenes_trabajo",
         "select=id_ot,estado,estado_tarea,nombre_tarea,tipo_tarea,"
-        "activador,duracion_estimada,tiempo_ejecucion,"
+        "activador,fecha_inicio,duracion_estim_seg,duracion_real_seg,"
         "codigo_activo,nombre_activo,ubicacion,clasificacion_2,"
         "responsable,fecha_creacion,fecha_finalizacion,fecha_programada"
         "&tipo_tarea=ilike.*PREVENTIV*"
@@ -317,17 +407,69 @@ def load_preventivas_supabase() -> list:
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_cotalker_index_supabase() -> dict:
     """
-    Retorna {id_ot: n_cotalker (int)} para todas las OTs que tienen
-    el campo n_cotalker poblado en Supabase.
-    Solo aplica a ESMAX/Aramco (únicos que usan Cotalker).
+    Retorna {id_ot: str} con el N° de aviso/referencia del cliente para cada OT:
+      - ESMAX/Aramco: campo n_cotalker (sistema Cotalker)
+      - COPEC: campo nota_tarea parseado → "No. Aviso: XXXXXXXX"
     """
-    rows = _query(
+    import re
+    _pat_aviso = re.compile(r"No\.\s*Aviso\s*:\s*(\d+)", re.IGNORECASE)
+    result: dict = {}
+
+    # 1) Aramco/ESMAX — campo n_cotalker directo
+    rows_cot = _query(
         "ordenes_trabajo",
         "select=id_ot,n_cotalker&n_cotalker=not.is.null",
         limit=5_000,
     )
-    return {
-        r["id_ot"]: int(r["n_cotalker"])
-        for r in rows
-        if r.get("id_ot") and r.get("n_cotalker")
-    }
+    for r in rows_cot:
+        if r.get("id_ot") and r.get("n_cotalker"):
+            result[r["id_ot"]] = str(int(r["n_cotalker"]))
+
+    # 2) COPEC  → "No. Aviso: XXXXXXXX"
+    #    SHELL  → 'ID Solicitud "XXXX"' o "ID Solicitud: XXXX"
+    _pat_id_sol = re.compile(r'ID\s*Solicitud\s*["\s:]+(\d+)', re.IGNORECASE)
+
+    rows_nota = _query(
+        "ordenes_trabajo",
+        "select=id_ot,cliente,nota_tarea"
+        "&nota_tarea=not.is.null"
+        "&cliente=in.(COPEC,SHELL (Enex))",
+        limit=10_000,
+    )
+    for r in rows_nota:
+        ot      = r.get("id_ot")
+        cliente = str(r.get("cliente") or "")
+        nota    = str(r.get("nota_tarea") or "")
+        if not ot or not nota:
+            continue
+        if "COPEC" in cliente.upper():
+            m = _pat_aviso.search(nota)
+        else:                               # SHELL (Enex)
+            m = _pat_id_sol.search(nota)
+        if m:
+            result[ot] = m.group(1)
+
+    return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 8. EN VIVO — órdenes actualmente en ejecución
+# ═════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=120, show_spinner=False)
+def load_ots_en_vivo_supabase() -> list:
+    """
+    OTs en estado activo (En Progreso / Por Validar / Por Iniciar).
+    TTL = 2 min para que los datos sean frescos sin sobrecargar Supabase.
+    Incluye preventivas y correctivas desde dic-2025 en adelante.
+    """
+    return _query(
+        "ordenes_trabajo",
+        "select=id_ot,estado,estado_tarea,tipo_tarea,nombre_tarea,"
+        "responsable,codigo_activo,nombre_activo,ubicacion,cliente,estacion,codigo_eds,"
+        "prioridad,prioridad_calc,fecha_creacion,fecha_inicio,fecha_programada,"
+        "duracion_real_seg,duracion_estim_seg,tiene_numeral,tiene_recursos"
+        "&estado=in.(En Progreso,Por Validar,Por Iniciar)"
+        "&fecha_creacion=gte.2025-12-20",
+        limit=500,
+    )
