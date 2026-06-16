@@ -8462,4 +8462,46 @@ elif _page == _NAV_PAGES[2]:
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
-st.caption("Occimiano — Gestión de Indicadores v1.2 | Fracttal One API + Supabase")
+
+# Timestamps de actualización de datos
+if "_session_start" not in st.session_state:
+    st.session_state["_session_start"] = datetime.now()
+
+_ultima_ot_str = "—"
+_ultima_ll_str = "—"
+try:
+    # OT más reciente en Supabase (caché ya cargado, sin request adicional)
+    _raw_check = load_work_orders_supabase()
+    _cd_vals = [r.get("creation_date") for r in _raw_check if r.get("creation_date")]
+    if _cd_vals:
+        _max_cd = pd.Timestamp(max(_cd_vals))
+        if _max_cd.tzinfo is not None:
+            _max_cd = _max_cd.tz_convert(None)
+        _ultima_ot_str = _max_cd.strftime("%d/%m/%Y %H:%M")
+except Exception:
+    pass
+try:
+    # Llamado más reciente en Supabase (v_llamados_sla, caché vía _sc)
+    _ll_check = st.session_state.get("_sc_df_llamados_supa")
+    if _ll_check is None:
+        _ll_check = load_all_llamados_supabase()
+    if isinstance(_ll_check, pd.DataFrame) and not _ll_check.empty and "fecha_llamado" in _ll_check.columns:
+        _max_ll = pd.to_datetime(_ll_check["fecha_llamado"], errors="coerce").max()
+        if pd.notna(_max_ll):
+            _ultima_ll_str = _max_ll.strftime("%d/%m/%Y")
+except Exception:
+    pass
+
+_session_str = st.session_state["_session_start"].strftime("%d/%m/%Y %H:%M")
+_footer_col1, _footer_col2 = st.columns([5, 5])
+with _footer_col1:
+    st.caption("Occimiano — Gestión de Indicadores v1.2 | Fracttal One API + Supabase")
+with _footer_col2:
+    st.markdown(
+        f'<div style="text-align:right;color:#94a3b8;font-size:0.72rem;line-height:1.6;">'
+        f'📦 Última OT en Supabase: <b>{_ultima_ot_str}</b> &nbsp;·&nbsp; '
+        f'📋 Último llamado: <b>{_ultima_ll_str}</b><br>'
+        f'🔄 Dashboard cargado: <b>{_session_str}</b>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
