@@ -8463,9 +8463,19 @@ elif _page == _NAV_PAGES[2]:
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
 
-# Timestamps de actualización de datos
+# Timestamps de actualización de datos — todo en hora Chile (America/Santiago)
+import pytz as _pytz
+_tz_stgo = _pytz.timezone("America/Santiago")
+
+def _to_stgo(ts) -> "pd.Timestamp":
+    """Convierte un Timestamp (con o sin tz) a hora Santiago."""
+    t = pd.Timestamp(ts)
+    if t.tzinfo is None:
+        t = t.tz_localize("UTC")   # Supabase almacena en UTC
+    return t.tz_convert(_tz_stgo)
+
 if "_session_start" not in st.session_state:
-    st.session_state["_session_start"] = datetime.now()
+    st.session_state["_session_start"] = datetime.now(_tz_stgo)
 
 _ultima_ot_str = "—"
 _ultima_ll_str = "—"
@@ -8474,10 +8484,7 @@ try:
     _raw_check = load_work_orders_supabase()
     _cd_vals = [r.get("creation_date") for r in _raw_check if r.get("creation_date")]
     if _cd_vals:
-        _max_cd = pd.Timestamp(max(_cd_vals))
-        if _max_cd.tzinfo is not None:
-            _max_cd = _max_cd.tz_convert(None)
-        _ultima_ot_str = _max_cd.strftime("%d/%m/%Y %H:%M")
+        _ultima_ot_str = _to_stgo(max(_cd_vals)).strftime("%d/%m/%Y %H:%M")
 except Exception:
     pass
 try:
@@ -8488,11 +8495,15 @@ try:
     if isinstance(_ll_check, pd.DataFrame) and not _ll_check.empty and "fecha_llamado" in _ll_check.columns:
         _max_ll = pd.to_datetime(_ll_check["fecha_llamado"], errors="coerce").max()
         if pd.notna(_max_ll):
-            _ultima_ll_str = _max_ll.strftime("%d/%m/%Y")
+            _ultima_ll_str = _to_stgo(_max_ll).strftime("%d/%m/%Y")
 except Exception:
     pass
 
-_session_str = st.session_state["_session_start"].strftime("%d/%m/%Y %H:%M")
+_session_ts = st.session_state["_session_start"]
+if hasattr(_session_ts, "strftime"):
+    _session_str = _session_ts.strftime("%d/%m/%Y %H:%M")
+else:
+    _session_str = "—"
 _footer_col1, _footer_col2 = st.columns([5, 5])
 with _footer_col1:
     st.caption("Occimiano — Gestión de Indicadores v1.2 | Fracttal One API + Supabase")
