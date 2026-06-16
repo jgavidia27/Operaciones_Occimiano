@@ -4639,10 +4639,11 @@ elif _page == _NAV_PAGES[0]:
             with _sf4:
                 if _equipo_sla != "Todos":
                     _grp_key_filt = _LABEL_TO_GRUPO.get(_equipo_sla, "")
-                    _senior_filt  = GRUPOS_TERRENO.get(_grp_key_filt, {}).get("senior", "")
-                    _miembros_filt = GRUPOS_TERRENO.get(_grp_key_filt, {}).get("miembros", [])
-                    _no_seniors_filt = [m for m in _miembros_filt if m != _senior_filt]
-                    _tec_sla_opts = ["Todos"] + sorted(_no_seniors_filt)
+                    # Nombres desde el dato real (igual que Precisión) — incluye al senior
+                    _tec_sla_opts = ["Todos"] + sorted(
+                        t for t in df_sla_src[df_sla_src["equipo"] == _grp_key_filt]["tecnico"].dropna().unique()
+                        if not _es_excluido(t)
+                    )
                 else:
                     _tec_sla_opts = ["Todos"] + sorted(
                         t for t in df_sla_src["tecnico"].dropna().unique()
@@ -5262,11 +5263,11 @@ elif _page == _NAV_PAGES[0]:
             with _rc4:
                 if _eq_rc != "Todos":
                     _grp_rc_k = _LABEL_TO_GRUPO.get(_eq_rc)
-                    _senior_rc = GRUPOS_TERRENO.get(_grp_rc_k, {}).get("senior", "")
-                    _tec_rc_opts = ["Todos"] + [
-                        m for m in GRUPOS_TERRENO.get(_grp_rc_k, {}).get("miembros", [])
-                        if m != _senior_rc
-                    ]
+                    # Nombres desde el dato real (igual que Precisión) — incluye al senior
+                    _tec_rc_opts = ["Todos"] + sorted(
+                        t for t in df_reinc[df_reinc["grupo_responsable"] == _grp_rc_k]["tecnico_responsable"].dropna().unique()
+                        if not _es_excluido(t)
+                    )
                 else:
                     _tec_rc_opts = ["Todos"] + sorted(
                         t for t in df_reinc["tecnico_responsable"].dropna().unique()
