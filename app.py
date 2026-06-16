@@ -8464,15 +8464,15 @@ elif _page == _NAV_PAGES[2]:
 st.divider()
 
 # Timestamps de actualización de datos — todo en hora Chile (America/Santiago)
-import pytz as _pytz
-_tz_stgo = _pytz.timezone("America/Santiago")
+from zoneinfo import ZoneInfo as _ZoneInfo
+_tz_stgo = _ZoneInfo("America/Santiago")
 
 def _to_stgo(ts) -> "pd.Timestamp":
     """Convierte un Timestamp (con o sin tz) a hora Santiago."""
     t = pd.Timestamp(ts)
     if t.tzinfo is None:
         t = t.tz_localize("UTC")   # Supabase almacena en UTC
-    return t.tz_convert(_tz_stgo)
+    return t.tz_convert("America/Santiago")
 
 if "_session_start" not in st.session_state:
     st.session_state["_session_start"] = datetime.now(_tz_stgo)
