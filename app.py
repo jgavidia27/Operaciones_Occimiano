@@ -7568,10 +7568,18 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 _MAX_EQ_SLA   = int(_pp_eq  * 0.40)
                 _MAX_EQ_MP    = int(_pp_eq  * 0.30)
                 _MAX_EQ_PREC  = int(_pp_eq  * 0.30)
-                # Callcenter: $100K/equipo/semana ÷ N personas × 13 semanas/trimestre
+                # Callcenter: $100K/equipo/semana — cuenta lunes reales del período activo
                 _BONO_CC_SEMANAL = 100_000
-                _BONO_CC = int(_BONO_CC_SEMANAL * 13 / _n_pool) if _n_pool > 0 else 0
-                _BONO_CC_EQ = _BONO_CC_SEMANAL * 13  # total equipo por trimestre
+                _n_semanas_cc = sum(
+                    len(pd.date_range(
+                        start=pd.Period(ms, "M").start_time,
+                        end=pd.Period(ms, "M").end_time,
+                        freq="W-MON",
+                    ))
+                    for ms in _meses_bono_activos
+                )
+                _BONO_CC = int(_BONO_CC_SEMANAL * _n_semanas_cc / _n_pool) if _n_pool > 0 else 0
+                _BONO_CC_EQ = _BONO_CC_SEMANAL * _n_semanas_cc  # total equipo por período
 
                 # ── Construir tabla HTML ──────────────────────────────────────
                 _hdr_teal = "#01798A"
@@ -7784,7 +7792,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     f'<tr style="background:{_tr_bg(6)};">'
                     f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
                     f'Callcenter <span style="color:{_t["muted"]};font-size:0.76rem;">'
-                    f'($100K/sem ÷ {_n_pool} pers × 13 sem)</span></td>'
+                    f'($100K/sem &divide; {_n_pool} pers &times; {_n_semanas_cc} sem)</span></td>'
                 )
                 for _tf in _miembros_full:
                     _html += (
