@@ -7822,6 +7822,8 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 _MAX_EQ_SLA   = int(_pp_eq  * 0.40)
                 _MAX_EQ_MP    = int(_pp_eq  * 0.30)
                 _MAX_EQ_PREC  = int(_pp_eq  * 0.30)
+                # Callcenter: monto fijo por persona por trimestre (sin medición aún)
+                _BONO_CC = 100_000
 
                 # ── Construir tabla HTML ──────────────────────────────────────
                 _hdr_teal = "#01798A"
@@ -7829,11 +7831,13 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 _row_bg_alt = _t["card"]
                 _row_bg     = _t.get("prog_bg", "#f3f4f6") if _t["card"] != "#ffffff" else "#f9fafb"
 
-                # Cabecera
+                # Cabecera — CSS last-child da fondo teal a columna EQUIPO
                 _html = (
+                    f'<style>.bono-tbl tbody tr td:last-child{{'
+                    f'background:rgba(1,121,138,0.11)!important;}}</style>'
                     f'<div style="overflow-x:auto;margin-bottom:16px;">'
-                    f'<table style="width:100%;border-collapse:collapse;font-size:0.83rem;'
-                    f'color:{_t["text"]};">'
+                    f'<table class="bono-tbl" style="width:100%;border-collapse:collapse;'
+                    f'font-size:0.83rem;color:{_t["text"]};">'
                     f'<thead><tr>'
                     f'<th style="background:{_hdr_teal};color:{_hdr_text};padding:8px 10px;'
                     f'text-align:left;min-width:160px;border-radius:6px 0 0 0;">KPI</th>'
@@ -8025,7 +8029,26 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     f'{_be_val_cell}</td></tr>'
                 )
 
-                # Fila 7: TOTAL trimestral (individual + equipo)
+                # Fila 6.5: Callcenter (fijo por trimestre)
+                _cc_cell = f'<span style="font-weight:700;">{_clp_fmt(_BONO_CC)}</span>'
+                _html += (
+                    f'<tr style="background:{_tr_bg(6)};">'
+                    f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
+                    f'Callcenter <span style="color:{_t["muted"]};font-size:0.76rem;">'
+                    f'(fijo trimestral)</span></td>'
+                )
+                for _tf in _miembros_full:
+                    _html += (
+                        f'<td style="padding:8px 10px;text-align:center;'
+                        f'border-bottom:1px solid {_t["border"]};">{_cc_cell}</td>'
+                    )
+                _html += (
+                    f'<td style="padding:8px 10px;text-align:center;'
+                    f'border-bottom:1px solid {_t["border"]};font-style:italic;">'
+                    f'{_cc_cell}</td></tr>'
+                )
+
+                # Fila 7: TOTAL trimestral (individual + equipo + callcenter)
                 _totales_trim = {}
                 _html += (
                     f'<tr style="background:{_t.get("info_bg", "#eff6ff")};">'
@@ -8042,7 +8065,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                         _MAX_IND_MP   * _niv_mp_i   / 100 +
                         _MAX_IND_PREC * _niv_prec_i / 100
                     )
-                    _total_t = _bono_ind_t + _bono_eq_est
+                    _total_t = _bono_ind_t + _bono_eq_est + _BONO_CC
                     _has_any_t = _k["pct_sla"] is not None or _k["n_pm"] > 0 or _k["pct_prec"] is not None
                     _totales_trim[_tf] = (_total_t, _has_any_t)
                     if not _has_any_t and not _eq_has_any:
