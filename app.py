@@ -3267,6 +3267,18 @@ elif _page == _NAV_PAGES[4]:
                 if _col in _df_vivo.columns:
                     _df_vivo[_col] = _df_vivo[_col].fillna("—")
 
+            # Traducir valores en inglés de Fracttal → español
+            _TAREA_MAP_VIVO = {
+                "DONE":         "Finalizada",
+                "NO_STARTED":   "No Iniciada",
+                "IN_PROGRESS":  "En Proceso",
+                "IN_REVIEW":    "En Revisión",
+                "ON_HOLD":      "En Espera",
+                "WAITING":      "En Espera",
+            }
+            if "estado_tarea" in _df_vivo.columns:
+                _df_vivo["estado_tarea"] = _df_vivo["estado_tarea"].replace(_TAREA_MAP_VIVO)
+
             _df_vivo["t_real"]      = _df_vivo["duracion_real_seg"].apply(_vivo_seg_fmt)
             _df_vivo["t_est"]       = _df_vivo["duracion_estim_seg"].apply(_vivo_seg_fmt)
             _df_vivo["avance_pct"]  = _df_vivo.apply(_vivo_avance, axis=1)
@@ -3303,6 +3315,46 @@ elif _page == _NAV_PAGES[4]:
             _kc4.metric("👷 Técnicos activos", _n_tec)
             _kc5.metric("🚨 Correctivas", _n_cm)
             _kc6.metric("🛠️ Preventivas", _n_pm)
+
+            st.divider()
+
+            # ── Trabajando Ahora ──────────────────────────────────────────────────
+            # Solo OTs cuya tarea está actualmente "En Proceso" en Fracttal
+            _df_ahora = _df_vivo[_df_vivo["estado_tarea"] == "En Proceso"].copy()
+            _n_ahora = len(_df_ahora)
+            st.markdown(
+                f'<div style="font-size:1.05rem;font-weight:700;'
+                f'margin-bottom:8px;">🟢 Trabajando ahora — {_n_ahora} técnico(s)</div>',
+                unsafe_allow_html=True,
+            )
+            if _df_ahora.empty:
+                st.info(
+                    "Ningún técnico tiene una tarea marcada como **En Proceso** en este momento. "
+                    "Los técnicos aparecen aquí cuando inician una tarea en Fracttal "
+                    "(Estado Tarea → En Proceso).",
+                    icon="ℹ️",
+                )
+            else:
+                _ahora_cols = ["id_ot", "responsable", "tipo_tarea", "cliente",
+                               "ubi_limpia", "inicio_fmt", "t_real", "t_est", "avance_pct"]
+                _df_ahora_show = _df_ahora[
+                    [c for c in _ahora_cols if c in _df_ahora.columns]
+                ].rename(columns={
+                    "id_ot": "OT", "responsable": "Técnico", "tipo_tarea": "Tipo",
+                    "cliente": "Cliente", "ubi_limpia": "Ubicación",
+                    "inicio_fmt": "Inicio", "t_real": "T. Real",
+                    "t_est": "T. Est.", "avance_pct": "Avance %",
+                })
+                st.dataframe(
+                    _df_ahora_show,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Avance %": st.column_config.ProgressColumn(
+                            min_value=0, max_value=100, format="%.0f%%", width=100
+                        ),
+                    },
+                )
 
             st.divider()
 
