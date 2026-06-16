@@ -528,8 +528,8 @@ def _show_login_page() -> None:
         padding-bottom: 0 !important;
     }}
     .block-container {{
-        padding-top: clamp(10rem, calc(50vh - 140px), 26rem) !important;
-        padding-bottom: 3rem !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
         max-width: 100% !important;
     }}
 
@@ -609,6 +609,9 @@ def _show_login_page() -> None:
     # ── Layout: espacio izquierdo (imagen) | form | padding derecho ────────
     _, _col, _ = st.columns([3.2, 1, 0.05])
     with _col:
+        # Espaciador para centrado vertical (~25% desde arriba)
+        st.markdown("<div style='height:22vh; min-height:60px;'></div>", unsafe_allow_html=True)
+
         _logo_path = _get_logo_path()
 
         with st.form("occim_login"):
