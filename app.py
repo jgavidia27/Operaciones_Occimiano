@@ -1035,7 +1035,6 @@ _NAV_PAGES = [
     "🛠️  Mantenciones Preventivas",
     "⛽  Estaciones de Servicio",
     "⌛  Utilización del Tiempo",
-    "📩  Órdenes por Cliente",
 ]
 
 # ── CSS del sidebar: colapsado / expandido (controlado por _sb_open) ─────────
@@ -1350,7 +1349,6 @@ _PAGE_TITLE = {
     _NAV_PAGES[2]: "Mantenciones Preventivas",
     _NAV_PAGES[3]: "Estaciones de Servicio",
     _NAV_PAGES[4]: "Utilización del Tiempo",
-    _NAV_PAGES[5]: "Órdenes por Cliente",
 }
 _n_ll = f"{len(df_llamados):,}" if not df_llamados.empty else "–"
 _CAPTION = (
@@ -1406,262 +1404,10 @@ def _load_wo_con_progreso(label: str = "órdenes de trabajo") -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 # PÁGINA 1: HISTORIAL FRACTTAL
 # ─────────────────────────────────────────────────────────────────────────────
-if _page == _NAV_PAGES[5]:
-    _hdr(_PAGE_TITLE[_NAV_PAGES[5]])
-    st.divider()
-    # ── Cargar OTs: Supabase (rapido) o Fracttal API (lento) ─────────────────
-    if _USE_SUPABASE:
-        raw_wo = load_work_orders_supabase()
-        if not raw_wo:
-            load_work_orders_supabase.clear()
-            raw_wo = load_work_orders_supabase()
-        if not raw_wo:
-            raw_wo = _load_wo_con_progreso("ordenes de trabajo")
-    else:
-        raw_wo = _load_wo_con_progreso("ordenes de trabajo")
-    _wo_sig = str(len(raw_wo))
-
-    _ph_hf = st.empty()
-    if st.session_state.get("_sc_sig_df_wo_base") != _wo_sig:
-        with _ph_hf.container():
-            with st.spinner(f"⚙️ Procesando {len(raw_wo):,} órdenes de trabajo…"):
-                df_wo = _sc("df_wo_base", _wo_sig, lambda: build_work_orders_df(raw_wo))
-    else:
-        df_wo = _sc("df_wo_base", _wo_sig, lambda: build_work_orders_df(raw_wo))
-    _ph_hf.empty()
-
-    if df_wo.empty:
-        st.error("No se pudo cargar información de órdenes de trabajo.")
-        st.stop()
-
-    now = pd.Timestamp.now(tz="UTC")
-
-    # ── Helpers de fecha ────────────────────────────────────────────────────
-    _MESES_ES_HF = {"01":"Enero","02":"Febrero","03":"Marzo","04":"Abril","05":"Mayo","06":"Junio",
-                    "07":"Julio","08":"Agosto","09":"Septiembre","10":"Octubre","11":"Noviembre","12":"Diciembre"}
-    def _ym_lbl_hf(ym: str) -> str:
-        p = str(ym).split("-")
-        return f"{_MESES_ES_HF.get(p[1], p[1])} {p[0][2:]}" if len(p) == 2 else ym
-
-    _TRIMESTRES_HF = {
-        "T1 · Ene–Mar": [1,2,3], "T2 · Abr–Jun": [4,5,6],
-        "T3 · Jul–Sep": [7,8,9], "T4 · Oct–Dic": [10,11,12],
-    }
-    _fl_hf = df_wo["creation_date"]
-    if _fl_hf.dt.tz is not None:
-        _fl_hf = _fl_hf.dt.tz_convert(None)
-    _meses_hf_nums  = set(_fl_hf.dt.month.dropna().astype(int).unique())
-    _trim_opts_hf   = ["Todos"] + [k for k,v in _TRIMESTRES_HF.items() if any(m in v for m in _meses_hf_nums)]
-    _mes_raw_hf     = _fl_hf.dt.to_period("M").astype(str)
-    _meses_hf_lbl   = ["Todos"] + [_ym_lbl_hf(m) for m in sorted(_mes_raw_hf.dropna().unique())]
-    _lbl_to_per_hf  = {_ym_lbl_hf(m): m for m in sorted(_mes_raw_hf.dropna().unique())}
-
-    # ── Filtros — Fila 1: Período · Mes · Cliente · Estación (búsqueda) ─────
-    # Excluir "OCCIMIANO" del listado de clientes (somos nosotros mismos)
-    all_clients = sorted(c for c in df_wo["client"].unique() if str(c).upper() != "OCCIMIANO")
-    hf1, hf2, hf3, hf4 = st.columns([1.5, 1.4, 1.6, 2.5])
-    with hf1:
-        sel_trim_hf = st.selectbox("Período", _trim_opts_hf, key="hf_trim")
-    with hf2:
-        sel_mes_hf  = st.selectbox("Mes", _meses_hf_lbl, key="hf_mes")
-    with hf3:
-        selected_client = st.selectbox("Cliente", ["Todos"] + all_clients, key="hf_cli")
-    with hf4:
-        # Text input con búsqueda progresiva — no requiere scroll
-        station_search = st.text_input(
-            "🔍 Estación (escribe para filtrar)",
-            key="hf_station",
-            placeholder="ej: Talagante, Av. Grecia, SH_36…",
-        )
-
-    # ── Aplicar filtros ──────────────────────────────────────────────────────
-    df_filtered = df_wo.copy()
-    if selected_client != "Todos":
-        df_filtered = df_filtered[df_filtered["client"] == selected_client]
-
-    _fl_filt = df_filtered["creation_date"]
-    if _fl_filt.dt.tz is not None:
-        _fl_filt = _fl_filt.dt.tz_convert(None)
-    df_filtered["_month"]   = _fl_filt.dt.month.astype("Int64")
-    df_filtered["_mes_per"] = _fl_filt.dt.to_period("M").astype(str)
-
-    if sel_trim_hf != "Todos":
-        df_filtered = df_filtered[df_filtered["_month"].isin(_TRIMESTRES_HF[sel_trim_hf])]
-    if sel_mes_hf != "Todos":
-        _p = _lbl_to_per_hf.get(sel_mes_hf)
-        if _p:
-            df_filtered = df_filtered[df_filtered["_mes_per"] == _p]
-    if station_search.strip():
-        df_filtered = df_filtered[
-            df_filtered["station"].astype(str).str.contains(station_search.strip(), case=False, na=False)
-        ]
-
-    st.divider()
-
-    # ── VISTA GENERAL ─────────────────────────────────────────────────────────
-    if not station_search.strip():
-        total_ots = len(df_filtered)
-        preventivas = (df_filtered["maint_type"] == "Preventiva").sum()
-        correctivas = (df_filtered["maint_type"] == "Correctiva").sum()
-
-        # EDS activas filtradas por cliente seleccionado
-        _eds_active = df_eds[df_eds["activa"]] if not df_eds.empty else pd.DataFrame()
-        if selected_client != "Todos" and not _eds_active.empty:
-            _eds_active = _eds_active[
-                _eds_active["cliente"].str.upper().str.contains(selected_client[:4].upper(), na=False)
-            ]
-        eds_count = len(_eds_active)
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Total OTs (Fracttal)", f"{total_ots:,}")
-        k2.metric("Preventivas", f"{preventivas:,}",
-                  delta=f"{preventivas/total_ots*100:.1f}%" if total_ots else None)
-        k3.metric("Correctivas", f"{correctivas:,}",
-                  delta=f"-{correctivas/total_ots*100:.1f}%" if total_ots else None, delta_color="inverse")
-        k4.metric("EDS activas (Listado)", f"{eds_count:,}")
-
-        st.divider()
-        st.markdown('<div class="section-header">Distribución por cliente</div>', unsafe_allow_html=True)
-
-        client_counts = (df_filtered.groupby("client")
-            .agg(ots=("folio","count"), estaciones=("station","nunique"))
-            .reset_index().sort_values("ots", ascending=False))
-
-        _hf_sig = f"{_wo_sig}_{selected_client}_{sel_trim_hf}_{sel_mes_hf}_{station_search}"
-        cp1, cp2 = st.columns([1, 2])
-        with cp1:
-            _pie_k = f"_fig_hf_pie_{_current_theme}_{_hf_sig}"
-            if _pie_k not in st.session_state:
-                fig_pie = px.pie(client_counts, values="ots", names="client", color="client",
-                                 color_discrete_map=CLIENT_COLORS, hole=0.45, title="OTs por cliente")
-                fig_pie.update_traces(textposition="outside", textinfo="label+percent")
-                fig_pie.update_layout(showlegend=False, margin=dict(t=40,b=10,l=10,r=10))
-                _apply_plot_theme(fig_pie)
-                st.session_state[_pie_k] = fig_pie
-            st.plotly_chart(st.session_state[_pie_k], width="stretch")
-        with cp2:
-            _bar_k = f"_fig_hf_bar_{_current_theme}_{_hf_sig}"
-            if _bar_k not in st.session_state:
-                fig_bar = px.bar(client_counts, x="client", y="ots", color="client",
-                                 color_discrete_map=CLIENT_COLORS, title="Total OTs por cliente", text_auto=True)
-                fig_bar.update_layout(showlegend=False, xaxis_title="", yaxis_title="OTs")
-                _apply_plot_theme(fig_bar)
-                st.session_state[_bar_k] = fig_bar
-            st.plotly_chart(st.session_state[_bar_k], width="stretch")
-
-        st.markdown('<div class="section-header">Resumen por estación</div>', unsafe_allow_html=True)
-
-        # ── Build Fracttal stats keyed by EDS code ────────────────────────────
-        reverse_name_map = {v: k for k, v in station_name_map.items()}
-        df_frac = df_filtered.copy()
-        df_frac["_eds"] = df_frac["station"].map(reverse_name_map)
-        frac_stats = (
-            df_frac.dropna(subset=["_eds"])
-            .groupby("_eds")
-            .agg(
-                total_ots=("folio", "count"),
-                preventivas=("maint_type", lambda x: (x == "Preventiva").sum()),
-                correctivas=("maint_type", lambda x: (x == "Correctiva").sum()),
-                equipos=("equipment", "nunique"),
-                ultima_mantencion=("final_date", "max"),
-            )
-            .reset_index()
-            .rename(columns={"_eds": "eds_occim"})
-        )
-
-        # ── EDS base: ALL active stations (left-join anchor) ──────────────────
-        df_eds_base = df_eds[df_eds["activa"]].copy() if not df_eds.empty else pd.DataFrame()
-        if not df_eds_base.empty and selected_client != "Todos":
-            df_eds_base = df_eds_base[
-                df_eds_base["cliente"].str.upper().str.contains(
-                    selected_client[:4].upper(), na=False
-                )
-            ]
-
-        if not df_eds_base.empty:
-            df_eds_base["nombre"] = df_eds_base["eds_occim"].map(station_name_map)
-            df_eds_base["nombre"] = df_eds_base.apply(
-                lambda r: r["nombre"]
-                if pd.notna(r.get("nombre")) and str(r.get("nombre", "")).strip()
-                else r.get("direccion", ""),
-                axis=1,
-            )
-            station_agg = df_eds_base[["eds_occim", "nombre", "cliente", "direccion"]].merge(
-                frac_stats, on="eds_occim", how="left"
-            )
-            for col in ["total_ots", "preventivas", "correctivas", "equipos"]:
-                station_agg[col] = station_agg[col].fillna(0).astype(int)
-            station_agg["ultima_mantencion"] = station_agg["ultima_mantencion"].apply(
-                lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "—"
-            )
-            station_agg = station_agg.sort_values("total_ots", ascending=False)
-
-            # Text search
-            srch_col, _ = st.columns([2, 3])
-            with srch_col:
-                srch_st = st.text_input(
-                    "Buscar estación",
-                    placeholder="Código, nombre o dirección…",
-                    key="tab1_search",
-                )
-            if srch_st:
-                mask = (
-                    station_agg["eds_occim"].str.upper().str.contains(srch_st.upper(), na=False)
-                    | station_agg["nombre"].str.upper().str.contains(srch_st.upper(), na=False)
-                    | station_agg["direccion"].str.upper().str.contains(srch_st.upper(), na=False)
-                )
-                station_agg = station_agg[mask]
-
-            max_ots = int(station_agg["total_ots"].max()) if station_agg["total_ots"].max() > 0 else 1
-            station_agg.columns = pd.Index([
-                "Código EDS", "Nombre", "Cliente", "Dirección",
-                "Total OTs", "Preventivas", "Correctivas", "Equipos", "Última Mantención"
-            ])
-            _show_df(station_agg, width="stretch", hide_index=True,
-                column_config={
-                    "Total OTs": st.column_config.NumberColumn(format="%d"),
-                    "Preventivas": st.column_config.ProgressColumn(min_value=0, max_value=max_ots),
-                    "Correctivas": st.column_config.ProgressColumn(min_value=0, max_value=max_ots),
-                })
-        else:
-            st.info("No hay datos de EDS disponibles.")
-
-        st.markdown('<div class="section-header">Top causas raíz de fallas</div>', unsafe_allow_html=True)
-        corr_df = df_filtered[df_filtered["maint_type"]=="Correctiva"]
-        top_causes = (corr_df["failure_cause"].value_counts().reset_index())
-        top_causes.columns = ["Causa","Cantidad"]
-        top_causes = top_causes[top_causes["Causa"].str.strip()!=""].head(15)
-        if not top_causes.empty:
-            _causes_k = f"_fig_hf_causes_{_current_theme}_{_hf_sig}"
-            if _causes_k not in st.session_state:
-                fig_causes = px.bar(top_causes, x="Cantidad", y="Causa", orientation="h",
-                                    color="Cantidad", color_continuous_scale="Reds")
-                fig_causes.update_layout(yaxis={"categoryorder":"total ascending"}, coloraxis_showscale=False)
-                _apply_plot_theme(fig_causes)
-                st.session_state[_causes_k] = fig_causes
-            st.plotly_chart(st.session_state[_causes_k], width="stretch")
-
-        st.markdown('<div class="section-header">Evolución mensual de OTs</div>', unsafe_allow_html=True)
-        df_m = df_filtered.dropna(subset=["creation_date"]).copy()
-        df_m["mes"] = df_m["creation_date"].dt.tz_convert(None).dt.to_period("M").astype(str)
-        monthly = df_m.groupby(["mes","maint_type"]).size().reset_index(name="ots")
-        if not monthly.empty:
-            _monthly_k = f"_fig_hf_monthly_{_current_theme}_{_hf_sig}"
-            if _monthly_k not in st.session_state:
-                fig_line = px.bar(monthly, x="mes", y="ots", color="maint_type",
-                                  color_discrete_map={"Preventiva":"#22c55e","Correctiva":"#ef4444","Otra":"#94a3b8"},
-                                  title="OTs por mes y tipo", barmode="stack")
-                fig_line.update_layout(xaxis_title="Mes", yaxis_title="Cantidad OTs", legend_title="Tipo")
-                _apply_plot_theme(fig_line)
-                st.session_state[_monthly_k] = fig_line
-            st.plotly_chart(st.session_state[_monthly_k], width="stretch")
-
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # PÁGINA 2: CUMPLIMIENTO DE SLA 2026
 # ─────────────────────────────────────────────────────────────────────────────
-elif _page == _NAV_PAGES[1]:
+if _page == _NAV_PAGES[1]:
     _hdr(_PAGE_TITLE[_NAV_PAGES[1]])
     st.divider()
     if df_llamados.empty:
@@ -3145,20 +2891,28 @@ elif _page == _NAV_PAGES[3]:
         _kc5.metric("Última atención",      _ultima_fecha if _ultima_fecha else "—")
 
         # ── Gráfico PM vs CM mensual ─────────────────────────────────────────
+        # Filtrar por EDS seleccionada (fix: antes usaba datos sin filtrar)
+        _pm_chart_src = df_wo_c[df_wo_c["maint_type"] == "Preventiva"].copy()
+        _cm_chart_src = df_ll_c.copy()
+        if _eds_sel_code:
+            if not _pm_chart_src.empty and "eds_occim" in _pm_chart_src.columns:
+                _pm_chart_src = _pm_chart_src[_pm_chart_src["eds_occim"] == _eds_sel_code]
+            if not _cm_chart_src.empty and "eds_occim" in _cm_chart_src.columns:
+                _cm_chart_src = _cm_chart_src[_cm_chart_src["eds_occim"] == _eds_sel_code]
+
         _pm_by_m = (
-            df_wo_c[df_wo_c["maint_type"] == "Preventiva"]
-            [df_wo_c["mes_str"].isin(_MESES_DISP) if "mes_str" in df_wo_c.columns else pd.Series(True, index=df_wo_c.index)]
+            _pm_chart_src[_pm_chart_src["mes_str"].isin(_MESES_DISP) if "mes_str" in _pm_chart_src.columns else pd.Series(True, index=_pm_chart_src.index)]
             .groupby("mes_num")["folio"].nunique()
             .reset_index()
             .rename(columns={"mes_num":"mes","folio":"PM"})
-        ) if not df_wo_c.empty else pd.DataFrame(columns=["mes","PM"])
+        ) if not _pm_chart_src.empty else pd.DataFrame(columns=["mes","PM"])
 
         _cm_by_m = (
-            df_ll_c[df_ll_c["Mes"].isin(range(1, _cur_month+1))]
+            _cm_chart_src[_cm_chart_src["Mes"].isin(range(1, _cur_month+1))]
             .groupby("Mes")["n_llamado"].count()
             .reset_index()
             .rename(columns={"Mes":"mes","n_llamado":"CM"})
-        ) if not df_ll_c.empty and "Mes" in df_ll_c.columns else pd.DataFrame(columns=["mes","CM"])
+        ) if not _cm_chart_src.empty and "Mes" in _cm_chart_src.columns else pd.DataFrame(columns=["mes","CM"])
 
         _chart_base = pd.DataFrame({"mes": list(range(1, _cur_month+1))})
         _chart_df = _chart_base.merge(_pm_by_m, on="mes", how="left").merge(_cm_by_m, on="mes", how="left").fillna(0)
