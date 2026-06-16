@@ -528,7 +528,7 @@ def _show_login_page() -> None:
         padding-bottom: 0 !important;
     }}
     .block-container {{
-        padding-top: clamp(6rem, calc(50vh - 190px), 22rem) !important;
+        padding-top: clamp(10rem, calc(50vh - 140px), 26rem) !important;
         padding-bottom: 3rem !important;
         max-width: 100% !important;
     }}
@@ -536,11 +536,11 @@ def _show_login_page() -> None:
     /* ── Card blanco ── */
     [data-testid="stForm"] {{
         background: #ffffff !important;
-        border-radius: 18px !important;
+        border-radius: 16px !important;
         border: none !important;
-        padding: 2.75rem 2.5rem 2.25rem !important;
-        box-shadow: 0 24px 80px rgba(0,0,0,0.65) !important;
-        max-width: 420px !important;
+        padding: 2rem 2rem 1.75rem !important;
+        box-shadow: 0 20px 70px rgba(0,0,0,0.65) !important;
+        max-width: 360px !important;
         margin: 0 auto !important;
     }}
 
