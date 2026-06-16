@@ -4060,7 +4060,7 @@ elif _page == _NAV_PAGES[0]:
         "📊  Desempeño SLA",
         "🎯  Efectividad MP",
         "📋  Precisión Fracttal",
-        "💲  Resumen Bono",
+        "💲  Resumen Bonos",
     ])
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -7143,7 +7143,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
 
 
     # ══════════════════════════════════════════════════════════════════════════
-    # TAB 4 — RESUMEN BONO
+    # TAB 4 — RESUMEN BONOS
     # ══════════════════════════════════════════════════════════════════════════
     with tab_bono:
         _bi_info, _bi_escala = st.columns([3, 2])
@@ -7568,8 +7568,10 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 _MAX_EQ_SLA   = int(_pp_eq  * 0.40)
                 _MAX_EQ_MP    = int(_pp_eq  * 0.30)
                 _MAX_EQ_PREC  = int(_pp_eq  * 0.30)
-                # Callcenter: monto fijo por persona por trimestre (sin medición aún)
-                _BONO_CC = 100_000
+                # Callcenter: $100K/equipo/semana ÷ N personas × 13 semanas/trimestre
+                _BONO_CC_SEMANAL = 100_000
+                _BONO_CC = int(_BONO_CC_SEMANAL * 13 / _n_pool) if _n_pool > 0 else 0
+                _BONO_CC_EQ = _BONO_CC_SEMANAL * 13  # total equipo por trimestre
 
                 # ── Construir tabla HTML ──────────────────────────────────────
                 _hdr_teal = "#01798A"
@@ -7775,13 +7777,14 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     f'{_be_val_cell}</td></tr>'
                 )
 
-                # Fila 6.5: Callcenter (fijo por trimestre)
+                # Fila 6.5: Callcenter ($100K/equipo/sem ÷ N pers × 13 sem)
                 _cc_cell = f'<span style="font-weight:700;">{_clp_fmt(_BONO_CC)}</span>'
+                _cc_eq_cell = f'<span style="font-weight:700;font-style:italic;">{_clp_fmt(_BONO_CC_EQ)}</span>'
                 _html += (
                     f'<tr style="background:{_tr_bg(6)};">'
                     f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
                     f'Callcenter <span style="color:{_t["muted"]};font-size:0.76rem;">'
-                    f'(fijo trimestral)</span></td>'
+                    f'($100K/sem ÷ {_n_pool} pers × 13 sem)</span></td>'
                 )
                 for _tf in _miembros_full:
                     _html += (
@@ -7791,7 +7794,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 _html += (
                     f'<td style="padding:8px 10px;text-align:center;'
                     f'border-bottom:1px solid {_t["border"]};font-style:italic;">'
-                    f'{_cc_cell}</td></tr>'
+                    f'{_cc_eq_cell}</td></tr>'
                 )
 
                 # Fila 7: TOTAL trimestral (individual + equipo + callcenter)
