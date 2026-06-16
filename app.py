@@ -497,8 +497,8 @@ def _show_login_page() -> None:
     if _hero_data:
         _bg = (
             "background-image: "
-            "linear-gradient(to right, transparent 0%, transparent 28%, "
-            "rgba(13,20,39,0.4) 44%, rgba(13,20,39,0.92) 61%, #0d1427 75%), "
+            "linear-gradient(to right, transparent 0%, transparent 50%, "
+            "rgba(13,20,39,0.45) 63%, rgba(13,20,39,0.95) 74%, #0d1427 84%), "
             f'url("{_hero_data}"); '
             "background-size: cover; background-position: center; "
             "background-repeat: no-repeat;"
@@ -607,7 +607,7 @@ def _show_login_page() -> None:
     """, unsafe_allow_html=True)
 
     # ── Layout: espacio izquierdo (imagen) | form | padding derecho ────────
-    _, _col, _ = st.columns([1.3, 1, 0.15])
+    _, _col, _ = st.columns([2.0, 1, 0.05])
     with _col:
         _logo_path = _get_logo_path()
 
