@@ -7525,6 +7525,11 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             _df_sla_bono = _df_sla_bono[
                 _df_sla_bono["mes"].astype(str).isin(_meses_bono_activos)
             ].copy()
+        # Columna normalizada para matching robusto (igual que MP) — evita fallos por tildes
+        if not _df_sla_bono.empty and "_tech_norm" not in _df_sla_bono.columns:
+            _df_sla_bono["_tech_norm"] = _df_sla_bono["tecnico"].fillna("").apply(
+                lambda s: " ".join(_norm_n(s).split())
+            )
 
         # ── Cargar datos de Precisión ─────────────────────────────────────────
         def _build_ot_all_bono():
@@ -7610,9 +7615,9 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             """
             _tn = " ".join(_norm_n(tech_full).split())
 
-            # SLA
-            if not _df_sla_bono.empty and "tecnico" in _df_sla_bono.columns:
-                _sla_t = _df_sla_bono[_df_sla_bono["tecnico"] == tech_full]
+            # SLA — matching normalizado (igual que MP) para tolerar diferencias de tildes
+            if not _df_sla_bono.empty and "_tech_norm" in _df_sla_bono.columns:
+                _sla_t = _df_sla_bono[_df_sla_bono["_tech_norm"] == _tn]
                 _n_sla_total = len(_sla_t)
                 _n_sla_ok = int(_sla_t["cumple_sla"].fillna(False).sum()) if "cumple_sla" in _sla_t.columns else 0
                 _pct_sla = (_n_sla_ok / _n_sla_total * 100) if _n_sla_total > 0 else None
@@ -7637,8 +7642,9 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
 
             # Prec — misma fórmula que KPI screen: % OTs con 4/4 componentes correctos
             # (binario all-or-nothing: score_total == 100 → correcta, cualquier fallo → mala)
-            if not _df_ot_bono_filt.empty and "tecnico" in _df_ot_bono_filt.columns:
-                _prec_t = _df_ot_bono_filt[_df_ot_bono_filt["tecnico"] == tech_full]
+            # matching normalizado para tolerar diferencias de tildes (igual que MP)
+            if not _df_ot_bono_filt.empty and "_tech_norm" in _df_ot_bono_filt.columns:
+                _prec_t = _df_ot_bono_filt[_df_ot_bono_filt["_tech_norm"] == _tn]
                 _n_ots_prec = len(_prec_t)
                 if _n_ots_prec > 0 and "score_total" in _prec_t.columns:
                     _n_correctas_t = int((_prec_t["score_total"] >= 100).sum())
