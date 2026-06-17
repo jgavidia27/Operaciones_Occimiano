@@ -634,7 +634,7 @@ def _show_login_page() -> None:
             st.markdown("""
             <p style="text-align:center;color:#1a3066;font-size:0.78rem;font-weight:600;
                 letter-spacing:0.6px;text-transform:uppercase;margin:0.1rem 0 0.2rem;">
-                Tablero de Indicadores operacionales</p>
+                Indicadores Operacionales</p>
             """, unsafe_allow_html=True)
 
             # Título
