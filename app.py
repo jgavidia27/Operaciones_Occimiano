@@ -1843,6 +1843,7 @@ if _page == _NAV_PAGES[1]:
                             marker_color=_bar_color_evol, opacity=0.9,
                             text=_ev_grp["llamados"],
                             textposition="inside",
+                            insidetextanchor="start",
                             textfont=dict(size=13, color=_bar_txt_evol, family="Arial"),
                         ),
                         secondary_y=False,
@@ -1884,7 +1885,7 @@ if _page == _NAV_PAGES[1]:
                         ),
                         secondary_y=True,
                     )
-                    # Anotaciones con fondo blanco bordeado en verde
+                    # Anotaciones con fondo blanco bordeado en verde — debajo del punto
                     for _, _ann_row in _ev_grp.iterrows():
                         _fig_sla_evol.add_annotation(
                             x=_ann_row["mes_lbl"],
@@ -1892,8 +1893,8 @@ if _page == _NAV_PAGES[1]:
                             yref="y2",
                             text=f"<b>{_ann_row['pct_sla']:.1f}%</b>  {int(_ann_row['cumple'])} cumple",
                             showarrow=False,
-                            yanchor="bottom",
-                            yshift=10,
+                            yanchor="top",
+                            yshift=-8,
                             font=dict(size=11, color="#16a34a", family="Arial"),
                             bgcolor="rgba(255,255,255,0.88)",
                             bordercolor="#22c55e",
