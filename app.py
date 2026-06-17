@@ -1157,14 +1157,11 @@ section[data-testid="stSidebar"] img { opacity: 0 !important; }
 with st.sidebar:
     # Logo Occimiano (solo en modo expandido)
     if _sb_open:
-        _logo_uri = _load_logo_b64()
-        if _logo_uri:
-            st.markdown(
-                f'<div style="text-align:center;padding:10px 4px 4px;background:#0d1427;">'
-                f'<img src="{_logo_uri}" style="max-width:100%;max-height:90px;'
-                f'object-fit:contain;"/></div>',
-                unsafe_allow_html=True,
-            )
+        _sidebar_logo = os.path.join(_APP_DIR, "logo_sidebar.jpg")
+        if not os.path.exists(_sidebar_logo):
+            _sidebar_logo = os.path.join(_APP_DIR, "logo_dashboard.jpg")
+        if os.path.exists(_sidebar_logo):
+            st.image(_sidebar_logo, use_container_width=True)
         else:
             st.markdown(
                 '<div style="text-align:center;padding:12px 0;">'
