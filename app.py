@@ -612,7 +612,9 @@ def _show_login_page() -> None:
         # Espaciador para centrado vertical (~25% desde arriba)
         st.markdown("<div style='height:22vh; min-height:60px;'></div>", unsafe_allow_html=True)
 
-        _logo_path = _get_logo_path()
+        # Logo de login: preferir logo_login.png, luego los genéricos
+        _login_logo = os.path.join(_APP_DIR, "logo_login.png")
+        _logo_path = _login_logo if os.path.exists(_login_logo) else _get_logo_path()
 
         with st.form("occim_login"):
 
@@ -628,9 +630,16 @@ def _show_login_page() -> None:
                         unsafe_allow_html=True,
                     )
 
+            # Subtítulo bajo el logo
+            st.markdown("""
+            <p style="text-align:center;color:#1a3066;font-size:0.78rem;font-weight:600;
+                letter-spacing:0.6px;text-transform:uppercase;margin:0.1rem 0 0.2rem;">
+                Tablero de Indicadores operacionales</p>
+            """, unsafe_allow_html=True)
+
             # Título
             st.markdown("""
-            <div style="text-align:center;padding:1rem 0 1.5rem;">
+            <div style="text-align:center;padding:0.75rem 0 1.4rem;">
                 <p style="color:#0d1427;font-size:1.45rem;font-weight:700;
                     margin:0;line-height:1.2;">Iniciar sesión</p>
             </div>
