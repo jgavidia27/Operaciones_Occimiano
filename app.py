@@ -3588,44 +3588,97 @@ elif _page == _NAV_PAGES[4]:
             # ── Desglose por técnico ──────────────────────────────────────────────
             if not _df_vf.empty:
                 st.divider()
-                st.subheader("👷 Carga actual por técnico")
 
-                _vivo_by_tec = (
-                    _df_vf[_df_vf["responsable"] != "—"]
-                    .groupby("responsable")
-                    .agg(
-                        total      =("id_ot",        "count"),
-                        en_proceso =("estado_tarea",  lambda x: (x == "En Proceso").sum()),
-                        correctivas=("tipo_tarea",
-                                     lambda x: x.str.contains("CORREC", na=False, case=False).sum()),
-                        preventivas=("tipo_tarea",
-                                     lambda x: x.str.contains("PREVEN", na=False, case=False).sum()),
-                        clientes   =("cliente",       lambda x: ", ".join(sorted(x[x != "—"].unique()))),
+                # Calcular semanas/mes del periodo actual
+                from datetime import datetime as _dt_c, timedelta as _td_c
+                _tz_c  = ZoneInfo("America/Santiago")
+                _hoy_c = _dt_c.now(_tz_c)
+                _s_act  = _hoy_c.isocalendar()[1]
+                _s_prox = _s_act + 1
+                _lun_act  = (_hoy_c - _td_c(days=_hoy_c.weekday())).replace(
+                    hour=0, minute=0, second=0, microsecond=0)
+                _dom_act  = _lun_act + _td_c(days=6, hours=23, minutes=59, seconds=59)
+                _lun_prox = _lun_act + _td_c(days=7)
+                _dom_prox = _lun_prox + _td_c(days=6, hours=23, minutes=59, seconds=59)
+
+                # Header con selector de periodo alineado a la derecha
+                _cc_tit, _cc_sel = st.columns([3, 1.2])
+                with _cc_tit:
+                    st.subheader("👷 Carga por técnico")
+                with _cc_sel:
+                    _periodo_opts = [
+                        "Todo el periodo",
+                        f"Semana actual  (S{_s_act})",
+                        f"Próxima semana (S{_s_prox})",
+                        f"Este mes ({_hoy_c.strftime('%b %y')})",
+                    ]
+                    _sel_periodo_c = st.selectbox(
+                        "Periodo", _periodo_opts, key="carga_tec_periodo",
+                        label_visibility="collapsed",
                     )
-                    .reset_index()
-                    .sort_values("total", ascending=False)
-                    .rename(columns={
-                        "responsable": "Técnico",
-                        "total":       "Total OTs",
-                        "en_proceso":  "🟢 En Proceso",
-                        "correctivas": "🚨 Correctivas",
-                        "preventivas": "🛠️ Preventivas",
-                        "clientes":    "Clientes",
-                    })
-                )
-                st.dataframe(
-                    _vivo_by_tec,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Técnico":       st.column_config.TextColumn(width=200),
-                        "Total OTs":     st.column_config.NumberColumn(width=85),
-                        "🟢 En Proceso": st.column_config.NumberColumn(width=100),
-                        "🚨 Correctivas":st.column_config.NumberColumn(width=100),
-                        "🛠️ Preventivas":st.column_config.NumberColumn(width=100),
-                        "Clientes":      st.column_config.TextColumn(width=200),
-                    },
-                )
+
+                # Filtrar por fecha_creacion según periodo elegido
+                _df_carga = _df_vf.copy()
+                if _sel_periodo_c != "Todo el periodo" and "fecha_creacion" in _df_carga.columns:
+                    _df_carga["_fc_dt"] = pd.to_datetime(
+                        _df_carga["fecha_creacion"], errors="coerce", utc=True
+                    ).dt.tz_convert(_tz_c)
+                    if "Semana actual" in _sel_periodo_c:
+                        _df_carga = _df_carga[
+                            (_df_carga["_fc_dt"] >= pd.Timestamp(_lun_act, tz=_tz_c)) &
+                            (_df_carga["_fc_dt"] <= pd.Timestamp(_dom_act, tz=_tz_c))
+                        ]
+                    elif "Próxima" in _sel_periodo_c:
+                        _df_carga = _df_carga[
+                            (_df_carga["_fc_dt"] >= pd.Timestamp(_lun_prox, tz=_tz_c)) &
+                            (_df_carga["_fc_dt"] <= pd.Timestamp(_dom_prox, tz=_tz_c))
+                        ]
+                    elif "Este mes" in _sel_periodo_c:
+                        _df_carga = _df_carga[
+                            _df_carga["_fc_dt"].dt.month == _hoy_c.month
+                        ]
+
+                st.caption(f"{len(_df_carga):,} OT(s) en el periodo seleccionado")
+
+                if _df_carga.empty:
+                    st.info("No hay OTs para el periodo seleccionado.", icon="📭")
+                else:
+                    _vivo_by_tec = (
+                        _df_carga[_df_carga["responsable"] != "—"]
+                        .groupby("responsable")
+                        .agg(
+                            total      =("id_ot",        "count"),
+                            en_proceso =("estado_tarea",  lambda x: (x == "En Proceso").sum()),
+                            correctivas=("tipo_tarea",
+                                         lambda x: x.str.contains("CORREC", na=False, case=False).sum()),
+                            preventivas=("tipo_tarea",
+                                         lambda x: x.str.contains("PREVEN", na=False, case=False).sum()),
+                            clientes   =("cliente",       lambda x: ", ".join(sorted(x[x != "—"].unique()))),
+                        )
+                        .reset_index()
+                        .sort_values("total", ascending=False)
+                        .rename(columns={
+                            "responsable": "Técnico",
+                            "total":       "Total OTs",
+                            "en_proceso":  "🟢 En Proceso",
+                            "correctivas": "🚨 Correctivas",
+                            "preventivas": "🛠️ Preventivas",
+                            "clientes":    "Clientes",
+                        })
+                    )
+                    st.dataframe(
+                        _vivo_by_tec,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Técnico":       st.column_config.TextColumn(width=200),
+                            "Total OTs":     st.column_config.NumberColumn(width=85),
+                            "🟢 En Proceso": st.column_config.NumberColumn(width=100),
+                            "🚨 Correctivas":st.column_config.NumberColumn(width=100),
+                            "🛠️ Preventivas":st.column_config.NumberColumn(width=100),
+                            "Clientes":      st.column_config.TextColumn(width=200),
+                        },
+                    )
 
         st.stop()
 
