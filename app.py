@@ -4217,6 +4217,9 @@ elif _page == _NAV_PAGES[0]:
     # _EQUIPO_LABEL es una identidad — se mantiene para compatibilidad con el resto
     # del código sin necesidad de refactorizar cada uso.
     _EQUIPO_LABEL = {k: k for k in GRUPOS_TERRENO}
+    # Etiquetas de display con paréntesis para los dos equipos de Carlos Avila
+    _EQUIPO_LABEL["Carlos Avila Norte"] = "Carlos Avila (Norte)"
+    _EQUIPO_LABEL["Carlos Avila Sur"]   = "Carlos Avila (Sur)"
     _LABEL_TO_GRUPO = {v: k for k, v in _EQUIPO_LABEL.items()}
 
     def _norm_n(s: str) -> str:
