@@ -3626,13 +3626,13 @@ elif _page == _NAV_PAGES[4]:
                     ).dt.tz_convert(_tz_c)
                     if "Semana actual" in _sel_periodo_c:
                         _df_carga = _df_carga[
-                            (_df_carga["_fc_dt"] >= pd.Timestamp(_lun_act, tz=_tz_c)) &
-                            (_df_carga["_fc_dt"] <= pd.Timestamp(_dom_act, tz=_tz_c))
+                            (_df_carga["_fc_dt"] >= pd.Timestamp(_lun_act)) &
+                            (_df_carga["_fc_dt"] <= pd.Timestamp(_dom_act))
                         ]
                     elif "Próxima" in _sel_periodo_c:
                         _df_carga = _df_carga[
-                            (_df_carga["_fc_dt"] >= pd.Timestamp(_lun_prox, tz=_tz_c)) &
-                            (_df_carga["_fc_dt"] <= pd.Timestamp(_dom_prox, tz=_tz_c))
+                            (_df_carga["_fc_dt"] >= pd.Timestamp(_lun_prox)) &
+                            (_df_carga["_fc_dt"] <= pd.Timestamp(_dom_prox))
                         ]
                     elif "Este mes" in _sel_periodo_c:
                         _df_carga = _df_carga[
