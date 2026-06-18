@@ -7032,7 +7032,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         ), row=1, col=1)
                         # Dona 2: de los que no cumplen → razonable vs injustificado
                         _fig_abs.add_trace(go.Pie(
-                            labels=["No cumplen (20–75%)", "Injustificado (<20%)"],
+                            labels=["No cumplen", "Injustificado (<20%)"],
                             values=[_n_jd, _n_abd],
                             hole=0.52,
                             marker=dict(colors=["#f59e0b", "#ef4444"],
@@ -7073,7 +7073,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             textfont=dict(size=11, color="#ffffff"),
                         ))
                         _fig_abs.add_trace(go.Bar(
-                            name="No cumplen (20–75%)",
+                            name="No cumplen",
                             x=_x_lbl,
                             y=_te_grp["just_fail"].tolist(),
                             marker_color="#f59e0b",
