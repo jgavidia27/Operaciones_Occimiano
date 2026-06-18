@@ -4733,6 +4733,10 @@ elif _page == _NAV_PAGES[0]:
                     lambda g: GRUPOS_TERRENO.get(g, {}).get("senior", "")
                 )
                 _eq_sum["equipo_label"] = _eq_sum["equipo"].map(_EQUIPO_LABEL).fillna(_eq_sum["equipo"])
+                # Respetar el orden canónico de GRUPOS_TERRENO (groupby ordena alfabético por defecto)
+                _grp_order = {k: i for i, k in enumerate(GRUPOS_TERRENO)}
+                _eq_sum["_order"] = _eq_sum["equipo"].map(_grp_order).fillna(99)
+                _eq_sum = _eq_sum.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
 
                 _cols_eq = st.columns(max(1, len(_eq_sum)))
                 for _col_ui, _row_eq in zip(_cols_eq, _eq_sum.itertuples()):
