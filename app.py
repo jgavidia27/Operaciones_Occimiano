@@ -7963,7 +7963,9 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
 
                 # ── Bono por persona: pool / n_integrantes (seniors incluidos) ──
                 # 50 % individual (KPIs propios) · 50 % equipo (KPIs agregados)
-                _n_pool       = len(_miembros_full)
+                # IMPORTANTE: siempre dividir por el equipo completo (_n_equipo_real),
+                # no por _miembros_full que puede estar filtrado a 1 persona.
+                _n_pool       = _n_equipo_real
                 _pp_max       = int(_BONO_TOTAL / _n_pool) if _n_pool > 0 else _BONO_TOTAL
                 _pp_ind       = int(_pp_max * 0.50)   # parte individual
                 _pp_eq        = int(_pp_max * 0.50)   # parte equipo
