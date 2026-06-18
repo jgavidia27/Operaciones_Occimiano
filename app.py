@@ -7903,10 +7903,11 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
         else:
             # ── Rotación callcenter Santiago ──────────────────────────────────
             # Ciclo fijo: Juan Gallardo → Luis Pinto → Victor Bahamonde → ...
-            # Referencia: lunes 01/06/2026 → Juan Gallardo (índice 0)
+            # Referencia: lunes 16/03/2026 → Juan Gallardo (índice 0)
+            # Con esta referencia Q2 (Abr-Jun 2026) queda: Gallardo=5 sem, resto=4 sem
             from datetime import date as _date_cc
             _CC_STGO   = ["Juan Gallardo", "Luis Pinto", "Victor Bahamonde"]
-            _CC_REF    = _date_cc(2026, 6, 1)  # lunes de referencia
+            _CC_REF    = _date_cc(2026, 3, 16)  # lunes de referencia
             _semanas_cc_por_equipo: dict = {}
             for _ms_cc in _meses_bono_activos:
                 for _lun_cc in pd.date_range(
