@@ -6545,8 +6545,8 @@ elif _page == _NAV_PAGES[0]:
             gk1.metric("Score global del mes", f"{score_global:.1f} / 100",
                        delta=lbl_global, delta_color="off")
             gk2.metric("OTs evaluadas", f"{total_ots_mes:,}")
-            gk3.metric("Tiempo OK (MP: ≥70% estim.)", f"{pct_tiempo:.1f}%",
-                       delta=f"{'✅' if pct_tiempo >= 70 else '⚠️'}")
+            gk3.metric("Tiempo OK (MP: ≥75% estim.)", f"{pct_tiempo:.1f}%",
+                       delta=f"{'✅' if pct_tiempo >= 75 else '⚠️'}")
             gk4.metric("Causa raíz OK", f"{pct_causa:.1f}%",
                        delta=f"{'✅' if pct_causa >= 80 else '⚠️'}")
             gk5.metric("Técnicos con bono (≥90% exactitud)", f"{tecnicos_con_bono} / {total_tecnicos}")
@@ -6800,23 +6800,23 @@ elif _page == _NAV_PAGES[0]:
                         unsafe_allow_html=True)
 
             # ── Leyenda expandible ────────────────────────────────────────────
-            with st.expander("📖  Regla de cumplimiento de tiempo (70% de la duración estimada)", expanded=False):
+            with st.expander("📖  Regla de cumplimiento de tiempo (75% de la duración estimada)", expanded=False):
                 st.markdown("""
 **¿Cómo funciona?**
 
 Cada mantenimiento preventivo tiene una **duración estimada** (programada en Fracttal).
-El técnico debe ejecutar la tarea respetando ese tiempo mínimo con una tolerancia del **30%**.
+El técnico debe ejecutar la tarea respetando ese tiempo mínimo con una tolerancia del **25%**.
 
-| Duración estimada | Mínimo aceptable (70%) | Ejemplo |
+| Duración estimada | Mínimo aceptable (75%) | Ejemplo |
 |---|---|---|
-| 00:40 (40 min) | 00:28 (28 min) | Si el técnico tardó 30 min → ✅ Cumple |
-| 00:30 (30 min) | 00:21 (21 min) | Si el técnico tardó 05 min → ❌ No cumple |
-| 01:00 (60 min) | 00:42 (42 min) | Si el técnico tardó 45 min → ✅ Cumple |
+| 00:40 (40 min) | 00:30 (30 min) | Si el técnico tardó 32 min → ✅ Cumple |
+| 00:30 (30 min) | 00:23 (23 min) | Si el técnico tardó 05 min → ❌ No cumple |
+| 01:00 (60 min) | 00:45 (45 min) | Si el técnico tardó 50 min → ✅ Cumple |
 
 **¿Qué se mide?**
 - **Tiempo efectivo** = `max(tasks_duration, tiempo real por fechas OT)` vs **`Duración Estimada`**
-- Si `Tiempo Efectivo ≥ Duración Estimada × 70%` → **CUMPLE**
-- Si `Tiempo Efectivo < Duración Estimada × 70%` → **ERROR** (posible quick-tick)
+- Si `Tiempo Efectivo ≥ Duración Estimada × 75%` → **CUMPLE**
+- Si `Tiempo Efectivo < Duración Estimada × 75%` → **ERROR** (posible quick-tick)
 - Si no hay duración estimada → **Sin datos** (no penaliza)
 
 **¿Por qué usar max(tasks_duration, elapsed)?**
@@ -6844,7 +6844,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 # Si el técnico no llenó tasks_duration (=0) pero el OT estuvo abierto
                 # N minutos, ese tiempo cuenta. Consistente con _score_tiempo en data.py.
                 _df_te["_effective_sec"] = _df_te[["duration_sec","elapsed_sec"]].fillna(0).max(axis=1)
-                _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.70
+                _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75
 
                 _te_mes = (
                     _df_te.groupby("mes")
@@ -6867,7 +6867,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     ), secondary_y=False)
                     _fig_te.add_trace(go.Scatter(
                         x=_te_mes["mes_lbl"], y=_te_mes["pct_ok"],
-                        name="% Tiempo correcto (≥70%)", mode="lines+markers",
+                        name="% Tiempo correcto (≥75%)", mode="lines+markers",
                         line=dict(color="#3b82f6", width=3),
                         marker=dict(size=10, color="#3b82f6", line=dict(color="#fff", width=2)),
                     ), secondary_y=True)
@@ -6908,7 +6908,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     return f"{h:02d}:{m:02d}"
 
                 _det_te = _df_te.copy()
-                _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.70).round(0)
+                _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.75).round(0)
                 _det_te["_pct_ej"]     = (_det_te["_effective_sec"] / _det_te["estimated_sec"] * 100).round(1)
                 _det_te_cd = pd.to_datetime(_det_te["creation_date"], errors="coerce")
                 _det_te_cd = _det_te_cd.dt.tz_convert(None) if _det_te_cd.dt.tz is not None else _det_te_cd
@@ -6919,7 +6919,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                      "estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"]
                     if c in _det_te.columns]].copy()
                 _det_te_disp["T. Estimado"]   = _det_te_disp["estimated_sec"].apply(_fmt_seg)
-                _det_te_disp["Mín. 70%"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
+                _det_te_disp["Mín. 75%"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
                 _det_te_disp["T. Ejecución"]   = _det_te_disp["_effective_sec"].apply(_fmt_seg)
                 _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
                 _det_te_disp["Estado"]         = _det_te_disp["_te_ok"].apply(
@@ -6950,19 +6950,19 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             "Estado":      st.column_config.TextColumn(width=110),
                         })
 
-                # ── Subsección: OTs con tiempo injustificado (<15% del estimado) ────────
+                # ── Subsección: OTs con tiempo injustificado (<20% del estimado) ────────
                 st.markdown("---")
-                st.markdown("**⚠️ OTs con tiempo de ejecución injustificado (< 15% del estimado)**")
+                st.markdown("**⚠️ OTs con tiempo de ejecución injustificado (< 20% del estimado)**")
                 st.caption(
                     "Barras apiladas por equipo (o por técnico si filtras). "
-                    "**Verde** = cumplen ≥70% del estimado · "
-                    "**Amarillo** = no cumplen pero tiempo razonable (15–70%) · "
-                    "**Rojo** = injustificado, ejecución < 15% del estimado"
+                    "**Verde** = cumplen ≥75% del estimado · "
+                    "**Amarillo** = no cumplen pero tiempo razonable (20–75%) · "
+                    "**Rojo** = injustificado, ejecución < 20% del estimado"
                 )
 
                 # Marcar los 3 segmentos sobre el total de preventivos con estimado
                 _df_te["_absurdo"]   = (~_df_te["_te_ok"]) & (
-                    _df_te["_effective_sec"] < _df_te["estimated_sec"] * 0.15
+                    _df_te["_effective_sec"] < _df_te["estimated_sec"] * 0.20
                 )
                 _df_te["_just_fail"] = (~_df_te["_te_ok"]) & (~_df_te["_absurdo"])
 
@@ -7002,43 +7002,68 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _use_donut = (equipo_kpi == "Todos" and tec_kpi_sel == "Todos")
 
                     if _use_donut:
-                        # ── Dona: vista general todos los equipos ────────────────
+                        # ── Dos donas: vista general todos los equipos ───────────
                         _n_ok_d  = int(_te_grp["ok"].sum())
                         _n_jd    = int(_te_grp["just_fail"].sum())
                         _n_abd   = int(_te_grp["absurdo"].sum())
-                        _fig_abs = go.Figure(data=[go.Pie(
-                            labels=["Cumplen ≥70%",
-                                    "No cumplen (15–70%)",
-                                    "Injustificado (<15%)"],
-                            values=[_n_ok_d, _n_jd, _n_abd],
+                        _n_no_cumple = _n_jd + _n_abd
+                        _n_total_d   = _n_ok_d + _n_no_cumple
+
+                        _fig_abs = make_subplots(
+                            rows=1, cols=2,
+                            specs=[[{"type": "domain"}, {"type": "domain"}]],
+                            subplot_titles=[
+                                "Cumplimiento general",
+                                "Desglose no cumplen",
+                            ],
+                        )
+                        # Dona 1: cumple vs no cumple
+                        _fig_abs.add_trace(go.Pie(
+                            labels=["Cumplen ≥75%", "No cumplen"],
+                            values=[_n_ok_d, _n_no_cumple],
                             hole=0.52,
-                            marker=dict(colors=["#22c55e", "#f59e0b", "#ef4444"],
+                            marker=dict(colors=["#22c55e", "#f59e0b"],
                                         line=dict(color="#ffffff", width=2)),
                             textinfo="percent+value",
                             texttemplate="%{percent:.1%}<br>%{value:,} OTs",
                             hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%}<extra></extra>",
                             direction="clockwise",
                             sort=False,
-                        )])
-                        _n_total_d = _n_ok_d + _n_jd + _n_abd
+                        ), row=1, col=1)
+                        # Dona 2: de los que no cumplen → razonable vs injustificado
+                        _fig_abs.add_trace(go.Pie(
+                            labels=["Tiempo razonable (20–75%)", "Injustificado (<20%)"],
+                            values=[_n_jd, _n_abd],
+                            hole=0.52,
+                            marker=dict(colors=["#f59e0b", "#ef4444"],
+                                        line=dict(color="#ffffff", width=2)),
+                            textinfo="percent+value",
+                            texttemplate="%{percent:.1%}<br>%{value:,} OTs",
+                            hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%}<extra></extra>",
+                            direction="clockwise",
+                            sort=False,
+                        ), row=1, col=2)
                         _fig_abs.update_layout(
-                            height=340,
-                            margin=dict(t=20, b=20, l=10, r=10),
+                            height=360,
+                            margin=dict(t=40, b=10, l=10, r=10),
                             showlegend=True,
-                            legend=dict(orientation="h", y=-0.08, x=0.5,
+                            legend=dict(orientation="h", y=-0.05, x=0.5,
                                         xanchor="center", font=dict(size=11)),
-                            annotations=[dict(
-                                text=f"<b>{_n_total_d:,}</b><br>OTs",
-                                x=0.5, y=0.5, showarrow=False,
-                                font=dict(size=18),
-                            )],
+                            annotations=[
+                                dict(text=f"<b>{_n_total_d:,}</b><br>OTs",
+                                     x=0.19, y=0.5, showarrow=False,
+                                     font=dict(size=16)),
+                                dict(text=f"<b>{_n_no_cumple:,}</b><br>No cumplen",
+                                     x=0.81, y=0.5, showarrow=False,
+                                     font=dict(size=14)),
+                            ],
                         )
                     else:
                         # ── Barras apiladas: vista por técnico dentro del equipo ──
                         _x_lbl = _te_grp["_label"].tolist()
                         _fig_abs = go.Figure()
                         _fig_abs.add_trace(go.Bar(
-                            name="Cumplen ≥70%",
+                            name="Cumplen ≥75%",
                             x=_x_lbl,
                             y=_te_grp["ok"].tolist(),
                             marker_color="#22c55e",
@@ -7048,7 +7073,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             textfont=dict(size=11, color="#ffffff"),
                         ))
                         _fig_abs.add_trace(go.Bar(
-                            name="No cumplen (15–70%)",
+                            name="No cumplen (20–75%)",
                             x=_x_lbl,
                             y=_te_grp["just_fail"].tolist(),
                             marker_color="#f59e0b",
@@ -7058,7 +7083,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             textfont=dict(size=11, color="#ffffff"),
                         ))
                         _fig_abs.add_trace(go.Bar(
-                            name="Injustificado (<15%)",
+                            name="Injustificado (<20%)",
                             x=_x_lbl,
                             y=_te_grp["absurdo"].tolist(),
                             marker_color="#ef4444",
