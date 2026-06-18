@@ -5335,10 +5335,12 @@ elif _page == _NAV_PAGES[0]:
                 _n_fnao = _n_sin_info = _n_sin_dato = _n_fao = _n_espec = _n_excl = 0
 
         # ── KPIs globales: Total PMs y PMs sin reincidencia ──────────────────────
+        # Solo se cuentan PMs de los mismos clientes que el numerador (consistencia).
         _df_pm_filt = df_wo[
             (df_wo["maint_type"] == "Preventiva") &
             (~df_wo["technician"].apply(_es_excluido)) &
-            (df_wo["equipo"] != "Sin equipo")
+            (df_wo["equipo"] != "Sin equipo") &
+            (df_wo["client"].isin(_CLIENTES_SLA) if "client" in df_wo.columns else True)
         ].copy()
         # Columna auxiliar: nombre normalizado (sin acentos, sin espacios dobles, minúsculas).
         # Fracttal puede guardar el nombre con doble espacio o acentos distintos al TECH_NAME_MAP.
@@ -5401,16 +5403,15 @@ elif _page == _NAV_PAGES[0]:
         _cal_cols = st.columns(len(_eq_label_cal_iter))
         for _ci, (_gk, _gl) in enumerate(zip(_eq_label_cal_iter.keys(), _eq_label_cal_iter.values())):
             _senior_cal = GRUPOS_TERRENO.get(_gk, {}).get("senior", "")
-            # PMs de este equipo (denominador total — todos los clientes)
+            # Denominador: solo PMs de los mismos clientes que el numerador (COPEC/ESMAX/SHELL).
+            # Incluir otros clientes (ej. Abastible) inflaría el denominador → efectividad % falsa.
             _pm_equipo = df_wo[
                 (df_wo["maint_type"] == "Preventiva") &
-                (df_wo["equipo"] == _gk)
+                (df_wo["equipo"] == _gk) &
+                (df_wo["client"].isin(_CLIENTES_SLA_RC) if "client" in df_wo.columns else True)
             ]
             _n_pm = _pm_equipo["folio"].nunique() if "folio" in _pm_equipo.columns else len(_pm_equipo)
-            # PMs de este equipo SOLO en clientes evaluados (COPEC/ESMAX/SHELL) — para transparencia
-            _pm_sla = _pm_equipo[_pm_equipo["client"].isin(_CLIENTES_SLA_RC)] \
-                if "client" in _pm_equipo.columns else pd.DataFrame()
-            _n_pm_sla = _pm_sla["folio"].nunique() if not _pm_sla.empty and "folio" in _pm_sla.columns else 0
+            _n_pm_sla = _n_pm  # ahora el denominador ya es solo clientes SLA
             # Fallas post-PM del período filtrado
             # nunique(folio_cm) = OTs correctivas únicas = 1 OT = 1 error
             if not _df_rc.empty and "folio_cm" in _df_rc.columns:
@@ -5438,7 +5439,7 @@ elif _page == _NAV_PAGES[0]:
             _exactitud_cal = round((1 - _fallas_eq / _n_pm) * 100, 1) if _n_pm > 0 else 100.0
 
             # Nota de cobertura: si 100% y pocos PMs SLA, advertir
-            if _exactitud_cal == 100.0 and _n_pm_sla == 0:
+            if _exactitud_cal == 100.0 and _n_pm == 0:
                 _cobertura_nota = (
                     f'<div style="font-size:0.65rem;color:#f59e0b;margin-top:3px;">'
                     f'⚠️ 0 PMs en COPEC/ESMAX/SHELL — sin cobertura de evaluación</div>'
@@ -5446,12 +5447,12 @@ elif _page == _NAV_PAGES[0]:
             elif _exactitud_cal == 100.0:
                 _cobertura_nota = (
                     f'<div style="font-size:0.65rem;color:{_t["muted"]};margin-top:3px;">'
-                    f'Verificados {_n_pm_sla} PMs en COPEC/ESMAX/SHELL</div>'
+                    f'Verificados {_n_pm} PMs en COPEC/ESMAX/SHELL</div>'
                 )
             else:
                 _cobertura_nota = (
                     f'<div style="font-size:0.65rem;color:{_t["muted"]};margin-top:3px;">'
-                    f'{_n_pm_sla} PMs en COPEC/ESMAX/SHELL</div>'
+                    f'{_n_pm} PMs en COPEC/ESMAX/SHELL</div>'
                 )
 
             _cal_cols[_ci].markdown(
@@ -7579,9 +7580,16 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
         # ── Cargar datos de MP (reincidencias) ────────────────────────────────
         _df_reinc_bono = st.session_state.get("df_reinc", pd.DataFrame()).copy()
         if not _df_reinc_bono.empty and "falla_tipo" in _df_reinc_bono.columns:
+            # Política FAO+FNAO: solo excluir Trabajos Especiales y causa=cliente
             _df_reinc_bono = _df_reinc_bono[
-                ~_df_reinc_bono["falla_tipo"].isin(["fnao", "especial"])
+                ~_df_reinc_bono["falla_tipo"].isin(["especial"])
             ].copy()
+        # Asegurar es_reincidencia_tecnico con política actual (igual que en tab Efectividad MP)
+        if not _df_reinc_bono.empty and "falla_tipo" in _df_reinc_bono.columns and "causa_clasif" in _df_reinc_bono.columns:
+            _df_reinc_bono["es_reincidencia_tecnico"] = (
+                (_df_reinc_bono["falla_tipo"] != "especial") &
+                (_df_reinc_bono["causa_clasif"] != "cliente")
+            )
         # Filtro de período
         if not _df_reinc_bono.empty and "fecha_cm" in _df_reinc_bono.columns:
             _reinc_fecha = pd.to_datetime(_df_reinc_bono["fecha_cm"], errors="coerce")
@@ -7598,11 +7606,13 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     _df_reinc_bono["mes"].astype(str).isin(_meses_bono_activos)
                 ].copy()
 
-        # PMs del período para denominador
+        # PMs del período para denominador (solo clientes SLA — mismos que el numerador)
+        _CLIENTES_SLA_BONO = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
         _df_pm_bono = df_wo[
             (df_wo["maint_type"] == "Preventiva") &
             (~df_wo["technician"].apply(_es_excluido)) &
-            (df_wo["equipo"] != "Sin equipo")
+            (df_wo["equipo"] != "Sin equipo") &
+            (df_wo["client"].isin(_CLIENTES_SLA_BONO) if "client" in df_wo.columns else True)
         ].copy()
         if not _df_pm_bono.empty:
             _pm_dates_bono = (
