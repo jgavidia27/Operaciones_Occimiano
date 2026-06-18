@@ -7776,6 +7776,26 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 "luego vuelve aquí."
             )
         else:
+            # ── Rotación callcenter Santiago ──────────────────────────────────
+            # Ciclo fijo: Juan Gallardo → Luis Pinto → Victor Bahamonde → ...
+            # Referencia: lunes 01/06/2026 → Juan Gallardo (índice 0)
+            from datetime import date as _date_cc
+            _CC_STGO   = ["Juan Gallardo", "Luis Pinto", "Victor Bahamonde"]
+            _CC_REF    = _date_cc(2026, 6, 1)  # lunes de referencia
+            _semanas_cc_por_equipo: dict = {}
+            for _ms_cc in _meses_bono_activos:
+                for _lun_cc in pd.date_range(
+                    start=pd.Period(_ms_cc, "M").start_time,
+                    end=pd.Period(_ms_cc, "M").end_time,
+                    freq="W-MON",
+                ):
+                    _idx_cc = ((_lun_cc.date() - _CC_REF).days // 7) % len(_CC_STGO)
+                    _eq_cc  = _CC_STGO[_idx_cc]
+                    _semanas_cc_por_equipo[_eq_cc] = (
+                        _semanas_cc_por_equipo.get(_eq_cc, 0) + 1
+                    )
+            # ── Fin rotación ──────────────────────────────────────────────────
+
             for _grp_key, _grp_info in GRUPOS_TERRENO.items():
                 # ── Filtro equipo ─────────────────────────────────────────────
                 if _bono_eq_key and _grp_key != _bono_eq_key:
@@ -7827,16 +7847,10 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 _MAX_EQ_SLA   = int(_pp_eq  * 0.40)
                 _MAX_EQ_MP    = int(_pp_eq  * 0.30)
                 _MAX_EQ_PREC  = int(_pp_eq  * 0.30)
-                # Callcenter: $100K/equipo/semana — cuenta lunes reales del período activo
+                # Callcenter: $100K/sem × semanas de turno del equipo (rotación stgo)
+                # Norte/Sur no participan → 0 semanas
                 _BONO_CC_SEMANAL = 100_000
-                _n_semanas_cc = sum(
-                    len(pd.date_range(
-                        start=pd.Period(ms, "M").start_time,
-                        end=pd.Period(ms, "M").end_time,
-                        freq="W-MON",
-                    ))
-                    for ms in _meses_bono_activos
-                )
+                _n_semanas_cc = _semanas_cc_por_equipo.get(_grp_key, 0)
                 _BONO_CC = int(_BONO_CC_SEMANAL * _n_semanas_cc / _n_equipo_real) if _n_equipo_real > 0 else 0
                 _BONO_CC_EQ = _BONO_CC_SEMANAL * _n_semanas_cc  # total equipo por período
 
@@ -8045,13 +8059,20 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 )
 
                 # Fila 6.5: Callcenter ($100K/equipo/sem ÷ N pers × 13 sem)
-                _cc_cell = f'<span style="font-weight:700;">{_clp_fmt(_BONO_CC)}</span>'
-                _cc_eq_cell = f'<span style="font-weight:700;font-style:italic;">{_clp_fmt(_BONO_CC_EQ)}</span>'
+                if _n_semanas_cc > 0:
+                    _cc_cell    = f'<span style="font-weight:700;">{_clp_fmt(_BONO_CC)}</span>'
+                    _cc_eq_cell = f'<span style="font-weight:700;font-style:italic;">{_clp_fmt(_BONO_CC_EQ)}</span>'
+                    _cc_lbl     = (f'$100K/sem &times; {_n_semanas_cc} sem de turno'
+                                   f' &divide; {_n_equipo_real} pers')
+                else:
+                    _cc_cell    = f'<span style="color:{_t["muted"]};font-size:0.82rem;">—</span>'
+                    _cc_eq_cell = f'<span style="color:{_t["muted"]};font-size:0.82rem;">—</span>'
+                    _cc_lbl     = 'no participa en rotación'
                 _html += (
                     f'<tr style="background:{_tr_bg(6)};">'
                     f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
                     f'Callcenter <span style="color:{_t["muted"]};font-size:0.76rem;">'
-                    f'($100K/sem &divide; {_n_equipo_real} pers &times; {_n_semanas_cc} sem)</span></td>'
+                    f'({_cc_lbl})</span></td>'
                 )
                 for _tf in _miembros_full:
                     _html += (
