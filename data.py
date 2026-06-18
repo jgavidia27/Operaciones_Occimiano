@@ -193,6 +193,19 @@ def get_grupo_tecnico(nombre_corto: str) -> str | None:
     return _TECNICO_A_GRUPO.get(nombre_corto)
 
 
+# Técnicos senior cuyo KPI individual = promedio del equipo completo (no solo sus propios casos).
+# Para estos 3, los indicadores SLA, Efectividad MP y Precisión Fracttal se calculan
+# como el agregado de todos los miembros de su equipo (incluido el propio senior).
+SENIORS: frozenset[str] = frozenset({"Juan Gallardo", "Victor Bahamonde", "Luis Pinto"})
+
+
+def get_senior_team_members(senior_short: str) -> list[str]:
+    """Retorna todos los miembros del equipo del senior (incluido él mismo).
+    Solo aplica para seniors con grupo propio (Juan Gallardo, Victor Bahamonde, Luis Pinto)."""
+    grp = GRUPOS_TERRENO.get(senior_short)
+    return list(grp["miembros"]) if grp else [senior_short]
+
+
 # ── Clientes reconocidos ─────────────────────────────────────────────────────
 CLIENT_MAP = {
     "COPEC": "COPEC",

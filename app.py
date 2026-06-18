@@ -25,6 +25,7 @@ from data import (
     build_kpi_llenado_df, score_llenado_por_ot, score_llenado_por_tecnico,
     build_reincidencias,
     GRUPOS_TERRENO, get_grupo_tecnico, TECNICOS_NO_APLICA,
+    SENIORS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
 )
 from gdrive import (
@@ -4846,6 +4847,19 @@ elif _page == _NAV_PAGES[0]:
                     cumple=("cumple_sla",   "sum"),
                     horas_prom=("horas_resolucion", "mean"),
                 ).reset_index()
+                # ── Seniors: reemplazar su fila con el agregado del equipo completo ────
+                for _snr in SENIORS:
+                    _snr_idx = _tec_sla_rank.index[_tec_sla_rank["tecnico"] == _snr]
+                    if len(_snr_idx) == 0:
+                        continue
+                    _snr_mbs  = get_senior_team_members(_snr)
+                    _snr_data = _df_con_pri[_df_con_pri["tecnico"].isin(_snr_mbs)]
+                    if _snr_data.empty:
+                        continue
+                    _si = _snr_idx[0]
+                    _tec_sla_rank.at[_si, "llamados"]   = len(_snr_data)
+                    _tec_sla_rank.at[_si, "cumple"]     = int(_snr_data["cumple_sla"].sum())
+                    _tec_sla_rank.at[_si, "horas_prom"] = _snr_data["horas_resolucion"].mean()
                 _tec_sla_rank["pct_sla"]    = (_tec_sla_rank["cumple"] / _tec_sla_rank["llamados"] * 100).round(1)
                 _tec_sla_rank["horas_prom"] = _tec_sla_rank["horas_prom"].round(1)
                 _tec_sla_rank = _tec_sla_rank.sort_values("pct_sla", ascending=True)
@@ -4950,6 +4964,21 @@ elif _page == _NAV_PAGES[0]:
                     .agg(total=("cumple_sla","count"), cumple=("cumple_sla","sum"))
                     .reset_index()
                 )
+                # Seniors: cada período usa el agregado del equipo
+                for _snr in SENIORS:
+                    _snr_mbs  = get_senior_team_members(_snr)
+                    _snr_pers = _tec_g.loc[_tec_g["tecnico"] == _snr, "_periodo"].unique()
+                    for _per in _snr_pers:
+                        _si_g = _tec_g.index[(_tec_g["tecnico"] == _snr) & (_tec_g["_periodo"] == _per)]
+                        if len(_si_g) == 0:
+                            continue
+                        _per_data = _df_tec[
+                            _df_tec["tecnico"].isin(_snr_mbs) & (_df_tec["_periodo"] == _per)
+                        ]
+                        if _per_data.empty:
+                            continue
+                        _tec_g.at[_si_g[0], "total"]  = len(_per_data)
+                        _tec_g.at[_si_g[0], "cumple"] = int(_per_data["cumple_sla"].sum())
                 _tec_g["pct"] = (
                     _tec_g["cumple"] / _tec_g["total"] * 100
                 ).round(1).where(_tec_g["total"] > 0)
@@ -4960,6 +4989,17 @@ elif _page == _NAV_PAGES[0]:
                     .agg(total=("cumple_sla","count"), cumple=("cumple_sla","sum"))
                     .reset_index()
                 )
+                # Seniors: total = agregado del equipo completo
+                for _snr in SENIORS:
+                    _snr_idx = _tec_tot.index[_tec_tot["tecnico"] == _snr]
+                    if len(_snr_idx) == 0:
+                        continue
+                    _snr_mbs  = get_senior_team_members(_snr)
+                    _snr_data = _df_tec[_df_tec["tecnico"].isin(_snr_mbs)]
+                    if _snr_data.empty:
+                        continue
+                    _tec_tot.at[_snr_idx[0], "total"]  = len(_snr_data)
+                    _tec_tot.at[_snr_idx[0], "cumple"] = int(_snr_data["cumple_sla"].sum())
                 _tec_tot["pct"] = (_tec_tot["cumple"] / _tec_tot["total"] * 100).round(1)
 
                 # ── Pivot ────────────────────────────────────────────────────
@@ -6307,6 +6347,66 @@ elif _page == _NAV_PAGES[0]:
 
         df_tec_scores = score_llenado_por_tecnico(df_ot_scores)
 
+        # ── df_tec_scores_rank: versión para rankings individuales donde los seniors
+        #    muestran el promedio de su equipo completo (no solo sus propios casos).
+        #    df_tec_scores (sin modificar) sigue usándose para tarjetas por equipo,
+        #    donde el equipo ya agrega todos sus miembros correctamente.
+        df_tec_scores_rank = df_tec_scores.copy()
+        if not df_tec_scores_rank.empty:
+            for _snr in SENIORS:
+                _snr_idx_r = df_tec_scores_rank.index[df_tec_scores_rank["tecnico"] == _snr]
+                if len(_snr_idx_r) == 0:
+                    continue
+                _snr_mbs_r  = get_senior_team_members(_snr)
+                _team_rows_r = df_tec_scores[df_tec_scores["tecnico"].isin(_snr_mbs_r)]
+                if len(_team_rows_r) <= 1:
+                    continue  # solo el senior mismo, sin compañeros → no hay nada que agregar
+                _si_r      = _snr_idx_r[0]
+                _tot_ots_r = int(_team_rows_r["ots_evaluadas"].sum())
+                _w_r       = _team_rows_r["ots_evaluadas"]  # pesos para promedios ponderados
+
+                def _wsum_r(col):
+                    return int(_team_rows_r[col].sum()) if col in _team_rows_r else 0
+
+                def _wavg_r(col):
+                    return round((_team_rows_r[col] * _w_r).sum() / _tot_ots_r, 1) \
+                        if _tot_ots_r > 0 and col in _team_rows_r else 0.0
+
+                _n_err_r = _wsum_r("n_errores")
+                df_tec_scores_rank.at[_si_r, "ots_evaluadas"]        = _tot_ots_r
+                df_tec_scores_rank.at[_si_r, "n_errores"]            = _n_err_r
+                df_tec_scores_rank.at[_si_r, "ots_correctas"]        = _tot_ots_r - _n_err_r
+                df_tec_scores_rank.at[_si_r, "correctivas"]          = _wsum_r("correctivas")
+                df_tec_scores_rank.at[_si_r, "sin_causa"]            = _wsum_r("sin_causa")
+                df_tec_scores_rank.at[_si_r, "causa_tecnico"]        = _wsum_r("causa_tecnico")
+                df_tec_scores_rank.at[_si_r, "causa_cliente"]        = _wsum_r("causa_cliente")
+                df_tec_scores_rank.at[_si_r, "err_tiempo"]           = _wsum_r("err_tiempo")
+                df_tec_scores_rank.at[_si_r, "err_causa"]            = _wsum_r("err_causa")
+                df_tec_scores_rank.at[_si_r, "err_numeral"]          = _wsum_r("err_numeral")
+                df_tec_scores_rank.at[_si_r, "err_deteccion"]        = _wsum_r("err_deteccion")
+                df_tec_scores_rank.at[_si_r, "err_total_dim"]        = (
+                    _wsum_r("err_tiempo") + _wsum_r("err_causa") + _wsum_r("err_numeral")
+                )
+                df_tec_scores_rank.at[_si_r, "tiempo_ok_count"]      = _tot_ots_r - _wsum_r("err_tiempo")
+                df_tec_scores_rank.at[_si_r, "causa_ok_count"]       = _tot_ots_r - _wsum_r("err_causa")
+                df_tec_scores_rank.at[_si_r, "numeral_ok_count"]     = _tot_ots_r - _wsum_r("err_numeral")
+                df_tec_scores_rank.at[_si_r, "deteccion_ok_count"]   = _tot_ots_r - _wsum_r("err_deteccion")
+                df_tec_scores_rank.at[_si_r, "score_promedio"]       = _wavg_r("score_promedio")
+                df_tec_scores_rank.at[_si_r, "score_tiempo_prom"]    = _wavg_r("score_tiempo_prom")
+                df_tec_scores_rank.at[_si_r, "score_causa_prom"]     = _wavg_r("score_causa_prom")
+                df_tec_scores_rank.at[_si_r, "score_numeral_prom"]   = _wavg_r("score_numeral_prom")
+                df_tec_scores_rank.at[_si_r, "score_deteccion_prom"] = _wavg_r("score_deteccion_prom")
+                df_tec_scores_rank.at[_si_r, "pct_tiempo_ok"]        = _wavg_r("pct_tiempo_ok")
+                df_tec_scores_rank.at[_si_r, "pct_causa_ok"]         = _wavg_r("pct_causa_ok")
+                df_tec_scores_rank.at[_si_r, "pct_numeral_ok"]       = _wavg_r("pct_numeral_ok")
+                df_tec_scores_rank.at[_si_r, "pct_deteccion_ok"]     = _wavg_r("pct_deteccion_ok")
+                _exactitud_r = round((1 - _n_err_r / _tot_ots_r) * 100, 1) if _tot_ots_r > 0 else 100.0
+                df_tec_scores_rank.at[_si_r, "exactitud_pct"]        = _exactitud_r
+                _bp_r, _bl_r, _, _bclp_r = _bono_prec(_exactitud_r)
+                df_tec_scores_rank.at[_si_r, "bono_pct"]    = _bp_r
+                df_tec_scores_rank.at[_si_r, "bono_semanal"] = _bclp_r
+                df_tec_scores_rank.at[_si_r, "umbral_bono"] = _bp_r > 0
+
         st.divider()
 
         # ── Tarjetas de bono por equipo (sin título, justo bajo los filtros) ─────
@@ -6421,8 +6521,8 @@ elif _page == _NAV_PAGES[0]:
             pct_tiempo = (df_ot_scores["score_tiempo"] >= 25).mean() * 100
             pct_causa  = df_ot_scores["causa_ok"].mean() * 100
             pct_numeral = df_ot_scores["numeral_ok"].mean() * 100
-            tecnicos_con_bono = (df_tec_scores["umbral_bono"]).sum() if not df_tec_scores.empty else 0
-            total_tecnicos = len(df_tec_scores)
+            tecnicos_con_bono = (df_tec_scores_rank["umbral_bono"]).sum() if not df_tec_scores_rank.empty else 0
+            total_tecnicos = len(df_tec_scores_rank)
 
             color_global, lbl_global = _score_level(score_global)
 
@@ -7003,9 +7103,9 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                         st.plotly_chart(st.session_state[_det_sig], width="stretch")
 
                 # ── Ranking de técnicos por campo de detección ─────────────────
-                if not df_tec_scores.empty and "err_deteccion" in df_tec_scores.columns:
-                    _det_rank = df_tec_scores[
-                        df_tec_scores["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)
+                if not df_tec_scores_rank.empty and "err_deteccion" in df_tec_scores_rank.columns:
+                    _det_rank = df_tec_scores_rank[
+                        df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)
                     ][["tecnico","ots_evaluadas","err_deteccion","pct_deteccion_ok"]].copy()
                     _det_rank = _det_rank.sort_values("err_deteccion", ascending=False)
                     _det_rank["cumple"] = _det_rank["pct_deteccion_ok"].apply(
@@ -7033,10 +7133,11 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             st.markdown('<div class="section-header">🏆 Ranking de técnicos — Índice de llenado</div>',
                         unsafe_allow_html=True)
 
-            if not df_tec_scores.empty:
+            if not df_tec_scores_rank.empty:
                 # Filtrar solo técnicos activos del organigrama (Libro4 / GRUPOS_TERRENO)
-                df_rank = df_tec_scores[
-                    df_tec_scores["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)
+                # df_tec_scores_rank: seniors muestran el promedio de su equipo completo
+                df_rank = df_tec_scores_rank[
+                    df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)
                 ].copy()
                 # Asegurar columna err_total_dim (puede faltar en caches pre-migración)
                 if "err_total_dim" not in df_rank.columns:
@@ -7115,7 +7216,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     "**Color** = nivel de bono según exactitud %"
                 )
 
-                _tec_base = df_tec_scores[df_tec_scores["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)].copy()
+                _tec_base = df_tec_scores_rank[df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)].copy()
 
                 # Guards para columnas nuevas (caches pre-migración)
                 _guards = {
