@@ -6940,13 +6940,13 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             "Tipo":        st.column_config.TextColumn(width=200),
                             "T. Estimado": st.column_config.TextColumn(width=100,
                                 help="Duración programada en Fracttal (HH:MM)"),
-                            "Mín. 70%":    st.column_config.TextColumn(width=90,
-                                help="Tiempo mínimo aceptable = 70% del estimado"),
+                            "Mín. 75%":    st.column_config.TextColumn(width=90,
+                                help="Tiempo mínimo aceptable = 75% del estimado"),
                             "T. Ejecución":st.column_config.TextColumn(width=110,
                                 help="Tiempo efectivo = max(tiempo tareas, tiempo real por fechas)"),
                             "% Ejecutado": st.column_config.ProgressColumn(
                                 label="% Ejecutado", min_value=0, max_value=150, format="%.1f%%",
-                                help="T.Efectivo / T.Estimado × 100. Verde si ≥70%"),
+                                help="T.Efectivo / T.Estimado × 100. Verde si ≥75%"),
                             "Estado":      st.column_config.TextColumn(width=110),
                         })
 
@@ -7143,10 +7143,10 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 "T. Ejecución":st.column_config.TextColumn(width=110),
                                 "% Ejecutado": st.column_config.ProgressColumn(
                                     min_value=0, max_value=50, format="%.1f%%",
-                                    help="Todos en esta tabla están por debajo del 15% del estimado."),
+                                    help="Todos en esta tabla están por debajo del 20% del estimado."),
                             })
                 else:
-                    st.success("✅ No hay preventivos con tiempo inferior al 15% del estimado en este período.")
+                    st.success("✅ No hay preventivos con tiempo inferior al 20% del estimado en este período.")
 
             else:
                 st.info("Sin datos de duración estimada disponibles para el filtro actual.")
@@ -7235,6 +7235,68 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             _apply_plot_theme(_fig_num)
                             st.session_state[_num_sig] = _fig_num
                         st.plotly_chart(st.session_state[_num_sig], width="stretch")
+
+                # ── Tabla detalle OTs numerales (cumple + no cumple) ──────────
+                _det_num = _df_num_base.copy()
+
+                # Extraer el numeral detectado de la nota (primer número ≥4 dígitos)
+                import re as _re_num
+                def _extraer_numeral(nota):
+                    if not nota or not isinstance(nota, str):
+                        return "—"
+                    m = _re_num.search(r"\b\d{4,}\b", nota)
+                    return m.group(0) if m else "—"
+
+                _det_num["_numeral"] = _det_num["note"].apply(_extraer_numeral)
+
+                # Formatear fecha
+                _det_num_cd = pd.to_datetime(_det_num["creation_date"], errors="coerce")
+                _det_num_cd = _det_num_cd.dt.tz_convert(None) if _det_num_cd.dt.tz is not None else _det_num_cd
+                _det_num["_fecha"] = _det_num_cd.dt.strftime("%d/%m/%Y")
+
+                # Estado visual
+                _det_num["_estado"] = _det_num["numeral_ok"].apply(
+                    lambda ok: "✅ Registrado" if ok else "❌ Sin numeral"
+                )
+
+                # Construir df de display
+                _cols_num = [c for c in
+                    ["folio","tecnico","_fecha","client","station","maint_type","_numeral","_estado"]
+                    if c in _det_num.columns]
+                _det_num_disp = _det_num[_cols_num].rename(columns={
+                    "folio":      "OT",
+                    "tecnico":    "Técnico",
+                    "_fecha":     "Fecha",
+                    "client":     "Cliente",
+                    "station":    "EDS",
+                    "maint_type": "Tipo",
+                    "_numeral":   "Numeral",
+                    "_estado":    "Estado",
+                }).sort_values(["Estado", "Fecha"], ascending=[True, False])
+
+                _n_sin   = int((~_df_num_base["numeral_ok"]).sum())
+                _n_con   = int(_df_num_base["numeral_ok"].sum())
+                with st.expander(
+                    f"📋 Detalle OTs — numerales ({_n_con:,} registrados · {_n_sin:,} sin numeral)",
+                    expanded=False,
+                ):
+                    st.caption(
+                        "Las OTs ❌ Sin numeral aparecen primero. "
+                        "Columna **Numeral**: primer número de ≥4 dígitos encontrado en la nota. "
+                        "Solo aplica a **lavadoras** — el resto se marca ✅ automáticamente."
+                    )
+                    _show_df(_det_num_disp, hide_index=True, width="stretch",
+                        column_config={
+                            "OT":       st.column_config.TextColumn(width=110),
+                            "Técnico":  st.column_config.TextColumn(width=190),
+                            "Fecha":    st.column_config.TextColumn(width=100),
+                            "Cliente":  st.column_config.TextColumn(width=90),
+                            "EDS":      st.column_config.TextColumn(width=200),
+                            "Tipo":     st.column_config.TextColumn(width=140),
+                            "Numeral":  st.column_config.TextColumn(width=100,
+                                help="Primer número ≥4 dígitos en la nota. '—' = no encontrado."),
+                            "Estado":   st.column_config.TextColumn(width=130),
+                        })
 
             if not df_tec_scores_rank.empty:
                 _tec_base = df_tec_scores_rank[df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)].copy()
