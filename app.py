@@ -8788,6 +8788,57 @@ elif _page == "🔐  Administración":
             })
             st.dataframe(_df_res, use_container_width=True, hide_index=True)
 
+            # ── Gráfico de conectividad por usuario ───────────────────────
+            if "duracion_min" in _df_ses.columns:
+                _uso_grp = (
+                    _df_ses.groupby("email")["duracion_min"]
+                    .sum().round(1).reset_index()
+                    .sort_values("duracion_min", ascending=True)
+                )
+                # Mostrar en horas si algún usuario supera 120 min
+                _usar_horas = _uso_grp["duracion_min"].max() > 120
+                if _usar_horas:
+                    _uso_grp["_val"] = (_uso_grp["duracion_min"] / 60).round(1)
+                    _unidad_lbl = "h"
+                else:
+                    _uso_grp["_val"] = _uso_grp["duracion_min"].round(1)
+                    _unidad_lbl = "min"
+                # Solo el nombre antes del @
+                _uso_grp["_usr"] = _uso_grp["email"].str.split("@").str[0]
+
+                _fig_uso = go.Figure(go.Bar(
+                    y=_uso_grp["_usr"],
+                    x=_uso_grp["_val"],
+                    orientation="h",
+                    marker=dict(
+                        color=_uso_grp["_val"],
+                        colorscale=[[0, "#93c5fd"], [1, "#1e3a5f"]],
+                        showscale=False,
+                    ),
+                    text=[f"  {v:.1f} {_unidad_lbl}" for v in _uso_grp["_val"]],
+                    textposition="outside",
+                    textfont=dict(size=12, color="#334155", family="Arial"),
+                    hovertemplate="<b>%{y}</b><br>Tiempo: %{x:.1f} " + _unidad_lbl + "<extra></extra>",
+                ))
+                _fig_uso.update_layout(
+                    title=dict(
+                        text=f"Tiempo total de uso por usuario ({_unidad_lbl})",
+                        font=dict(size=15, color="#1e293b"),
+                    ),
+                    height=max(220, len(_uso_grp) * 56 + 100),
+                    margin=dict(l=10, r=110, t=50, b=30),
+                    xaxis=dict(
+                        title=f"Tiempo ({_unidad_lbl})",
+                        showgrid=True, gridcolor="#e2e8f0",
+                        zeroline=False,
+                    ),
+                    yaxis=dict(showgrid=False, automargin=True),
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="Arial"),
+                )
+                st.plotly_chart(_fig_uso, use_container_width=True)
+
             st.divider()
             st.markdown("##### Detalle de sesiones")
             _df_ses_show = _df_ses.copy()
