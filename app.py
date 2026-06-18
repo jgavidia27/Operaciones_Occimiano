@@ -6563,10 +6563,14 @@ elif _page == _NAV_PAGES[0]:
                 f"Técnicos: **{total_tecnicos}**  |  Período: **{_mes_lbl_prec}**"
             )
 
+            # Usar pct_* ya calculadas con el denominador correcto:
+            #   pct_tiempo  → solo preventivas (MC tienen 25 auto, no cuentan)
+            #   pct_causa   → MC+MP (aplica a todos)
+            #   pct_numeral → solo preventivas (MC tienen 25 auto, no cuentan)
             dim_avg = {
-                "⏱ Tiempo ejecución (25 pts)":   df_ot_scores["score_tiempo"].mean(),
-                "🔍 Causa raíz (25 pts)":         df_ot_scores["score_causa"].mean(),
-                "🔢 Numeral registrado (25 pts)": df_ot_scores["score_numeral"].mean(),
+                "⏱ Tiempo ejecución (25 pts)":   pct_tiempo  / 100 * 25,
+                "🔍 Causa raíz (25 pts)":         pct_causa   / 100 * 25,
+                "🔢 Numeral registrado (25 pts)": pct_numeral / 100 * 25,
             }
             dim_max = {k: 25 for k in dim_avg}
             dim_colors = ["#f59e0b", "#3b82f6", "#22c55e"]
