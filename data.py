@@ -460,9 +460,11 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         _texto_numeral = (best_note + " " + task_note).upper()
         _equipo_nombre = (wo.get("items_log_description") or "").strip().upper()
         _es_lavadora   = bool(re.search(r"LAVAD", _equipo_nombre))
+        _numeral_match = re.search(r"\b\d{4,}\b", _texto_numeral) if _es_lavadora else None
+        _numeral_valor = _numeral_match.group(0) if _numeral_match else ""
         numeral_ok = (
             not _es_lavadora                                 # no lavadora → no aplica → OK
-            or bool(re.search(r"\b\d{4,}\b", _texto_numeral))  # lavadora → requiere numeral
+            or bool(_numeral_valor)                          # lavadora → requiere numeral
         )
 
         # ── Método de detección de falla ──────────────────────────────────────
@@ -503,6 +505,8 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "causa_clasif":      causa_clasif,
             "causa_ok":          causa_ok,
             "numeral_ok":        numeral_ok,
+            "es_lavadora":       _es_lavadora,
+            "numeral_valor":     _numeral_valor,
             "deteccion_raw":     raw_deteccion,
             "deteccion_ok":      deteccion_ok,
             "duration_sec":      duration_sec,

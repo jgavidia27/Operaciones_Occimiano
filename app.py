@@ -7246,25 +7246,30 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 # ── Tabla detalle OTs numerales (cumple + no cumple) ──────────
                 _det_num = _df_num_base.copy()
 
-                # Extraer el numeral detectado de la nota (primer número ≥4 dígitos)
-                import re as _re_num
-                def _extraer_numeral(nota):
-                    if not nota or not isinstance(nota, str):
-                        return "—"
-                    m = _re_num.search(r"\b\d{4,}\b", nota)
-                    return m.group(0) if m else "—"
+                # Columna Numeral: usa el valor extraído por data.py (de note+task_note).
+                # Para no-lavadoras el numeral no aplica → mostrar "N/A".
+                def _fmt_numeral_valor(row):
+                    if not row.get("es_lavadora", True):
+                        return "N/A"
+                    v = row.get("numeral_valor", "") or ""
+                    return v if v else "—"
 
-                _det_num["_numeral"] = _det_num["note"].apply(_extraer_numeral)
+                # Estado visual con tres casos:
+                #   🔵 No aplica  → equipo no es lavadora (numeral_ok True automático)
+                #   ✅ [número]   → lavadora con numeral registrado
+                #   ❌ Sin numeral → lavadora sin numeral
+                def _fmt_numeral_estado(row):
+                    if not row.get("es_lavadora", True):
+                        return "🔵 No aplica"
+                    return "✅ Registrado" if row["numeral_ok"] else "❌ Sin numeral"
+
+                _det_num["_numeral"] = _det_num.apply(_fmt_numeral_valor, axis=1)
+                _det_num["_estado"]  = _det_num.apply(_fmt_numeral_estado, axis=1)
 
                 # Formatear fecha
                 _det_num_cd = pd.to_datetime(_det_num["creation_date"], errors="coerce")
                 _det_num_cd = _det_num_cd.dt.tz_convert(None) if _det_num_cd.dt.tz is not None else _det_num_cd
                 _det_num["_fecha"] = _det_num_cd.dt.strftime("%d/%m/%Y")
-
-                # Estado visual
-                _det_num["_estado"] = _det_num["numeral_ok"].apply(
-                    lambda ok: "✅ Registrado" if ok else "❌ Sin numeral"
-                )
 
                 # Construir df de display
                 _cols_num = [c for c in
@@ -7281,16 +7286,20 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     "_estado":    "Estado",
                 }).sort_values(["Estado", "Fecha"], ascending=[True, False])
 
-                _n_sin   = int((~_df_num_base["numeral_ok"]).sum())
-                _n_con   = int(_df_num_base["numeral_ok"].sum())
+                _n_sin      = int((~_df_num_base["numeral_ok"]).sum())
+                _n_lav_ok   = int((_df_num_base["es_lavadora"] & _df_num_base["numeral_ok"]).sum()) \
+                              if "es_lavadora" in _df_num_base.columns else int(_df_num_base["numeral_ok"].sum())
+                _n_no_aplica = int((~_df_num_base["es_lavadora"]).sum()) \
+                               if "es_lavadora" in _df_num_base.columns else 0
                 with st.expander(
-                    f"📋 Detalle OTs — numerales ({_n_con:,} registrados · {_n_sin:,} sin numeral)",
+                    f"📋 Detalle OTs — numerales ({_n_lav_ok:,} registrados · {_n_sin:,} sin numeral · {_n_no_aplica:,} no aplica)",
                     expanded=False,
                 ):
                     st.caption(
-                        "Las OTs ❌ Sin numeral aparecen primero. "
-                        "Columna **Numeral**: primer número de ≥4 dígitos encontrado en la nota. "
-                        "Solo aplica a **lavadoras** — el resto se marca ✅ automáticamente."
+                        "Solo aplica a **lavadoras**. "
+                        "🔵 **No aplica** = equipo no es lavadora (compresores, aspiradoras, etc.). "
+                        "✅ **Registrado** = lavadora con numeral detectado en la nota. "
+                        "❌ **Sin numeral** = lavadora sin numeral registrado."
                     )
                     _show_df(_det_num_disp, hide_index=True, width="stretch",
                         column_config={
@@ -7493,9 +7502,13 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         return f"❌ {raw[:35]}" if raw else "❌ Sin causa"
                     drill_disp["_col_causa"] = drill_disp.apply(_fmt_causa, axis=1)
 
-                    # Columna 6: 🔢 Numeral — ✅/❌ + indicación
+                    # Columna 6: 🔢 Numeral — tres casos: no aplica / registrado / sin numeral
+                    def _fmt_col_numeral(r):
+                        if not r.get("es_lavadora", True):
+                            return "🔵 No aplica"
+                        return "✅ Registrado" if r.get("numeral_ok", False) else "❌ Sin numeral"
                     drill_disp["_col_numeral"] = drill_disp.apply(
-                        lambda r: "✅ Registrado" if r.get("numeral_ok", False) else "❌ Sin numeral",
+                        _fmt_col_numeral,
                         axis=1)
 
                     # Columna 7: 🎯 Modalidad — valor registrado + ✅/❌
