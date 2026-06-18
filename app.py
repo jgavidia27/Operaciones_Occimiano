@@ -4848,11 +4848,15 @@ elif _page == _NAV_PAGES[0]:
                     horas_prom=("horas_resolucion", "mean"),
                 ).reset_index()
                 # ── Seniors: reemplazar su fila con el agregado del equipo completo ────
+                # IMPORTANTE: _df_con_pri["tecnico"] usa nombres completos (Fracttal),
+                # mientras que SENIORS y GRUPOS_TERRENO.miembros usan nombres cortos.
+                # Por eso se convierte vía TECH_NAME_MAP antes de comparar.
                 for _snr in SENIORS:
-                    _snr_idx = _tec_sla_rank.index[_tec_sla_rank["tecnico"] == _snr]
+                    _snr_full = TECH_NAME_MAP.get(_snr, _snr)
+                    _snr_idx = _tec_sla_rank.index[_tec_sla_rank["tecnico"] == _snr_full]
                     if len(_snr_idx) == 0:
                         continue
-                    _snr_mbs  = get_senior_team_members(_snr)
+                    _snr_mbs  = [TECH_NAME_MAP.get(m, m) for m in get_senior_team_members(_snr)]
                     _snr_data = _df_con_pri[_df_con_pri["tecnico"].isin(_snr_mbs)]
                     if _snr_data.empty:
                         continue
@@ -4966,10 +4970,11 @@ elif _page == _NAV_PAGES[0]:
                 )
                 # Seniors: cada período usa el agregado del equipo
                 for _snr in SENIORS:
-                    _snr_mbs  = get_senior_team_members(_snr)
-                    _snr_pers = _tec_g.loc[_tec_g["tecnico"] == _snr, "_periodo"].unique()
+                    _snr_full = TECH_NAME_MAP.get(_snr, _snr)
+                    _snr_mbs  = [TECH_NAME_MAP.get(m, m) for m in get_senior_team_members(_snr)]
+                    _snr_pers = _tec_g.loc[_tec_g["tecnico"] == _snr_full, "_periodo"].unique()
                     for _per in _snr_pers:
-                        _si_g = _tec_g.index[(_tec_g["tecnico"] == _snr) & (_tec_g["_periodo"] == _per)]
+                        _si_g = _tec_g.index[(_tec_g["tecnico"] == _snr_full) & (_tec_g["_periodo"] == _per)]
                         if len(_si_g) == 0:
                             continue
                         _per_data = _df_tec[
@@ -4991,10 +4996,11 @@ elif _page == _NAV_PAGES[0]:
                 )
                 # Seniors: total = agregado del equipo completo
                 for _snr in SENIORS:
-                    _snr_idx = _tec_tot.index[_tec_tot["tecnico"] == _snr]
+                    _snr_full = TECH_NAME_MAP.get(_snr, _snr)
+                    _snr_idx = _tec_tot.index[_tec_tot["tecnico"] == _snr_full]
                     if len(_snr_idx) == 0:
                         continue
-                    _snr_mbs  = get_senior_team_members(_snr)
+                    _snr_mbs  = [TECH_NAME_MAP.get(m, m) for m in get_senior_team_members(_snr)]
                     _snr_data = _df_tec[_df_tec["tecnico"].isin(_snr_mbs)]
                     if _snr_data.empty:
                         continue
@@ -6354,10 +6360,11 @@ elif _page == _NAV_PAGES[0]:
         df_tec_scores_rank = df_tec_scores.copy()
         if not df_tec_scores_rank.empty:
             for _snr in SENIORS:
-                _snr_idx_r = df_tec_scores_rank.index[df_tec_scores_rank["tecnico"] == _snr]
+                _snr_full_r = TECH_NAME_MAP.get(_snr, _snr)
+                _snr_idx_r = df_tec_scores_rank.index[df_tec_scores_rank["tecnico"] == _snr_full_r]
                 if len(_snr_idx_r) == 0:
                     continue
-                _snr_mbs_r  = get_senior_team_members(_snr)
+                _snr_mbs_r  = [TECH_NAME_MAP.get(m, m) for m in get_senior_team_members(_snr)]
                 _team_rows_r = df_tec_scores[df_tec_scores["tecnico"].isin(_snr_mbs_r)]
                 if len(_team_rows_r) <= 1:
                     continue  # solo el senior mismo, sin compañeros → no hay nada que agregar
@@ -7730,7 +7737,13 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             """
             Retorna dict con SLA, MP y Prec para un técnico dado.
             tech_full: nombre completo (API)
+            Para seniors, retorna el agregado del equipo completo en lugar de datos individuales.
             """
+            # Seniors: su KPI = promedio del equipo (igual que ranking y tabla SLA)
+            _short_snr = next((k for k, v in TECH_NAME_MAP.items() if v == tech_full), None)
+            if _short_snr in SENIORS:
+                return _kpi_para_equipo(equipo_key)
+
             _tn = " ".join(_norm_n(tech_full).split())
 
             # SLA — matching normalizado (igual que MP) para tolerar diferencias de tildes
