@@ -3591,7 +3591,8 @@ elif _page == _NAV_PAGES[4]:
 
                 # Calcular semanas/mes del periodo actual
                 from datetime import datetime as _dt_c, timedelta as _td_c
-                _tz_c  = ZoneInfo("America/Santiago")
+                from zoneinfo import ZoneInfo as _ZIC
+                _tz_c  = _ZIC("America/Santiago")
                 _hoy_c = _dt_c.now(_tz_c)
                 _s_act  = _hoy_c.isocalendar()[1]
                 _s_prox = _s_act + 1
