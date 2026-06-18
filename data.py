@@ -119,6 +119,14 @@ def classify_causa_raiz(causa: str) -> str:
 # GRUPOS DE TRABAJO — BONO TERRENO (período junio–agosto 2026)
 # ══════════════════════════════════════════════════════════════════════════════
 GRUPOS_TERRENO = {
+    # Orden de aparición en el dashboard: Gallardo → Pinto → Bahamonde → Avila Norte → Avila Sur
+    "Juan Gallardo": {
+        "senior":   "Juan Gallardo",
+        # Juan Gallardo = Juan Antonio Gallardo Romero
+        # Ignacio Ferrari = Iván Ignacio Vergara Ferrari
+        # Edison Carrasco = Edison Jhon Carrasco Navarro
+        "miembros": ["Juan Gallardo", "Javier Hein", "Edison Carrasco", "Ignacio Ferrari"],
+    },
     # Región Metropolitana — equipos nombrados por su jefe
     "Luis Pinto": {
         "senior":   "Luis Pinto",
@@ -133,13 +141,6 @@ GRUPOS_TERRENO = {
         # Victor Bahamonde = Victor Hugo Bahamonde Bustamante
         # Martin Flores = Martín Ignacio Flores Galaz
         "miembros": ["Victor Bahamonde", "Martin Flores", "Eduardo Toro"],
-    },
-    "Juan Gallardo": {
-        "senior":   "Juan Gallardo",
-        # Juan Gallardo = Juan Antonio Gallardo Romero
-        # Ignacio Ferrari = Iván Ignacio Vergara Ferrari
-        # Edison Carrasco = Edison Jhon Carrasco Navarro
-        "miembros": ["Juan Gallardo", "Javier Hein", "Edison Carrasco", "Ignacio Ferrari"],
     },
     # Carlos Avila Norte — Coquimbo (equipo directo de Carlos Avila)
     "Carlos Avila Norte": {
