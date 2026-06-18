@@ -6956,7 +6956,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 st.caption(
                     "Barras apiladas por equipo (o por técnico si filtras). "
                     "**Verde** = cumplen ≥75% del estimado · "
-                    "**Amarillo** = no cumplen pero tiempo razonable (20–75%) · "
+                    "**Amarillo** = no cumplen (20–75%) · "
                     "**Rojo** = injustificado, ejecución < 20% del estimado"
                 )
 
@@ -7032,7 +7032,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         ), row=1, col=1)
                         # Dona 2: de los que no cumplen → razonable vs injustificado
                         _fig_abs.add_trace(go.Pie(
-                            labels=["Tiempo razonable (20–75%)", "Injustificado (<20%)"],
+                            labels=["No cumplen (20–75%)", "Injustificado (<20%)"],
                             values=[_n_jd, _n_abd],
                             hole=0.52,
                             marker=dict(colors=["#f59e0b", "#ef4444"],
