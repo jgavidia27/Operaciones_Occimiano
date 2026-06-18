@@ -7162,14 +7162,17 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 "(≥4 dígitos) en lavadoras. Correctivas no se evalúan en este indicador."
             )
 
-            _df_num_base = df_ot_scores.copy()
+            # Numeral solo aplica a preventivas → filtrar correctivas desde la base
+            _df_num_base = df_ot_scores[~df_ot_scores["es_correctiva"]].copy() \
+                if "es_correctiva" in df_ot_scores.columns else df_ot_scores.copy()
             if not _df_num_base.empty:
                 _num_ok  = int(_df_num_base["numeral_ok"].sum())
                 _num_tot = len(_df_num_base)
                 _num_pct = _num_ok / _num_tot * 100 if _num_tot > 0 else 0.0
 
                 # ── Evolución mensual de registro de numerales ────────────────
-                _df_num_hist = df_ot_all.copy()
+                _df_num_hist = df_ot_all[~df_ot_all["es_correctiva"]].copy() \
+                    if "es_correctiva" in df_ot_all.columns else df_ot_all.copy()
                 if equipo_kpi != "Todos":
                     _grp_num = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
                     _df_num_hist = _df_num_hist[_df_num_hist["equipo"] == _grp_num]
