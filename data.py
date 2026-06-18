@@ -501,7 +501,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     """
     Calcula puntaje de calidad de llenado por OT (0–100).
 
-    KPI Llenado Fracttal — 4 componentes (25 pts c/u = 100 total):
+    KPI Llenado Fracttal — 3 componentes (25 pts c/u = 75 total):
     ┌──────────────────────────────────┬──────┬────────────────────────────────────────────────────┐
     │ Componente                       │ Pts  │ Criterio                                           │
     ├──────────────────────────────────┼──────┼────────────────────────────────────────────────────┤
@@ -511,10 +511,11 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     │ 2. Causa raíz llenada            │ 0–25 │ MC: causa específica → 25 | vacía/vaga → 0         │
     │                                  │      │ PM: no aplica → 25 siempre                         │
     │ 3. Numeral registrado            │ 0–25 │ número ≥ 4 dígitos en nota/task_note → 25 | 0      │
-    │ 4. Método de detección de falla  │ 0–25 │ ≠ "SIN CLASIFICAR" y no vacío → 25 | 0             │
     └──────────────────────────────────┴──────┴────────────────────────────────────────────────────┘
+    Nota: Modalidad de atención (ex componente 4) se muestra como dato informativo
+    pero no entra al KPI (no está en contrato).
 
-    Una OT es "mala" si score_total < 100 (al menos 1 componente falló).
+    Una OT es "mala" si score_total < 75 (al menos 1 componente falló).
     El KPI mide la CANTIDAD DE OTs MALAS, no la suma de errores individuales.
     """
     if df_kpi.empty:
@@ -655,11 +656,10 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         lambda ok: "✅ Método registrado" if ok else "❌ Sin clasificar"
     )
 
-    # ── Score total 0–100 (4 componentes × 25 pts) ───────────────────────────
+    # ── Score total 0–75 (3 componentes × 25 pts; Modalidad excluida) ───────
     ot["score_total"] = (
-        ot["score_tiempo"] + ot["score_causa"] +
-        ot["score_numeral"] + ot["score_deteccion"]
-    ).clip(upper=100).round(1)
+        ot["score_tiempo"] + ot["score_causa"] + ot["score_numeral"]
+    ).clip(upper=75).round(1)
 
     # Mantener columnas legacy para compatibilidad con código existente
     ot["score_nota"]       = ot["note_words"].apply(
@@ -916,7 +916,7 @@ def score_llenado_por_tecnico(
         cliente_principal=    ("client",          lambda x: x.mode().iloc[0] if len(x) > 0 else ""),
         ots_evaluadas=        ("folio",           "count"),
         score_promedio=       ("score_total",     "mean"),
-        # ── 4 componentes KPI Llenado ──
+        # ── 3 componentes KPI Llenado (Tiempo, Causa raíz, Numeral) ──
         score_tiempo_prom=    ("score_tiempo",    "mean"),
         score_causa_prom=     ("score_causa",     "mean"),
         score_numeral_prom=   ("score_numeral",   "mean"),
@@ -931,13 +931,13 @@ def score_llenado_por_tecnico(
         sin_causa=            ("causa_clasif",    lambda x: (x == "sin_clasificar").sum()),
         causa_tecnico=        ("causa_clasif",    lambda x: (x == "tecnico").sum()),
         causa_cliente=        ("causa_clasif",    lambda x: (x == "cliente").sum()),
-        # ── OTs con error global (score < 100) — métrica X ───────────────────
-        n_errores=            ("score_total",     lambda x: int((x < 100).sum())),
+        # ── OTs con error global (score < 75) — métrica X (3 componentes) ──────
+        n_errores=            ("score_total",     lambda x: int((x < 75).sum())),
         # ── Errores por dimensión — para métrica Y (suma de fallos individuales)
         err_tiempo=           ("score_tiempo",    lambda x: int((x < 25).sum())),
         err_causa=            ("score_causa",     lambda x: int((x < 25).sum())),
         err_numeral=          ("score_numeral",   lambda x: int((x < 25).sum())),
-        err_deteccion=        ("score_deteccion", lambda x: int((x < 25).sum())),
+        err_deteccion=        ("score_deteccion", lambda x: int((x < 25).sum())),  # informativo
     ).reset_index()
 
     for c in ["score_promedio", "score_tiempo_prom", "score_causa_prom",
@@ -946,9 +946,8 @@ def score_llenado_por_tecnico(
         grp[c] = grp[c].round(1)
 
     # ── Métricas derivadas ─────────────────────────────────────────────────────
-    # Y = suma de errores individuales por dimensión (una OT puede contribuir hasta 4)
-    grp["err_total_dim"]      = (grp["err_tiempo"] + grp["err_causa"] +
-                                  grp["err_numeral"] + grp["err_deteccion"])
+    # Y = suma de errores individuales por dimensión KPI (una OT puede contribuir hasta 3)
+    grp["err_total_dim"]      = (grp["err_tiempo"] + grp["err_causa"] + grp["err_numeral"])
     # OTs sin ningún error
     grp["ots_correctas"]      = grp["ots_evaluadas"] - grp["n_errores"]
     # Conteos OK por dimensión (para tabla de técnicos)

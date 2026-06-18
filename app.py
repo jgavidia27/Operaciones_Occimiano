@@ -6114,7 +6114,7 @@ elif _page == _NAV_PAGES[0]:
                 f'<span style="color:#ef4444;">&lt; 70%</span> → <b>Sin bono</b><br>'
                 f'<div style="border-top:1px solid {_t["border"]};margin:5px 0;padding-top:4px;'
                 f'font-size:0.72rem;color:{_t["muted"]};">'
-                f'4 componentes × 25 pts:<br>⏱ Tiempo · 🔍 Causa · 🔢 Numeral · 🎯 Modalidad de atención</div>'
+                f'3 componentes × 25 pts:<br>⏱ Tiempo · 🔍 Causa · 🔢 Numeral</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -6124,13 +6124,12 @@ elif _page == _NAV_PAGES[0]:
                 f'border-radius:8px;padding:12px 16px;margin-bottom:12px;color:{_t["text"]};">'
                 '<b>KPI Precisión Fracttal</b> — Representa el <b>30% del bono de desempeño</b> '
                 '(<b>$105.000 bruto/trimestre</b> máximo, pago trimestral). '
-                'Mide <b>4 componentes</b> por OT (25 pts c/u = 100 total): '
+                'Mide <b>3 componentes</b> por OT (25 pts c/u = 75 total): '
                 '<b>Tiempo de ejecución</b>, '
-                '<b>Causa raíz</b> (solo MC), '
-                '<b>Numeral registrado</b> y '
-                '<b>Método de detección de falla</b>. '
+                '<b>Causa raíz</b> (solo MC) y '
+                '<b>Numeral registrado</b>. '
                 f'<span style="font-size:0.82rem;color:{_t["muted"]};">'
-                'Una OT es "mala" si falla en <b>cualquiera</b> de los 4 — aunque solo falle 1. '
+                'Una OT es "mala" si falla en <b>cualquiera</b> de los 3 — aunque solo falle 1. '
                 'El bono se mide por <b>% de OTs buenas</b>, no por suma de errores.</span></div>',
                 unsafe_allow_html=True,
             )
@@ -6447,14 +6446,12 @@ elif _page == _NAV_PAGES[0]:
             )
 
             dim_avg = {
-                "⏱ Tiempo ejecución (25 pts)":     df_ot_scores["score_tiempo"].mean(),
-                "🔍 Causa raíz (25 pts)":           df_ot_scores["score_causa"].mean(),
-                "🔢 Numeral registrado (25 pts)":   df_ot_scores["score_numeral"].mean(),
-                "🎯 Modalidad de atención (25 pts)": df_ot_scores["score_deteccion"].mean()
-                    if "score_deteccion" in df_ot_scores.columns else 0,
+                "⏱ Tiempo ejecución (25 pts)":   df_ot_scores["score_tiempo"].mean(),
+                "🔍 Causa raíz (25 pts)":         df_ot_scores["score_causa"].mean(),
+                "🔢 Numeral registrado (25 pts)": df_ot_scores["score_numeral"].mean(),
             }
             dim_max = {k: 25 for k in dim_avg}
-            dim_colors = ["#f59e0b", "#3b82f6", "#22c55e", "#a855f7"]
+            dim_colors = ["#f59e0b", "#3b82f6", "#22c55e"]
 
             dim_df = pd.DataFrame([
                 {
@@ -6921,15 +6918,16 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                         st.plotly_chart(st.session_state[_num_sig], width="stretch")
 
             # ══════════════════════════════════════════════════════════════════
-            # SECCIÓN: MODALIDAD DE ATENCIÓN
+            # SECCIÓN: MODALIDAD DE ATENCIÓN (informativa — no entra al KPI)
             # ══════════════════════════════════════════════════════════════════
             st.divider()
-            st.markdown('<div class="section-header">🎯  Modalidad de Atención — OTs con campo registrado</div>',
+            st.markdown('<div class="section-header">ℹ️  Modalidad de Atención — dato informativo (no afecta KPI)</div>',
                         unsafe_allow_html=True)
             st.caption(
+                "ℹ️ Este indicador es **solo informativo** — no forma parte del cálculo de Precisión Fracttal ni del bono. "
                 "Porcentaje de OTs donde el técnico registró la modalidad de atención "
                 "(Atendido Presencial / Vía Remota / Con su MP / Llamado Duplicado). "
-                "Si queda como **SIN CLASIFICAR** = error de llenado."
+                "Si queda como **SIN CLASIFICAR** = campo sin completar."
             )
 
             if "deteccion_ok" in df_ot_scores.columns and not df_ot_scores.empty:
@@ -7155,13 +7153,13 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                             unsafe_allow_html=True)
                 tec_disp = _tec_base[[
                     "tecnico", "ots_evaluadas", "ots_correctas", "n_errores", "err_total_dim",
-                    "col_tiempo", "col_causa", "col_numeral", "col_deteccion",
+                    "col_tiempo", "col_causa", "col_numeral",
                     "exactitud_pct", "bono_label",
                 ]].copy()
 
                 tec_disp.columns = [
                     "Técnico", "OTs evaluadas", "OTs sin error", "OTs con error", "Errores individuales",
-                    "⏱ Tiempo OK", "🔍 Causa OK", "🔢 Numeral OK", "🎯 Modalidad OK",
+                    "⏱ Tiempo OK", "🔍 Causa OK", "🔢 Numeral OK",
                     "Exactitud %", "Bono semanal",
                 ]
 
@@ -7170,15 +7168,14 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     column_config={
                         "OTs evaluadas":       st.column_config.NumberColumn(format="%d"),
                         "OTs sin error":       st.column_config.NumberColumn(
-                            help="OTs donde los 4 componentes estuvieron correctos.", format="%d"),
+                            help="OTs donde los 3 componentes estuvieron correctos.", format="%d"),
                         "OTs con error":       st.column_config.NumberColumn(
                             help="OTs con al menos 1 componente incorrecto — estas cuentan para el KPI.", format="%d"),
                         "Errores individuales":st.column_config.NumberColumn(
-                            help="Suma de fallos por dimensión (una OT puede aportar hasta 4).", format="%d"),
+                            help="Suma de fallos por dimensión (una OT puede aportar hasta 3).", format="%d"),
                         "⏱ Tiempo OK":         st.column_config.TextColumn(help="OTs con tiempo correcto / total (%)"),
                         "🔍 Causa OK":          st.column_config.TextColumn(help="OTs con causa raíz válida / total (%)"),
                         "🔢 Numeral OK":        st.column_config.TextColumn(help="OTs con numeral registrado / total (%)"),
-                        "🎯 Modalidad OK":      st.column_config.TextColumn(help="OTs con método de detección ≠ SIN CLASIFICAR / total (%)"),
                         "Exactitud %":         st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
                     },
                 )
@@ -7273,15 +7270,16 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     _c = drill_disp["score_causa"]   if "score_causa"     in drill_disp.columns else pd.Series(0, index=drill_disp.index)
                     _n = drill_disp["score_numeral"] if "score_numeral"   in drill_disp.columns else pd.Series(0, index=drill_disp.index)
                     _d = drill_disp["score_deteccion"] if "score_deteccion" in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                    # KPI: solo 3 componentes (tiempo, causa, numeral) — Modalidad excluida
                     _ok_bits = ((_s >= 25).astype(int) + (_c >= 25).astype(int) +
-                                (_n >= 25).astype(int) + (_d >= 25).astype(int))
+                                (_n >= 25).astype(int))
 
                     # Columna 1: Cumple
-                    drill_disp["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 4 else "❌ Con error")
+                    drill_disp["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 3 else "❌ Con error")
 
-                    # Columna 2: X/4
+                    # Columna 2: X/3
                     drill_disp["_x4"] = _ok_bits.apply(
-                        lambda n: f"{n}/4 {'✅' if n == 4 else ('⚠️' if n >= 2 else '❌')}")
+                        lambda n: f"{n}/3 {'✅' if n == 3 else ('⚠️' if n >= 2 else '❌')}")
 
                     # Columna 3: Tipo (title case)
                     drill_disp["_tipo"] = drill_disp["maint_type"].fillna("").str.title()
@@ -7321,9 +7319,9 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     else:
                         drill_disp["_col_modal"] = "❌ Sin clasificar"
 
-                    # Columna 8: 💬 Observación — descripción de qué falló
-                    _nombres_comp = {0: "Tiempo", 1: "Causa raíz", 2: "Numeral", 3: "Modalidad"}
-                    _scores_comp  = [_s, _c, _n, _d]
+                    # Columna 8: 💬 Observación — descripción de qué falló (3 componentes KPI)
+                    _nombres_comp = {0: "Tiempo", 1: "Causa raíz", 2: "Numeral"}
+                    _scores_comp  = [_s, _c, _n]
                     def _obs(r):
                         fallos = [_nombres_comp[i] for i, sc in enumerate(_scores_comp)
                                   if sc[r.name] < 25]
@@ -7346,17 +7344,16 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     ]].copy()
 
                     drill_disp.columns = [
-                        "Cumple", "X/4", "OT", "Estación", "Tipo",
+                        "Cumple", "X/3", "OT", "Estación", "Tipo",
                         "Score",
-                        "⏱ Tiempo", "🔍 Causa raíz", "🔢 Numeral", "🎯 Modalidad",
+                        "⏱ Tiempo", "🔍 Causa raíz", "🔢 Numeral", "ℹ️ Modalidad",
                         "💬 Observación", "Fecha",
                     ]
 
-                    # Alertas rápidas (sin quick_tick_label)
+                    # Alertas rápidas
                     _qt_criticas  = int((_s < 1).sum())
                     _qt_rapidas   = int(((_s >= 1) & (_s < 25)).sum())
                     _sin_causa    = int((_c == 0).sum())
-                    _sin_modal    = int((_d == 0).sum())
 
                     if _qt_criticas or _qt_rapidas:
                         st.markdown(
@@ -7373,39 +7370,32 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                             f'📋 <b>{_sin_causa} correctiva(s) sin causa raíz</b> registrada</div>',
                             unsafe_allow_html=True,
                         )
-                    if _sin_modal:
-                        st.markdown(
-                            f'<div style="background:{_t["warn_bg"]};border-left:4px solid #a855f7;'
-                            f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
-                            f'🎯 <b>{_sin_modal} OT(s) sin modalidad de atención</b> — campo dejado en "Sin clasificar"</div>',
-                            unsafe_allow_html=True,
-                        )
 
                     _show_df(
                         drill_disp,
                         width="stretch",
                         hide_index=True,
                         column_config={
-                            "Cumple":         st.column_config.TextColumn(width=100,
-                                help="✅ = 4/4 componentes OK · ❌ = ≥1 falló"),
-                            "X/4":            st.column_config.TextColumn(width=80,
-                                help="Componentes correctos de los 4 posibles"),
-                            "OT":             st.column_config.TextColumn(width=110),
-                            "Estación":       st.column_config.TextColumn(width=200),
-                            "Tipo":           st.column_config.TextColumn(width=130),
-                            "Score":          st.column_config.ProgressColumn(
-                                min_value=0, max_value=100, format="%.1f"),
-                            "⏱ Tiempo":       st.column_config.TextColumn(width=110,
+                            "Cumple":           st.column_config.TextColumn(width=100,
+                                help="✅ = 3/3 componentes OK · ❌ = ≥1 falló"),
+                            "X/3":              st.column_config.TextColumn(width=80,
+                                help="Componentes correctos de los 3 del KPI"),
+                            "OT":               st.column_config.TextColumn(width=110),
+                            "Estación":         st.column_config.TextColumn(width=200),
+                            "Tipo":             st.column_config.TextColumn(width=130),
+                            "Score":            st.column_config.ProgressColumn(
+                                min_value=0, max_value=75, format="%.1f"),
+                            "⏱ Tiempo":         st.column_config.TextColumn(width=110,
                                 help="Minutos con Fracttal abierto · ✅ cumple el umbral"),
-                            "🔍 Causa raíz":  st.column_config.TextColumn(width=240,
+                            "🔍 Causa raíz":    st.column_config.TextColumn(width=240,
                                 help="Causa registrada por el técnico · PM no requiere causa"),
-                            "🔢 Numeral":     st.column_config.TextColumn(width=130,
+                            "🔢 Numeral":       st.column_config.TextColumn(width=130,
                                 help="Si registró o no un número de ficha ≥4 dígitos en la nota"),
-                            "🎯 Modalidad":   st.column_config.TextColumn(width=230,
-                                help="Modalidad de atención · ❌ = dejó SIN CLASIFICAR"),
-                            "💬 Observación": st.column_config.TextColumn(width=260,
-                                help="Resumen de cumplimiento de la OT"),
-                            "Fecha":          st.column_config.TextColumn(width=90),
+                            "ℹ️ Modalidad":     st.column_config.TextColumn(width=230,
+                                help="Modalidad de atención — dato informativo, no entra al KPI"),
+                            "💬 Observación":   st.column_config.TextColumn(width=260,
+                                help="Resumen de cumplimiento de la OT (3 componentes)"),
+                            "Fecha":            st.column_config.TextColumn(width=90),
                         },
                     )
 
@@ -7667,14 +7657,14 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             else:
                 _n_fallas_t = 0
 
-            # Prec — misma fórmula que KPI screen: % OTs con 4/4 componentes correctos
-            # (binario all-or-nothing: score_total == 100 → correcta, cualquier fallo → mala)
+            # Prec — misma fórmula que KPI screen: % OTs con 3/3 componentes correctos
+            # (binario all-or-nothing: score_total >= 75 → correcta = 3/3 componentes OK)
             # matching normalizado para tolerar diferencias de tildes (igual que MP)
             if not _df_ot_bono_filt.empty and "_tech_norm" in _df_ot_bono_filt.columns:
                 _prec_t = _df_ot_bono_filt[_df_ot_bono_filt["_tech_norm"] == _tn]
                 _n_ots_prec = len(_prec_t)
                 if _n_ots_prec > 0 and "score_total" in _prec_t.columns:
-                    _n_correctas_t = int((_prec_t["score_total"] >= 100).sum())
+                    _n_correctas_t = int((_prec_t["score_total"] >= 75).sum())
                     _pct_prec = _n_correctas_t / _n_ots_prec * 100
                 else:
                     _pct_prec = None
@@ -7712,12 +7702,12 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             else:
                 _n_fallas_e = 0
 
-            # Prec — misma fórmula que KPI screen: % OTs con 4/4 componentes correctos
+            # Prec — misma fórmula que KPI screen: % OTs con 3/3 componentes correctos (score >= 75)
             if not _df_ot_bono_filt.empty and "equipo" in _df_ot_bono_filt.columns:
                 _prec_e = _df_ot_bono_filt[_df_ot_bono_filt["equipo"] == equipo_key]
                 _n_ots_e = len(_prec_e)
                 if _n_ots_e > 0 and "score_total" in _prec_e.columns:
-                    _n_correctas_e = int((_prec_e["score_total"] >= 100).sum())
+                    _n_correctas_e = int((_prec_e["score_total"] >= 75).sum())
                     _pct_prec = _n_correctas_e / _n_ots_e * 100
                 else:
                     _pct_prec = None
