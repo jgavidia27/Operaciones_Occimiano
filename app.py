@@ -4848,16 +4848,14 @@ elif _page == _NAV_PAGES[0]:
                     horas_prom=("horas_resolucion", "mean"),
                 ).reset_index()
                 # ── Seniors: reemplazar su fila con el agregado del equipo completo ────
-                # IMPORTANTE: _df_con_pri["tecnico"] usa nombres completos (Fracttal),
-                # mientras que SENIORS y GRUPOS_TERRENO.miembros usan nombres cortos.
-                # Por eso se convierte vía TECH_NAME_MAP antes de comparar.
+                # Usamos la columna "equipo" (misma fuente que las tarjetas equipo)
+                # para evitar cualquier discrepancia de tildes/espacios en nombres completos.
                 for _snr in SENIORS:
                     _snr_full = TECH_NAME_MAP.get(_snr, _snr)
                     _snr_idx = _tec_sla_rank.index[_tec_sla_rank["tecnico"] == _snr_full]
                     if len(_snr_idx) == 0:
                         continue
-                    _snr_mbs  = [TECH_NAME_MAP.get(m, m) for m in get_senior_team_members(_snr)]
-                    _snr_data = _df_con_pri[_df_con_pri["tecnico"].isin(_snr_mbs)]
+                    _snr_data = _df_con_pri[_df_con_pri["equipo"] == _snr]
                     if _snr_data.empty:
                         continue
                     _si = _snr_idx[0]
@@ -4971,14 +4969,13 @@ elif _page == _NAV_PAGES[0]:
                 # Seniors: cada período usa el agregado del equipo
                 for _snr in SENIORS:
                     _snr_full = TECH_NAME_MAP.get(_snr, _snr)
-                    _snr_mbs  = [TECH_NAME_MAP.get(m, m) for m in get_senior_team_members(_snr)]
                     _snr_pers = _tec_g.loc[_tec_g["tecnico"] == _snr_full, "_periodo"].unique()
                     for _per in _snr_pers:
                         _si_g = _tec_g.index[(_tec_g["tecnico"] == _snr_full) & (_tec_g["_periodo"] == _per)]
                         if len(_si_g) == 0:
                             continue
                         _per_data = _df_tec[
-                            _df_tec["tecnico"].isin(_snr_mbs) & (_df_tec["_periodo"] == _per)
+                            (_df_tec["equipo"] == _snr) & (_df_tec["_periodo"] == _per)
                         ]
                         if _per_data.empty:
                             continue
@@ -5000,8 +4997,7 @@ elif _page == _NAV_PAGES[0]:
                     _snr_idx = _tec_tot.index[_tec_tot["tecnico"] == _snr_full]
                     if len(_snr_idx) == 0:
                         continue
-                    _snr_mbs  = [TECH_NAME_MAP.get(m, m) for m in get_senior_team_members(_snr)]
-                    _snr_data = _df_tec[_df_tec["tecnico"].isin(_snr_mbs)]
+                    _snr_data = _df_tec[_df_tec["equipo"] == _snr]
                     if _snr_data.empty:
                         continue
                     _tec_tot.at[_snr_idx[0], "total"]  = len(_snr_data)
@@ -6353,6 +6349,11 @@ elif _page == _NAV_PAGES[0]:
 
         df_tec_scores = score_llenado_por_tecnico(df_ot_scores)
 
+        # Añadir columna "equipo" a df_tec_scores para poder agrupar por equipo en overrides
+        # (misma lógica robusta que las tarjetas equipo)
+        if not df_tec_scores.empty:
+            df_tec_scores["equipo"] = df_tec_scores["tecnico"].apply(_get_equipo)
+
         # ── df_tec_scores_rank: versión para rankings individuales donde los seniors
         #    muestran el promedio de su equipo completo (no solo sus propios casos).
         #    df_tec_scores (sin modificar) sigue usándose para tarjetas por equipo,
@@ -6364,8 +6365,8 @@ elif _page == _NAV_PAGES[0]:
                 _snr_idx_r = df_tec_scores_rank.index[df_tec_scores_rank["tecnico"] == _snr_full_r]
                 if len(_snr_idx_r) == 0:
                     continue
-                _snr_mbs_r  = [TECH_NAME_MAP.get(m, m) for m in get_senior_team_members(_snr)]
-                _team_rows_r = df_tec_scores[df_tec_scores["tecnico"].isin(_snr_mbs_r)]
+                # Usar columna "equipo" para matching robusto (igual que tarjetas equipo)
+                _team_rows_r = df_tec_scores[df_tec_scores["equipo"] == _snr]
                 if len(_team_rows_r) <= 1:
                     continue  # solo el senior mismo, sin compañeros → no hay nada que agregar
                 _si_r      = _snr_idx_r[0]
