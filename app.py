@@ -6840,7 +6840,11 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
             if not _df_te_base.empty and "estimated_sec" in _df_te_base.columns:
                 # Solo OTs con duración estimada > 0
                 _df_te = _df_te_base[_df_te_base["estimated_sec"] > 0].copy()
-                _df_te["_te_ok"] = _df_te["duration_sec"] >= _df_te["estimated_sec"] * 0.80
+                # Tiempo efectivo = max(tasks_duration, elapsed real por fechas).
+                # Si el técnico no llenó tasks_duration (=0) pero el OT estuvo abierto
+                # N minutos, ese tiempo cuenta. Consistente con _score_tiempo en data.py.
+                _df_te["_effective_sec"] = _df_te[["duration_sec","elapsed_sec"]].fillna(0).max(axis=1)
+                _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.70
 
                 _te_mes = (
                     _df_te.groupby("mes")
@@ -6863,7 +6867,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     ), secondary_y=False)
                     _fig_te.add_trace(go.Scatter(
                         x=_te_mes["mes_lbl"], y=_te_mes["pct_ok"],
-                        name="% Tiempo correcto (≥80%)", mode="lines+markers",
+                        name="% Tiempo correcto (≥70%)", mode="lines+markers",
                         line=dict(color="#3b82f6", width=3),
                         marker=dict(size=10, color="#3b82f6", line=dict(color="#fff", width=2)),
                     ), secondary_y=True)
@@ -6904,23 +6908,24 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     return f"{h:02d}:{m:02d}"
 
                 _det_te = _df_te.copy()
-                _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.80).round(0)
-                _det_te["_pct_ej"]     = (_det_te["duration_sec"] / _det_te["estimated_sec"] * 100).round(1)
-                _det_te["creation_date"] = pd.to_datetime(_det_te["creation_date"], errors="coerce")\
-                    .dt.tz_convert(None).dt.strftime("%d/%m/%Y")
+                _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.70).round(0)
+                _det_te["_pct_ej"]     = (_det_te["_effective_sec"] / _det_te["estimated_sec"] * 100).round(1)
+                _det_te_cd = pd.to_datetime(_det_te["creation_date"], errors="coerce")
+                _det_te_cd = _det_te_cd.dt.tz_convert(None) if _det_te_cd.dt.tz is not None else _det_te_cd
+                _det_te["creation_date"] = _det_te_cd.dt.strftime("%d/%m/%Y")
 
                 _det_te_disp = _det_te[[c for c in
                     ["folio","tecnico","creation_date","maint_type",
-                     "estimated_sec","_minimo_sec","duration_sec","_pct_ej","_te_ok"]
+                     "estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"]
                     if c in _det_te.columns]].copy()
                 _det_te_disp["T. Estimado"]   = _det_te_disp["estimated_sec"].apply(_fmt_seg)
-                _det_te_disp["Mín. 80%"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
-                _det_te_disp["T. Ejecución"]   = _det_te_disp["duration_sec"].apply(_fmt_seg)
+                _det_te_disp["Mín. 70%"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
+                _det_te_disp["T. Ejecución"]   = _det_te_disp["_effective_sec"].apply(_fmt_seg)
                 _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
                 _det_te_disp["Estado"]         = _det_te_disp["_te_ok"].apply(
                     lambda v: "✅ Cumple" if v else "❌ No cumple")
                 _det_te_disp = _det_te_disp.drop(
-                    columns=["estimated_sec","_minimo_sec","duration_sec","_pct_ej","_te_ok"],
+                    columns=["estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"],
                     errors="ignore"
                 ).rename(columns={
                     "folio":"OT","tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
@@ -6935,13 +6940,13 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                             "Tipo":        st.column_config.TextColumn(width=200),
                             "T. Estimado": st.column_config.TextColumn(width=100,
                                 help="Duración programada en Fracttal (HH:MM)"),
-                            "Mín. 80%":    st.column_config.TextColumn(width=90,
-                                help="Tiempo mínimo aceptable = 80% del estimado"),
+                            "Mín. 70%":    st.column_config.TextColumn(width=90,
+                                help="Tiempo mínimo aceptable = 70% del estimado"),
                             "T. Ejecución":st.column_config.TextColumn(width=110,
-                                help="Tiempo real que tardó el técnico"),
+                                help="Tiempo efectivo = max(tiempo tareas, tiempo real por fechas)"),
                             "% Ejecutado": st.column_config.ProgressColumn(
                                 label="% Ejecutado", min_value=0, max_value=150, format="%.1f%%",
-                                help="T.Ejecución / T.Estimado × 100. Verde si ≥80%"),
+                                help="T.Efectivo / T.Estimado × 100. Verde si ≥70%"),
                             "Estado":      st.column_config.TextColumn(width=110),
                         })
 
@@ -6949,147 +6954,136 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 st.markdown("---")
                 st.markdown("**⚠️ OTs con tiempo de ejecución injustificado (< 15% del estimado)**")
                 st.caption(
-                    "De los preventivos que **no cumplen el mínimo del 80%**, "
-                    "¿cuántos tienen un tiempo tan corto que es físicamente imposible? "
-                    "**Criterio:** ejecución < 15% del tiempo estimado  "
-                    "*(ej: tarea de 60 min ejecutada en menos de 9 min)*"
+                    "Barras apiladas por equipo (o por técnico si filtras). "
+                    "**Verde** = cumplen ≥70% del estimado · "
+                    "**Amarillo** = no cumplen pero tiempo razonable (15–70%) · "
+                    "**Rojo** = injustificado, ejecución < 15% del estimado"
                 )
 
-                _df_te_fail = _df_te[~_df_te["_te_ok"]].copy()
-                _n_fail = len(_df_te_fail)
+                # Marcar los 3 segmentos sobre el total de preventivos con estimado
+                _df_te["_absurdo"]   = (~_df_te["_te_ok"]) & (
+                    _df_te["_effective_sec"] < _df_te["estimated_sec"] * 0.15
+                )
+                _df_te["_just_fail"] = (~_df_te["_te_ok"]) & (~_df_te["_absurdo"])
 
-                if _n_fail > 0:
-                    _df_te_fail["_absurdo"] = (
-                        _df_te_fail["duration_sec"] < _df_te_fail["estimated_sec"] * 0.15
+                # Determinar agrupación según filtros
+                if tec_kpi_sel != "Todos":
+                    _grp_col = "tecnico"
+                elif equipo_kpi != "Todos":
+                    _grp_col = "tecnico"
+                else:
+                    _grp_col = "equipo"
+
+                _te_grp = (
+                    _df_te.groupby(_grp_col)
+                    .agg(
+                        ok=("_te_ok",     "sum"),
+                        just_fail=("_just_fail", "sum"),
+                        absurdo=("_absurdo",  "sum"),
+                        total=("_te_ok",  "count"),
                     )
-                    _n_absurdo    = int(_df_te_fail["_absurdo"].sum())
-                    _df_abs_only  = _df_te_fail[_df_te_fail["_absurdo"]].copy()
-                    _n_te_total   = len(_df_te)
-                    _n_ok         = _n_te_total - _n_fail
-                    _n_just       = _n_fail - _n_absurdo
-                    _pct_fail     = _n_fail    / _n_te_total * 100 if _n_te_total > 0 else 0.0
-                    _pct_abs_fail = _n_absurdo / _n_fail     * 100 if _n_fail     > 0 else 0.0
-                    _pct_abs_tot  = _n_absurdo / _n_te_total * 100 if _n_te_total > 0 else 0.0
+                    .reset_index()
+                )
+                _te_grp["pct_ok"]      = (_te_grp["ok"]        / _te_grp["total"] * 100).round(1)
+                _te_grp["pct_just"]    = (_te_grp["just_fail"]  / _te_grp["total"] * 100).round(1)
+                _te_grp["pct_absurdo"] = (_te_grp["absurdo"]    / _te_grp["total"] * 100).round(1)
 
-                    # ── Tarjetas cascada: Total → No cumplen 80% → Injustificados ──
-                    _ac1, _ac2, _ac3 = st.columns(3)
-                    _cs = (f'border-radius:10px;padding:18px 14px;text-align:center;'
-                           f'background:{_t["card"]};')
-                    with _ac1:
-                        st.markdown(
-                            f'<div style="{_cs}border:2px solid {_t["border"]};">'
-                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:4px;letter-spacing:.05em;">TOTAL OTs EVALUADAS</div>'
-                            f'<div style="font-size:2rem;font-weight:800;color:{_t["text"]};">{_n_te_total:,}</div>'
-                            f'<div style="font-size:0.78rem;color:{_t["muted"]};margin-top:4px;">con tiempo estimado</div>'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
-                    with _ac2:
-                        st.markdown(
-                            f'<div style="{_cs}border:2px solid #f59e0b55;">'
-                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:4px;letter-spacing:.05em;">NO CUMPLEN EL 80%</div>'
-                            f'<div style="font-size:2rem;font-weight:800;color:#f59e0b;">{_n_fail:,}</div>'
-                            f'<div style="font-size:0.78rem;color:{_t["muted"]};margin-top:4px;">{_pct_fail:.1f}% del total</div>'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
-                    with _ac3:
-                        _col3 = "#ef4444" if _pct_abs_fail >= 30 else (
-                                "#f59e0b" if _pct_abs_fail >= 10 else "#22c55e")
-                        st.markdown(
-                            f'<div style="{_cs}border:2px solid {_col3}55;">'
-                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:4px;letter-spacing:.05em;">TIEMPO INJUSTIFICADO (&lt;15%)</div>'
-                            f'<div style="font-size:2rem;font-weight:800;color:{_col3};">{_n_absurdo:,}</div>'
-                            f'<div style="font-size:0.78rem;color:{_t["muted"]};margin-top:4px;">{_pct_abs_fail:.1f}% de los incumplimientos</div>'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
+                if _grp_col == "equipo":
+                    _grp_order = {k: i for i, k in enumerate(GRUPOS_TERRENO)}
+                    _te_grp["_order"] = _te_grp["equipo"].map(_grp_order).fillna(99)
+                    _te_grp["_label"] = _te_grp["equipo"].map(_EQUIPO_LABEL).fillna(_te_grp["equipo"])
+                    _te_grp = _te_grp.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
+                else:
+                    _te_grp["_label"] = _te_grp["tecnico"]
+                    _te_grp = _te_grp.sort_values("absurdo", ascending=False).reset_index(drop=True)
 
-                    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+                _x_lbl = _te_grp["_label"].tolist()
 
-                    # ── Barra apilada: Total OTs desglosado en 3 segmentos ──────
-                    _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
-                    if _abs_sig not in st.session_state:
-                        _fig_abs = go.Figure()
-                        _fig_abs.add_trace(go.Bar(
-                            name=f"Cumplen ≥80%  ({_n_ok:,})",
-                            x=[_n_ok], y=["OTs preventivas"],
-                            orientation="h",
-                            marker_color="#22c55e",
-                            text=[f"<b>{_n_ok:,}</b><br>{100-_pct_fail:.1f}%"],
-                            textposition="inside",
-                            textfont=dict(size=12, color="#ffffff"),
-                            hovertemplate=f"Cumplen ≥80%: {_n_ok:,} OTs<extra></extra>",
-                        ))
-                        _fig_abs.add_trace(go.Bar(
-                            name=f"No cumplen — tiempo razonable  ({_n_just:,})",
-                            x=[_n_just], y=["OTs preventivas"],
-                            orientation="h",
-                            marker_color="#f59e0b",
-                            text=[f"<b>{_n_just:,}</b>"] if _n_just > 0 else [""],
-                            textposition="inside",
-                            textfont=dict(size=12, color="#ffffff"),
-                            hovertemplate=f"No cumplen (15-80%): {_n_just:,} OTs<extra></extra>",
-                        ))
-                        _fig_abs.add_trace(go.Bar(
-                            name=f"Injustificado &lt;15%  ({_n_absurdo:,})",
-                            x=[_n_absurdo], y=["OTs preventivas"],
-                            orientation="h",
-                            marker_color="#ef4444",
-                            text=[f"<b>{_n_absurdo:,}</b><br>{_pct_abs_tot:.1f}% del total"] if _n_absurdo > 0 else [""],
-                            textposition="inside",
-                            textfont=dict(size=12, color="#ffffff"),
-                            hovertemplate=f"Injustificado (<15%): {_n_absurdo:,} OTs<extra></extra>",
-                        ))
-                        _fig_abs.update_layout(
-                            barmode="stack",
-                            height=130,
-                            margin=dict(t=10, b=40, l=10, r=20),
-                            showlegend=True,
-                            legend=dict(orientation="h", y=-0.5, x=0, font=dict(size=11)),
-                            xaxis=dict(tickformat="d", title=""),
-                            yaxis=dict(title=""),
-                        )
-                        _apply_plot_theme(_fig_abs)
-                        st.session_state[_abs_sig] = _fig_abs
-                    st.plotly_chart(st.session_state[_abs_sig], width="stretch")
+                _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
+                if _abs_sig not in st.session_state:
+                    _fig_abs = go.Figure()
+                    _fig_abs.add_trace(go.Bar(
+                        name="Cumplen ≥70%",
+                        x=_x_lbl,
+                        y=_te_grp["ok"].tolist(),
+                        marker_color="#22c55e",
+                        text=[f"{int(v):,}<br>{p:.1f}%"
+                              for v, p in zip(_te_grp["ok"], _te_grp["pct_ok"])],
+                        textposition="inside",
+                        textfont=dict(size=11, color="#ffffff"),
+                    ))
+                    _fig_abs.add_trace(go.Bar(
+                        name="No cumplen — tiempo razonable (15–70%)",
+                        x=_x_lbl,
+                        y=_te_grp["just_fail"].tolist(),
+                        marker_color="#f59e0b",
+                        text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                              for v, p in zip(_te_grp["just_fail"], _te_grp["pct_just"])],
+                        textposition="inside",
+                        textfont=dict(size=11, color="#ffffff"),
+                    ))
+                    _fig_abs.add_trace(go.Bar(
+                        name="Injustificado (<15%)",
+                        x=_x_lbl,
+                        y=_te_grp["absurdo"].tolist(),
+                        marker_color="#ef4444",
+                        text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                              for v, p in zip(_te_grp["absurdo"], _te_grp["pct_absurdo"])],
+                        textposition="inside",
+                        textfont=dict(size=11, color="#ffffff"),
+                    ))
+                    _fig_abs.update_layout(
+                        barmode="stack",
+                        height=340,
+                        margin=dict(t=30, b=20, l=10, r=20),
+                        showlegend=True,
+                        legend=dict(orientation="h", y=1.1, x=0),
+                        yaxis=dict(title="OTs preventivas", tickformat="d"),
+                        xaxis=dict(title=""),
+                        bargap=0.35,
+                    )
+                    _apply_plot_theme(_fig_abs)
+                    st.session_state[_abs_sig] = _fig_abs
+                st.plotly_chart(st.session_state[_abs_sig], width="stretch")
 
-                    # Tabla detalle de OTs injustificadas
-                    if not _df_abs_only.empty:
-                        _df_abs_only["_pct_ej_abs"] = (
-                            _df_abs_only["duration_sec"] / _df_abs_only["estimated_sec"] * 100
-                        ).round(1)
-                        _det_abs = _df_abs_only.copy()
-                        _det_abs_cd = pd.to_datetime(_det_abs["creation_date"], errors="coerce")
-                        _det_abs_cd = _det_abs_cd.dt.tz_convert(None) if _det_abs_cd.dt.tz is not None else _det_abs_cd
-                        _det_abs["creation_date"] = _det_abs_cd.dt.strftime("%d/%m/%Y")
-                        _det_abs["T. Estimado"]  = _det_abs["estimated_sec"].apply(_fmt_seg)
-                        _det_abs["T. Ejecución"] = _det_abs["duration_sec"].apply(_fmt_seg)
-                        _det_abs["% Ejecutado"]  = _det_abs["_pct_ej_abs"]
-                        _det_abs_disp = _det_abs[[c for c in
-                            ["folio","tecnico","creation_date","maint_type",
-                             "T. Estimado","T. Ejecución","% Ejecutado"]
-                            if c in _det_abs.columns]].rename(columns={
-                                "folio":"OT","tecnico":"Técnico",
-                                "creation_date":"Fecha","maint_type":"Tipo",
-                            }).sort_values("Fecha", ascending=False)
+                # ── Tabla detalle de OTs injustificadas ──────────────────────────
+                _df_abs_only = _df_te[_df_te["_absurdo"]].copy()
+                _n_absurdo   = len(_df_abs_only)
 
-                        with st.expander(
-                            f"📋 Detalle OTs con tiempo injustificado ({_n_absurdo:,} OTs)", expanded=False
-                        ):
-                            _show_df(_det_abs_disp, hide_index=True, width="stretch",
-                                column_config={
-                                    "OT":          st.column_config.TextColumn(width=110),
-                                    "Técnico":     st.column_config.TextColumn(width=190),
-                                    "Fecha":       st.column_config.TextColumn(width=100),
-                                    "Tipo":        st.column_config.TextColumn(width=200),
-                                    "T. Estimado": st.column_config.TextColumn(width=100),
-                                    "T. Ejecución":st.column_config.TextColumn(width=110),
-                                    "% Ejecutado": st.column_config.ProgressColumn(
-                                        min_value=0, max_value=50, format="%.1f%%",
-                                        help="Porcentaje del tiempo estimado que realmente se ejecutó. "
-                                             "Todos en esta tabla están por debajo del 15%."),
-                                })
+                if not _df_abs_only.empty:
+                    _df_abs_only["_pct_ej_abs"] = (
+                        _df_abs_only["_effective_sec"] / _df_abs_only["estimated_sec"] * 100
+                    ).round(1)
+                    _det_abs = _df_abs_only.copy()
+                    _det_abs_cd = pd.to_datetime(_det_abs["creation_date"], errors="coerce")
+                    _det_abs_cd = _det_abs_cd.dt.tz_convert(None) if _det_abs_cd.dt.tz is not None else _det_abs_cd
+                    _det_abs["creation_date"] = _det_abs_cd.dt.strftime("%d/%m/%Y")
+                    _det_abs["T. Estimado"]  = _det_abs["estimated_sec"].apply(_fmt_seg)
+                    _det_abs["T. Ejecución"] = _det_abs["_effective_sec"].apply(_fmt_seg)
+                    _det_abs["% Ejecutado"]  = _det_abs["_pct_ej_abs"]
+                    _det_abs_disp = _det_abs[[c for c in
+                        ["folio","tecnico","creation_date","maint_type",
+                         "T. Estimado","T. Ejecución","% Ejecutado"]
+                        if c in _det_abs.columns]].rename(columns={
+                            "folio":"OT","tecnico":"Técnico",
+                            "creation_date":"Fecha","maint_type":"Tipo",
+                        }).sort_values("Fecha", ascending=False)
+
+                    with st.expander(
+                        f"📋 Detalle OTs con tiempo injustificado ({_n_absurdo:,} OTs)", expanded=False
+                    ):
+                        _show_df(_det_abs_disp, hide_index=True, width="stretch",
+                            column_config={
+                                "OT":          st.column_config.TextColumn(width=110),
+                                "Técnico":     st.column_config.TextColumn(width=190),
+                                "Fecha":       st.column_config.TextColumn(width=100),
+                                "Tipo":        st.column_config.TextColumn(width=200),
+                                "T. Estimado": st.column_config.TextColumn(width=100),
+                                "T. Ejecución":st.column_config.TextColumn(width=110),
+                                "% Ejecutado": st.column_config.ProgressColumn(
+                                    min_value=0, max_value=50, format="%.1f%%",
+                                    help="Todos en esta tabla están por debajo del 15% del estimado."),
+                            })
                 else:
                     st.success("✅ No hay preventivos con tiempo inferior al 15% del estimado en este período.")
 
