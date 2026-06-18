@@ -6174,11 +6174,11 @@ elif _page == _NAV_PAGES[0]:
                 '<b>KPI Precisión Fracttal</b> — Representa el <b>30% del bono de desempeño</b> '
                 '(<b>$105.000 bruto/trimestre</b> máximo, pago trimestral). '
                 'Mide <b>3 componentes</b> por OT (25 pts c/u = 75 total): '
-                '<b>Tiempo de ejecución</b>, '
-                '<b>Causa raíz</b> (solo MC) y '
-                '<b>Numeral registrado</b>. '
+                '<b>Tiempo de ejecución</b> (solo MP), '
+                '<b>Causa raíz</b> (MC+MP) y '
+                '<b>Numeral registrado</b> (solo MP). '
                 f'<span style="font-size:0.82rem;color:{_t["muted"]};">'
-                'Una OT es "mala" si falla en <b>cualquiera</b> de los 3 — aunque solo falle 1. '
+                'Una OT es "mala" si falla en <b>cualquiera</b> de los componentes que le aplican. '
                 'El bono se mide por <b>% de OTs buenas</b>, no por suma de errores.</span></div>',
                 unsafe_allow_html=True,
             )
@@ -6533,9 +6533,12 @@ elif _page == _NAV_PAGES[0]:
         else:
             total_ots_mes = len(df_ot_scores)
             score_global = df_ot_scores["score_total"].mean()
-            pct_tiempo = (df_ot_scores["score_tiempo"] >= 25).mean() * 100
-            pct_causa  = df_ot_scores["causa_ok"].mean() * 100
-            pct_numeral = df_ot_scores["numeral_ok"].mean() * 100
+            # Tiempo y Numeral: solo se miden en preventivas
+            _df_mp_kpi = df_ot_scores[~df_ot_scores["es_correctiva"]] if "es_correctiva" in df_ot_scores.columns else df_ot_scores
+            _df_mc_kpi = df_ot_scores[df_ot_scores["es_correctiva"]]  if "es_correctiva" in df_ot_scores.columns else pd.DataFrame()
+            pct_tiempo  = (_df_mp_kpi["score_tiempo"] >= 25).mean() * 100 if not _df_mp_kpi.empty else 0.0
+            pct_causa   = df_ot_scores["causa_ok"].mean() * 100  # aplica a todas
+            pct_numeral = _df_mp_kpi["numeral_ok"].mean() * 100  if not _df_mp_kpi.empty else 0.0
             tecnicos_con_bono = (df_tec_scores_rank["umbral_bono"]).sum() if not df_tec_scores_rank.empty else 0
             total_tecnicos = len(df_tec_scores_rank)
 
@@ -6545,9 +6548,9 @@ elif _page == _NAV_PAGES[0]:
             gk1.metric("Score global del mes", f"{score_global:.1f} / 100",
                        delta=lbl_global, delta_color="off")
             gk2.metric("OTs evaluadas", f"{total_ots_mes:,}")
-            gk3.metric("Tiempo OK (MP: ≥75% estim.)", f"{pct_tiempo:.1f}%",
+            gk3.metric("Tiempo OK · solo MP (≥75%)", f"{pct_tiempo:.1f}%",
                        delta=f"{'✅' if pct_tiempo >= 75 else '⚠️'}")
-            gk4.metric("Causa raíz OK", f"{pct_causa:.1f}%",
+            gk4.metric("Causa raíz OK · MC+MP", f"{pct_causa:.1f}%",
                        delta=f"{'✅' if pct_causa >= 80 else '⚠️'}")
             gk5.metric("Técnicos con bono (≥90% exactitud)", f"{tecnicos_con_bono} / {total_tecnicos}")
 
@@ -6624,7 +6627,7 @@ elif _page == _NAV_PAGES[0]:
             # SECCIÓN: CAUSA RAÍZ
             # ══════════════════════════════════════════════════════════════════
             st.divider()
-            st.markdown('<div class="section-header">🔍  Causa Raíz — Correctivos</div>',
+            st.markdown('<div class="section-header">🔍  Causa Raíz — MC y MP</div>',
                         unsafe_allow_html=True)
 
             # ── Leyenda expandible ────────────────────────────────────────────
@@ -6681,26 +6684,11 @@ elif _page == _NAV_PAGES[0]:
                 return f"{_MN2.get(int(p[1]),p[1])} '{p[0][2:]}" if len(p)==2 else str(ym)
 
             # ── Gráfico evolución mensual Causa Raíz ─────────────────────────
-            st.markdown("**Evolución mensual — % correctivos con Causa Raíz correctamente llenada**")
+            st.markdown("**Evolución mensual — % OTs (MC+MP) con Causa Raíz correctamente llenada**")
 
-            def _causa_raiz_ok(causa: str) -> bool:
-                """True si la causa raíz está correctamente llenada."""
-                causa = str(causa or "").strip()
-                if not causa or causa.upper() in ("SIN CLASIFICAR", "NONE", "-", "", "NAN"):
-                    return False
-                if _re.match(r"^\d+$", causa):       # solo números → error
-                    return False
-                if _re.match(r"^0[12]\.7", causa.upper()):  # OTROS → dato vago
-                    return False
-                if _re.match(r"^\d{2}\.\d", causa):  # código válido
-                    return True
-                return False
-
-            # df_kpi_raw tiene columna "causa_raiz_raw" (no "failure_cause")
-            _df_cr_base = df_kpi_raw[
-                df_kpi_raw.get("es_correctiva", pd.Series(dtype=bool, index=df_kpi_raw.index))
-                == True
-            ].copy() if "es_correctiva" in df_kpi_raw.columns else df_kpi_raw.copy()
+            # df_kpi_raw tiene columna "causa_raiz_raw" y "causa_ok" (calculada en data.py)
+            # causa_ok en MC: código Fracttal válido o keyword. En MP: cualquier texto no vacío.
+            _df_cr_base = df_kpi_raw.copy()  # incluye MC y MP
 
             if equipo_kpi != "Todos":
                 _grp_cr = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
@@ -6708,9 +6696,10 @@ elif _page == _NAV_PAGES[0]:
             if tec_kpi_sel != "Todos":
                 _df_cr_base = _df_cr_base[_df_cr_base["tecnico"] == tec_kpi_sel]
 
-            if not _df_cr_base.empty and "causa_raiz_raw" in _df_cr_base.columns:
+            if not _df_cr_base.empty and "causa_ok" in _df_cr_base.columns:
                 _df_cr_base = _df_cr_base.copy()
-                _df_cr_base["_causa_ok"] = _df_cr_base["causa_raiz_raw"].apply(_causa_raiz_ok)
+                # Usar causa_ok ya calculada en data.py (MC: código Fracttal; MP: texto no vacío)
+                _df_cr_base["_causa_ok"] = _df_cr_base["causa_ok"].fillna(False).astype(bool)
 
                 _cr_mes = (
                     _df_cr_base.groupby("mes")
@@ -6726,7 +6715,7 @@ elif _page == _NAV_PAGES[0]:
                     _fig_cr = make_subplots(specs=[[{"secondary_y": True}]])
                     _fig_cr.add_trace(go.Bar(
                         x=_cr_mes["mes_lbl"], y=_cr_mes["total"],
-                        name="OTs correctivas", marker_color="#94a3b8", opacity=0.85,
+                        name="OTs (MC+MP)", marker_color="#94a3b8", opacity=0.85,
                         text=_cr_mes["total"], textposition="inside",
                         textfont=dict(size=11, color="#ffffff"),
                     ), secondary_y=False)
@@ -6757,7 +6746,7 @@ elif _page == _NAV_PAGES[0]:
                         height=380, margin=dict(t=40, b=20),
                         legend=dict(orientation="h", y=1.08, x=0), bargap=0.3,
                     )
-                    _fig_cr.update_yaxes(title_text="OTs correctivas", secondary_y=False)
+                    _fig_cr.update_yaxes(title_text="OTs (MC+MP)", secondary_y=False)
                     _fig_cr.update_yaxes(title_text="% Causa raíz OK", secondary_y=True,
                                          tickformat=".1f", ticksuffix="%", range=[0, 110])
                     _apply_plot_theme(_fig_cr)
@@ -6765,7 +6754,7 @@ elif _page == _NAV_PAGES[0]:
                 st.plotly_chart(st.session_state.get(_cr_sig), width="stretch")
 
                 # ── Tabla detalle de Causa Raíz ───────────────────────────────
-                with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} correctivos)", expanded=False):
+                with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} OTs MC+MP)", expanded=False):
                     _det_cr = _df_cr_base[[c for c in
                         ["folio","tecnico","creation_date","maint_type",
                          "causa_raiz_raw","causa_clasif","_causa_ok"]
@@ -7169,8 +7158,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
             st.markdown('<div class="section-header">🔢  Registro de Numerales — OTs con número de ficha</div>',
                         unsafe_allow_html=True)
             st.caption(
-                "Porcentaje de OTs donde el técnico registró un número de ficha (≥4 dígitos) "
-                "en la nota o task_note. Aplica a todos los tipos de OT."
+                "Solo **preventivas (MP)**. Porcentaje donde el técnico registró un número de ficha "
+                "(≥4 dígitos) en lavadoras. Correctivas no se evalúan en este indicador."
             )
 
             _df_num_base = df_ot_scores.copy()

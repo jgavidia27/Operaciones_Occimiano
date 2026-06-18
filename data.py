@@ -437,17 +437,19 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         maint_type_raw = (wo.get("tasks_log_task_type_main") or "").strip().upper()
         es_correctiva = "CORRECTIVA" in maint_type_raw
 
-        # Para preventivas no se exige causa raíz → no penalizar
-        # Para correctivas: el técnico debe haber registrado UN CÓDIGO FRACTTAL VÁLIDO.
-        # Malo: vacío, "SIN CLASIFICAR", números sueltos (150, 1, 12345, etc.).
-        # Bueno: código con prefijo Fracttal real (01.x, 02.x, 03.x, 04.x).
-        # NOTA: se restringe a 0[1-4] para evitar que "12.3" u otros inventados pasen.
+        # Causa raíz aplica a AMBOS tipos (MC y MP).
+        # MC: debe tener código Fracttal válido (01.x – 04.x) o keyword reconocida.
+        # MP: cualquier texto no vacío es aceptado (el técnico documenta lo observado).
+        # Malo para MC: vacío, "SIN CLASIFICAR", números sueltos (150, 1, 12345, etc.).
+        # Bueno para MC: código con prefijo Fracttal real (01.x, 02.x, 03.x, 04.x).
         _causa_tiene_codigo = bool(re.match(r"0[1-4]\.\d", raw_causa))
-        causa_ok = (
-            not es_correctiva                               # PM no requiere causa
-            or _causa_tiene_codigo                          # MC: código Fracttal (0X.X.-)
-            or causa_clasif in ("tecnico", "cliente")       # MC: también reconocido por keywords
-        )
+        if es_correctiva:
+            causa_ok = (
+                _causa_tiene_codigo                         # MC: código Fracttal (0X.X.-)
+                or causa_clasif in ("tecnico", "cliente")   # MC: también reconocido por keywords
+            )
+        else:
+            causa_ok = bool(raw_causa and raw_causa.upper() not in ("SIN CLASIFICAR", "N/A", "NA"))
 
         # ── Numeral (número de fichas) ─────────────────────────────────────────
         # El numeral se registra en task_note como número seguido de "und" o como
@@ -603,10 +605,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     #       tiempo real debe contar. La función max() toma el mayor valor disponible.
     def _score_tiempo(row) -> int:
         if row["es_correctiva"]:
-            elapsed = row["max_elapsed"]
-            if elapsed > 900:  return 25   # > 15 min → bien
-            if elapsed > 300:  return 12   # 5-15 min → posible fix simple
-            return 0                       # < 5 min  → quick-tick
+            return 25  # Tiempo no se evalúa en correctivas → 25 pts auto (no penaliza)
         else:
             elapsed = row["max_elapsed"]
             estim = row.get("estim_sec_sum", 0) or 0
@@ -626,11 +625,15 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     ot["score_tiempo"] = ot.apply(_score_tiempo, axis=1)
 
     # ── Componente 2: Causa raíz llenada (0–25 pts) ───────────────────────────
-    # Solo aplica a correctivas. PM siempre obtiene los 25 pts.
+    # Aplica a AMBOS tipos: MC exige código Fracttal; MP exige cualquier texto.
     ot["score_causa"] = ot["causa_ok"].apply(lambda ok: 25 if ok else 0)
 
     # ── Componente 3: Numeral registrado (0–25 pts) ───────────────────────────
-    ot["score_numeral"] = ot["numeral_ok"].apply(lambda ok: 25 if ok else 0)
+    # Solo aplica a preventivas (lavadoras). Correctivas = 25 pts auto (no aplica).
+    ot["score_numeral"] = ot.apply(
+        lambda r: 25 if r["es_correctiva"] else (25 if r["numeral_ok"] else 0),
+        axis=1,
+    )
 
     # ── Componente 4: Método de detección de falla (0–25 pts) ────────────────
     # OK = cualquier valor que no sea vacío ni "SIN CLASIFICAR"
