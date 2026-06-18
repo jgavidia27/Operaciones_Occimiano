@@ -1167,13 +1167,18 @@ def build_reincidencias(df_wo: pd.DataFrame, excel_to_full: dict = None) -> pd.D
     merged["causa_clasif"] = merged["causa_raiz"].apply(classify_causa_raiz)
 
     def _es_tecnico(row) -> bool:
+        # Política actualizada: F.A.O + F.N.A.O ambas imputan KPI.
+        # Un correctivo dentro de los 5 días de un PM en la misma estación
+        # es error del técnico del preventivo, independiente de la clasificación
+        # que ponga el técnico del correctivo en el campo "Falla".
+        # Solo se excluye si la causa raíz confirma daño externo del cliente
+        # (ej: equipo roto por cliente, falta de sal en ablandador, etc.)
+        # o si es un Trabajo Especial (categoría que no es falla post-PM).
         ft = row["falla_tipo"]
         cc = row["causa_clasif"]
-        if ft == "fnao":    return False
-        if ft == "fao":     return True
-        if ft in ("sin_info","sin_dato"): return True
-        if cc == "cliente": return False
-        return False
+        if ft == "especial":  return False   # Trabajo Especial → no es reincidencia
+        if cc == "cliente":   return False   # Causa confirmada del cliente → no imputa
+        return True   # FAO + FNAO + sin_info + sin_dato → todos imputan
 
     merged["es_reincidencia_tecnico"] = merged.apply(_es_tecnico, axis=1)
     # tecnico_short solo está en prev_tmp → no tiene sufijo

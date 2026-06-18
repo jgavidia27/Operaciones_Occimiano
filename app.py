@@ -5155,14 +5155,14 @@ elif _page == _NAV_PAGES[0]:
         st.markdown(
             f'<div style="background:{_t["err_bg"]};border-left:4px solid #ef4444;'
             f'border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:0.9rem;color:{_t["text"]};">'
-            '<b>⚠️ Criterio de atribución — Sin información:</b> '
-            'Si dentro del rango de 5 días el técnico del correctivo <b>no registra el tipo de falla</b>, '
-            'deja el campo vacío o selecciona "Sin Información", '
-            '<b>el error se considera atribuible al técnico que realizó el preventivo.</b> '
-            'Al no existir una declaración explícita de causa externa (F.N.A.O), '
-            'Occimiano no puede quedar exento de responsabilidad por omisión de información. '
-            'La única forma de excluir un correctivo es que el técnico declare formalmente '
-            '<b>"F.N.A.O — Falla No Atribuible a Occimiano"</b> con su respectiva justificación.</div>',
+            '<b>⚠️ Criterio de atribución — F.A.O + F.N.A.O:</b> '
+            'Todo correctivo generado dentro de los 5 días siguientes a un PM en la misma estación '
+            'imputa KPI al técnico del preventivo, <b>independiente de la clasificación que registre '
+            'el técnico del correctivo</b> (F.A.O o F.N.A.O). '
+            'Declarar "F.N.A.O" no exime de responsabilidad: si el servicio falló tan rápido, '
+            'el problema debió detectarse en el preventivo. '
+            '<b>Única excepción:</b> causa raíz confirmada como daño externo del cliente '
+            '(equipo roto por el cliente, falta de insumos como sal del ablandador, etc.).</div>',
             unsafe_allow_html=True,
         )
 
@@ -5203,6 +5203,15 @@ elif _page == _NAV_PAGES[0]:
                 "folio2": "folio_cm", "fecha2": "fecha_cm",
                 "tecnico2": "tecnico_cm",
             })
+
+        # Recalcular es_reincidencia_tecnico con política actual (FAO+FNAO imputan).
+        # Se hace aquí para no depender del caché que puede tener la política anterior
+        # (solo Trabajos Especiales y causa=cliente quedan excluidos).
+        if not df_reinc.empty and "falla_tipo" in df_reinc.columns and "causa_clasif" in df_reinc.columns:
+            df_reinc["es_reincidencia_tecnico"] = (
+                (df_reinc["falla_tipo"] != "especial") &
+                (df_reinc["causa_clasif"] != "cliente")
+            )
 
         # ── Filtros PRIMERO — necesarios para que las tarjetas reflejen el período ──
         if df_reinc.empty or "fecha_cm" not in df_reinc.columns:
@@ -5315,11 +5324,13 @@ elif _page == _NAV_PAGES[0]:
                 _n_sin_dato = int(_cnt_falla.get("sin_dato", 0))
                 _n_fao      = int(_cnt_falla.get("fao",      0))
                 _n_espec    = int(_cnt_falla.get("especial", 0))
-                _n_excl     = _n_fnao + _n_espec   # excluir F.N.A.O y Trabajos Especiales
-                # F.N.A.O: causa externa confirmada por el técnico → no responsabilidad Occimiano.
-                # Trabajos Especiales (03.-): no son fallas post-PM → no son reincidencias.
-                # Sin info / sin dato = duda recae en Occimiano → SÍ es error del técnico.
-                _df_rc = _df_rc[~_df_rc["falla_tipo"].isin(["fnao", "especial"])]
+                _n_excl     = _n_espec   # Solo Trabajos Especiales excluidos (F.N.A.O ahora SÍ imputa)
+                # Política actualizada: F.A.O + F.N.A.O ambas imputan KPI.
+                # Trabajos Especiales (03.-): no son fallas post-PM → únicos excluidos.
+                # F.N.A.O ya NO excluye: declarar "no atribuible" no exime de responsabilidad
+                # si el correctivo nació dentro de los 5 días del PM en la misma estación.
+                # Única excepción real: causa_clasif="cliente" (daño externo obvio del cliente).
+                _df_rc = _df_rc[~_df_rc["falla_tipo"].isin(["especial"])]
             else:
                 _n_fnao = _n_sin_info = _n_sin_dato = _n_fao = _n_espec = _n_excl = 0
 
@@ -5723,8 +5734,8 @@ elif _page == _NAV_PAGES[0]:
             # ── Fila 2: desglose de fallas ────────────────────────────────────
             _rm1, _rm2, _rm3, _rm4 = st.columns(4)
             _rm1.metric("Total fallas post-PM detectadas", f"{_n_bruto:,}",
-                        delta=f"{_n_excl:,} F.N.A.O excluidas — ver detalle ↓", delta_color="off")
-            _rm2.metric("F.A.O — Error del técnico", f"{_tec_rc:,}",
+                        delta=f"{_n_excl:,} Trab. Especiales excluidos — ver detalle ↓", delta_color="off")
+            _rm2.metric("F.A.O + F.N.A.O — Error del técnico", f"{_tec_rc:,}",
                         delta="⚠️ Afecta KPI Calidad" if _tec_rc > 0 else "✅ Sin afectación",
                         delta_color="off")
             _rm3.metric("Trabajos Especiales", f"{_espec_rc:,}",
@@ -5742,14 +5753,14 @@ elif _page == _NAV_PAGES[0]:
                     f"""
 | Clasificación (columna "Falla" en Fracttal) | Cant. | ¿Imputa KPI? | Criterio |
 |---|---|---|---|
-| 🔴 F.A.O — Falla Atribuible a Occimiano | **{_n_fao:,}** | ✅ Sí | Técnico confirmó que es error de Occimiano |
+| 🔴 F.A.O — Falla Atribuible a Occimiano | **{_n_fao:,}** | ✅ Sí | Técnico confirmó error de Occimiano → imputa KPI |
+| 🟠 F.N.A.O — No Atribuible a Occimiano | **{_n_fnao:,}** | ✅ Sí | Correctivo en ≤5 días = error del PM, independiente de clasificación |
 | ⚫ Sin Información (opción "04.-") | **{_n_sin_info:,}** | ✅ Sí | Sin justificación → la duda recae en Occimiano |
 | ⚫ Sin dato (campo completamente vacío) | **{_n_sin_dato:,}** | ✅ Sí | Sin justificación → la duda recae en Occimiano |
-| 🔵 Trabajos Especiales | **{_n_espec:,}** | ⚠️ No | Categoría explícita, no imputa KPI Calidad |
-| 🟢 F.N.A.O — No Atribuible a Occimiano | **{_n_fnao:,}** | ❌ Excluida | Técnico declaró EXPLÍCITAMENTE causa externa |
+| 🔵 Trabajos Especiales | **{_n_espec:,}** | ⚠️ No | No es falla post-PM → no imputa KPI Calidad |
 | **TOTAL detectadas** | **{_n_bruto:,}** | | |
-| **TOTAL analizadas** | **{_total_rc:,}** | | = F.A.O + Sin info + Sin dato + Trab. Especiales |
-| **TOTAL excluidas** | **{_n_excl:,}** | | = Solo F.N.A.O (causa externa confirmada) |
+| **TOTAL que imputan KPI** | **{_total_rc:,}** | | = F.A.O + F.N.A.O + Sin info + Sin dato (excl. Especiales y causa=cliente) |
+| **TOTAL excluidos** | **{_n_excl:,}** | | = Solo Trabajos Especiales |
                     """,
                     unsafe_allow_html=False,
                 )
