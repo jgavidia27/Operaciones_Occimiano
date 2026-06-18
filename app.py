@@ -6962,59 +6962,99 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     _df_te_fail["_absurdo"] = (
                         _df_te_fail["duration_sec"] < _df_te_fail["estimated_sec"] * 0.15
                     )
-                    _n_absurdo  = int(_df_te_fail["_absurdo"].sum())
-                    _pct_absurdo = _n_absurdo / _n_fail * 100 if _n_fail > 0 else 0.0
+                    _n_absurdo    = int(_df_te_fail["_absurdo"].sum())
+                    _df_abs_only  = _df_te_fail[_df_te_fail["_absurdo"]].copy()
+                    _n_te_total   = len(_df_te)
+                    _n_ok         = _n_te_total - _n_fail
+                    _n_just       = _n_fail - _n_absurdo
+                    _pct_fail     = _n_fail    / _n_te_total * 100 if _n_te_total > 0 else 0.0
+                    _pct_abs_fail = _n_absurdo / _n_fail     * 100 if _n_fail     > 0 else 0.0
+                    _pct_abs_tot  = _n_absurdo / _n_te_total * 100 if _n_te_total > 0 else 0.0
 
-                    _abs_c1, _abs_c2 = st.columns([1, 3])
-                    with _abs_c1:
-                        _col_abs = "#ef4444" if _pct_absurdo >= 30 else (
-                                   "#f59e0b" if _pct_absurdo >= 10 else "#22c55e")
+                    # ── Tarjetas cascada: Total → No cumplen 80% → Injustificados ──
+                    _ac1, _ac2, _ac3 = st.columns(3)
+                    _cs = (f'border-radius:10px;padding:18px 14px;text-align:center;'
+                           f'background:{_t["card"]};')
+                    with _ac1:
                         st.markdown(
-                            f'<div style="background:{_t["card"]};border:2px solid {_col_abs}44;'
-                            f'border-radius:10px;padding:20px;text-align:center;">'
-                            f'<div style="font-size:2rem;font-weight:800;color:{_col_abs};">'
-                            f'{_pct_absurdo:.1f}%</div>'
-                            f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
-                            f'{_n_absurdo:,} de {_n_fail:,} incumplimientos</div>'
-                            f'<div style="font-size:0.78rem;color:{_t["muted"]};">'
-                            f'son tiempos injustificados (&lt;15%)</div>'
-                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
-                            f'Meta: &lt;10% de los incumplimientos</div>'
+                            f'<div style="{_cs}border:2px solid {_t["border"]};">'
+                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:4px;letter-spacing:.05em;">TOTAL OTs EVALUADAS</div>'
+                            f'<div style="font-size:2rem;font-weight:800;color:{_t["text"]};">{_n_te_total:,}</div>'
+                            f'<div style="font-size:0.78rem;color:{_t["muted"]};margin-top:4px;">con tiempo estimado</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with _ac2:
+                        st.markdown(
+                            f'<div style="{_cs}border:2px solid #f59e0b55;">'
+                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:4px;letter-spacing:.05em;">NO CUMPLEN EL 80%</div>'
+                            f'<div style="font-size:2rem;font-weight:800;color:#f59e0b;">{_n_fail:,}</div>'
+                            f'<div style="font-size:0.78rem;color:{_t["muted"]};margin-top:4px;">{_pct_fail:.1f}% del total</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with _ac3:
+                        _col3 = "#ef4444" if _pct_abs_fail >= 30 else (
+                                "#f59e0b" if _pct_abs_fail >= 10 else "#22c55e")
+                        st.markdown(
+                            f'<div style="{_cs}border:2px solid {_col3}55;">'
+                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:4px;letter-spacing:.05em;">TIEMPO INJUSTIFICADO (&lt;15%)</div>'
+                            f'<div style="font-size:2rem;font-weight:800;color:{_col3};">{_n_absurdo:,}</div>'
+                            f'<div style="font-size:0.78rem;color:{_t["muted"]};margin-top:4px;">{_pct_abs_fail:.1f}% de los incumplimientos</div>'
                             f'</div>',
                             unsafe_allow_html=True,
                         )
 
-                    with _abs_c2:
-                        # Gráfico por técnico: cuántos tiempos injustificados tiene cada uno
-                        _df_abs_only = _df_te_fail[_df_te_fail["_absurdo"]].copy()
-                        if not _df_abs_only.empty and "tecnico" in _df_abs_only.columns:
-                            _abs_by_tec = (
-                                _df_abs_only.groupby("tecnico")
-                                .agg(absurdos=("_absurdo", "count"))
-                                .reset_index()
-                                .sort_values("absurdos", ascending=True)
-                            )
-                            _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
-                            if _abs_sig not in st.session_state:
-                                _fig_abs = px.bar(
-                                    _abs_by_tec, x="absurdos", y="tecnico",
-                                    orientation="h",
-                                    text="absurdos",
-                                    labels={"absurdos": "OTs con tiempo injustificado (<15%)", "tecnico": ""},
-                                    color_discrete_sequence=["#ef4444"],
-                                )
-                                _fig_abs.update_traces(textposition="outside")
-                                _fig_abs.update_layout(
-                                    height=max(200, len(_abs_by_tec) * 38 + 60),
-                                    margin=dict(t=10, b=10, l=10, r=60),
-                                    showlegend=False,
-                                    xaxis=dict(tickformat="d"),
-                                )
-                                _apply_plot_theme(_fig_abs)
-                                st.session_state[_abs_sig] = _fig_abs
-                            st.plotly_chart(st.session_state[_abs_sig], width="stretch")
+                    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
-                    # Tabla detalle de OTs absurdas
+                    # ── Barra apilada: Total OTs desglosado en 3 segmentos ──────
+                    _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
+                    if _abs_sig not in st.session_state:
+                        _fig_abs = go.Figure()
+                        _fig_abs.add_trace(go.Bar(
+                            name=f"Cumplen ≥80%  ({_n_ok:,})",
+                            x=[_n_ok], y=["OTs preventivas"],
+                            orientation="h",
+                            marker_color="#22c55e",
+                            text=[f"<b>{_n_ok:,}</b><br>{100-_pct_fail:.1f}%"],
+                            textposition="inside",
+                            textfont=dict(size=12, color="#ffffff"),
+                            hovertemplate=f"Cumplen ≥80%: {_n_ok:,} OTs<extra></extra>",
+                        ))
+                        _fig_abs.add_trace(go.Bar(
+                            name=f"No cumplen — tiempo razonable  ({_n_just:,})",
+                            x=[_n_just], y=["OTs preventivas"],
+                            orientation="h",
+                            marker_color="#f59e0b",
+                            text=[f"<b>{_n_just:,}</b>"] if _n_just > 0 else [""],
+                            textposition="inside",
+                            textfont=dict(size=12, color="#ffffff"),
+                            hovertemplate=f"No cumplen (15-80%): {_n_just:,} OTs<extra></extra>",
+                        ))
+                        _fig_abs.add_trace(go.Bar(
+                            name=f"Injustificado &lt;15%  ({_n_absurdo:,})",
+                            x=[_n_absurdo], y=["OTs preventivas"],
+                            orientation="h",
+                            marker_color="#ef4444",
+                            text=[f"<b>{_n_absurdo:,}</b><br>{_pct_abs_tot:.1f}% del total"] if _n_absurdo > 0 else [""],
+                            textposition="inside",
+                            textfont=dict(size=12, color="#ffffff"),
+                            hovertemplate=f"Injustificado (<15%): {_n_absurdo:,} OTs<extra></extra>",
+                        ))
+                        _fig_abs.update_layout(
+                            barmode="stack",
+                            height=130,
+                            margin=dict(t=10, b=40, l=10, r=20),
+                            showlegend=True,
+                            legend=dict(orientation="h", y=-0.5, x=0, font=dict(size=11)),
+                            xaxis=dict(tickformat="d", title=""),
+                            yaxis=dict(title=""),
+                        )
+                        _apply_plot_theme(_fig_abs)
+                        st.session_state[_abs_sig] = _fig_abs
+                    st.plotly_chart(st.session_state[_abs_sig], width="stretch")
+
+                    # Tabla detalle de OTs injustificadas
                     if not _df_abs_only.empty:
                         _df_abs_only["_pct_ej_abs"] = (
                             _df_abs_only["duration_sec"] / _df_abs_only["estimated_sec"] * 100
