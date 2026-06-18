@@ -6944,6 +6944,115 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                                 help="T.Ejecución / T.Estimado × 100. Verde si ≥80%"),
                             "Estado":      st.column_config.TextColumn(width=110),
                         })
+
+                # ── Subsección: OTs con tiempo injustificado (<15% del estimado) ────────
+                st.markdown("---")
+                st.markdown("**⚠️ OTs con tiempo de ejecución injustificado (< 15% del estimado)**")
+                st.caption(
+                    "De los preventivos que **no cumplen el mínimo del 80%**, "
+                    "¿cuántos tienen un tiempo tan corto que es físicamente imposible? "
+                    "**Criterio:** ejecución < 15% del tiempo estimado  "
+                    "*(ej: tarea de 60 min ejecutada en menos de 9 min)*"
+                )
+
+                _df_te_fail = _df_te[~_df_te["_te_ok"]].copy()
+                _n_fail = len(_df_te_fail)
+
+                if _n_fail > 0:
+                    _df_te_fail["_absurdo"] = (
+                        _df_te_fail["duration_sec"] < _df_te_fail["estimated_sec"] * 0.15
+                    )
+                    _n_absurdo  = int(_df_te_fail["_absurdo"].sum())
+                    _pct_absurdo = _n_absurdo / _n_fail * 100 if _n_fail > 0 else 0.0
+
+                    _abs_c1, _abs_c2 = st.columns([1, 3])
+                    with _abs_c1:
+                        _col_abs = "#ef4444" if _pct_absurdo >= 30 else (
+                                   "#f59e0b" if _pct_absurdo >= 10 else "#22c55e")
+                        st.markdown(
+                            f'<div style="background:{_t["card"]};border:2px solid {_col_abs}44;'
+                            f'border-radius:10px;padding:20px;text-align:center;">'
+                            f'<div style="font-size:2rem;font-weight:800;color:{_col_abs};">'
+                            f'{_pct_absurdo:.1f}%</div>'
+                            f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
+                            f'{_n_absurdo:,} de {_n_fail:,} incumplimientos</div>'
+                            f'<div style="font-size:0.78rem;color:{_t["muted"]};">'
+                            f'son tiempos injustificados (&lt;15%)</div>'
+                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
+                            f'Meta: &lt;10% de los incumplimientos</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                    with _abs_c2:
+                        # Gráfico por técnico: cuántos tiempos injustificados tiene cada uno
+                        _df_abs_only = _df_te_fail[_df_te_fail["_absurdo"]].copy()
+                        if not _df_abs_only.empty and "tecnico" in _df_abs_only.columns:
+                            _abs_by_tec = (
+                                _df_abs_only.groupby("tecnico")
+                                .agg(absurdos=("_absurdo", "count"))
+                                .reset_index()
+                                .sort_values("absurdos", ascending=True)
+                            )
+                            _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
+                            if _abs_sig not in st.session_state:
+                                _fig_abs = px.bar(
+                                    _abs_by_tec, x="absurdos", y="tecnico",
+                                    orientation="h",
+                                    text="absurdos",
+                                    labels={"absurdos": "OTs con tiempo injustificado (<15%)", "tecnico": ""},
+                                    color_discrete_sequence=["#ef4444"],
+                                )
+                                _fig_abs.update_traces(textposition="outside")
+                                _fig_abs.update_layout(
+                                    height=max(200, len(_abs_by_tec) * 38 + 60),
+                                    margin=dict(t=10, b=10, l=10, r=60),
+                                    showlegend=False,
+                                    xaxis=dict(tickformat="d"),
+                                )
+                                _apply_plot_theme(_fig_abs)
+                                st.session_state[_abs_sig] = _fig_abs
+                            st.plotly_chart(st.session_state[_abs_sig], width="stretch")
+
+                    # Tabla detalle de OTs absurdas
+                    if not _df_abs_only.empty:
+                        _df_abs_only["_pct_ej_abs"] = (
+                            _df_abs_only["duration_sec"] / _df_abs_only["estimated_sec"] * 100
+                        ).round(1)
+                        _det_abs = _df_abs_only.copy()
+                        _det_abs_cd = pd.to_datetime(_det_abs["creation_date"], errors="coerce")
+                        _det_abs_cd = _det_abs_cd.dt.tz_convert(None) if _det_abs_cd.dt.tz is not None else _det_abs_cd
+                        _det_abs["creation_date"] = _det_abs_cd.dt.strftime("%d/%m/%Y")
+                        _det_abs["T. Estimado"]  = _det_abs["estimated_sec"].apply(_fmt_seg)
+                        _det_abs["T. Ejecución"] = _det_abs["duration_sec"].apply(_fmt_seg)
+                        _det_abs["% Ejecutado"]  = _det_abs["_pct_ej_abs"]
+                        _det_abs_disp = _det_abs[[c for c in
+                            ["folio","tecnico","creation_date","maint_type",
+                             "T. Estimado","T. Ejecución","% Ejecutado"]
+                            if c in _det_abs.columns]].rename(columns={
+                                "folio":"OT","tecnico":"Técnico",
+                                "creation_date":"Fecha","maint_type":"Tipo",
+                            }).sort_values("Fecha", ascending=False)
+
+                        with st.expander(
+                            f"📋 Detalle OTs con tiempo injustificado ({_n_absurdo:,} OTs)", expanded=False
+                        ):
+                            _show_df(_det_abs_disp, hide_index=True, width="stretch",
+                                column_config={
+                                    "OT":          st.column_config.TextColumn(width=110),
+                                    "Técnico":     st.column_config.TextColumn(width=190),
+                                    "Fecha":       st.column_config.TextColumn(width=100),
+                                    "Tipo":        st.column_config.TextColumn(width=200),
+                                    "T. Estimado": st.column_config.TextColumn(width=100),
+                                    "T. Ejecución":st.column_config.TextColumn(width=110),
+                                    "% Ejecutado": st.column_config.ProgressColumn(
+                                        min_value=0, max_value=50, format="%.1f%%",
+                                        help="Porcentaje del tiempo estimado que realmente se ejecutó. "
+                                             "Todos en esta tabla están por debajo del 15%."),
+                                })
+                else:
+                    st.success("✅ No hay preventivos con tiempo inferior al 15% del estimado en este período.")
+
             else:
                 st.info("Sin datos de duración estimada disponibles para el filtro actual.")
 
@@ -7143,94 +7252,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                                     min_value=0, max_value=100, format="%.1f%%"),
                             })
 
-            # ── Ranking de técnicos ───────────────────────────────────────────────
-            st.divider()
-            st.markdown('<div class="section-header">🏆 Ranking de técnicos — Índice de llenado</div>',
-                        unsafe_allow_html=True)
-
             if not df_tec_scores_rank.empty:
-                # Filtrar solo técnicos activos del organigrama (Libro4 / GRUPOS_TERRENO)
-                # df_tec_scores_rank: seniors muestran el promedio de su equipo completo
-                df_rank = df_tec_scores_rank[
-                    df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)
-                ].copy()
-                # Asegurar columna err_total_dim (puede faltar en caches pre-migración)
-                if "err_total_dim" not in df_rank.columns:
-                    df_rank["err_total_dim"] = df_rank["n_errores"]
-                if "exactitud_pct" not in df_rank.columns:
-                    df_rank["exactitud_pct"] = (
-                        (1 - df_rank["n_errores"] / df_rank["ots_evaluadas"].clip(lower=1)) * 100
-                    ).round(1)
-                # Nivel de bono — escala trimestral 7 niveles
-                def _nivel_exactitud(e: float) -> str:
-                    if e >= 95: return "≥95% — $105.000/trim"
-                    if e >= 90: return "≥90% — $94.500/trim"
-                    if e >= 85: return "≥85% — $84.000/trim"
-                    if e >= 80: return "≥80% — $73.500/trim"
-                    if e >= 75: return "≥75% — $63.000/trim"
-                    if e >= 70: return "≥70% — $52.500/trim"
-                    return "<70% — Sin bono"
-                df_rank["nivel"] = df_rank["exactitud_pct"].apply(_nivel_exactitud)
-                # Etiqueta en barra: "50 OTs c/error · 200 err.ind."
-                df_rank["lbl_barra"] = df_rank.apply(
-                    lambda r: f"{int(r['n_errores'])} OT · {int(r['err_total_dim'])} err.",
-                    axis=1)
-                # Ordenar de menor a mayor exactitud (peores arriba → visualmente más impactante)
-                df_rank_plot = df_rank.sort_values("exactitud_pct", ascending=True)
-
-                _rank_k = f"_fig_prec_rank_{_current_theme}_{_prec_sig}"
-                if _rank_k not in st.session_state:
-                    fig_rank = px.bar(
-                        df_rank_plot,
-                        x="n_errores", y="tecnico",
-                        orientation="h",
-                        color="nivel",
-                        color_discrete_map={
-                            "≥95% — $105.000/trim": _SCORE_COLOR["verde"],
-                            "≥90% — $94.500/trim":  "#16a34a",
-                            "≥85% — $84.000/trim":  "#4ade80",
-                            "≥80% — $73.500/trim":  "#65a30d",
-                            "≥75% — $63.000/trim":  _SCORE_COLOR["amarillo"],
-                            "≥70% — $52.500/trim":  "#f97316",
-                            "<70% — Sin bono":      _SCORE_COLOR["rojo"],
-                        },
-                        text=df_rank_plot["lbl_barra"],
-                        labels={"n_errores": "OTs con error (≥1 dimensión incorrecta)", "tecnico": ""},
-                        category_orders={"nivel": [
-                            "≥95% — $105.000/trim", "≥90% — $94.500/trim",
-                            "≥85% — $84.000/trim",  "≥80% — $73.500/trim",
-                            "≥75% — $63.000/trim",  "≥70% — $52.500/trim",
-                            "<70% — Sin bono",
-                        ]},
-                        custom_data=["err_total_dim", "exactitud_pct"],
-                    )
-                    fig_rank.update_traces(
-                        textposition="outside",
-                        hovertemplate=(
-                            "<b>%{y}</b><br>"
-                            "OTs con error: %{x}<br>"
-                            "Errores individuales: %{customdata[0]}<br>"
-                            "Exactitud: %{customdata[1]:.1f}%"
-                            "<extra></extra>"
-                        ),
-                    )
-                    _max_err = max(int(df_rank_plot["n_errores"].max()) + 2, 6)
-                    fig_rank.update_layout(
-                        height=max(300, len(df_rank_plot) * 40 + 80),
-                        margin=dict(t=20, b=20, l=10, r=100),
-                        xaxis=dict(range=[0, _max_err], tickformat="d",
-                                   title="OTs con error (X) — barra muestra X; etiqueta X·Y"),
-                        legend_title="Bono (exactitud)",
-                    )
-                    _apply_plot_theme(fig_rank)
-                    st.session_state[_rank_k] = fig_rank
-                st.plotly_chart(st.session_state[_rank_k], width="stretch")
-                st.caption(
-                    "**Barra** = OTs con ≥1 error (X)  ·  "
-                    "**Etiqueta** = X OTs con error · Y errores individuales  ·  "
-                    "**Color** = nivel de bono según exactitud %"
-                )
-
                 _tec_base = df_tec_scores_rank[df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)].copy()
 
                 # Guards para columnas nuevas (caches pre-migración)
