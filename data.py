@@ -410,10 +410,10 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             estimated_sec = int(wo.get("duration") or 0)
         except (ValueError, TypeError):
             estimated_sec = 0
-        # Tiempo OK: ejecución >= 80% de la duración estimada
+        # Tiempo OK: ejecución >= 70% de la duración estimada
         # Solo aplica si hay duración estimada (> 0) y la tarea es preventiva
         tiempo_ok_estim = (
-            (duration_sec >= estimated_sec * 0.80)
+            (duration_sec >= estimated_sec * 0.70)
             if estimated_sec > 0 else None  # None = sin datos suficientes
         )
 
@@ -520,7 +520,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     │ Componente                       │ Pts  │ Criterio                                           │
     ├──────────────────────────────────┼──────┼────────────────────────────────────────────────────┤
     │ 1. Tiempo de ejecución           │ 0–25 │ MC: >15min→25 | 5-15→12 | <5→0                    │
-    │                                  │      │ MP (con estim.): ≥80%→25 | 50-79%→12 | <50%→0     │
+    │                                  │      │ MP (con estim.): ≥70%→25 | 35-69%→12 | <35%→0     │
     │                                  │      │ MP (sin estim.): >30min→25 | 15-30→12 | <15→0      │
     │ 2. Causa raíz llenada            │ 0–25 │ MC: causa específica → 25 | vacía/vaga → 0         │
     │                                  │      │ PM: no aplica → 25 siempre                         │
@@ -580,7 +580,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         ot = ot.merge(_estim_g, on="folio", how="left")
         ot["estim_sec_sum"] = ot["estim_sec_sum"].fillna(0)
         ot["tiempo_ok_estim"] = ot.apply(
-            lambda r: (r["exec_sec_sum"] >= r["estim_sec_sum"] * 0.80)
+            lambda r: (r["exec_sec_sum"] >= r["estim_sec_sum"] * 0.70)
                       if r["estim_sec_sum"] > 0 else None,
             axis=1,
         )
@@ -596,7 +596,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     # ── Componente 1: Tiempo de ejecución (0–25 pts) ──────────────────────────
     # MC: < 5 min → 0 | 5-15 min → 12 | > 15 min → 25
     # MP (con estim.): usa max(tasks_duration, elapsed) / estimado
-    #   ≥80% → 25 | 50-79% → 12 | <50% → 0
+    #   ≥70% → 25 | 35-69% → 12 | <35% → 0
     # MP (sin estim.): <15 min → 0 | 15-30 min → 12 | >30 min → 25
     # NOTA: para PMs se usa max(exec_sec_sum, max_elapsed) porque si el técnico
     #       no llenó tasks_duration (= 0) pero tuvo el OT abierto 100 min, ese
@@ -615,8 +615,8 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
                 # Usar el mayor entre tasks_duration y elapsed real (fecha_inicio→fin)
                 effective = max(exec_r, elapsed)
                 ratio = effective / estim
-                if ratio >= 0.80: return 25
-                if ratio >= 0.50: return 12
+                if ratio >= 0.70: return 25
+                if ratio >= 0.35: return 12
                 return 0
             else:
                 if elapsed > 1800: return 25

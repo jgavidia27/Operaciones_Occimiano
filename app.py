@@ -6545,8 +6545,8 @@ elif _page == _NAV_PAGES[0]:
             gk1.metric("Score global del mes", f"{score_global:.1f} / 100",
                        delta=lbl_global, delta_color="off")
             gk2.metric("OTs evaluadas", f"{total_ots_mes:,}")
-            gk3.metric("Tiempo OK (MP: 80% estim.)", f"{pct_tiempo:.1f}%",
-                       delta=f"{'✅' if pct_tiempo >= 80 else '⚠️'}")
+            gk3.metric("Tiempo OK (MP: ≥70% estim.)", f"{pct_tiempo:.1f}%",
+                       delta=f"{'✅' if pct_tiempo >= 70 else '⚠️'}")
             gk4.metric("Causa raíz OK", f"{pct_causa:.1f}%",
                        delta=f"{'✅' if pct_causa >= 80 else '⚠️'}")
             gk5.metric("Técnicos con bono (≥90% exactitud)", f"{tecnicos_con_bono} / {total_tecnicos}")
@@ -6800,28 +6800,28 @@ elif _page == _NAV_PAGES[0]:
                         unsafe_allow_html=True)
 
             # ── Leyenda expandible ────────────────────────────────────────────
-            with st.expander("📖  Regla de cumplimiento de tiempo (80% de la duración estimada)", expanded=False):
+            with st.expander("📖  Regla de cumplimiento de tiempo (70% de la duración estimada)", expanded=False):
                 st.markdown("""
 **¿Cómo funciona?**
 
 Cada mantenimiento preventivo tiene una **duración estimada** (programada en Fracttal).
-El técnico debe ejecutar la tarea respetando ese tiempo mínimo con una tolerancia del **20%**.
+El técnico debe ejecutar la tarea respetando ese tiempo mínimo con una tolerancia del **30%**.
 
-| Duración estimada | Mínimo aceptable (80%) | Ejemplo |
+| Duración estimada | Mínimo aceptable (70%) | Ejemplo |
 |---|---|---|
-| 00:40 (40 min) | 00:32 (32 min) | Si el técnico tardó 35 min → ✅ Cumple |
-| 00:30 (30 min) | 00:24 (24 min) | Si el técnico tardó 05 min → ❌ No cumple |
-| 01:00 (60 min) | 00:48 (48 min) | Si el técnico tardó 50 min → ✅ Cumple |
+| 00:40 (40 min) | 00:28 (28 min) | Si el técnico tardó 30 min → ✅ Cumple |
+| 00:30 (30 min) | 00:21 (21 min) | Si el técnico tardó 05 min → ❌ No cumple |
+| 01:00 (60 min) | 00:42 (42 min) | Si el técnico tardó 45 min → ✅ Cumple |
 
 **¿Qué se mide?**
-- **`Tiempo de Ejecución`** (campo `tasks_duration` de Fracttal) vs **`Duración Estimada`** (campo `duration`)
-- Si `Tiempo Ejecución ≥ Duración Estimada × 80%` → **CUMPLE**
-- Si `Tiempo Ejecución < Duración Estimada × 80%` → **ERROR** (posible quick-tick)
+- **Tiempo efectivo** = `max(tasks_duration, tiempo real por fechas OT)` vs **`Duración Estimada`**
+- Si `Tiempo Efectivo ≥ Duración Estimada × 70%` → **CUMPLE**
+- Si `Tiempo Efectivo < Duración Estimada × 70%` → **ERROR** (posible quick-tick)
 - Si no hay duración estimada → **Sin datos** (no penaliza)
 
-**¿Por qué el 20% de holgura?**
-El técnico puede llegar y encontrar la máquina en buen estado, reduciendo el tiempo real,
-pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
+**¿Por qué usar max(tasks_duration, elapsed)?**
+Si el técnico no llenó el campo de duración de tareas pero tuvo el OT abierto 90 min,
+esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
 """)
 
             # ── Gráfico evolución mensual Tiempo de Ejecución ────────────────
