@@ -7791,6 +7791,9 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 ]
                 if not _miembros_full:
                     continue
+                # Guardar tamaño real del equipo ANTES de filtro por técnico
+                # (para dividir el bono callcenter correctamente)
+                _n_equipo_real = len(_miembros_full)
 
                 # ── Filtro técnico ────────────────────────────────────────────
                 if _bono_tec_sel != "Todos":
@@ -7834,7 +7837,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     ))
                     for ms in _meses_bono_activos
                 )
-                _BONO_CC = int(_BONO_CC_SEMANAL * _n_semanas_cc / _n_pool) if _n_pool > 0 else 0
+                _BONO_CC = int(_BONO_CC_SEMANAL * _n_semanas_cc / _n_equipo_real) if _n_equipo_real > 0 else 0
                 _BONO_CC_EQ = _BONO_CC_SEMANAL * _n_semanas_cc  # total equipo por período
 
                 # ── Construir tabla HTML ──────────────────────────────────────
@@ -8048,7 +8051,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                     f'<tr style="background:{_tr_bg(6)};">'
                     f'<td style="padding:8px 10px;font-weight:600;border-bottom:1px solid {_t["border"]};">'
                     f'Callcenter <span style="color:{_t["muted"]};font-size:0.76rem;">'
-                    f'($100K/sem &divide; {_n_pool} pers &times; {_n_semanas_cc} sem)</span></td>'
+                    f'($100K/sem &divide; {_n_equipo_real} pers &times; {_n_semanas_cc} sem)</span></td>'
                 )
                 for _tf in _miembros_full:
                     _html += (
