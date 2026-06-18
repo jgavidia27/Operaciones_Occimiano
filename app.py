@@ -6997,51 +6997,87 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _te_grp["_label"] = _te_grp["tecnico"]
                     _te_grp = _te_grp.sort_values("absurdo", ascending=False).reset_index(drop=True)
 
-                _x_lbl = _te_grp["_label"].tolist()
-
                 _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
                 if _abs_sig not in st.session_state:
-                    _fig_abs = go.Figure()
-                    _fig_abs.add_trace(go.Bar(
-                        name="Cumplen ≥70%",
-                        x=_x_lbl,
-                        y=_te_grp["ok"].tolist(),
-                        marker_color="#22c55e",
-                        text=[f"{int(v):,}<br>{p:.1f}%"
-                              for v, p in zip(_te_grp["ok"], _te_grp["pct_ok"])],
-                        textposition="inside",
-                        textfont=dict(size=11, color="#ffffff"),
-                    ))
-                    _fig_abs.add_trace(go.Bar(
-                        name="No cumplen — tiempo razonable (15–70%)",
-                        x=_x_lbl,
-                        y=_te_grp["just_fail"].tolist(),
-                        marker_color="#f59e0b",
-                        text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
-                              for v, p in zip(_te_grp["just_fail"], _te_grp["pct_just"])],
-                        textposition="inside",
-                        textfont=dict(size=11, color="#ffffff"),
-                    ))
-                    _fig_abs.add_trace(go.Bar(
-                        name="Injustificado (<15%)",
-                        x=_x_lbl,
-                        y=_te_grp["absurdo"].tolist(),
-                        marker_color="#ef4444",
-                        text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
-                              for v, p in zip(_te_grp["absurdo"], _te_grp["pct_absurdo"])],
-                        textposition="inside",
-                        textfont=dict(size=11, color="#ffffff"),
-                    ))
-                    _fig_abs.update_layout(
-                        barmode="stack",
-                        height=340,
-                        margin=dict(t=30, b=20, l=10, r=20),
-                        showlegend=True,
-                        legend=dict(orientation="h", y=1.1, x=0),
-                        yaxis=dict(title="OTs preventivas", tickformat="d"),
-                        xaxis=dict(title=""),
-                        bargap=0.35,
-                    )
+                    _use_donut = (equipo_kpi == "Todos" and tec_kpi_sel == "Todos")
+
+                    if _use_donut:
+                        # ── Dona: vista general todos los equipos ────────────────
+                        _n_ok_d  = int(_te_grp["ok"].sum())
+                        _n_jd    = int(_te_grp["just_fail"].sum())
+                        _n_abd   = int(_te_grp["absurdo"].sum())
+                        _fig_abs = go.Figure(data=[go.Pie(
+                            labels=["Cumplen ≥70%",
+                                    "No cumplen (15–70%)",
+                                    "Injustificado (<15%)"],
+                            values=[_n_ok_d, _n_jd, _n_abd],
+                            hole=0.52,
+                            marker=dict(colors=["#22c55e", "#f59e0b", "#ef4444"],
+                                        line=dict(color="#ffffff", width=2)),
+                            textinfo="percent+value",
+                            texttemplate="%{percent:.1%}<br>%{value:,} OTs",
+                            hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%}<extra></extra>",
+                            direction="clockwise",
+                            sort=False,
+                        )])
+                        _n_total_d = _n_ok_d + _n_jd + _n_abd
+                        _fig_abs.update_layout(
+                            height=340,
+                            margin=dict(t=20, b=20, l=10, r=10),
+                            showlegend=True,
+                            legend=dict(orientation="h", y=-0.08, x=0.5,
+                                        xanchor="center", font=dict(size=11)),
+                            annotations=[dict(
+                                text=f"<b>{_n_total_d:,}</b><br>OTs",
+                                x=0.5, y=0.5, showarrow=False,
+                                font=dict(size=18),
+                            )],
+                        )
+                    else:
+                        # ── Barras apiladas: vista por técnico dentro del equipo ──
+                        _x_lbl = _te_grp["_label"].tolist()
+                        _fig_abs = go.Figure()
+                        _fig_abs.add_trace(go.Bar(
+                            name="Cumplen ≥70%",
+                            x=_x_lbl,
+                            y=_te_grp["ok"].tolist(),
+                            marker_color="#22c55e",
+                            text=[f"{int(v):,}<br>{p:.1f}%"
+                                  for v, p in zip(_te_grp["ok"], _te_grp["pct_ok"])],
+                            textposition="inside",
+                            textfont=dict(size=11, color="#ffffff"),
+                        ))
+                        _fig_abs.add_trace(go.Bar(
+                            name="No cumplen (15–70%)",
+                            x=_x_lbl,
+                            y=_te_grp["just_fail"].tolist(),
+                            marker_color="#f59e0b",
+                            text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                                  for v, p in zip(_te_grp["just_fail"], _te_grp["pct_just"])],
+                            textposition="inside",
+                            textfont=dict(size=11, color="#ffffff"),
+                        ))
+                        _fig_abs.add_trace(go.Bar(
+                            name="Injustificado (<15%)",
+                            x=_x_lbl,
+                            y=_te_grp["absurdo"].tolist(),
+                            marker_color="#ef4444",
+                            text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                                  for v, p in zip(_te_grp["absurdo"], _te_grp["pct_absurdo"])],
+                            textposition="inside",
+                            textfont=dict(size=11, color="#ffffff"),
+                        ))
+                        _fig_abs.update_layout(
+                            barmode="stack",
+                            height=340,
+                            margin=dict(t=30, b=20, l=10, r=20),
+                            showlegend=True,
+                            legend=dict(orientation="h", y=1.1, x=0),
+                            yaxis=dict(title="OTs preventivas", tickformat="d"),
+                            xaxis=dict(title=""),
+                            bargap=0.35,
+                        )
+
                     _apply_plot_theme(_fig_abs)
                     st.session_state[_abs_sig] = _fig_abs
                 st.plotly_chart(st.session_state[_abs_sig], width="stretch")
