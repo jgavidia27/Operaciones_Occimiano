@@ -6901,13 +6901,24 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     st.session_state[_te_sig] = _fig_te
                 st.plotly_chart(st.session_state.get(_te_sig), width="stretch")
 
+                # ── Filtro de periodo para tablas y gráficos de dona/barras ──
+                # (el gráfico de evolución mensual siempre muestra todos los meses)
+                _df_te_p = _df_te[_df_te["mes"].astype(str).isin(set(_meses_prec_str))].copy()
+                if _sem_prec != "Todas":
+                    _sem_match_te = next((s for s in _sems_prec if s[0] == _sem_prec), None)
+                    if _sem_match_te and "creation_date_local" in _df_te_p.columns:
+                        _df_te_p = _df_te_p[
+                            (_df_te_p["creation_date_local"] >= _sem_match_te[1]) &
+                            (_df_te_p["creation_date_local"] <= _sem_match_te[2])
+                        ]
+
                 # ── Tabla detalle de Tiempo de Ejecución ─────────────────────
                 def _fmt_seg(s):
                     if pd.isna(s) or s == 0: return "—"
                     s = int(s); h, m = s//3600, (s%3600)//60
                     return f"{h:02d}:{m:02d}"
 
-                _det_te = _df_te.copy()
+                _det_te = _df_te_p.copy()
                 _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.75).round(0)
                 _det_te["_pct_ej"]     = (_det_te["_effective_sec"] / _det_te["estimated_sec"] * 100).round(1)
                 _det_te_cd = pd.to_datetime(_det_te["creation_date"], errors="coerce")
@@ -6961,10 +6972,10 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 )
 
                 # Marcar los 3 segmentos sobre el total de preventivos con estimado
-                _df_te["_absurdo"]   = (~_df_te["_te_ok"]) & (
-                    _df_te["_effective_sec"] < _df_te["estimated_sec"] * 0.20
+                _df_te_p["_absurdo"]   = (~_df_te_p["_te_ok"]) & (
+                    _df_te_p["_effective_sec"] < _df_te_p["estimated_sec"] * 0.20
                 )
-                _df_te["_just_fail"] = (~_df_te["_te_ok"]) & (~_df_te["_absurdo"])
+                _df_te_p["_just_fail"] = (~_df_te_p["_te_ok"]) & (~_df_te_p["_absurdo"])
 
                 # Determinar agrupación según filtros
                 if tec_kpi_sel != "Todos":
@@ -6975,7 +6986,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _grp_col = "equipo"
 
                 _te_grp = (
-                    _df_te.groupby(_grp_col)
+                    _df_te_p.groupby(_grp_col)
                     .agg(
                         ok=("_te_ok",     "sum"),
                         just_fail=("_just_fail", "sum"),
@@ -6997,7 +7008,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _te_grp["_label"] = _te_grp["tecnico"]
                     _te_grp = _te_grp.sort_values("absurdo", ascending=False).reset_index(drop=True)
 
-                _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
+                _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}"
                 if _abs_sig not in st.session_state:
                     _use_donut = (equipo_kpi == "Todos" and tec_kpi_sel == "Todos")
 
@@ -7108,7 +7119,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 st.plotly_chart(st.session_state[_abs_sig], width="stretch")
 
                 # ── Tabla detalle de OTs injustificadas ──────────────────────────
-                _df_abs_only = _df_te[_df_te["_absurdo"]].copy()
+                _df_abs_only = _df_te_p[_df_te_p["_absurdo"]].copy()
                 _n_absurdo   = len(_df_abs_only)
 
                 if not _df_abs_only.empty:
