@@ -5168,9 +5168,9 @@ elif _page == _NAV_PAGES[0]:
 
         # Cachear en session_state — no recomputa al cambiar filtros
         # .copy() evita mutar el objeto cacheado al añadir columnas (fecha_cm_dt, mes)
-        # NOTA: solo COPEC/ESMAX/SHELL entran al cálculo de reincidencias.
-        # Abastible y otros clientes se excluyen aquí para no contaminar el KPI.
-        _CLIENTES_SLA = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
+        # Clientes evaluados en reincidencias: todos los clientes con contrato de PM+SLA.
+        # Abastible incluida: un correctivo en ≤5 días tras un PM en Abastible = error igual.
+        _CLIENTES_SLA = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
         _df_wo_reinc = df_wo[df_wo["client"].isin(_CLIENTES_SLA)].copy() \
                        if "client" in df_wo.columns else df_wo
         try:
@@ -5335,7 +5335,7 @@ elif _page == _NAV_PAGES[0]:
                 _n_fnao = _n_sin_info = _n_sin_dato = _n_fao = _n_espec = _n_excl = 0
 
         # ── KPIs globales: Total PMs y PMs sin reincidencia ──────────────────────
-        # Solo se cuentan PMs de los mismos clientes que el numerador (consistencia).
+        # Solo se cuentan PMs de los mismos clientes que el numerador (COPEC/ESMAX/SHELL/Abastible).
         _df_pm_filt = df_wo[
             (df_wo["maint_type"] == "Preventiva") &
             (~df_wo["technician"].apply(_es_excluido)) &
@@ -5397,14 +5397,14 @@ elif _page == _NAV_PAGES[0]:
         else:
             _eq_label_cal_iter = _EQUIPO_LABEL_CAL
 
-        # Clientes evaluados en reincidencias (COPEC/ESMAX/SHELL) — para nota de transparencia
-        _CLIENTES_SLA_RC = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
+        # Clientes evaluados en reincidencias (mismos que numerador)
+        _CLIENTES_SLA_RC = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
 
         _cal_cols = st.columns(len(_eq_label_cal_iter))
         for _ci, (_gk, _gl) in enumerate(zip(_eq_label_cal_iter.keys(), _eq_label_cal_iter.values())):
             _senior_cal = GRUPOS_TERRENO.get(_gk, {}).get("senior", "")
-            # Denominador: solo PMs de los mismos clientes que el numerador (COPEC/ESMAX/SHELL).
-            # Incluir otros clientes (ej. Abastible) inflaría el denominador → efectividad % falsa.
+            # Denominador: solo PMs de los mismos clientes que el numerador (COPEC/ESMAX/SHELL/Abastible).
+            # Incluir otros clientes no evaluados inflaría el denominador → efectividad % falsa.
             _pm_equipo = df_wo[
                 (df_wo["maint_type"] == "Preventiva") &
                 (df_wo["equipo"] == _gk) &
@@ -7607,7 +7607,7 @@ pero no puede hacerlo en 1 o 5 minutos si el estándar es 40 minutos.
                 ].copy()
 
         # PMs del período para denominador (solo clientes SLA — mismos que el numerador)
-        _CLIENTES_SLA_BONO = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
+        _CLIENTES_SLA_BONO = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
         _df_pm_bono = df_wo[
             (df_wo["maint_type"] == "Preventiva") &
             (~df_wo["technician"].apply(_es_excluido)) &
