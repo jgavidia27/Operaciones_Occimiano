@@ -206,17 +206,29 @@ def load_work_orders_supabase() -> list:
     Retorna lista de dicts compatible con el formato raw de Fracttal.
     El dashboard puede llamar build_work_orders_df() sobre este resultado.
     """
-    rows = _query(
-        "ordenes_trabajo",
+    # Columnas base + numerales reales. Si la migración migrate_numerales.sql
+    # aún no se corrió, numeral_inicial/final no existen → reintentar sin ellas
+    # para no romper el dashboard (resiliencia ante orden de despliegue).
+    _base_cols = (
         "select=id_ot,estado,estado_tarea,codigo_activo,nombre_activo,"
         "ubicacion,cliente,estacion,codigo_eds,responsable,tipo_tarea,"
         "prioridad,prioridad_calc,fecha_creacion,fecha_inicio,"
         "fecha_finalizacion,causa_raiz,tipo_falla,modalidad_atencion,"
-        "nota,nota_tarea,tiene_numeral,duracion_real_seg,duracion_estim_seg,"
+        "nota,nota_tarea,tiene_numeral,"
+        "duracion_real_seg,duracion_estim_seg,"
         "tiene_recursos,completada"
-        "&order=fecha_creacion.desc",
+    )
+    rows = _query(
+        "ordenes_trabajo",
+        _base_cols + ",numeral_inicial,numeral_final&order=fecha_creacion.desc",
         limit=20_000
     )
+    if not rows:   # posible 400 por columnas inexistentes → fallback sin numerales
+        rows = _query(
+            "ordenes_trabajo",
+            _base_cols + "&order=fecha_creacion.desc",
+            limit=20_000
+        )
     # Mapear al formato que espera build_work_orders_df
     mapped = []
     for r in rows:
@@ -242,6 +254,9 @@ def load_work_orders_supabase() -> list:
             "detection_method_description": r.get("modalidad_atencion"),
             "note":                       r.get("nota"),
             "task_note":                  r.get("nota_tarea"),
+            # Numerales reales extraídos de las subtareas (type=3 inicial, type=5 final)
+            "numeral_inicial":            r.get("numeral_inicial"),
+            "numeral_final":              r.get("numeral_final"),
             "stop_assets_sec":            0,
             "total_cost_task":            None,
             "resources_inventory":        "1" if r.get("tiene_recursos") else None,

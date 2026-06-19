@@ -451,17 +451,42 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         else:
             causa_ok = bool(raw_causa and raw_causa.upper() not in ("SIN CLASIFICAR", "N/A", "NA"))
 
-        # ── Numeral (número de fichas) ─────────────────────────────────────────
-        # El numeral se registra en task_note como número seguido de "und" o como
-        # primer token numérico grande (> 1000). También puede aparecer en note.
-        # Ejemplo real: "182740 und valor base 37745 und"
+        # ── Numeral (lectura del contador de fichas) ───────────────────────────
         # REGLA: aplica a LAVADORAS, ASPIRADORAS y LAVAINTERIORES.
         # El resto (ablandadores, compresores, etc.) → numeral_ok = True automático.
-        _texto_numeral = (best_note + " " + task_note).upper()
+        #
+        # FUENTE PRIMARIA (confiable): valor REAL del formulario de la tarea,
+        #   extraído de /api/work_orders_subtasks/ y persistido en Supabase:
+        #     numeral_inicial → ítem "TOMA DE NUMERAL INICIAL" (type=3)
+        #     numeral_final   → ítem "TOMA DE NUMERAL FINAL"   (type=5)
+        # FALLBACK (heurístico): si no hay valor real (ruta Fracttal directa o
+        #   caché previo), se busca un número ≥4 dígitos en la nota. Menos fiable.
         _equipo_nombre = (wo.get("items_log_description") or "").strip().upper()
         _es_lavadora   = bool(re.search(r"LAVAD|ASPIRA|LAVAINT", _equipo_nombre))
-        _numeral_match = re.search(r"\b\d{4,}\b", _texto_numeral) if _es_lavadora else None
-        _numeral_valor = _numeral_match.group(0) if _numeral_match else ""
+
+        _num_inicial = str(wo.get("numeral_inicial") or "").strip()
+        _num_final   = str(wo.get("numeral_final")   or "").strip()
+        _num_inicial = "" if _num_inicial.lower() in ("none", "null") else _num_inicial
+        _num_final   = "" if _num_final.lower()   in ("none", "null") else _num_final
+
+        if _num_inicial or _num_final:
+            # Valor real disponible → fuente de verdad
+            _numeral_valor = _num_final or _num_inicial   # final = lectura vigente
+        elif _es_lavadora:
+            # Fallback regex sobre la nota (legacy / Fracttal directo)
+            _texto_numeral = (best_note + " " + task_note).upper()
+            _numeral_match = re.search(r"\b\d{4,}\b", _texto_numeral)
+            _numeral_valor = _numeral_match.group(0) if _numeral_match else ""
+        else:
+            _numeral_valor = ""
+
+        # Fichas del período = final − inicial (cuando ambos son numéricos)
+        def _to_int(s):
+            m = re.search(r"\d+", s or "")
+            return int(m.group(0)) if m else None
+        _vi, _vf = _to_int(_num_inicial), _to_int(_num_final)
+        _fichas_periodo = (_vf - _vi) if (_vi is not None and _vf is not None) else None
+
         numeral_ok = (
             not _es_lavadora                                 # no aplica → OK automático
             or bool(_numeral_valor)                          # aplica → requiere numeral
@@ -507,6 +532,9 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "numeral_ok":        numeral_ok,
             "es_lavadora":       _es_lavadora,
             "numeral_valor":     _numeral_valor,
+            "numeral_inicial":   _num_inicial,
+            "numeral_final":     _num_final,
+            "fichas_periodo":    _fichas_periodo,
             "deteccion_raw":     raw_deteccion,
             "deteccion_ok":      deteccion_ok,
             "duration_sec":      duration_sec,
@@ -573,6 +601,12 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     if "numeral_valor" in df_kpi.columns:
         # Tomar el primer valor no-vacío entre las tareas de la OT
         _agg["numeral_valor"] = ("numeral_valor", lambda x: next((v for v in x if v), ""))
+    if "numeral_inicial" in df_kpi.columns:
+        _agg["numeral_inicial"] = ("numeral_inicial", lambda x: next((v for v in x if v), ""))
+    if "numeral_final" in df_kpi.columns:
+        _agg["numeral_final"]   = ("numeral_final",   lambda x: next((v for v in x if v), ""))
+    if "fichas_periodo" in df_kpi.columns:
+        _agg["fichas_periodo"]  = ("fichas_periodo",  lambda x: next((v for v in x if v is not None), None))
 
     ot = df_kpi.groupby("folio").agg(**_agg).reset_index()
 
@@ -581,6 +615,9 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     if "deteccion_raw" not in ot.columns: ot["deteccion_raw"] = ""
     if "es_lavadora"   not in ot.columns: ot["es_lavadora"]   = True   # conservador: asumir lavadora
     if "numeral_valor" not in ot.columns: ot["numeral_valor"]  = ""
+    if "numeral_inicial" not in ot.columns: ot["numeral_inicial"] = ""
+    if "numeral_final"   not in ot.columns: ot["numeral_final"]   = ""
+    if "fichas_periodo"  not in ot.columns: ot["fichas_periodo"]  = None
 
     # Agregar campos de tiempo condicionalmente (pueden faltar en caché viejo)
     if "duration_sec" in df_kpi.columns:

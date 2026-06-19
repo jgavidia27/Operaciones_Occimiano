@@ -54,7 +54,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v11-aspira-lavaint"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v12-numeral-real"  # bump para invalidar disco al cambiar data.py
 
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def _cached_build_kpi_llenado(raw_wo: list, cache_v: str = _KPI_CACHE_VERSION) -> pd.DataFrame:
@@ -7269,8 +7269,28 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         return "✅ Registrado"    # fallback si numeral_valor vacío
                     return "❌ Sin numeral"
 
-                _det_num["_numeral"] = _det_num.apply(_fmt_numeral_valor, axis=1)
-                _det_num["_estado"]  = _det_num.apply(_fmt_numeral_estado, axis=1)
+                def _fmt_numeral_ini_fin(row, campo):
+                    if not row.get("es_lavadora", True):
+                        return "—"
+                    v = str(row.get(campo, "") or "").strip()
+                    return v if v and v.lower() not in ("none", "null") else "—"
+
+                def _fmt_fichas(row):
+                    if not row.get("es_lavadora", True):
+                        return "—"
+                    fp = row.get("fichas_periodo", None)
+                    if fp is None or (isinstance(fp, float) and pd.isna(fp)):
+                        return "—"
+                    try:
+                        return f"{int(fp):,}"
+                    except (ValueError, TypeError):
+                        return "—"
+
+                _det_num["_numeral"]  = _det_num.apply(_fmt_numeral_valor, axis=1)
+                _det_num["_estado"]   = _det_num.apply(_fmt_numeral_estado, axis=1)
+                _det_num["_n_ini"]    = _det_num.apply(lambda r: _fmt_numeral_ini_fin(r, "numeral_inicial"), axis=1)
+                _det_num["_n_fin"]    = _det_num.apply(lambda r: _fmt_numeral_ini_fin(r, "numeral_final"), axis=1)
+                _det_num["_fichas"]   = _det_num.apply(_fmt_fichas, axis=1)
 
                 # Formatear fecha
                 _det_num_cd = pd.to_datetime(_det_num["creation_date"], errors="coerce")
@@ -7279,7 +7299,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
 
                 # Construir df de display
                 _cols_num = [c for c in
-                    ["folio","tecnico","_fecha","client","station","maint_type","_numeral","_estado"]
+                    ["folio","tecnico","_fecha","client","station","maint_type",
+                     "_n_ini","_n_fin","_fichas","_estado"]
                     if c in _det_num.columns]
                 _det_num_disp = _det_num[_cols_num].rename(columns={
                     "folio":      "OT",
@@ -7288,7 +7309,9 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     "client":     "Cliente",
                     "station":    "EDS",
                     "maint_type": "Tipo",
-                    "_numeral":   "Numeral",
+                    "_n_ini":     "N. Inicial",
+                    "_n_fin":     "N. Final",
+                    "_fichas":    "Fichas período",
                     "_estado":    "Estado",
                 }).sort_values(["Estado", "Fecha"], ascending=[True, False])
 
@@ -7302,22 +7325,27 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     expanded=False,
                 ):
                     st.caption(
-                        "Solo aplica a **lavadoras**. "
-                        "🔵 **No aplica** = equipo no es lavadora (compresores, aspiradoras, etc.). "
-                        "✅ **Registrado** = lavadora con numeral detectado en la nota. "
-                        "❌ **Sin numeral** = lavadora sin numeral registrado."
+                        "Aplica a **lavadoras y aspiradoras**. Numerales **reales** "
+                        "leídos del formulario de la tarea en Fracttal (no de la nota). "
+                        "🔵 **No aplica** = equipo sin numeral (compresores, ablandadores, etc.). "
+                        "✅ = numeral registrado · ❌ **Sin numeral** = lavadora/aspiradora sin lectura. "
+                        "**Fichas período** = N. Final − N. Inicial."
                     )
                     _show_df(_det_num_disp, hide_index=True, width="stretch",
                         column_config={
-                            "OT":       st.column_config.TextColumn(width=110),
-                            "Técnico":  st.column_config.TextColumn(width=190),
-                            "Fecha":    st.column_config.TextColumn(width=100),
-                            "Cliente":  st.column_config.TextColumn(width=90),
-                            "EDS":      st.column_config.TextColumn(width=200),
-                            "Tipo":     st.column_config.TextColumn(width=140),
-                            "Numeral":  st.column_config.TextColumn(width=100,
-                                help="Primer número ≥4 dígitos en la nota. '—' = no encontrado."),
-                            "Estado":   st.column_config.TextColumn(width=130),
+                            "OT":            st.column_config.TextColumn(width=110),
+                            "Técnico":       st.column_config.TextColumn(width=180),
+                            "Fecha":         st.column_config.TextColumn(width=95),
+                            "Cliente":       st.column_config.TextColumn(width=85),
+                            "EDS":           st.column_config.TextColumn(width=180),
+                            "Tipo":          st.column_config.TextColumn(width=130),
+                            "N. Inicial":    st.column_config.TextColumn(width=90,
+                                help="Lectura inicial del contador (TOMA DE NUMERAL INICIAL)."),
+                            "N. Final":      st.column_config.TextColumn(width=90,
+                                help="Lectura final del contador (TOMA DE NUMERAL FINAL)."),
+                            "Fichas período":st.column_config.TextColumn(width=100,
+                                help="Diferencia Final − Inicial = fichas usadas en el período."),
+                            "Estado":        st.column_config.TextColumn(width=120),
                         })
 
             if not df_tec_scores_rank.empty:

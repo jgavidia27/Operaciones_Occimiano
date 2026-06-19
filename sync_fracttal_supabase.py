@@ -315,6 +315,8 @@ def main():
     parser.add_argument("--desde",    default="2026-01-01")
     parser.add_argument("--modo",     choices=["completo","incremental"], default="completo")
     parser.add_argument("--reanudar", action="store_true")
+    parser.add_argument("--sin-numerales", action="store_true",
+                        help="No ejecutar el sync de numerales reales al terminar")
     args = parser.parse_args()
 
     if args.modo == "incremental":
@@ -369,6 +371,31 @@ def main():
 
     print("-" * 65)
     log(f"COMPLETADO - {total:,} registros cargados en '{SUPABASE_TABLE}'", "OK")
+
+    # ── Paso 2: numerales reales (lavadoras/aspiradoras) ─────────────────────
+    # Corre DESPUÉS del sync principal para fijar el valor real del numeral por
+    # encima del flag tiene_numeral que el regex dejó como baseline.
+    if not args.sin_numerales:
+        try:
+            import sync_numerales
+            print("-" * 65)
+            log("Paso 2: extrayendo numerales reales de subtareas...", "PROG")
+            folios = sync_numerales.query_lavadora_folios(desde)
+            log(f"{len(folios)} OTs lavadora/aspiradora a revisar", "OK")
+            con = sin = 0
+            CHUNK = 200
+            for i in range(0, len(folios), CHUNK):
+                res = sync_numerales.fetch_numerales_batch(folios[i:i+CHUNK])
+                for folio, (ini, fin) in res.items():
+                    sync_numerales.patch_numeral(folio, ini, fin)
+                    if ini or fin: con += 1
+                    else:          sin += 1
+                log(f"Numerales {min(i+CHUNK,len(folios)):>5}/{len(folios)} | "
+                    f"con: {con} sin: {sin}", "PROG")
+            log(f"Numerales OK - {con} con valor, {sin} sin valor", "OK")
+        except Exception as e:
+            log(f"Sync de numerales falló (no crítico): {e}", "WARN")
+
     return total
 
 
