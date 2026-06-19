@@ -249,6 +249,118 @@ def _parse_hierarchy(parent_description: str) -> tuple[str, str]:
     return client_raw or "OTROS", station
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# NUMERALES — parseo y detección de anomalías
+# ══════════════════════════════════════════════════════════════════════════════
+# El numeral es un CONTADOR acumulativo de fichas. Reglas (definidas con operaciones):
+#   • Entre OTs distintas: un salto grande es NORMAL (la máquina vende fichas a
+#     clientes entre visitas). NO se evalúa aquí.
+#   • Dentro de la misma OT (inicial → final): el técnico solo gasta fichas
+#     PROBANDO la máquina tras configurarla. 1–30 normal, 50–100 raro,
+#     >100 anómalo, y final < inicial es imposible.
+# El valor con ≥8 dígitos se considera tecleo basura (ej. 99999999999999).
+
+_NUMERAL_GARBAGE_MIN = 10_000_000   # ≥8 dígitos → valor inválido
+
+
+def _numeral_to_int(s) -> "int | None":
+    """Extrae el entero de un valor de numeral. None si vacío o basura (≥8 díg.)."""
+    m = re.search(r"\d+", str(s or ""))
+    if not m:
+        return None
+    v = int(m.group(0))
+    return v if v < _NUMERAL_GARBAGE_MIN else None
+
+
+def clasificar_fichas_anomalia(inicial, final) -> tuple:
+    """
+    Clasifica la diferencia final − inicial DENTRO de una OT.
+
+    Returns (severidad, etiqueta, fichas):
+      severidad: 'ok' | 'warn' | 'alert' | 'na'
+      etiqueta:  texto con emoji para mostrar
+      fichas:    int | None  (None si no se puede calcular)
+    """
+    ni_raw = str(inicial or "").strip()
+    nf_raw = str(final   or "").strip()
+    vi, vf = _numeral_to_int(ni_raw), _numeral_to_int(nf_raw)
+
+    # Valor crudo presente pero basura (≥8 díg.) → alerta de dato inválido
+    _ni_has = bool(re.search(r"\d", ni_raw))
+    _nf_has = bool(re.search(r"\d", nf_raw))
+    if (_ni_has and vi is None) or (_nf_has and vf is None):
+        return ("alert", "🔴 Valor inválido", None)
+
+    if vi is None or vf is None:
+        return ("na", "—", None)
+
+    fichas = vf - vi
+    if fichas < 0:
+        return ("alert", f"🔴 Final < Inicial ({fichas:,})", fichas)
+    if fichas > 100:
+        return ("alert", f"🔴 {fichas:,} fichas (>100)", fichas)
+    if fichas > 50:
+        return ("warn", f"🟡 {fichas} fichas (50–100)", fichas)
+    return ("ok", f"✅ {fichas} fichas", fichas)
+
+
+def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
+                            n: int = 10) -> pd.DataFrame:
+    """
+    Historial de lecturas de numeral por equipo (lavadoras/aspiradoras).
+
+    Toma un df de build_work_orders_df (que ya incluye numeral_inicial/final),
+    opcionalmente filtra por EDS (eds_occim == eds_code), y devuelve los últimos
+    `n` registros de CADA equipo con su clasificación de anomalía.
+
+    Columnas: equipment, equipment_code, station, fecha, technician, folio,
+              numeral_inicial, numeral_final, fichas, severidad, estado.
+    Ordenado por equipo y fecha descendente.
+    """
+    if df_wo.empty or "numeral_final" not in df_wo.columns:
+        return pd.DataFrame()
+
+    df = df_wo.copy()
+    if eds_code and "eds_occim" in df.columns:
+        df = df[df["eds_occim"] == eds_code]
+
+    # Solo lavadoras/aspiradoras/lavainteriores
+    _nombre = df["equipment"].fillna("").str.upper()
+    df = df[_nombre.str.contains("LAVAD|ASPIRA|LAVAINT", regex=True, na=False)]
+    if df.empty:
+        return pd.DataFrame()
+
+    # Solo OTs con al menos un valor de numeral registrado
+    _ni = df["numeral_inicial"].fillna("").astype(str).str.strip()
+    _nf = df["numeral_final"].fillna("").astype(str).str.strip()
+    _tiene = (_ni.str.contains(r"\d", na=False)) | (_nf.str.contains(r"\d", na=False))
+    df = df[_tiene]
+    if df.empty:
+        return pd.DataFrame()
+
+    # Fecha de referencia: finalización; fallback a creación
+    df["_fecha"] = df["final_date"].fillna(df["creation_date"])
+
+    # Clasificación de anomalía por fila
+    _clasif = df.apply(
+        lambda r: clasificar_fichas_anomalia(r["numeral_inicial"], r["numeral_final"]),
+        axis=1,
+    )
+    df["severidad"] = _clasif.apply(lambda t: t[0])
+    df["estado"]    = _clasif.apply(lambda t: t[1])
+    df["fichas"]    = _clasif.apply(lambda t: t[2])
+
+    # Últimos n registros por equipo (por código de activo)
+    df = df.sort_values(["equipment_code", "_fecha"], ascending=[True, False])
+    df = df.groupby("equipment_code", group_keys=False).head(n)
+
+    cols = ["equipment", "equipment_code", "station", "_fecha", "technician",
+            "folio", "numeral_inicial", "numeral_final", "fichas",
+            "severidad", "estado"]
+    cols = [c for c in cols if c in df.columns]
+    return df[cols].rename(columns={"_fecha": "fecha"}).reset_index(drop=True)
+
+
 def build_work_orders_df(raw: list) -> pd.DataFrame:
     """
     Convierte la lista cruda de work_orders de Fracttal en un DataFrame limpio.
@@ -277,6 +389,8 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
     ratings                 = []
     costs                   = []
     stop_minutes_list       = []
+    numerales_ini           = []
+    numerales_fin           = []
 
     for wo in raw:
         client, station = _parse_hierarchy(wo.get("parent_description") or "")
@@ -299,6 +413,8 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
         ratings.append(wo.get("rating"))
         costs.append(wo.get("total_cost_task") or 0)
         stop_minutes_list.append((wo.get("stop_assets_sec") or 0) / 60)
+        numerales_ini.append(wo.get("numeral_inicial"))
+        numerales_fin.append(wo.get("numeral_final"))
 
     # ── Construir DataFrame de una vez (sin append iterativo) ─────────────────
     df = pd.DataFrame({
@@ -319,6 +435,8 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
         "rating":            ratings,
         "cost":              costs,
         "stop_minutes":      stop_minutes_list,
+        "numeral_inicial":   numerales_ini,
+        "numeral_final":     numerales_fin,
     })
 
     # ── pd.to_datetime vectorizado: UNA llamada por columna (no 20k) ──────────

@@ -23,7 +23,7 @@ from api import (
 from data import (
     build_work_orders_df, build_third_parties_df, station_summary, CLIENT_COLORS,
     build_kpi_llenado_df, score_llenado_por_ot, score_llenado_por_tecnico,
-    build_reincidencias,
+    build_reincidencias, build_numeral_historial,
     GRUPOS_TERRENO, get_grupo_tecnico, TECNICOS_NO_APLICA,
     SENIORS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
@@ -3197,6 +3197,68 @@ elif _page == _NAV_PAGES[3]:
                         unsafe_allow_html=True,
                     )
                     _render_fallas_panel(_df_fallas_eds, f"eds_{_ck}_{_eds_sel_code}")
+
+            # ── Historial de numerales por equipo ────────────────────────────
+            # Últimos 10 registros de cada lavadora/aspiradora de esta EDS, con
+            # detección de anomalías DENTRO de cada OT (final − inicial):
+            #   ✅ 1-50 fichas (prueba normal) · 🟡 50-100 (raro) ·
+            #   🔴 >100, final<inicial o valor inválido.
+            _df_num_hist_eds = build_numeral_historial(
+                df_wo_c, eds_code=_eds_sel_code, n=10
+            )
+            if not _df_num_hist_eds.empty:
+                _n_equipos = _df_num_hist_eds["equipment_code"].nunique()
+                _n_alertas = int((_df_num_hist_eds["severidad"] == "alert").sum())
+                _n_warn    = int((_df_num_hist_eds["severidad"] == "warn").sum())
+                _alert_txt = (
+                    f" · <span style='color:#EF4444;'>{_n_alertas} anomalía(s)</span>"
+                    if _n_alertas else ""
+                )
+                _warn_txt = (
+                    f" · <span style='color:#F59E0B;'>{_n_warn} a revisar</span>"
+                    if _n_warn else ""
+                )
+                st.markdown(
+                    f'<div style="font-weight:700;font-size:0.95rem;margin:18px 0 6px 0;'
+                    f'color:{_t["text"]};">🔢 Historial de numerales — {_n_equipos} equipo(s)'
+                    f'{_alert_txt}{_warn_txt}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "Últimos 10 registros por equipo. **Fichas = N. Final − N. Inicial** "
+                    "dentro de la misma OT (fichas que el técnico usó probando la máquina). "
+                    "✅ 1–50 normal · 🟡 50–100 raro · 🔴 >100, Final<Inicial o valor inválido. "
+                    "Saltos grandes *entre* fechas distintas son normales (venta de fichas)."
+                )
+                # Agrupar visualmente por equipo
+                for _eq_code, _grp in _df_num_hist_eds.groupby("equipment_code", sort=False):
+                    _eq_nombre = _grp["equipment"].iloc[0]
+                    _eq_alertas = int((_grp["severidad"] == "alert").sum())
+                    _badge = f"  🔴 {_eq_alertas}" if _eq_alertas else ""
+                    with st.expander(f"{_eq_nombre}  ({_eq_code}){_badge}",
+                                     expanded=bool(_eq_alertas)):
+                        _disp = _grp.copy()
+                        _disp["Fecha"] = pd.to_datetime(
+                            _disp["fecha"], errors="coerce"
+                        ).dt.strftime("%d/%m/%Y").fillna("—")
+                        _disp = _disp[[
+                            "Fecha", "technician", "numeral_inicial",
+                            "numeral_final", "estado"
+                        ]].rename(columns={
+                            "technician":      "Técnico",
+                            "numeral_inicial": "N. Inicial",
+                            "numeral_final":   "N. Final",
+                            "estado":          "Fichas (prueba)",
+                        })
+                        _show_df(_disp, use_container_width=True, hide_index=True,
+                            column_config={
+                                "Fecha":      st.column_config.TextColumn(width=95),
+                                "Técnico":    st.column_config.TextColumn(width=180),
+                                "N. Inicial": st.column_config.TextColumn(width=100),
+                                "N. Final":   st.column_config.TextColumn(width=100),
+                                "Fichas (prueba)": st.column_config.TextColumn(width=170,
+                                    help="Final − Inicial dentro de la OT = fichas de prueba."),
+                            })
 
         # ── Tabla de detalle EDS ─────────────────────────────────────────────
         st.markdown(
