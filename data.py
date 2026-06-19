@@ -392,6 +392,67 @@ def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
     return df[cols].rename(columns={"_fecha": "fecha"}).reset_index(drop=True)
 
 
+_SEQ_SALTO_FACTOR = 5     # inicial ≥ 5× el final previo = salto de magnitud
+_SEQ_PREV_MIN     = 200   # piso para evaluar saltos (evita ruido en contadores chicos)
+
+
+def analizar_secuencias(df_hist: pd.DataFrame, n: "int | None" = 10) -> pd.DataFrame:
+    """
+    Validación de secuencia ENTRE OTs (no solo dentro de la OT).
+
+    Un numeral es un contador acumulativo: entre dos visitas SOLO puede subir
+    (ventas de fichas a clientes). Por eso, comparando el numeral inicial de cada
+    visita contra el numeral final de la visita ANTERIOR del mismo equipo, se
+    detectan errores que se arrastran y que la validación intra-OT no ve:
+
+      • Retroceso: inicial < final previo  → el contador "bajó" (imposible:
+        error inflado arrastrado, o una corrección tardía).
+      • Salto de magnitud: inicial ≥ 5× el final previo → dígito de más
+        introducido justo en esa visita.
+
+    Recibe la salida de build_numeral_historial(n=None) y devuelve el historial
+    ordenado cronológicamente por equipo, con columnas extra:
+      salto_seq      (str: etiqueta del salto o "")
+      seq_severidad  ('alert' | 'ok')
+      prev_final     (int | None: final de la visita previa, para contexto)
+    Limita a los últimos `n` registros por equipo (None = sin límite).
+    """
+    if df_hist.empty:
+        return df_hist
+
+    df = df_hist.copy()
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce", utc=True)
+    df = df.sort_values(["equipment_code", "fecha"])
+
+    df["_vi"] = df["numeral_inicial"].apply(_numeral_raw_int)
+    df["_vf"] = df["numeral_final"].apply(_numeral_raw_int)
+    # Final de la visita previa del mismo equipo
+    df["prev_final"] = df.groupby("equipment_code")["_vf"].shift(1)
+
+    def _seq(row):
+        pf, ci = row["prev_final"], row["_vi"]
+        if pd.isna(pf) or ci is None:
+            return ("", "ok")
+        pf = int(pf)
+        if pf <= 0:
+            return ("", "ok")
+        if ci < pf:
+            return (f"🔴 Retroceso (previo {pf:,} → inicial {ci:,})", "alert")
+        if pf >= _SEQ_PREV_MIN and ci >= pf * _SEQ_SALTO_FACTOR:
+            return (f"🟣 Salto ×{ci/pf:.0f} (previo {pf:,} → inicial {ci:,})", "alert")
+        return ("", "ok")
+
+    _res = df.apply(_seq, axis=1)
+    df["salto_seq"]     = _res.apply(lambda t: t[0])
+    df["seq_severidad"] = _res.apply(lambda t: t[1])
+
+    # Últimos n por equipo (mantener orden cronológico ascendente dentro del grupo)
+    if n is not None:
+        df = df.groupby("equipment_code", group_keys=False).tail(n)
+
+    return df.drop(columns=["_vi", "_vf"], errors="ignore")
+
+
 def build_work_orders_df(raw: list) -> pd.DataFrame:
     """
     Convierte la lista cruda de work_orders de Fracttal en un DataFrame limpio.
