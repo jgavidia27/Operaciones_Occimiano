@@ -385,7 +385,7 @@ def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
     if n is not None:
         df = df.groupby("equipment_code", group_keys=False).head(n)
 
-    cols = ["client", "equipment", "equipment_code", "station", "_fecha",
+    cols = ["client", "equipment", "equipment_code", "station", "eds_occim", "_fecha",
             "technician", "folio", "numeral_inicial", "numeral_final", "fichas",
             "categoria", "severidad", "estado"]
     cols = [c for c in cols if c in df.columns]
@@ -483,6 +483,7 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
     stop_minutes_list       = []
     numerales_ini           = []
     numerales_fin           = []
+    eds_occims              = []
 
     for wo in raw:
         client, station = _parse_hierarchy(wo.get("parent_description") or "")
@@ -507,6 +508,11 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
         stop_minutes_list.append((wo.get("stop_assets_sec") or 0) / 60)
         numerales_ini.append(wo.get("numeral_inicial"))
         numerales_fin.append(wo.get("numeral_final"))
+        _eo_raw = wo.get("groups_2_description")
+        try:
+            eds_occims.append(str(int(float(_eo_raw))) if _eo_raw not in (None, "", "None") else "")
+        except (ValueError, TypeError):
+            eds_occims.append(str(_eo_raw or "").strip())
 
     # ── Construir DataFrame de una vez (sin append iterativo) ─────────────────
     df = pd.DataFrame({
@@ -529,6 +535,7 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
         "stop_minutes":      stop_minutes_list,
         "numeral_inicial":   numerales_ini,
         "numeral_final":     numerales_fin,
+        "eds_occim":         eds_occims,
     })
 
     # ── pd.to_datetime vectorizado: UNA llamada por columna (no 20k) ──────────

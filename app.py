@@ -54,7 +54,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v12-numeral-real"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v13-eds-occim"  # bump para invalidar disco al cambiar data.py
 
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def _cached_build_kpi_llenado(raw_wo: list, cache_v: str = _KPI_CACHE_VERSION) -> pd.DataFrame:
@@ -2723,7 +2723,7 @@ elif _page == _NAV_PAGES[3]:
         _df["year"]    = _cd.dt.year
         return _df
 
-    df_wo_eds_full = _sc("df_wo_eds_v2_numeral", _wo_eds_sig, _build_wo_eds)
+    df_wo_eds_full = _sc("df_wo_eds_v3_eds_occim", _wo_eds_sig, _build_wo_eds)
 
     # Filtrar a clientes EDS y año actual ────────────────────────────────────
     _EDS_CLIENTS = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
@@ -3302,31 +3302,40 @@ elif _page == _NAV_PAGES[3]:
         _show_df(_df_display, use_container_width=True, hide_index=True)
 
     # ════════════════════════════════════════════════════════════════════════
-    # PESTAÑA: HISTORIAL DE NUMERALES (global, con filtros propios)
+    # PESTAÑA: HISTORIAL DE NUMERALES (global, agrupado por EDS, con buscador)
     # ════════════════════════════════════════════════════════════════════════
     def _render_numeral_tab():
         st.caption(
-            "Historial de numerales por equipo (**lavadoras y aspiradoras**) — los últimos "
-            "10 registros de cada uno. Se valida en **dos niveles**: dentro de cada OT "
-            "(fichas de prueba = Final − Inicial) y **entre OTs** (el contador solo puede "
-            "subir entre visitas; si el inicial baja o salta ×10 respecto al final previo, "
-            "es un error arrastrado). Saltos grandes *entre fechas* por venta de fichas son normales."
+            "Historial de numerales por EDS (**lavadoras y aspiradoras**) — los últimos "
+            "10 registros por equipo. Validación en dos niveles: dentro de cada OT "
+            "(Fichas = Final − Inicial) y entre OTs (el contador solo puede subir; "
+            "si el inicial baja o salta ×5 respecto al final previo, es un error arrastrado)."
         )
 
-        # Historial completo + validación de secuencia (últimos 10 por equipo)
         _hist = build_numeral_historial(df_wo_eds_full, eds_code=None, n=None)
         if _hist.empty:
             st.info("Aún no hay registros de numeral. Corre el sync de numerales para poblar los datos.")
             return
         _seq = analizar_secuencias(_hist, n=10)
 
-        # Derivar período sobre la secuencia
+        # ── Lookup de metadatos EDS (eds_occim → nombre, loc) ─────────────────
+        _eds_meta = {}
+        if not df_eds.empty and "eds_occim" in df_eds.columns:
+            for _, _row in df_eds.iterrows():
+                _mk = str(_row.get("eds_occim", "") or "").strip()
+                if _mk:
+                    _eds_meta[_mk] = {
+                        "nombre": str(_row.get("nombre", "") or ""),
+                        "loc":    str(_row.get("_loc_code", "") or ""),
+                    }
+
+        # ── Período ────────────────────────────────────────────────────────────
         _f = pd.to_datetime(_seq["fecha"], errors="coerce", utc=True).dt.tz_convert(None)
         _seq["_year"] = _f.dt.year
         _seq["_mes"]  = _f.dt.month
         _seq["_trim"] = _f.dt.quarter
 
-        # ── Filtros ───────────────────────────────────────────────────────────
+        # ── Filtros fila 1 ─────────────────────────────────────────────────────
         _fc1, _fc2, _fc3, _fc4 = st.columns([1.0, 1.0, 1.4, 1.8])
         with _fc1:
             _yrs = sorted([int(y) for y in _seq["_year"].dropna().unique()], reverse=True)
@@ -3341,15 +3350,21 @@ elif _page == _NAV_PAGES[3]:
             _cli_sel = st.multiselect("Cliente",
                 options=["COPEC","Aramco (Esmax)","SHELL (Enex)"], key="num_tab_cli")
 
-        _sit_opts = ["normal","raro","anomalo","incongruente","salto_seq"]
+        _sit_opts  = ["normal","raro","anomalo","incongruente","salto_seq"]
         _sit_label = {**CAT_LABEL, "salto_seq": "🟣 Salto de secuencia (entre OTs)"}
-        _sit_sel = st.multiselect("Situación a revisar", options=_sit_opts,
+        _sit_sel   = st.multiselect("Situación a revisar", options=_sit_opts,
             format_func=lambda c: _sit_label.get(c, c),
             default=["raro","anomalo","incongruente","salto_seq"], key="num_tab_sit",
-            help="Un equipo aparece si ALGUNO de sus últimos 10 registros cae en estas situaciones. "
-                 "Agrega 'Normal' para ver también equipos sanos.")
+            help="Un equipo aparece si ALGUNO de sus últimos 10 registros cae en estas situaciones.")
 
-        # ── Determinar equipos en alcance (período + cliente) ─────────────────
+        # ── Buscador de EDS ────────────────────────────────────────────────────
+        _busq = st.text_input(
+            "Buscar EDS",
+            placeholder="Código (60079)  ·  LOC (LOC-074)  ·  Nombre (Costanera, Vitacura, Portugal…)",
+            key="num_tab_busq",
+        )
+
+        # ── Scope período + cliente ────────────────────────────────────────────
         _scope = _seq[_seq["_year"] == _yr_sel].copy()
         if _trim_sel != "Todos":
             _scope = _scope[_scope["_trim"] == int(_trim_sel[1])]
@@ -3359,79 +3374,126 @@ elif _page == _NAV_PAGES[3]:
             _scope = _scope[_scope["client"].isin(_cli_sel)]
         _codes_scope = set(_scope["equipment_code"].unique())
 
-        # Secuencia completa (últimos 10) de los equipos en alcance
         _disp_seq = _seq[_seq["equipment_code"].isin(_codes_scope)].copy()
         if _disp_seq.empty:
             st.info("Sin equipos para los filtros seleccionados.")
             return
 
-        # Marca de match de situación por fila
         _disp_seq["_match"] = (
             _disp_seq["categoria"].isin([c for c in _sit_sel if c != "salto_seq"]) |
             ((_disp_seq["seq_severidad"] == "alert") if "salto_seq" in _sit_sel else False)
         )
 
-        # ── KPI cards (sobre lecturas en alcance) ─────────────────────────────
+        # ── KPI cards ─────────────────────────────────────────────────────────
         _k1, _k2, _k3, _k4, _k5 = st.columns(5)
-        _k1.metric("Equipos",      len(_codes_scope))
+        _k1.metric("Equipos",         len(_codes_scope))
         _k2.metric("🟡 Raro",         int((_scope["categoria"] == "raro").sum()))
         _k3.metric("🔴 Anómalo",      int((_scope["categoria"] == "anomalo").sum()))
         _k4.metric("🟣 Incongruente", int((_scope["categoria"] == "incongruente").sum()))
         _k5.metric("🟣 Saltos sec.",  int((_disp_seq["seq_severidad"] == "alert").sum()))
 
-        # ── Equipos a mostrar: los que tienen ≥1 match en la situación elegida ─
         _codes_match = set(_disp_seq[_disp_seq["_match"]]["equipment_code"].unique())
         if not _codes_match:
             st.success("✅ Ningún equipo con registros en la situación seleccionada para estos filtros.")
             return
 
+        # ── Agrupar equipos por EDS ────────────────────────────────────────────
+        _eds_groups = {}
+        for _code in _codes_match:
+            _grp = _disp_seq[_disp_seq["equipment_code"] == _code]
+            _eo  = str(_grp["eds_occim"].iloc[0] if "eds_occim" in _grp.columns else "").strip()
+            _stn = str(_grp["station"].iloc[0])
+            _ekey = _eo if _eo else _stn
+            if _ekey not in _eds_groups:
+                _meta = _eds_meta.get(_eo, {})
+                _eds_groups[_ekey] = {
+                    "nombre":    _meta.get("nombre") or _stn,
+                    "loc":       _meta.get("loc", ""),
+                    "eds_occim": _eo,
+                    "station":   _stn,
+                    "client":    str(_grp["client"].iloc[0]),
+                    "equipos":   [],
+                    "n_alerta":  0,
+                }
+            _na = (
+                int((_grp["seq_severidad"] == "alert").sum()) +
+                int(_grp["categoria"].isin(["anomalo","incongruente"]).sum())
+            )
+            _eds_groups[_ekey]["equipos"].append((_na, _code))
+            _eds_groups[_ekey]["n_alerta"] += _na
+
+        # ── Aplicar buscador ───────────────────────────────────────────────────
+        if _busq.strip():
+            _q = _busq.strip().upper()
+            _eds_groups = {
+                k: v for k, v in _eds_groups.items()
+                if (_q in str(v["eds_occim"]).upper()
+                    or _q in str(v["loc"]).upper()
+                    or _q in str(v["nombre"]).upper()
+                    or _q in str(v["station"]).upper())
+            }
+        if not _eds_groups:
+            st.info("Sin resultados. Prueba con otro código EDS, LOC o nombre de estación.")
+            return
+
+        _n_eds_total = len(_eds_groups)
+        _n_eq_total  = sum(len(v["equipos"]) for v in _eds_groups.values())
         st.markdown(
-            f'<div style="font-weight:700;font-size:0.92rem;margin:10px 0 4px 0;color:{_t["text"]};">'
-            f'{len(_codes_match)} equipo(s) a revisar</div>', unsafe_allow_html=True,
+            f'<div style="font-weight:700;font-size:0.92rem;margin:10px 0 4px 0;'
+            f'color:{_t["text"]};">'
+            f'{_n_eds_total} EDS con alertas · {_n_eq_total} equipo(s) a revisar</div>',
+            unsafe_allow_html=True,
         )
 
-        # Ordenar equipos: primero los que tienen más alertas
-        def _eq_sev(code):
-            g = _disp_seq[_disp_seq["equipment_code"] == code]
-            return (
-                int((g["seq_severidad"] == "alert").sum()) +
-                int(g["categoria"].isin(["anomalo","incongruente"]).sum())
+        # ── Renderizar por EDS → equipos ──────────────────────────────────────
+        for _ekey, _einfo in sorted(_eds_groups.items(), key=lambda x: -x[1]["n_alerta"]):
+            _loc_txt  = f"&nbsp;·&nbsp;{_einfo['loc']}"      if _einfo["loc"]      else ""
+            _code_txt = f"&nbsp;·&nbsp;{_einfo['eds_occim']}" if _einfo["eds_occim"] else ""
+            _n_eq_eds = len(_einfo["equipos"])
+            st.markdown(
+                f'<div style="background:{_t["card"]};border:1px solid {_t["border"]};'
+                f'border-radius:8px;padding:8px 14px;margin:14px 0 2px 0;">'
+                f'<span style="font-weight:700;font-size:0.95rem;">'
+                f'{_einfo["nombre"] or _einfo["station"]}</span>'
+                f'<span style="font-size:0.80rem;color:#888;margin-left:8px;">'
+                f'{_code_txt}{_loc_txt}&nbsp;·&nbsp;{_einfo["client"]}</span>'
+                f'<span style="float:right;font-size:0.82rem;color:#888;">'
+                f'{_einfo["n_alerta"]} alerta(s)&nbsp;·&nbsp;{_n_eq_eds} equipo(s)</span>'
+                f'</div>',
+                unsafe_allow_html=True,
             )
-        _codes_ordenados = sorted(_codes_match, key=_eq_sev, reverse=True)
-
-        for _code in _codes_ordenados:
-            _grp = _disp_seq[_disp_seq["equipment_code"] == _code].sort_values("fecha", ascending=False)
-            _eq_nombre = _grp["equipment"].iloc[0]
-            _eq_eds    = _grp["station"].iloc[0]
-            _n_seq     = int((_grp["seq_severidad"] == "alert").sum())
-            _n_intra   = int(_grp["categoria"].isin(["anomalo","incongruente"]).sum())
-            _badge = ""
-            if _n_seq:   _badge += f"  🟣 {_n_seq} salto(s)"
-            if _n_intra: _badge += f"  🔴 {_n_intra} intra-OT"
-            with st.expander(f"{_eq_nombre}  ({_code}) · {_eq_eds}{_badge}",
-                             expanded=bool(_n_seq or _n_intra)):
-                _d = _grp.copy()
-                _d["Fecha"] = pd.to_datetime(_d["fecha"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
-                _d["Salto secuencia"] = _d["salto_seq"].replace("", "✅ OK")
-                _d = _d[[
-                    "Fecha","technician","numeral_inicial","numeral_final",
-                    "estado","Salto secuencia",
-                ]].rename(columns={
-                    "technician":      "Técnico",
-                    "numeral_inicial": "N. Inicial",
-                    "numeral_final":   "N. Final",
-                    "estado":          "Fichas (intra-OT)",
-                })
-                _show_df(_d, use_container_width=True, hide_index=True,
-                    column_config={
-                        "Fecha":      st.column_config.TextColumn(width=90),
-                        "Técnico":    st.column_config.TextColumn(width=160),
-                        "N. Inicial": st.column_config.TextColumn(width=95),
-                        "N. Final":   st.column_config.TextColumn(width=95),
-                        "Fichas (intra-OT)": st.column_config.TextColumn(width=180),
-                        "Salto secuencia":   st.column_config.TextColumn(width=240,
-                            help="Compara el inicial de esta visita con el final de la anterior."),
+            for _na, _code in sorted(_einfo["equipos"], key=lambda x: -x[0]):
+                _grp = _disp_seq[_disp_seq["equipment_code"] == _code].sort_values("fecha", ascending=False)
+                _eq_nombre = _grp["equipment"].iloc[0]
+                _n_seq   = int((_grp["seq_severidad"] == "alert").sum())
+                _n_intra = int(_grp["categoria"].isin(["anomalo","incongruente"]).sum())
+                _badge = ""
+                if _n_seq:   _badge += f"  🟣 {_n_seq} salto(s)"
+                if _n_intra: _badge += f"  🔴 {_n_intra} intra-OT"
+                with st.expander(f"{_eq_nombre}  ({_code}){_badge}",
+                                 expanded=bool(_n_seq or _n_intra)):
+                    _d = _grp.copy()
+                    _d["Fecha"] = pd.to_datetime(_d["fecha"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
+                    _d["Salto secuencia"] = _d["salto_seq"].replace("", "✅ OK")
+                    _d = _d[[
+                        "Fecha","technician","numeral_inicial","numeral_final",
+                        "estado","Salto secuencia",
+                    ]].rename(columns={
+                        "technician":      "Técnico",
+                        "numeral_inicial": "N. Inicial",
+                        "numeral_final":   "N. Final",
+                        "estado":          "Fichas (intra-OT)",
                     })
+                    _show_df(_d, use_container_width=True, hide_index=True,
+                        column_config={
+                            "Fecha":      st.column_config.TextColumn(width=90),
+                            "Técnico":    st.column_config.TextColumn(width=160),
+                            "N. Inicial": st.column_config.TextColumn(width=95),
+                            "N. Final":   st.column_config.TextColumn(width=95),
+                            "Fichas (intra-OT)": st.column_config.TextColumn(width=180),
+                            "Salto secuencia":   st.column_config.TextColumn(width=240,
+                                help="Compara el inicial de esta visita con el final de la anterior."),
+                        })
 
     # ── Renderizar tabs ──────────────────────────────────────────────────────
     with _tabs_eds[0]:
