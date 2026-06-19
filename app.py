@@ -7246,28 +7246,31 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             st.session_state[_num_sig] = _fig_num
                         st.plotly_chart(st.session_state[_num_sig], width="stretch")
 
-                # ── Tabla detalle OTs numerales (solo equipos que requieren numeral) ──
-                # Filtrar a solo OTs donde el numeral aplica (lavadoras, aspiradoras, lavainteriores)
-                _det_num = _df_num_base[_df_num_base["es_lavadora"]].copy() \
-                    if "es_lavadora" in _df_num_base.columns else _df_num_base.copy()
+                # ── Tabla detalle OTs numerales (cumple + no cumple) ──────────
+                _det_num = _df_num_base.copy()
 
-                # Columna Estado:
-                #   ✅ 182740     → numeral real encontrado en la nota
-                #   ❌ Sin numeral → equipo sin numeral registrado
+                # Columna Numeral y Estado con tres casos claros:
+                #   🔵 No aplica  → equipo no es lavadora (no se exige numeral)
+                #   ✅ 182740     → lavadora con numeral real encontrado en la nota
+                #   ❌ Sin numeral → lavadora sin numeral registrado
+                def _fmt_numeral_valor(row):
+                    if not row.get("es_lavadora", True):
+                        return "N/A"
+                    v = str(row.get("numeral_valor", "") or "").strip()
+                    return v if v else "—"
+
                 def _fmt_numeral_estado(row):
+                    if not row.get("es_lavadora", True):
+                        return "🔵 No aplica"
                     v = str(row.get("numeral_valor", "") or "").strip()
                     if row.get("numeral_ok", False) and v:
-                        return f"✅ {v}"
+                        return f"✅ {v}"          # muestra el número real
                     if row.get("numeral_ok", False):
-                        return "✅ Registrado"
+                        return "✅ Registrado"    # fallback si numeral_valor vacío
                     return "❌ Sin numeral"
 
-                _det_num["_estado"] = _det_num.apply(_fmt_numeral_estado, axis=1)
-
-                # Columna Numeral: el número extraído o "—"
-                _det_num["_numeral"] = _det_num["numeral_valor"].apply(
-                    lambda v: str(v).strip() if v and str(v).strip() else "—"
-                )
+                _det_num["_numeral"] = _det_num.apply(_fmt_numeral_valor, axis=1)
+                _det_num["_estado"]  = _det_num.apply(_fmt_numeral_estado, axis=1)
 
                 # Formatear fecha
                 _det_num_cd = pd.to_datetime(_det_num["creation_date"], errors="coerce")
@@ -7289,21 +7292,20 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     "_estado":    "Estado",
                 }).sort_values(["Estado", "Fecha"], ascending=[True, False])
 
-                _n_aplica    = int(_df_num_base["es_lavadora"].sum()) \
-                               if "es_lavadora" in _df_num_base.columns else len(_df_num_base)
-                _n_lav_ok    = int((_df_num_base["es_lavadora"] & _df_num_base["numeral_ok"]).sum()) \
-                               if "es_lavadora" in _df_num_base.columns else int(_df_num_base["numeral_ok"].sum())
-                _n_sin       = int((_df_num_base["es_lavadora"] & ~_df_num_base["numeral_ok"]).sum()) \
-                               if "es_lavadora" in _df_num_base.columns else int((~_df_num_base["numeral_ok"]).sum())
+                _n_sin      = int((~_df_num_base["numeral_ok"]).sum())
+                _n_lav_ok   = int((_df_num_base["es_lavadora"] & _df_num_base["numeral_ok"]).sum()) \
+                              if "es_lavadora" in _df_num_base.columns else int(_df_num_base["numeral_ok"].sum())
+                _n_no_aplica = int((~_df_num_base["es_lavadora"]).sum()) \
+                               if "es_lavadora" in _df_num_base.columns else 0
                 with st.expander(
-                    f"📋 Detalle OTs — numerales ({_n_lav_ok:,} registrados · {_n_sin:,} sin numeral · de {_n_aplica:,} evaluadas)",
+                    f"📋 Detalle OTs — numerales ({_n_lav_ok:,} registrados · {_n_sin:,} sin numeral · {_n_no_aplica:,} no aplica)",
                     expanded=False,
                 ):
                     st.caption(
-                        "Solo se muestran OTs de **lavadoras, aspiradoras y lavainteriores** "
-                        "(equipos que registran numeral). "
-                        "✅ **Registrado** = numeral detectado en la nota. "
-                        "❌ **Sin numeral** = técnico no registró el numeral."
+                        "Solo aplica a **lavadoras**. "
+                        "🔵 **No aplica** = equipo no es lavadora (compresores, aspiradoras, etc.). "
+                        "✅ **Registrado** = lavadora con numeral detectado en la nota. "
+                        "❌ **Sin numeral** = lavadora sin numeral registrado."
                     )
                     _show_df(_det_num_disp, hide_index=True, width="stretch",
                         column_config={
