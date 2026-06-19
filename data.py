@@ -455,16 +455,16 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         # El numeral se registra en task_note como número seguido de "und" o como
         # primer token numérico grande (> 1000). También puede aparecer en note.
         # Ejemplo real: "182740 und valor base 37745 und"
-        # REGLA: solo aplica a LAVADORAS. Aspiradoras, compresores, etc. no tienen
-        # numeral → para esos equipos numeral_ok = True por defecto.
+        # REGLA: aplica a LAVADORAS, ASPIRADORAS y LAVAINTERIORES.
+        # El resto (ablandadores, compresores, etc.) → numeral_ok = True automático.
         _texto_numeral = (best_note + " " + task_note).upper()
         _equipo_nombre = (wo.get("items_log_description") or "").strip().upper()
-        _es_lavadora   = bool(re.search(r"LAVAD", _equipo_nombre))
+        _es_lavadora   = bool(re.search(r"LAVAD|ASPIRA|LAVAINT", _equipo_nombre))
         _numeral_match = re.search(r"\b\d{4,}\b", _texto_numeral) if _es_lavadora else None
         _numeral_valor = _numeral_match.group(0) if _numeral_match else ""
         numeral_ok = (
-            not _es_lavadora                                 # no lavadora → no aplica → OK
-            or bool(_numeral_valor)                          # lavadora → requiere numeral
+            not _es_lavadora                                 # no aplica → OK automático
+            or bool(_numeral_valor)                          # aplica → requiere numeral
         )
 
         # ── Método de detección de falla ──────────────────────────────────────

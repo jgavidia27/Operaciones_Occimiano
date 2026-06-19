@@ -54,7 +54,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v10-es_lavadora"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v11-aspira-lavaint"  # bump para invalidar disco al cambiar data.py
 
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def _cached_build_kpi_llenado(raw_wo: list, cache_v: str = _KPI_CACHE_VERSION) -> pd.DataFrame:
