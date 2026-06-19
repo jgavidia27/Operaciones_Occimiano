@@ -260,61 +260,90 @@ def _parse_hierarchy(parent_description: str) -> tuple[str, str]:
 #     >100 anómalo, y final < inicial es imposible.
 # El valor con ≥8 dígitos se considera tecleo basura (ej. 99999999999999).
 
-_NUMERAL_GARBAGE_MIN = 10_000_000   # ≥8 dígitos → valor inválido
+_VALOR_GARBAGE     = 10_000_000   # ≥8 díg: un solo valor de numeral imposible (basura)
+_DIFF_INCONGRUENTE = 400_000      # diff dentro de OT > esto = registro imposible
+
+# Mapa categoría → severidad (para colorear / contar en paneles)
+_CAT_SEVERIDAD = {
+    "normal":       "ok",
+    "raro":         "warn",
+    "anomalo":      "alert",
+    "incongruente": "alert",
+    "sin_dato":     "na",
+}
+# Etiquetas cortas para filtros y leyendas
+CAT_LABEL = {
+    "normal":       "✅ Normal",
+    "raro":         "🟡 Raro (revisar)",
+    "anomalo":      "🔴 Anómalo",
+    "incongruente": "🟣 Registro incongruente",
+    "sin_dato":     "— Sin dato",
+}
 
 
-def _numeral_to_int(s) -> "int | None":
-    """Extrae el entero de un valor de numeral. None si vacío o basura (≥8 díg.)."""
+def _numeral_raw_int(s) -> "int | None":
+    """Extrae el entero de un valor de numeral (sin filtrar magnitud)."""
     m = re.search(r"\d+", str(s or ""))
-    if not m:
-        return None
-    v = int(m.group(0))
-    return v if v < _NUMERAL_GARBAGE_MIN else None
+    return int(m.group(0)) if m else None
 
 
-def clasificar_fichas_anomalia(inicial, final) -> tuple:
+def clasificar_numeral(inicial, final) -> tuple:
     """
-    Clasifica la diferencia final − inicial DENTRO de una OT.
+    Clasifica una lectura de numeral según la diferencia final − inicial
+    DENTRO de una misma OT (fichas que el técnico usó probando la máquina).
 
-    Returns (severidad, etiqueta, fichas):
-      severidad: 'ok' | 'warn' | 'alert' | 'na'
-      etiqueta:  texto con emoji para mostrar
-      fichas:    int | None  (None si no se puede calcular)
+    Categorías:
+      'normal'        1–50 fichas (prueba normal)
+      'raro'          50–100 fichas (a revisar)
+      'anomalo'       >100 fichas  o  Final < Inicial
+      'incongruente'  diferencia imposible (>400.000), salto de orden de
+                      magnitud (ej. 5.000→50.000) o valor basura (≥8 díg.)
+      'sin_dato'      sin valores suficientes para evaluar
+
+    Returns (categoria, etiqueta, fichas).
     """
-    ni_raw = str(inicial or "").strip()
-    nf_raw = str(final   or "").strip()
-    vi, vf = _numeral_to_int(ni_raw), _numeral_to_int(nf_raw)
+    vi, vf = _numeral_raw_int(inicial), _numeral_raw_int(final)
 
-    # Valor crudo presente pero basura (≥8 díg.) → alerta de dato inválido
-    _ni_has = bool(re.search(r"\d", ni_raw))
-    _nf_has = bool(re.search(r"\d", nf_raw))
-    if (_ni_has and vi is None) or (_nf_has and vf is None):
-        return ("alert", "🔴 Valor inválido", None)
+    # Valor único basura (≥8 díg., ej. 99999999999999) → incongruente
+    if (vi is not None and vi >= _VALOR_GARBAGE) or (vf is not None and vf >= _VALOR_GARBAGE):
+        return ("incongruente", "🟣 Valor inválido (basura)", None)
 
     if vi is None or vf is None:
-        return ("na", "—", None)
+        return ("sin_dato", "—", None)
 
     fichas = vf - vi
+
+    # ── Incongruente (lo más roto: precede al resto) ──────────────────────────
+    if fichas > _DIFF_INCONGRUENTE:
+        return ("incongruente", f"🟣 {fichas:,} fichas (registro imposible)", fichas)
+    if vi >= 100 and vf >= vi * 9:          # salto ~10× = cero de más
+        return ("incongruente", f"🟣 Salto de magnitud ({vi:,}→{vf:,})", fichas)
+
+    # ── Anómalo ───────────────────────────────────────────────────────────────
     if fichas < 0:
-        return ("alert", f"🔴 Final < Inicial ({fichas:,})", fichas)
+        return ("anomalo", f"🔴 Final < Inicial ({fichas:,})", fichas)
     if fichas > 100:
-        return ("alert", f"🔴 {fichas:,} fichas (>100)", fichas)
+        return ("anomalo", f"🔴 {fichas:,} fichas (>100)", fichas)
+
+    # ── Raro / Normal ─────────────────────────────────────────────────────────
     if fichas > 50:
-        return ("warn", f"🟡 {fichas} fichas (50–100)", fichas)
-    return ("ok", f"✅ {fichas} fichas", fichas)
+        return ("raro", f"🟡 {fichas} fichas (50–100)", fichas)
+    return ("normal", f"✅ {fichas} fichas", fichas)
 
 
 def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
-                            n: int = 10) -> pd.DataFrame:
+                            n: "int | None" = 10) -> pd.DataFrame:
     """
     Historial de lecturas de numeral por equipo (lavadoras/aspiradoras).
 
     Toma un df de build_work_orders_df (que ya incluye numeral_inicial/final),
     opcionalmente filtra por EDS (eds_occim == eds_code), y devuelve los últimos
-    `n` registros de CADA equipo con su clasificación de anomalía.
+    `n` registros de CADA equipo con su clasificación. Si n=None, no limita
+    (útil para la pestaña global con filtros propios).
 
-    Columnas: equipment, equipment_code, station, fecha, technician, folio,
-              numeral_inicial, numeral_final, fichas, severidad, estado.
+    Columnas: client, equipment, equipment_code, station, fecha, technician,
+              folio, numeral_inicial, numeral_final, fichas, categoria,
+              severidad, estado.
     Ordenado por equipo y fecha descendente.
     """
     if df_wo.empty or "numeral_final" not in df_wo.columns:
@@ -341,22 +370,24 @@ def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
     # Fecha de referencia: finalización; fallback a creación
     df["_fecha"] = df["final_date"].fillna(df["creation_date"])
 
-    # Clasificación de anomalía por fila
+    # Clasificación por fila (categoría, etiqueta, fichas)
     _clasif = df.apply(
-        lambda r: clasificar_fichas_anomalia(r["numeral_inicial"], r["numeral_final"]),
+        lambda r: clasificar_numeral(r["numeral_inicial"], r["numeral_final"]),
         axis=1,
     )
-    df["severidad"] = _clasif.apply(lambda t: t[0])
+    df["categoria"] = _clasif.apply(lambda t: t[0])
     df["estado"]    = _clasif.apply(lambda t: t[1])
     df["fichas"]    = _clasif.apply(lambda t: t[2])
+    df["severidad"] = df["categoria"].map(_CAT_SEVERIDAD).fillna("na")
 
-    # Últimos n registros por equipo (por código de activo)
+    # Orden por equipo y fecha descendente; limitar últimos n por equipo si aplica
     df = df.sort_values(["equipment_code", "_fecha"], ascending=[True, False])
-    df = df.groupby("equipment_code", group_keys=False).head(n)
+    if n is not None:
+        df = df.groupby("equipment_code", group_keys=False).head(n)
 
-    cols = ["equipment", "equipment_code", "station", "_fecha", "technician",
-            "folio", "numeral_inicial", "numeral_final", "fichas",
-            "severidad", "estado"]
+    cols = ["client", "equipment", "equipment_code", "station", "_fecha",
+            "technician", "folio", "numeral_inicial", "numeral_final", "fichas",
+            "categoria", "severidad", "estado"]
     cols = [c for c in cols if c in df.columns]
     return df[cols].rename(columns={"_fecha": "fecha"}).reset_index(drop=True)
 

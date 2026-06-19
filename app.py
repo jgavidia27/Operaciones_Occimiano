@@ -23,7 +23,7 @@ from api import (
 from data import (
     build_work_orders_df, build_third_parties_df, station_summary, CLIENT_COLORS,
     build_kpi_llenado_df, score_llenado_por_ot, score_llenado_por_tecnico,
-    build_reincidencias, build_numeral_historial,
+    build_reincidencias, build_numeral_historial, CAT_LABEL,
     GRUPOS_TERRENO, get_grupo_tecnico, TECNICOS_NO_APLICA,
     SENIORS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
@@ -2768,6 +2768,7 @@ elif _page == _NAV_PAGES[3]:
         "🔴  COPEC",
         "🟢  Aramco (Esmax)",
         "🟡  Shell (Enex)",
+        "🔢  Historial de Numerales",
     ])
 
     # ════════════════════════════════════════════════════════════════════════
@@ -3300,6 +3301,128 @@ elif _page == _NAV_PAGES[3]:
         _df_display = _df_display.fillna("—")
         _show_df(_df_display, use_container_width=True, hide_index=True)
 
+    # ════════════════════════════════════════════════════════════════════════
+    # PESTAÑA: HISTORIAL DE NUMERALES (global, con filtros propios)
+    # ════════════════════════════════════════════════════════════════════════
+    def _render_numeral_tab():
+        st.caption(
+            "Historial completo de lecturas de numeral de **lavadoras y aspiradoras**. "
+            "Las **fichas** = N. Final − N. Inicial dentro de la misma OT (fichas que el "
+            "técnico gastó probando la máquina). Saltos grandes *entre fechas* son normales "
+            "(venta de fichas a clientes)."
+        )
+
+        # Historial completo (sin límite por equipo)
+        _hist = build_numeral_historial(df_wo_eds_full, eds_code=None, n=None)
+        if _hist.empty:
+            st.info("Aún no hay registros de numeral. Corre el sync de numerales para poblar los datos.")
+            return
+
+        # Derivar período
+        _f = pd.to_datetime(_hist["fecha"], errors="coerce", utc=True)
+        _f = _f.dt.tz_convert(None)
+        _hist["_year"]    = _f.dt.year
+        _hist["_mes"]     = _f.dt.month
+        _hist["_trim"]    = _f.dt.quarter
+        _hist["_mes_str"] = _f.dt.to_period("M").astype(str)
+
+        # ── Filtros ───────────────────────────────────────────────────────────
+        _fc1, _fc2, _fc3, _fc4 = st.columns([1.2, 1.2, 1.4, 2])
+        with _fc1:
+            _yrs = sorted([int(y) for y in _hist["_year"].dropna().unique()], reverse=True)
+            _yr_sel = st.selectbox("Año", _yrs, index=0, key="num_tab_year")
+        with _fc2:
+            _trim_sel = st.selectbox(
+                "Trimestre", ["Todos", "T1", "T2", "T3", "T4"], key="num_tab_trim"
+            )
+        with _fc3:
+            _meses_en_yr = sorted(_hist[_hist["_year"] == _yr_sel]["_mes"].dropna().unique())
+            _mes_sel = st.multiselect(
+                "Mes (opcional)", options=[int(m) for m in _meses_en_yr],
+                format_func=lambda m: _MES_ES[int(m)], key="num_tab_mes",
+            )
+        with _fc4:
+            _cli_sel = st.multiselect(
+                "Cliente",
+                options=["COPEC", "Aramco (Esmax)", "SHELL (Enex)"],
+                key="num_tab_cli",
+            )
+
+        # Filtro de situación
+        _cats_orden = ["normal", "raro", "anomalo", "incongruente"]
+        _sit_sel = st.multiselect(
+            "Situación",
+            options=_cats_orden,
+            format_func=lambda c: CAT_LABEL.get(c, c),
+            default=["raro", "anomalo", "incongruente"],
+            key="num_tab_sit",
+            help="Por defecto se muestran solo los casos a revisar. Agrega 'Normal' para ver todo.",
+        )
+
+        # ── Aplicar filtros ─────────────────────────────────────────────────────
+        _df = _hist[_hist["_year"] == _yr_sel].copy()
+        if _trim_sel != "Todos":
+            _df = _df[_df["_trim"] == int(_trim_sel[1])]
+        if _mes_sel:
+            _df = _df[_df["_mes"].isin(_mes_sel)]
+        if _cli_sel:
+            _df = _df[_df["client"].isin(_cli_sel)]
+        if _sit_sel:
+            _df = _df[_df["categoria"].isin(_sit_sel)]
+
+        # ── KPI cards por situación (sobre el universo del año/período, sin filtro situación) ──
+        _univ = _hist[_hist["_year"] == _yr_sel].copy()
+        if _trim_sel != "Todos":
+            _univ = _univ[_univ["_trim"] == int(_trim_sel[1])]
+        if _mes_sel:
+            _univ = _univ[_univ["_mes"].isin(_mes_sel)]
+        if _cli_sel:
+            _univ = _univ[_univ["client"].isin(_cli_sel)]
+
+        _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+        _k1.metric("Registros", len(_univ))
+        _k2.metric("✅ Normal",        int((_univ["categoria"] == "normal").sum()))
+        _k3.metric("🟡 Raro",          int((_univ["categoria"] == "raro").sum()))
+        _k4.metric("🔴 Anómalo",       int((_univ["categoria"] == "anomalo").sum()))
+        _k5.metric("🟣 Incongruente",  int((_univ["categoria"] == "incongruente").sum()))
+
+        # ── Tabla ───────────────────────────────────────────────────────────────
+        if _df.empty:
+            st.info("Sin registros para los filtros seleccionados.")
+            return
+
+        _disp = _df.sort_values("fecha", ascending=False).copy()
+        _disp["Fecha"] = pd.to_datetime(_disp["fecha"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
+        _disp = _disp[[
+            "Fecha", "client", "station", "equipment", "technician",
+            "numeral_inicial", "numeral_final", "estado", "folio",
+        ]].rename(columns={
+            "client":          "Cliente",
+            "station":         "EDS",
+            "equipment":       "Equipo",
+            "technician":      "Técnico",
+            "numeral_inicial": "N. Inicial",
+            "numeral_final":   "N. Final",
+            "estado":          "Situación",
+            "folio":           "OT",
+        })
+        st.markdown(
+            f'<div style="font-weight:700;font-size:0.9rem;margin:6px 0;color:{_t["text"]};">'
+            f'{len(_disp)} registro(s)</div>', unsafe_allow_html=True,
+        )
+        _show_df(_disp, use_container_width=True, hide_index=True,
+            column_config={
+                "Fecha":      st.column_config.TextColumn(width=90),
+                "Cliente":    st.column_config.TextColumn(width=110),
+                "EDS":        st.column_config.TextColumn(width=190),
+                "Equipo":     st.column_config.TextColumn(width=210),
+                "Técnico":    st.column_config.TextColumn(width=170),
+                "N. Inicial": st.column_config.TextColumn(width=95),
+                "N. Final":   st.column_config.TextColumn(width=95),
+                "Situación":  st.column_config.TextColumn(width=210),
+                "OT":         st.column_config.TextColumn(width=100),
+            })
+
     # ── Renderizar tabs ──────────────────────────────────────────────────────
     with _tabs_eds[0]:
         _render_eds_tab("COPEC", 0)
@@ -3307,6 +3430,8 @@ elif _page == _NAV_PAGES[3]:
         _render_eds_tab("Aramco (Esmax)", 1)
     with _tabs_eds[2]:
         _render_eds_tab("SHELL (Enex)", 2)
+    with _tabs_eds[3]:
+        _render_numeral_tab()
 
 
 
