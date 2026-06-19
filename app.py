@@ -54,9 +54,12 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
+_KPI_CACHE_VERSION = "v10-es_lavadora"  # bump para invalidar disco al cambiar data.py
+
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
-def _cached_build_kpi_llenado(raw_wo: list) -> pd.DataFrame:
-    """Wrapper con caché persistente en disco. Sobrevive reinicios de Streamlit."""
+def _cached_build_kpi_llenado(raw_wo: list, cache_v: str = _KPI_CACHE_VERSION) -> pd.DataFrame:
+    """Wrapper con caché persistente en disco. Sobrevive reinicios de Streamlit.
+    cache_v: bumpearlo fuerza invalidación del caché persistente."""
     return build_kpi_llenado_df(raw_wo)
 
 # ── Session-state cache helper ───────────────────────────────────────────────
