@@ -561,18 +561,26 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         causa_raiz_raw= ("causa_raiz_raw", "first"),
         causa_clasif=   ("causa_clasif",   "first"),
         causa_ok=       ("causa_ok",       "first"),
-        numeral_ok=     ("numeral_ok",     "first"),
+        numeral_ok=     ("numeral_ok",     "any"),   # True si CUALQUIER tarea tiene numeral
     )
     # Deteccion puede faltar en caches pre-migración
     if "deteccion_ok" in df_kpi.columns:
         _agg["deteccion_ok"]  = ("deteccion_ok",  "first")
         _agg["deteccion_raw"] = ("deteccion_raw", "first")
+    # Campos de numeral (pueden faltar en caches pre-migración)
+    if "es_lavadora" in df_kpi.columns:
+        _agg["es_lavadora"]   = ("es_lavadora",   "first")
+    if "numeral_valor" in df_kpi.columns:
+        # Tomar el primer valor no-vacío entre las tareas de la OT
+        _agg["numeral_valor"] = ("numeral_valor", lambda x: next((v for v in x if v), ""))
 
     ot = df_kpi.groupby("folio").agg(**_agg).reset_index()
 
     # Guard: asegurar columnas nuevas aunque vengan de caché viejo
     if "deteccion_ok"  not in ot.columns: ot["deteccion_ok"]  = False
     if "deteccion_raw" not in ot.columns: ot["deteccion_raw"] = ""
+    if "es_lavadora"   not in ot.columns: ot["es_lavadora"]   = True   # conservador: asumir lavadora
+    if "numeral_valor" not in ot.columns: ot["numeral_valor"]  = ""
 
     # Agregar campos de tiempo condicionalmente (pueden faltar en caché viejo)
     if "duration_sec" in df_kpi.columns:

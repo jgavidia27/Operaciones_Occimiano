@@ -7246,22 +7246,25 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 # ── Tabla detalle OTs numerales (cumple + no cumple) ──────────
                 _det_num = _df_num_base.copy()
 
-                # Columna Numeral: usa el valor extraído por data.py (de note+task_note).
-                # Para no-lavadoras el numeral no aplica → mostrar "N/A".
+                # Columna Numeral y Estado con tres casos claros:
+                #   🔵 No aplica  → equipo no es lavadora (no se exige numeral)
+                #   ✅ 182740     → lavadora con numeral real encontrado en la nota
+                #   ❌ Sin numeral → lavadora sin numeral registrado
                 def _fmt_numeral_valor(row):
                     if not row.get("es_lavadora", True):
                         return "N/A"
-                    v = row.get("numeral_valor", "") or ""
+                    v = str(row.get("numeral_valor", "") or "").strip()
                     return v if v else "—"
 
-                # Estado visual con tres casos:
-                #   🔵 No aplica  → equipo no es lavadora (numeral_ok True automático)
-                #   ✅ [número]   → lavadora con numeral registrado
-                #   ❌ Sin numeral → lavadora sin numeral
                 def _fmt_numeral_estado(row):
                     if not row.get("es_lavadora", True):
                         return "🔵 No aplica"
-                    return "✅ Registrado" if row["numeral_ok"] else "❌ Sin numeral"
+                    v = str(row.get("numeral_valor", "") or "").strip()
+                    if row.get("numeral_ok", False) and v:
+                        return f"✅ {v}"          # muestra el número real
+                    if row.get("numeral_ok", False):
+                        return "✅ Registrado"    # fallback si numeral_valor vacío
+                    return "❌ Sin numeral"
 
                 _det_num["_numeral"] = _det_num.apply(_fmt_numeral_valor, axis=1)
                 _det_num["_estado"]  = _det_num.apply(_fmt_numeral_estado, axis=1)
