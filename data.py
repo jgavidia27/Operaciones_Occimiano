@@ -480,12 +480,20 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         else:
             _numeral_valor = ""
 
-        # Fichas del período = final − inicial (cuando ambos son numéricos)
+        # Fichas del período = final − inicial (cuando ambos son numéricos).
+        # Guard de sanidad: valores con >7 dígitos son casi siempre tecleo erróneo
+        # (ej. 99999999999999). Diferencia negativa o absurda → no se reporta.
         def _to_int(s):
             m = re.search(r"\d+", s or "")
-            return int(m.group(0)) if m else None
+            if not m:
+                return None
+            v = int(m.group(0))
+            return v if v < 10_000_000 else None   # descartar basura (>7 díg.)
         _vi, _vf = _to_int(_num_inicial), _to_int(_num_final)
-        _fichas_periodo = (_vf - _vi) if (_vi is not None and _vf is not None) else None
+        if _vi is not None and _vf is not None and 0 <= (_vf - _vi) <= 1_000_000:
+            _fichas_periodo = _vf - _vi
+        else:
+            _fichas_periodo = None   # negativo, reseteo de contador o dato corrupto
 
         numeral_ok = (
             not _es_lavadora                                 # no aplica → OK automático
