@@ -7437,6 +7437,43 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
                 _det_te_disp["Estado"]         = _det_te_disp["_te_ok"].apply(
                     lambda v: "✅ Cumple" if v else "❌ No cumple")
+
+                # Diagnóstico de no cumplimiento del tiempo. Solo se llena cuando
+                # _te_ok == False; cuando cumple queda vacío.
+                def _fmt_hm(seg):
+                    if seg is None or pd.isna(seg) or seg <= 0: return "0min"
+                    seg = int(seg); h, m = seg//3600, (seg%3600)//60
+                    return f"{h}h{m:02d}min" if h else f"{m}min"
+
+                def _diag_tiempo(r):
+                    if bool(r.get("_te_ok", False)):
+                        return ""
+                    estim = int(r.get("estimated_sec") or 0)
+                    real  = int(r.get("_effective_sec") or 0)
+                    minimo = int(r.get("_minimo_sec") or 0)
+                    pct = float(r.get("_pct_ej") or 0.0)
+                    deficit = minimo - real
+                    estim_h = _fmt_hm(estim)
+                    real_h  = _fmt_hm(real)
+                    min_h   = _fmt_hm(minimo)
+                    # Casos por gravedad
+                    if real == 0:
+                        return (f"Sin registro de tiempo: el técnico no documentó duración alguna. "
+                                f"Estimado {estim_h}, mínimo aceptable {min_h}.")
+                    if pct < 5:
+                        return (f"Tiempo absurdo: registró {real_h} cuando el estimado era {estim_h} "
+                                f"(mínimo {min_h}). Imposible ejecutar una preventiva en ese plazo.")
+                    if pct < 20:
+                        return (f"Tiempo injustificado: {real_h} es <20% del estimado ({estim_h}). "
+                                f"Quick-tick probable — debió ser al menos {min_h}.")
+                    if pct < 50:
+                        return (f"Muy por debajo del mínimo: {real_h} ejecutado vs {min_h} requerido "
+                                f"(75% de {estim_h}). Déficit de {_fmt_hm(deficit)}.")
+                    # 50-75% → cerca pero no llega
+                    return (f"El acumulado del tiempo no cumple ni siquiera el 75% mínimo de {estim_h}: "
+                            f"registró {real_h} y se requerían {min_h} (faltaron {_fmt_hm(deficit)}).")
+
+                _det_te_disp["Diagnóstico de no cumplimiento"] = _det_te.apply(_diag_tiempo, axis=1).values
                 # Normalizar EDS para display (Equipo se omite: una OT puede tener
                 # subtareas con activos distintos; lo que evalúa el KPI es la OT completa).
                 if "eds_occim" in _det_te_disp.columns:
@@ -7448,9 +7485,10 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     "folio":"OT","eds_occim":"EDS",
                     "tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
                 }).sort_values("Fecha", ascending=False)
-                # Orden: OT - EDS - Técnico - resto
+                # Orden: OT - EDS - Técnico - resto, Diagnóstico al final
                 _orden_te = ["OT","EDS","Técnico","Fecha","Tipo",
-                             "T. Estimado","Mín. 75%","T. Ejecución","% Ejecutado","Estado"]
+                             "T. Estimado","Mín. 75%","T. Ejecución","% Ejecutado","Estado",
+                             "Diagnóstico de no cumplimiento"]
                 _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
                 with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({len(_det_te_disp):,} preventivos con estimado)", expanded=False):
@@ -7472,6 +7510,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 label="% Ejecutado", min_value=0, max_value=150, format="%.1f%%",
                                 help="T.Efectivo / T.Estimado × 100. Verde si ≥75%"),
                             "Estado":      st.column_config.TextColumn(width=110),
+                            "Diagnóstico de no cumplimiento": st.column_config.TextColumn(width=380,
+                                help="Razón concreta por la que el tiempo no cumple: tiempo absurdo, sin registro, déficit vs mínimo aceptable. Vacío cuando cumple."),
                         })
 
                 # ── Subsección: OTs con tiempo injustificado (<20% del estimado) ────────
