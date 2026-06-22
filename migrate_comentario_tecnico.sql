@@ -14,13 +14,19 @@
 --   Se extrae vía /api/work_orders_subtasks/ (mismo origen que el numeral)
 --   y se persiste aquí con sync_numerales.py.
 
--- 1. Agregar columna
+-- 1. Agregar columnas
+--    comentario_tecnico  → texto libre del técnico (falla / trabajo / observaciones)
+--    form_tiene_numeral  → si el formulario de la OT incluía el campo "TOMA DE NUMERAL".
+--      Permite penalizar en correctivas el numeral vacío SOLO cuando el form lo pedía
+--      (si no tenía el campo, dejarlo vacío es justificable, no es error del técnico).
 ALTER TABLE ordenes_trabajo
-  ADD COLUMN IF NOT EXISTS comentario_tecnico TEXT;
+  ADD COLUMN IF NOT EXISTS comentario_tecnico TEXT,
+  ADD COLUMN IF NOT EXISTS form_tiene_numeral BOOLEAN;
 
 -- 2. Verificar
 SELECT
   COUNT(*)                                                AS total,
   COUNT(*) FILTER (WHERE comentario_tecnico IS NOT NULL
-                     AND comentario_tecnico <> '')        AS con_comentario
+                     AND comentario_tecnico <> '')        AS con_comentario,
+  COUNT(*) FILTER (WHERE form_tiene_numeral IS TRUE)      AS form_con_numeral
 FROM ordenes_trabajo;

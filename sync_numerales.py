@@ -115,7 +115,7 @@ def query_lavadora_folios(desde: str) -> list:
     return folios
 
 
-def patch_numeral(folio: str, inicial, final, comentario=None) -> bool:
+def patch_numeral(folio: str, inicial, final, comentario=None, form_tiene_numeral=None) -> bool:
     payload = {
         "numeral_inicial": inicial,
         "numeral_final":   final,
@@ -125,6 +125,8 @@ def patch_numeral(folio: str, inicial, final, comentario=None) -> bool:
     # Solo escribir comentario si se extrajo alguno (no pisar con None datos previos)
     if comentario:
         payload["comentario_tecnico"] = comentario
+    if form_tiene_numeral is not None:
+        payload["form_tiene_numeral"] = bool(form_tiene_numeral)
     r = requests.patch(
         f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?id_ot=eq.{folio}",
         headers=_sb_headers(write=True),
@@ -160,10 +162,13 @@ def _consolidar_comentario(items: list) -> str:
 
 def fetch_numerales(folio: str) -> tuple:
     """
-    Retorna (folio, inicial, final, comentario).
+    Retorna (folio, inicial, final, comentario, form_tiene_numeral).
     inicial    = primer ítem type=3 con 'NUMERAL' en la descripción.
     final      = primer ítem type=5 con 'NUMERAL' en la descripción.
     comentario = texto libre del técnico (falla, trabajo, observaciones).
+    form_tiene_numeral = True si el formulario incluía el campo TOMA DE NUMERAL
+                         (aunque venga vacío) → permite distinguir "no lo llenó"
+                         de "el formulario no lo pedía".
     """
     headers = {"Authorization": f"Bearer {get_token()}"}
     try:
@@ -174,14 +179,18 @@ def fetch_numerales(folio: str) -> tuple:
         )
         items = r.json().get("data", [])
     except Exception:
-        return folio, None, None, None
+        return folio, None, None, None, None
 
     inicial = final = None
+    form_tiene_numeral = False
     for it in items:
         desc = (it.get("description") or "").upper()
         if "NUMERAL" not in desc:
             continue
-        t   = it.get("id_task_form_item_type")
+        t = it.get("id_task_form_item_type")
+        # El campo existe en el formulario (independiente de si trae valor)
+        if t in (3, 5):
+            form_tiene_numeral = True
         val = (str(it.get("value")) if it.get("value") is not None else "").strip()
         if not val or val.lower() in ("none", "null"):
             continue
@@ -191,17 +200,17 @@ def fetch_numerales(folio: str) -> tuple:
             final = val
 
     comentario = _consolidar_comentario(items) or None
-    return folio, inicial, final, comentario
+    return folio, inicial, final, comentario, form_tiene_numeral
 
 
 def fetch_numerales_batch(folios: list, workers: int = WORKERS) -> dict:
-    """{folio: (inicial, final, comentario)} para una lista de folios, en paralelo."""
+    """{folio: (inicial, final, comentario, form_tiene_numeral)} en paralelo."""
     out: dict = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(fetch_numerales, f): f for f in folios}
         for fut in as_completed(futs):
-            folio, ini, fin, com = fut.result()
-            out[folio] = (ini, fin, com)
+            folio, ini, fin, com, form_num = fut.result()
+            out[folio] = (ini, fin, com, form_num)
     return out
 
 
@@ -238,17 +247,17 @@ def main():
     for i in range(0, len(folios), CHUNK):
         chunk = folios[i : i + CHUNK]
         res = fetch_numerales_batch(chunk)
-        for folio, (ini, fin, com) in res.items():
+        for folio, (ini, fin, com, form_num) in res.items():
             if ini or fin:
-                ok = patch_numeral(folio, ini, fin, com)
+                ok = patch_numeral(folio, ini, fin, com, form_num)
                 if ok:
                     con_num += 1
                 else:
                     errores += 1
             else:
                 # Lavadora sin numeral registrado → marcar explícitamente vacío
-                # (el comentario del técnico se guarda igual si existe)
-                patch_numeral(folio, None, None, com)
+                # (el comentario y el flag de campo del formulario se guardan igual)
+                patch_numeral(folio, None, None, com, form_num)
                 sin_num += 1
         log(f"Procesados {min(i+CHUNK, len(folios)):>5}/{len(folios)} | "
             f"con numeral: {con_num} | sin: {sin_num} | err: {errores}", "PROG")

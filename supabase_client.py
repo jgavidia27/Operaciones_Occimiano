@@ -223,7 +223,7 @@ def load_work_orders_supabase() -> list:
     # Así un despliegue previo a la migración no rompe ni pierde el numeral.
     rows = _query(
         "ordenes_trabajo",
-        _base_cols + ",numeral_inicial,numeral_final,comentario_tecnico&order=fecha_creacion.desc",
+        _base_cols + ",numeral_inicial,numeral_final,comentario_tecnico,form_tiene_numeral&order=fecha_creacion.desc",
         limit=20_000
     )
     if not rows:
@@ -268,6 +268,8 @@ def load_work_orders_supabase() -> list:
             "numeral_final":              r.get("numeral_final"),
             # Comentario/conclusión del técnico (texto libre del formulario, type=1)
             "comentario_tecnico":         r.get("comentario_tecnico"),
+            # ¿El formulario incluía el campo de numeral? (para evaluar MC con justicia)
+            "form_tiene_numeral":         r.get("form_tiene_numeral"),
             "stop_assets_sec":            0,
             "total_cost_task":            None,
             "resources_inventory":        "1" if r.get("tiene_recursos") else None,

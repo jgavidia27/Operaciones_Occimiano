@@ -344,6 +344,7 @@ _NUMERAL_FICHAS_MAX = 20          # > esto dentro de una misma OT = sospechoso
 NUMERAL_MOTIVO_LABEL = {
     "ok":             "✅ Numeral válido",
     "no_aplica":      "🔵 No aplica",
+    "no_aplica_mc":   "🔵 No aplica (correctiva sin campo)",
     "sin_numeral":    "❌ Sin numeral",
     "basura":         "🟣 Valor basura (≥8 díg.)",
     "negativo":       "🔴 Final < Inicial",
@@ -352,18 +353,25 @@ NUMERAL_MOTIVO_LABEL = {
 }
 
 
-def eval_numeral_kpi(es_lavadora: bool, inicial, final) -> tuple:
+def eval_numeral_kpi(es_lavadora: bool, inicial, final,
+                     es_correctiva: bool = False,
+                     form_tiene_numeral=None) -> tuple:
     """
     Veredicto BINARIO de calidad del numeral para el KPI Precisión.
     Returns (numeral_ok: bool, motivo: str).
 
-    Solo exige numeral a lavadoras/aspiradoras. Reglas (de peor a mejor):
-      • sin_numeral    → lavadora sin ningún valor registrado
+    Aplica a lavadoras/aspiradoras en MC y MP (el formulario exige el numeral en
+    ambas). Reglas con valor registrado (de peor a mejor):
       • basura         → algún valor ≥8 díg (tecleo imposible, ej. 99.999.999)
       • negativo       → final < inicial (imposible, el contador no retrocede)
       • salto_magnitud → final ≥ 9× inicial (un cero de más al teclear)
       • exceso_fichas  → final − inicial > 20 (un técnico no gasta tantas fichas)
       • ok             → numeral coherente
+
+    Sin valor registrado:
+      • Preventiva                       → sin_numeral (el form MP siempre lo pide)
+      • Correctiva con campo en el form  → sin_numeral (lo dejó vacío = descuido)
+      • Correctiva sin campo / desconocido → no_aplica_mc (justificable, no penaliza)
     """
     if not es_lavadora:
         return True, "no_aplica"
@@ -373,7 +381,12 @@ def eval_numeral_kpi(es_lavadora: bool, inicial, final) -> tuple:
     _ni = "" if _ni.lower() in ("none", "null") else _ni
     _nf = "" if _nf.lower() in ("none", "null") else _nf
     if not _ni and not _nf:
-        return False, "sin_numeral"
+        if not es_correctiva:
+            return False, "sin_numeral"          # MP: el formulario siempre lo pide
+        # Correctiva: solo penaliza si el formulario tenía el campo numeral
+        if form_tiene_numeral is True:
+            return False, "sin_numeral"
+        return True, "no_aplica_mc"              # sin campo o desconocido → justificable
 
     vi, vf = _numeral_raw_int(_ni), _numeral_raw_int(_nf)
 
@@ -785,7 +798,12 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
 
         # CALIDAD del numeral (no solo presencia): un 99.999.999 o un salto de
         # >20 fichas dentro de la OT ahora cuenta como dato MALO (numeral_ok=False).
-        numeral_ok, numeral_motivo = eval_numeral_kpi(_es_lavadora, _num_inicial, _num_final)
+        # Aplica a MC y MP; en MC sin valor, solo penaliza si el form tenía el campo.
+        _form_num = wo.get("form_tiene_numeral")
+        numeral_ok, numeral_motivo = eval_numeral_kpi(
+            _es_lavadora, _num_inicial, _num_final,
+            es_correctiva=es_correctiva, form_tiene_numeral=_form_num,
+        )
 
         # ── Método de detección de falla ──────────────────────────────────────
         # Campo detection_method_description de Fracttal (Análisis de Fallas).
@@ -827,6 +845,7 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "comentario_tecnico": (wo.get("comentario_tecnico") or "").strip(),
             "numeral_ok":        numeral_ok,
             "numeral_motivo":    numeral_motivo,
+            "form_tiene_numeral": wo.get("form_tiene_numeral"),
             "es_lavadora":       _es_lavadora,
             "numeral_valor":     _numeral_valor,
             "numeral_inicial":   _num_inicial,
@@ -855,7 +874,9 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     │                                  │      │ MP (sin estim.): >30min→25 | 15-30→12 | <15→0      │
     │ 2. Causa raíz llenada            │ 0–25 │ MC: causa específica → 25 | vacía/vaga → 0         │
     │                                  │      │ PM: no aplica → 25 siempre                         │
-    │ 3. Numeral registrado            │ 0–25 │ número ≥ 4 dígitos en nota/task_note → 25 | 0      │
+    │ 3. Numeral registrado            │ 0–25 │ lavadora/aspiradora (MC+MP): numeral válido → 25  │
+    │                                  │      │ basura/exceso>20/salto/negativo/sin dato → 0      │
+    │                                  │      │ equipo sin numeral (no lavadora) → 25 (no aplica) │
     └──────────────────────────────────┴──────┴────────────────────────────────────────────────────┘
     Nota: Modalidad de atención (ex componente 4) se muestra como dato informativo
     pero no entra al KPI (no está en contrato).
@@ -904,6 +925,9 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         _agg["numeral_final"]   = ("numeral_final",   lambda x: next((v for v in x if v), ""))
     if "comentario_tecnico" in df_kpi.columns:
         _agg["comentario_tecnico"] = ("comentario_tecnico", lambda x: next((v for v in x if v), ""))
+    if "form_tiene_numeral" in df_kpi.columns:
+        # True si CUALQUIER tarea de la OT tenía el campo numeral en el formulario
+        _agg["form_tiene_numeral"] = ("form_tiene_numeral", lambda x: bool(any(bool(v) for v in x)))
     if "fichas_periodo" in df_kpi.columns:
         _agg["fichas_periodo"]  = ("fichas_periodo",  lambda x: next((v for v in x if v is not None), None))
 
@@ -918,6 +942,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     if "numeral_final"   not in ot.columns: ot["numeral_final"]   = ""
     if "fichas_periodo"  not in ot.columns: ot["fichas_periodo"]  = None
     if "comentario_tecnico" not in ot.columns: ot["comentario_tecnico"] = ""
+    if "form_tiene_numeral" not in ot.columns: ot["form_tiene_numeral"] = None
 
     # Re-evaluar la CALIDAD del numeral a nivel OT desde los valores agregados
     # (inicial/final = primer no-vacío). Garantiza que el veredicto coincida con
@@ -925,7 +950,9 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     # venga de antes del cambio (donde numeral_ok era solo presencia).
     _num_eval = ot.apply(
         lambda r: eval_numeral_kpi(
-            r.get("es_lavadora", True), r.get("numeral_inicial", ""), r.get("numeral_final", "")
+            r.get("es_lavadora", True), r.get("numeral_inicial", ""), r.get("numeral_final", ""),
+            es_correctiva=r.get("es_correctiva", False),
+            form_tiene_numeral=r.get("form_tiene_numeral"),
         ),
         axis=1,
     )
@@ -991,11 +1018,10 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     ot["score_causa"] = ot["causa_ok"].apply(lambda ok: 25 if ok else 0)
 
     # ── Componente 3: Numeral registrado (0–25 pts) ───────────────────────────
-    # Solo aplica a preventivas (lavadoras). Correctivas = 25 pts auto (no aplica).
-    ot["score_numeral"] = ot.apply(
-        lambda r: 25 if r["es_correctiva"] else (25 if r["numeral_ok"] else 0),
-        axis=1,
-    )
+    # Aplica a TODA lavadora/aspiradora (MC y MP): el formulario exige el numeral
+    # en ambos tipos, así que un dato basura en una correctiva también penaliza.
+    # numeral_ok ya devuelve True para equipos que no son lavadora (no_aplica).
+    ot["score_numeral"] = ot["numeral_ok"].apply(lambda ok: 25 if ok else 0)
 
     # ── Componente 4: Método de detección de falla (0–25 pts) ────────────────
     # OK = cualquier valor que no sea vacío ni "SIN CLASIFICAR"

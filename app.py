@@ -55,7 +55,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v14-numeral-calidad"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v15-numeral-mc"  # bump para invalidar disco al cambiar data.py
 
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def _cached_build_kpi_llenado(raw_wo: list, cache_v: str = _KPI_CACHE_VERSION) -> pd.DataFrame:
@@ -6504,7 +6504,7 @@ elif _page == _NAV_PAGES[0]:
                 'Mide <b>3 componentes</b> por OT (25 pts c/u = 75 total): '
                 '<b>Tiempo de ejecución</b> (solo MP), '
                 '<b>Causa raíz</b> (MC+MP) y '
-                '<b>Numeral registrado</b> (solo MP). '
+                '<b>Numeral registrado</b> (MC+MP en lavadoras/aspiradoras). '
                 f'<span style="font-size:0.82rem;color:{_t["muted"]};">'
                 'Una OT es "mala" si falla en <b>cualquiera</b> de los componentes que le aplican. '
                 'El bono se mide por <b>% de OTs buenas</b>, no por suma de errores.</span></div>',
@@ -6861,12 +6861,14 @@ elif _page == _NAV_PAGES[0]:
         else:
             total_ots_mes = len(df_ot_scores)
             score_global = df_ot_scores["score_total"].mean()
-            # Tiempo y Numeral: solo se miden en preventivas
+            # Tiempo: solo se mide en preventivas. Causa: MC+MP.
+            # Numeral: toda lavadora/aspiradora (MC+MP) — el formulario lo exige en ambas.
             _df_mp_kpi = df_ot_scores[~df_ot_scores["es_correctiva"]] if "es_correctiva" in df_ot_scores.columns else df_ot_scores
             _df_mc_kpi = df_ot_scores[df_ot_scores["es_correctiva"]]  if "es_correctiva" in df_ot_scores.columns else pd.DataFrame()
+            _df_lav_kpi = df_ot_scores[df_ot_scores["es_lavadora"]] if "es_lavadora" in df_ot_scores.columns else df_ot_scores
             pct_tiempo  = (_df_mp_kpi["score_tiempo"] >= 25).mean() * 100 if not _df_mp_kpi.empty else 0.0
             pct_causa   = df_ot_scores["causa_ok"].mean() * 100  # aplica a todas
-            pct_numeral = _df_mp_kpi["numeral_ok"].mean() * 100  if not _df_mp_kpi.empty else 0.0
+            pct_numeral = _df_lav_kpi["numeral_ok"].mean() * 100  if not _df_lav_kpi.empty else 0.0
             tecnicos_con_bono = (df_tec_scores_rank["umbral_bono"]).sum() if not df_tec_scores_rank.empty else 0
             total_tecnicos = len(df_tec_scores_rank)
 
@@ -6894,7 +6896,7 @@ elif _page == _NAV_PAGES[0]:
             # Usar pct_* ya calculadas con el denominador correcto:
             #   pct_tiempo  → solo preventivas (MC tienen 25 auto, no cuentan)
             #   pct_causa   → MC+MP (aplica a todos)
-            #   pct_numeral → solo preventivas (MC tienen 25 auto, no cuentan)
+            #   pct_numeral → toda lavadora/aspiradora (MC+MP) — el formulario lo exige
             dim_avg = {
                 "⏱ Tiempo ejecución (25 pts)":   pct_tiempo  / 100 * 25,
                 "🔍 Causa raíz (25 pts)":         pct_causa   / 100 * 25,
