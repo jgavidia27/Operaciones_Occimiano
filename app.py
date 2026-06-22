@@ -58,6 +58,34 @@ _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 _KPI_CACHE_VERSION = "v18-causa-solo-mc"  # bump para invalidar disco al cambiar data.py
 
 
+def _filtro_ot_input(key: str, columna_ot: str = "OT") -> str:
+    """Caja de texto compacta para filtrar tablas por número de OT.
+    Devuelve el query normalizado en MAYÚSCULAS sin espacios; "" si no filtra.
+    Acepta entradas como "37852", "os-37852", "OS-37852, OS-38066" (lista).
+    """
+    raw = st.text_input(
+        f"🔎 Filtrar por OT", "", key=key,
+        placeholder="OS-37852  ·  ó solo el número (37852)  ·  separar varias con coma",
+        help="Filtra esta tabla por una o varias OTs. Vacío = todas.",
+    )
+    return raw.strip().upper()
+
+
+def _aplicar_filtro_ot(df, query: str, col: str = "OT"):
+    """Aplica el filtro de OT al DataFrame. Soporta lista separada por comas
+    y matching por substring (37852 encuentra OS-37852)."""
+    if not query or col not in df.columns:
+        return df
+    tokens = [t.strip() for t in query.replace(";", ",").split(",") if t.strip()]
+    if not tokens:
+        return df
+    serie = df[col].astype(str).str.upper()
+    mask = pd.Series(False, index=df.index)
+    for t in tokens:
+        mask |= serie.str.contains(t, regex=False, na=False)
+    return df[mask]
+
+
 # Limpia los encabezados verbosos del comentario consolidado del técnico (data
 # antigua del sync trae "DESCRIPCIÓN DE LA FALLA ENCONTRADA: xxx | TRABAJO
 # REALIZADO ...: yyy"). Devuelve solo el contenido, separado por " | ".
@@ -7213,7 +7241,9 @@ elif _page == _NAV_PAGES[0]:
                         st.plotly_chart(st.session_state[_cr_sig], width="stretch")
 
                 # ── Tabla detalle de Causa Raíz ───────────────────────────────
-                with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} correctivas)", expanded=False):
+                _n_cr_total = len(_df_cr_base)
+                with st.expander(f"📋 Detalle de OTs — Causa Raíz ({_n_cr_total:,} correctivas)", expanded=False):
+                    _filtro_cr = _filtro_ot_input("kpi_filtro_ot_causa")
                     _det_cr = _df_cr_base[[c for c in
                         ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
                          "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok",
@@ -7294,6 +7324,10 @@ elif _page == _NAV_PAGES[0]:
                                  "Clasificación","Estado",
                                  "Comentario técnico / qué hizo","Diagnóstico del error"]
                     _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
+                    # Filtro por OT (si el usuario escribió algo)
+                    _det_cr = _aplicar_filtro_ot(_det_cr, _filtro_cr, col="OT")
+                    if _filtro_cr:
+                        st.caption(f"Mostrando **{len(_det_cr):,}** de {_n_cr_total:,} OTs (filtro: `{_filtro_cr}`).")
                     _show_df(_det_cr, hide_index=True, width="stretch",
                         column_config={
                             "OT":            st.column_config.TextColumn(width=110),
@@ -7491,7 +7525,12 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                              "Diagnóstico de no cumplimiento"]
                 _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
-                with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({len(_det_te_disp):,} preventivos con estimado)", expanded=False):
+                _n_te_total = len(_det_te_disp)
+                with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({_n_te_total:,} preventivos con estimado)", expanded=False):
+                    _filtro_te = _filtro_ot_input("kpi_filtro_ot_tiempo")
+                    _det_te_disp = _aplicar_filtro_ot(_det_te_disp, _filtro_te, col="OT")
+                    if _filtro_te:
+                        st.caption(f"Mostrando **{len(_det_te_disp):,}** de {_n_te_total:,} OTs (filtro: `{_filtro_te}`).")
                     _show_df(_det_te_disp, hide_index=True, width="stretch",
                         column_config={
                             "OT":          st.column_config.TextColumn(width=110),
@@ -7699,6 +7738,10 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     with st.expander(
                         f"📋 Detalle OTs con tiempo injustificado ({_n_absurdo:,} OTs)", expanded=False
                     ):
+                        _filtro_abs = _filtro_ot_input("kpi_filtro_ot_injust")
+                        _det_abs_disp = _aplicar_filtro_ot(_det_abs_disp, _filtro_abs, col="OT")
+                        if _filtro_abs:
+                            st.caption(f"Mostrando **{len(_det_abs_disp):,}** de {_n_absurdo:,} OTs (filtro: `{_filtro_abs}`).")
                         _show_df(_det_abs_disp, hide_index=True, width="stretch",
                             column_config={
                                 "OT":          st.column_config.TextColumn(width=110),
@@ -7864,6 +7907,11 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         "**Comentario técnico** = lo que el técnico escribió en el formulario "
                         "(falla, trabajo realizado, observaciones) — la causa raíz real."
                     )
+                    _n_num_total = len(_det_num_disp)
+                    _filtro_num = _filtro_ot_input("kpi_filtro_ot_numeral")
+                    _det_num_disp = _aplicar_filtro_ot(_det_num_disp, _filtro_num, col="OT")
+                    if _filtro_num:
+                        st.caption(f"Mostrando **{len(_det_num_disp):,}** de {_n_num_total:,} OTs (filtro: `{_filtro_num}`).")
                     _show_df(_det_num_disp, hide_index=True, width="stretch",
                         column_config={
                             "OT":            st.column_config.TextColumn(width=110),
