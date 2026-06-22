@@ -91,14 +91,29 @@ def _sb_headers(write: bool = False) -> dict:
 
 
 def query_lavadora_folios(desde: str) -> list:
-    """Folios de OTs cuyo activo es lavadora/aspiradora/lavainterior desde `desde`."""
+    """Folios candidatos al sync de numerales.
+
+    Antes filtraba por nombre_activo LAVAD/ASPIRA/LAVAINT, pero ese campo
+    refleja SOLO el activo principal persistido en Supabase (1 fila/OT).
+    Una preventiva compuesta como OS-37930 puede tener 4 subtareas en Fracttal
+    (Bomba + Ablandador + Aspiradora + Lavadora) y haber persistido la Bomba
+    como activo principal — la OT queda fuera del sync y sus numerales no se
+    extraen, aunque la aspiradora/lavadora SÍ tengan numeral en el formulario.
+
+    Solución: traemos TODAS las OTs preventivas + las correctivas en activos
+    con numeral (lavadora/aspiradora/lavainterior). El propio sync detecta a
+    nivel de subtarea si hay numeral que extraer.
+    """
     folios, offset, page = [], 0, 1000
     while True:
         url = (
             f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}"
-            f"?select=id_ot,nombre_activo"
+            f"?select=id_ot,nombre_activo,tipo_tarea"
             f"&fecha_creacion=gte.{desde}"
-            f"&or=(nombre_activo.ilike.*LAVAD*,nombre_activo.ilike.*ASPIRA*,nombre_activo.ilike.*LAVAINT*)"
+            # Preventivas (compuestas o no) + correctivas en lavadora/aspiradora/lavainterior
+            f"&or=(tipo_tarea.ilike.*PREVENTIVA*,"
+            f"and(tipo_tarea.ilike.*CORRECTIVA*,"
+            f"or(nombre_activo.ilike.*LAVAD*,nombre_activo.ilike.*ASPIRA*,nombre_activo.ilike.*LAVAINT*)))"
             f"&order=fecha_creacion.desc&limit={page}&offset={offset}"
         )
         r = requests.get(url, headers=_sb_headers(), timeout=30)

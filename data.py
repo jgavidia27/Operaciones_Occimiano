@@ -783,7 +783,19 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         # FALLBACK (heurístico): si no hay valor real (ruta Fracttal directa o
         #   caché previo), se busca un número ≥4 dígitos en la nota. Menos fiable.
         _equipo_nombre = (wo.get("items_log_description") or "").strip().upper()
-        _es_lavadora   = bool(re.search(r"LAVAD|ASPIRA|LAVAINT", _equipo_nombre))
+        _es_lavadora_por_nombre = bool(re.search(r"LAVAD|ASPIRA|LAVAINT", _equipo_nombre))
+        # Señal más confiable: el sync detectó que el formulario tenía campo
+        # numeral (form_tiene_numeral). Cubre OTs compuestas tipo OS-37930 donde
+        # el activo principal es Bomba pero hay subtareas de Lavadora/Aspiradora
+        # con su numeral. Si el sync aún no corrió (form_tiene_numeral=None),
+        # caemos al heurístico por nombre del activo principal.
+        _form_num_raw = wo.get("form_tiene_numeral")
+        if _form_num_raw is True:
+            _es_lavadora = True
+        elif _form_num_raw is False:
+            _es_lavadora = False
+        else:
+            _es_lavadora = _es_lavadora_por_nombre
 
         _num_inicial = str(wo.get("numeral_inicial") or "").strip()
         _num_final   = str(wo.get("numeral_final")   or "").strip()
