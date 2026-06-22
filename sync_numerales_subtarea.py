@@ -1,0 +1,259 @@
+"""
+sync_numerales_subtarea.py
+==========================
+Pobla la tabla `numerales_subtarea` con 1 fila por (OT × activo con numeral).
+
+A diferencia de sync_numerales.py (que persiste 1 numeral por OT en
+`ordenes_trabajo`), aquí desglosamos:
+  - Cada subtarea de la OT en Fracttal que tiene su par TOMA DE NUMERAL
+    INICIAL / FINAL en el formulario.
+  - Asociación correcta usando id_work_order_task (en singular) — el campo
+    que liga cada item del formulario a su subtarea específica.
+
+Resultado: una OS-37930 con Lavadora + Aspiradora genera 2 filas, cada una
+con su propio numeral y veredicto de calidad. El KPI considera la OT mala
+si CUALQUIER subtarea con numeral falla.
+
+Uso:
+  python sync_numerales_subtarea.py                    (backfill 2026-01-01)
+  python sync_numerales_subtarea.py --desde 2026-06-01
+  python sync_numerales_subtarea.py --modo incremental (últimas 72h)
+  python sync_numerales_subtarea.py --folios OS-37930,OS-38066
+"""
+
+import argparse
+import json
+import time
+from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import requests
+
+# Compartimos credenciales / helpers con sync_numerales.py
+from sync_numerales import (
+    SUPABASE_URL, SUPABASE_KEY, FRACTTAL_BASE, ID_COMPANY,
+    get_token, _sb_headers, log,
+)
+from data import eval_numeral_kpi, _numeral_raw_int
+
+TABLE_DESTINO = "numerales_subtarea"
+TABLE_OT      = "ordenes_trabajo"
+
+FRACTTAL_WO       = f"{FRACTTAL_BASE}/api/work_orders/"
+FRACTTAL_SUBTASKS = f"{FRACTTAL_BASE}/api/work_orders_subtasks/"
+
+WORKERS = 16
+
+
+def _tipo_activo(nombre: str) -> str:
+    """Devuelve 'lavadora' | 'aspiradora' | 'lavainterior' | 'otro'."""
+    n = (nombre or "").upper()
+    if "LAVAINT" in n or "LAVATAP" in n: return "lavainterior"
+    if "ASPIRA"  in n:                   return "aspiradora"
+    if "LAVAD"   in n:                   return "lavadora"
+    return "otro"
+
+
+def query_preventiva_folios(desde: str) -> list:
+    """Folios candidatos: preventivas y correctivas (todas) desde `desde`.
+    No filtramos por nombre_activo porque OTs compuestas tienen activos
+    principales que no son lavadora pero contienen subtareas que sí lo son."""
+    folios, offset, page = [], 0, 1000
+    while True:
+        url = (f"{SUPABASE_URL}/rest/v1/{TABLE_OT}"
+               f"?select=id_ot&fecha_creacion=gte.{desde}"
+               f"&or=(tipo_tarea.ilike.*PREVENTIVA*,tipo_tarea.ilike.*CORRECTIVA*)"
+               f"&order=fecha_creacion.desc&limit={page}&offset={offset}")
+        r = requests.get(url, headers=_sb_headers(), timeout=30)
+        if r.status_code != 200:
+            log(f"Error Supabase {r.status_code}: {r.text[:200]}", "ERR")
+            break
+        batch = r.json()
+        if not batch:
+            break
+        folios.extend(row["id_ot"] for row in batch if row.get("id_ot"))
+        if len(batch) < page:
+            break
+        offset += page
+    return folios
+
+
+def fetch_subtareas_numeral(folio: str) -> list:
+    """Devuelve una lista de dicts con el numeral por subtarea:
+       [{id_work_order_task, codigo_activo, nombre_activo, tipo_activo,
+         numeral_inicial, numeral_final}, ...]
+       Solo incluye subtareas que en el formulario tenían el par NUMERAL.
+    """
+    h = {"Authorization": f"Bearer {get_token()}"}
+    # 1) Subtareas de la OT
+    try:
+        r = requests.get(FRACTTAL_WO, headers=h,
+                         params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 50},
+                         timeout=30)
+        subtareas = r.json().get("data", []) or []
+    except Exception:
+        return []
+    if not subtareas:
+        return []
+    # Indexar por id_work_orders_tasks (clave del join con items)
+    idx = {}
+    for s in subtareas:
+        kid = s.get("id_work_orders_tasks")
+        if kid is None:
+            continue
+        idx[kid] = {
+            "id_work_order_task": kid,
+            "codigo_activo":      s.get("code"),
+            "nombre_activo":      (s.get("items_log_description") or "").strip(),
+            "tipo_activo":        _tipo_activo(s.get("items_log_description") or ""),
+            "numeral_inicial":    None,
+            "numeral_final":      None,
+        }
+
+    # 2) Items del formulario (NUMERAL INICIAL/FINAL) — limit alto para no truncar
+    try:
+        r2 = requests.get(FRACTTAL_SUBTASKS, headers=h,
+                          params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 500},
+                          timeout=30)
+        items = r2.json().get("data", []) or []
+    except Exception:
+        items = []
+
+    for it in items:
+        desc = (it.get("description") or "").upper()
+        if "NUMERAL" not in desc:
+            continue
+        kid = it.get("id_work_order_task")          # ← SINGULAR (la clave correcta)
+        if kid is None or kid not in idx:
+            continue
+        t = it.get("id_task_form_item_type")
+        val = (str(it.get("value")) if it.get("value") is not None else "").strip()
+        if not val or val.lower() in ("none", "null"):
+            continue
+        if t == 3 and idx[kid]["numeral_inicial"] is None:
+            idx[kid]["numeral_inicial"] = val
+        elif t == 5 and idx[kid]["numeral_final"] is None:
+            idx[kid]["numeral_final"] = val
+
+    # 3) Filtrar: solo subtareas que efectivamente registraron numeral
+    #    O cuyo activo es lavadora/aspiradora/lavainterior (aunque el técnico
+    #    no haya llenado el campo — esa es la prueba de "no llenó").
+    out = []
+    for kid, row in idx.items():
+        es_objetivo = row["tipo_activo"] in ("lavadora", "aspiradora", "lavainterior")
+        tiene_valor = bool(row["numeral_inicial"] or row["numeral_final"])
+        if es_objetivo or tiene_valor:
+            out.append(row)
+    return out
+
+
+def evaluar_calidad(row: dict) -> tuple:
+    """Aplica eval_numeral_kpi a esta subtarea concreta. Devuelve
+    (numeral_ok, motivo, fichas_periodo)."""
+    es_lavadora = row["tipo_activo"] in ("lavadora", "aspiradora", "lavainterior")
+    ok, motivo = eval_numeral_kpi(es_lavadora, row["numeral_inicial"], row["numeral_final"])
+    vi = _numeral_raw_int(row["numeral_inicial"])
+    vf = _numeral_raw_int(row["numeral_final"])
+    fichas = None
+    if vi is not None and vf is not None and 0 <= vf - vi <= 1_000_000:
+        fichas = vf - vi
+    return ok, motivo, fichas
+
+
+def upsert_subtareas(folio: str, filas: list) -> tuple:
+    """Upsert por (id_ot, id_work_order_task). Devuelve (ok_count, err_count)."""
+    if not filas:
+        return 0, 0
+    payload = []
+    for r in filas:
+        ok, motivo, fichas = evaluar_calidad(r)
+        payload.append({
+            "id_ot":              folio,
+            "id_work_order_task": r["id_work_order_task"],
+            "codigo_activo":      r["codigo_activo"],
+            "nombre_activo":      r["nombre_activo"],
+            "tipo_activo":        r["tipo_activo"],
+            "numeral_inicial":    r["numeral_inicial"],
+            "numeral_final":      r["numeral_final"],
+            "fichas_periodo":     fichas,
+            "numeral_ok":         ok,
+            "motivo":             motivo,
+            "updated_at":         datetime.now(timezone.utc).isoformat(),
+        })
+    # Upsert por (id_ot, id_work_order_task) — declarada UNIQUE en la migración
+    h = _sb_headers(write=True)
+    h["Prefer"] = "resolution=merge-duplicates,return=minimal"
+    h["Content-Type"] = "application/json"
+    url = (f"{SUPABASE_URL}/rest/v1/{TABLE_DESTINO}"
+           f"?on_conflict=id_ot,id_work_order_task")
+    for intento in range(3):
+        try:
+            r = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
+            if r.status_code in (200, 201, 204):
+                return len(payload), 0
+            if intento == 2:
+                log(f"PATCH {folio} → {r.status_code}: {r.text[:200]}", "ERR")
+                return 0, len(payload)
+        except requests.exceptions.RequestException:
+            if intento == 2:
+                return 0, len(payload)
+            time.sleep(2 * (intento + 1))
+    return 0, len(payload)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--desde", default="2026-01-01")
+    ap.add_argument("--modo",  choices=["completo","incremental"], default="completo")
+    ap.add_argument("--folios", default="")
+    args = ap.parse_args()
+
+    if args.folios:
+        folios = [f.strip() for f in args.folios.split(",") if f.strip()]
+        log(f"Folios puntuales: {len(folios)}")
+    else:
+        desde = ((datetime.now() - timedelta(hours=72)).strftime("%Y-%m-%d")
+                 if args.modo == "incremental" else args.desde)
+        log(f"Buscando OTs desde {desde}...")
+        folios = query_preventiva_folios(desde)
+        log(f"Encontradas {len(folios)} OTs candidatas", "OK")
+
+    if not folios:
+        log("Sin folios", "WARN")
+        return
+
+    log("Extrayendo subtareas por activo (paralelo)...", "PROG")
+    print("-"*65)
+    t0 = time.time()
+    rows_ok = rows_err = ots_con_sub = ots_sin_sub = 0
+    CHUNK = 200
+    for i in range(0, len(folios), CHUNK):
+        chunk = folios[i:i+CHUNK]
+        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            futs = {ex.submit(fetch_subtareas_numeral, f): f for f in chunk}
+            for fut in as_completed(futs):
+                folio = futs[fut]
+                try:
+                    filas = fut.result()
+                except Exception:
+                    filas = []
+                if not filas:
+                    ots_sin_sub += 1
+                    continue
+                ots_con_sub += 1
+                ok, err = upsert_subtareas(folio, filas)
+                rows_ok  += ok
+                rows_err += err
+        log(f"Procesadas {min(i+CHUNK,len(folios)):>5}/{len(folios)} | "
+            f"OTs con subtareas: {ots_con_sub} | filas upserted: {rows_ok} | err: {rows_err}",
+            "PROG")
+    print("-"*65)
+    log(f"COMPLETADO en {time.time()-t0:.0f}s | "
+        f"{ots_con_sub} OTs con subtareas-numeral | "
+        f"{rows_ok} filas upserted | "
+        f"{ots_sin_sub} OTs sin subtareas-numeral | "
+        f"{rows_err} errores", "OK")
+
+
+if __name__ == "__main__":
+    main()
