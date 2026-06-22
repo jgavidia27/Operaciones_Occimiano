@@ -451,7 +451,7 @@ def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
 
     cols = ["client", "equipment", "equipment_code", "station", "eds_occim", "_fecha",
             "technician", "folio", "numeral_inicial", "numeral_final", "fichas",
-            "categoria", "severidad", "estado"]
+            "categoria", "severidad", "estado", "comentario_tecnico"]
     cols = [c for c in cols if c in df.columns]
     return df[cols].rename(columns={"_fecha": "fecha"}).reset_index(drop=True)
 
@@ -552,6 +552,7 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
     numerales_ini           = []
     numerales_fin           = []
     eds_occims              = []
+    comentarios_tec         = []
 
     for wo in raw:
         client, station = _parse_hierarchy(wo.get("parent_description") or "")
@@ -576,6 +577,7 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
         stop_minutes_list.append((wo.get("stop_assets_sec") or 0) / 60)
         numerales_ini.append(wo.get("numeral_inicial"))
         numerales_fin.append(wo.get("numeral_final"))
+        comentarios_tec.append((wo.get("comentario_tecnico") or "").strip())
         _eo_raw = wo.get("groups_2_description")
         try:
             eds_occims.append(str(int(float(_eo_raw))) if _eo_raw not in (None, "", "None") else "")
@@ -603,6 +605,7 @@ def build_work_orders_df(raw: list) -> pd.DataFrame:
         "stop_minutes":      stop_minutes_list,
         "numeral_inicial":   numerales_ini,
         "numeral_final":     numerales_fin,
+        "comentario_tecnico": comentarios_tec,
         "eds_occim":         eds_occims,
     })
 
@@ -821,6 +824,7 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "causa_raiz_raw":    raw_causa,
             "causa_clasif":      causa_clasif,
             "causa_ok":          causa_ok,
+            "comentario_tecnico": (wo.get("comentario_tecnico") or "").strip(),
             "numeral_ok":        numeral_ok,
             "numeral_motivo":    numeral_motivo,
             "es_lavadora":       _es_lavadora,
@@ -898,6 +902,8 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         _agg["numeral_inicial"] = ("numeral_inicial", lambda x: next((v for v in x if v), ""))
     if "numeral_final" in df_kpi.columns:
         _agg["numeral_final"]   = ("numeral_final",   lambda x: next((v for v in x if v), ""))
+    if "comentario_tecnico" in df_kpi.columns:
+        _agg["comentario_tecnico"] = ("comentario_tecnico", lambda x: next((v for v in x if v), ""))
     if "fichas_periodo" in df_kpi.columns:
         _agg["fichas_periodo"]  = ("fichas_periodo",  lambda x: next((v for v in x if v is not None), None))
 
@@ -911,6 +917,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     if "numeral_inicial" not in ot.columns: ot["numeral_inicial"] = ""
     if "numeral_final"   not in ot.columns: ot["numeral_final"]   = ""
     if "fichas_periodo"  not in ot.columns: ot["fichas_periodo"]  = None
+    if "comentario_tecnico" not in ot.columns: ot["comentario_tecnico"] = ""
 
     # Re-evaluar la CALIDAD del numeral a nivel OT desde los valores agregados
     # (inicial/final = primer no-vacío). Garantiza que el veredicto coincida con

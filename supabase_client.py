@@ -218,12 +218,21 @@ def load_work_orders_supabase() -> list:
         "duracion_real_seg,duracion_estim_seg,"
         "tiene_recursos,completada"
     )
+    # Fallback escalonado: si comentario_tecnico aún no existe (migración nueva
+    # sin correr), reintentar solo con numerales; y si esos tampoco, base sola.
+    # Así un despliegue previo a la migración no rompe ni pierde el numeral.
     rows = _query(
         "ordenes_trabajo",
-        _base_cols + ",numeral_inicial,numeral_final&order=fecha_creacion.desc",
+        _base_cols + ",numeral_inicial,numeral_final,comentario_tecnico&order=fecha_creacion.desc",
         limit=20_000
     )
-    if not rows:   # posible 400 por columnas inexistentes → fallback sin numerales
+    if not rows:
+        rows = _query(
+            "ordenes_trabajo",
+            _base_cols + ",numeral_inicial,numeral_final&order=fecha_creacion.desc",
+            limit=20_000
+        )
+    if not rows:
         rows = _query(
             "ordenes_trabajo",
             _base_cols + "&order=fecha_creacion.desc",
@@ -257,6 +266,8 @@ def load_work_orders_supabase() -> list:
             # Numerales reales extraídos de las subtareas (type=3 inicial, type=5 final)
             "numeral_inicial":            r.get("numeral_inicial"),
             "numeral_final":              r.get("numeral_final"),
+            # Comentario/conclusión del técnico (texto libre del formulario, type=1)
+            "comentario_tecnico":         r.get("comentario_tecnico"),
             "stop_assets_sec":            0,
             "total_cost_task":            None,
             "resources_inventory":        "1" if r.get("tiene_recursos") else None,

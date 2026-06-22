@@ -115,27 +115,55 @@ def query_lavadora_folios(desde: str) -> list:
     return folios
 
 
-def patch_numeral(folio: str, inicial, final) -> bool:
+def patch_numeral(folio: str, inicial, final, comentario=None) -> bool:
+    payload = {
+        "numeral_inicial": inicial,
+        "numeral_final":   final,
+        "tiene_numeral":   bool(inicial or final),
+        "updated_at":      datetime.now(timezone.utc).isoformat(),
+    }
+    # Solo escribir comentario si se extrajo alguno (no pisar con None datos previos)
+    if comentario:
+        payload["comentario_tecnico"] = comentario
     r = requests.patch(
         f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?id_ot=eq.{folio}",
         headers=_sb_headers(write=True),
-        data=json.dumps({
-            "numeral_inicial": inicial,
-            "numeral_final":   final,
-            "tiene_numeral":   bool(inicial or final),
-            "updated_at":      datetime.now(timezone.utc).isoformat(),
-        }),
+        data=json.dumps(payload),
         timeout=15,
     )
     return r.status_code in (200, 204)
 
 
-# ── Extracción de numerales por folio ────────────────────────────────────────
+# ── Extracción de numerales + comentario del técnico por folio ───────────────
+# Campos de texto libre relevantes (id_task_form_item_type = 1). Se ignoran
+# los "PENDIENTE(S)" (suelen ser "No" / ruido). El resto = conclusión del técnico.
+_COMENTARIO_MAX = 600   # tope de caracteres del comentario consolidado
+
+def _consolidar_comentario(items: list) -> str:
+    """Une los campos de texto libre del técnico en un solo string legible."""
+    partes = []
+    for it in items:
+        if it.get("id_task_form_item_type") != 1:
+            continue
+        desc = (it.get("description") or "").strip()
+        val  = (str(it.get("value")) if it.get("value") is not None else "").strip()
+        if not val or val.lower() in ("none", "null"):
+            continue
+        if desc.upper().startswith("PENDIENTE"):
+            continue
+        # Normalizar saltos de línea internos a un espacio
+        val = " ".join(val.split())
+        partes.append(f"{desc}: {val}" if desc else val)
+    texto = " | ".join(partes)
+    return texto[:_COMENTARIO_MAX]
+
+
 def fetch_numerales(folio: str) -> tuple:
     """
-    Retorna (folio, inicial, final). None si no hay valor.
-    inicial = primer ítem type=3 con 'NUMERAL' en la descripción.
-    final   = primer ítem type=5 con 'NUMERAL' en la descripción.
+    Retorna (folio, inicial, final, comentario).
+    inicial    = primer ítem type=3 con 'NUMERAL' en la descripción.
+    final      = primer ítem type=5 con 'NUMERAL' en la descripción.
+    comentario = texto libre del técnico (falla, trabajo, observaciones).
     """
     headers = {"Authorization": f"Bearer {get_token()}"}
     try:
@@ -146,7 +174,7 @@ def fetch_numerales(folio: str) -> tuple:
         )
         items = r.json().get("data", [])
     except Exception:
-        return folio, None, None
+        return folio, None, None, None
 
     inicial = final = None
     for it in items:
@@ -161,17 +189,19 @@ def fetch_numerales(folio: str) -> tuple:
             inicial = val
         elif t == 5 and final is None:
             final = val
-    return folio, inicial, final
+
+    comentario = _consolidar_comentario(items) or None
+    return folio, inicial, final, comentario
 
 
 def fetch_numerales_batch(folios: list, workers: int = WORKERS) -> dict:
-    """{folio: (inicial, final)} para una lista de folios, en paralelo."""
+    """{folio: (inicial, final, comentario)} para una lista de folios, en paralelo."""
     out: dict = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(fetch_numerales, f): f for f in folios}
         for fut in as_completed(futs):
-            folio, ini, fin = fut.result()
-            out[folio] = (ini, fin)
+            folio, ini, fin, com = fut.result()
+            out[folio] = (ini, fin, com)
     return out
 
 
@@ -208,16 +238,17 @@ def main():
     for i in range(0, len(folios), CHUNK):
         chunk = folios[i : i + CHUNK]
         res = fetch_numerales_batch(chunk)
-        for folio, (ini, fin) in res.items():
+        for folio, (ini, fin, com) in res.items():
             if ini or fin:
-                ok = patch_numeral(folio, ini, fin)
+                ok = patch_numeral(folio, ini, fin, com)
                 if ok:
                     con_num += 1
                 else:
                     errores += 1
             else:
                 # Lavadora sin numeral registrado → marcar explícitamente vacío
-                patch_numeral(folio, None, None)
+                # (el comentario del técnico se guarda igual si existe)
+                patch_numeral(folio, None, None, com)
                 sin_num += 1
         log(f"Procesados {min(i+CHUNK, len(folios)):>5}/{len(folios)} | "
             f"con numeral: {con_num} | sin: {sin_num} | err: {errores}", "PROG")

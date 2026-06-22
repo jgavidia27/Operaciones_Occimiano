@@ -2724,7 +2724,7 @@ elif _page == _NAV_PAGES[3]:
         _df["year"]    = _cd.dt.year
         return _df
 
-    df_wo_eds_full = _sc("df_wo_eds_v3_eds_occim", _wo_eds_sig, _build_wo_eds)
+    df_wo_eds_full = _sc("df_wo_eds_v4_comentario", _wo_eds_sig, _build_wo_eds)
 
     # Filtrar a clientes EDS y año actual ────────────────────────────────────
     _EDS_CLIENTS = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
@@ -3533,14 +3533,17 @@ elif _page == _NAV_PAGES[3]:
                         lambda f: "🔴 Origen del error" if f == _origen_folio and _origen_folio else ""
                     )
 
+                    if "comentario_tecnico" in _d.columns:
+                        _d["comentario_tecnico"] = _d["comentario_tecnico"].fillna("").replace("", "—")
                     _cols_d = ["Fecha","folio","technician","numeral_inicial","numeral_final",
-                               "estado","Salto secuencia","Origen"]
+                               "estado","Salto secuencia","Origen","comentario_tecnico"]
                     _d = _d[[c for c in _cols_d if c in _d.columns]].rename(columns={
                         "folio":           "OT",
                         "technician":      "Técnico",
                         "numeral_inicial": "N. Inicial",
                         "numeral_final":   "N. Final",
                         "estado":          "Fichas (intra-OT)",
+                        "comentario_tecnico": "Comentario técnico / causa raíz",
                     })
                     _show_df(_d, use_container_width=True, hide_index=True,
                         column_config={
@@ -3554,6 +3557,8 @@ elif _page == _NAV_PAGES[3]:
                                 help="Compara el inicial de esta visita con el final de la anterior."),
                             "Origen": st.column_config.TextColumn(width=155,
                                 help="Primera OT donde el contador dejó de ser coherente."),
+                            "Comentario técnico / causa raíz": st.column_config.TextColumn(width=320,
+                                help="Texto libre del técnico en Fracttal (falla, trabajo, observaciones). Vacío = no documentó."),
                         })
 
     # ── Renderizar tabs ──────────────────────────────────────────────────────
@@ -7618,10 +7623,17 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _det_num_cd = _det_num_cd.dt.tz_convert(None) if _det_num_cd.dt.tz is not None else _det_num_cd
                 _det_num["_fecha"] = _det_num_cd.dt.strftime("%d/%m/%Y")
 
+                # Comentario / conclusión del técnico (texto libre del PDF de la OT).
+                # Clave para rastrear la causa raíz cuando el numeral viene malo.
+                def _fmt_comentario(row):
+                    c = str(row.get("comentario_tecnico", "") or "").strip()
+                    return c if c else "—"
+                _det_num["_comentario"] = _det_num.apply(_fmt_comentario, axis=1)
+
                 # Construir df de display
                 _cols_num = [c for c in
                     ["folio","tecnico","_fecha","client","station","maint_type",
-                     "_n_ini","_n_fin","_fichas","_estado"]
+                     "_n_ini","_n_fin","_fichas","_estado","_comentario"]
                     if c in _det_num.columns]
                 _det_num_disp = _det_num[_cols_num].rename(columns={
                     "folio":      "OT",
@@ -7634,6 +7646,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     "_n_fin":     "N. Final",
                     "_fichas":    "Fichas período",
                     "_estado":    "Estado",
+                    "_comentario":"Comentario técnico / causa raíz",
                 }).sort_values(["Estado", "Fecha"], ascending=[True, False])
 
                 _n_sin      = int((~_df_num_base["numeral_ok"]).sum())
@@ -7649,8 +7662,10 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         "Aplica a **lavadoras y aspiradoras**. Numerales **reales** "
                         "leídos del formulario de la tarea en Fracttal (no de la nota). "
                         "🔵 **No aplica** = equipo sin numeral (compresores, ablandadores, etc.). "
-                        "✅ = numeral registrado · ❌ **Sin numeral** = lavadora/aspiradora sin lectura. "
-                        "**Fichas período** = N. Final − N. Inicial."
+                        "✅ = numeral válido · ❌/🟣 = dato malo (sin numeral, basura, exceso de fichas, salto). "
+                        "**Fichas período** = N. Final − N. Inicial (>20 en una OT = sospechoso). "
+                        "**Comentario técnico** = lo que el técnico escribió en el formulario "
+                        "(falla, trabajo realizado, observaciones) — la causa raíz real."
                     )
                     _show_df(_det_num_disp, hide_index=True, width="stretch",
                         column_config={
@@ -7666,7 +7681,9 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 help="Lectura final del contador (TOMA DE NUMERAL FINAL)."),
                             "Fichas período":st.column_config.TextColumn(width=100,
                                 help="Diferencia Final − Inicial = fichas usadas en el período."),
-                            "Estado":        st.column_config.TextColumn(width=120),
+                            "Estado":        st.column_config.TextColumn(width=150),
+                            "Comentario técnico / causa raíz": st.column_config.TextColumn(width=340,
+                                help="Texto libre del técnico en el formulario de Fracttal: falla encontrada, trabajo realizado y observaciones. Vacío = el técnico no documentó."),
                         })
 
             if not df_tec_scores_rank.empty:
