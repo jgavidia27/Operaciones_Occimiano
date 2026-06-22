@@ -3318,15 +3318,27 @@ elif _page == _NAV_PAGES[3]:
             return
         _seq = analizar_secuencias(_hist, n=10)
 
-        # ── Lookup de metadatos EDS (eds_occim → nombre, loc) ─────────────────
+        # ── Lookup de metadatos EDS (eds_occim → nombre, loc, macrozona) ─────────
+        _NORTE_KW = ("arica","tarapaca","antofagasta","atacama","coquimbo")
+        _SUR_KW   = ("maule","nuble","biobio","araucania","araucan",
+                     "los rios","los lagos","aysen","magallanes")
         _eds_meta = {}
         if not df_eds.empty and "eds_occim" in df_eds.columns:
             for _, _row in df_eds.iterrows():
                 _mk = str(_row.get("eds_occim", "") or "").strip()
                 if _mk:
+                    _reg_raw = str(_row.get("region", "") or "").lower()
+                    _reg = unicodedata.normalize("NFKD", _reg_raw).encode("ascii","ignore").decode()
+                    if any(k in _reg for k in _NORTE_KW):
+                        _mz = "Norte"
+                    elif any(k in _reg for k in _SUR_KW):
+                        _mz = "Sur"
+                    else:
+                        _mz = "Santiago"
                     _eds_meta[_mk] = {
-                        "nombre": str(_row.get("nombre", "") or ""),
-                        "loc":    str(_row.get("_loc_code", "") or ""),
+                        "nombre":    str(_row.get("nombre", "") or ""),
+                        "loc":       str(_row.get("_loc_code", "") or ""),
+                        "macrozona": _mz,
                     }
 
         # ── Período ────────────────────────────────────────────────────────────
@@ -3334,9 +3346,13 @@ elif _page == _NAV_PAGES[3]:
         _seq["_year"] = _f.dt.year
         _seq["_mes"]  = _f.dt.month
         _seq["_trim"] = _f.dt.quarter
+        # Macrozona por equipo (via eds_occim → lookup)
+        _seq["_zona"] = _seq["eds_occim"].apply(
+            lambda eo: _eds_meta.get(str(eo or "").strip(), {}).get("macrozona", "")
+        )
 
         # ── Filtros fila 1 ─────────────────────────────────────────────────────
-        _fc1, _fc2, _fc3, _fc4 = st.columns([1.0, 1.0, 1.4, 1.8])
+        _fc1, _fc2, _fc3, _fc4, _fc5 = st.columns([0.8, 0.8, 1.2, 1.5, 1.0])
         with _fc1:
             _yrs = sorted([int(y) for y in _seq["_year"].dropna().unique()], reverse=True)
             _yr_sel = st.selectbox("Año", _yrs, index=0, key="num_tab_year")
@@ -3349,6 +3365,10 @@ elif _page == _NAV_PAGES[3]:
         with _fc4:
             _cli_sel = st.multiselect("Cliente",
                 options=["COPEC","Aramco (Esmax)","SHELL (Enex)"], key="num_tab_cli")
+        with _fc5:
+            _zona_sel = st.multiselect("Región",
+                options=["Norte","Santiago","Sur"], key="num_tab_zona",
+                help="Norte: Coquimbo y arriba · Santiago: RM + Valparaíso + O'Higgins · Sur: Maule y abajo")
 
         _sit_opts  = ["normal","raro","anomalo","incongruente","salto_seq"]
         _sit_label = {**CAT_LABEL, "salto_seq": "🟣 Salto de secuencia (entre OTs)"}
@@ -3364,7 +3384,7 @@ elif _page == _NAV_PAGES[3]:
             key="num_tab_busq",
         )
 
-        # ── Scope período + cliente ────────────────────────────────────────────
+        # ── Scope período + cliente + región ──────────────────────────────────
         _scope = _seq[_seq["_year"] == _yr_sel].copy()
         if _trim_sel != "Todos":
             _scope = _scope[_scope["_trim"] == int(_trim_sel[1])]
@@ -3372,6 +3392,8 @@ elif _page == _NAV_PAGES[3]:
             _scope = _scope[_scope["_mes"].isin(_mes_sel)]
         if _cli_sel:
             _scope = _scope[_scope["client"].isin(_cli_sel)]
+        if _zona_sel:
+            _scope = _scope[_scope["_zona"].isin(_zona_sel)]
         _codes_scope = set(_scope["equipment_code"].unique())
 
         _disp_seq = _seq[_seq["equipment_code"].isin(_codes_scope)].copy()
@@ -3409,6 +3431,7 @@ elif _page == _NAV_PAGES[3]:
                 _eds_groups[_ekey] = {
                     "nombre":    _meta.get("nombre") or _stn,
                     "loc":       _meta.get("loc", ""),
+                    "macrozona": _meta.get("macrozona", ""),
                     "eds_occim": _eo,
                     "station":   _stn,
                     "client":    str(_grp["client"].iloc[0]),
@@ -3446,15 +3469,22 @@ elif _page == _NAV_PAGES[3]:
         )
 
         # ── Renderizar por EDS → equipos ──────────────────────────────────────
+        _ZONA_COLOR = {"Norte": "#F59E0B", "Santiago": "#3B82F6", "Sur": "#10B981"}
         for _ekey, _einfo in sorted(_eds_groups.items(), key=lambda x: -x[1]["n_alerta"]):
-            _loc_txt  = f"&nbsp;·&nbsp;{_einfo['loc']}"      if _einfo["loc"]      else ""
+            _loc_txt  = f"&nbsp;·&nbsp;{_einfo['loc']}"       if _einfo["loc"]      else ""
             _code_txt = f"&nbsp;·&nbsp;{_einfo['eds_occim']}" if _einfo["eds_occim"] else ""
             _n_eq_eds = len(_einfo["equipos"])
+            _mz       = _einfo.get("macrozona", "")
+            _mz_color = _ZONA_COLOR.get(_mz, "#888")
+            _mz_txt   = (f'<span style="background:{_mz_color}22;color:{_mz_color};'
+                         f'border-radius:4px;padding:1px 7px;font-size:0.75rem;'
+                         f'font-weight:600;margin-left:8px;">{_mz}</span>') if _mz else ""
             st.markdown(
                 f'<div style="background:{_t["card"]};border:1px solid {_t["border"]};'
                 f'border-radius:8px;padding:8px 14px;margin:14px 0 2px 0;">'
                 f'<span style="font-weight:700;font-size:0.95rem;">'
                 f'{_einfo["nombre"] or _einfo["station"]}</span>'
+                f'{_mz_txt}'
                 f'<span style="font-size:0.80rem;color:#888;margin-left:8px;">'
                 f'{_code_txt}{_loc_txt}&nbsp;·&nbsp;{_einfo["client"]}</span>'
                 f'<span style="float:right;font-size:0.82rem;color:#888;">'
