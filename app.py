@@ -8007,16 +8007,29 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
             st.divider()
             st.markdown('<div class="section-header">🔍 Detalle de OTs por técnico</div>',
                         unsafe_allow_html=True)
-            st.caption("Selecciona un técnico para ver el historial completo de sus OTs del mes.")
+            st.caption(
+                "Selecciona uno o varios técnicos para ver el historial completo de sus OTs del periodo. "
+                "Vacío = todos los técnicos del filtro actual (equipo seleccionado)."
+            )
 
             if not df_tec_scores.empty:
-                tec_drill = st.selectbox(
-                    "Técnico",
-                    df_tec_scores["tecnico"].tolist(),
+                _tec_opts = df_tec_scores["tecnico"].tolist()
+                tec_drill_list = st.multiselect(
+                    "Técnico(s)",
+                    _tec_opts,
+                    default=[],
                     key="kpi_drill_tec",
+                    placeholder="Todos los técnicos del equipo",
                 )
-                df_drill = df_ot_scores[df_ot_scores["tecnico"] == tec_drill].copy()
-                df_drill = df_drill.sort_values("score_total", ascending=True)
+                if tec_drill_list:
+                    df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(tec_drill_list)].copy()
+                    _tec_drill_lbl = (", ".join(tec_drill_list) if len(tec_drill_list) <= 3
+                                      else f"{len(tec_drill_list)} técnicos seleccionados")
+                else:
+                    # Sin selección explícita → todos los técnicos disponibles en df_ot_scores
+                    df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(_tec_opts)].copy()
+                    _tec_drill_lbl = f"Todos ({df_drill['tecnico'].nunique()} técnicos)"
+                df_drill = df_drill.sort_values(["tecnico","score_total"], ascending=[True, True])
 
                 if not df_drill.empty:
                     avg_drill = df_drill["score_total"].mean()
@@ -8024,7 +8037,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     st.markdown(
                         f'<div style="background:{color_d}18;border-left:4px solid {color_d};'
                         f'border-radius:8px;padding:10px 14px;margin-bottom:8px;">'
-                        f'<b style="color:{color_d}">{tec_drill}</b> — '
+                        f'<b style="color:{color_d}">{_tec_drill_lbl}</b> — '
                         f'Score promedio: <b>{avg_drill:.1f}/100</b> &nbsp; {lbl_d} &nbsp; | &nbsp; '
                         f'<b>{len(df_drill)}</b> OTs en {_mes_lbl_prec}</div>',
                         unsafe_allow_html=True,
@@ -8086,19 +8099,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         _fmt_col_numeral,
                         axis=1)
 
-                    # Columna 7: 🎯 Modalidad — valor registrado + ✅/❌
-                    def _fmt_modal(r):
-                        raw = str(r.get("deteccion_raw","") or "").strip()
-                        ok  = _d[r.name] >= 25
-                        if ok and raw:
-                            return f"✅ {raw[:38]}"
-                        return "❌ Sin clasificar"
-                    if "deteccion_raw" in drill_disp.columns:
-                        drill_disp["_col_modal"] = drill_disp.apply(_fmt_modal, axis=1)
-                    else:
-                        drill_disp["_col_modal"] = "❌ Sin clasificar"
-
-                    # Columna 8: 💬 Observación — descripción de qué falló (3 componentes KPI)
+                    # Columna 7: 💬 Observación — descripción de qué falló (3 componentes KPI)
                     _nombres_comp = {0: "Tiempo", 1: "Causa raíz", 2: "Numeral"}
                     _scores_comp  = [_s, _c, _n]
                     def _obs(r):
@@ -8109,23 +8110,29 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         return "⚠️ No cumple: " + ", ".join(fallos)
                     drill_disp["_obs"] = drill_disp.apply(_obs, axis=1)
 
-                    # Columna 9: Fecha cierre
+                    # Columna 8: Fecha cierre
                     drill_disp["_fecha"] = pd.to_datetime(
                         drill_disp["final_date"], errors="coerce"
                     ).dt.strftime("%d/%m/%Y")
 
-                    # Selección ordenada y limpia — sin riesgo de mezclar columnas
+                    # EDS y Técnico (para identificar la fila en vista multi-técnico)
+                    if "eds_occim" in drill_disp.columns:
+                        drill_disp["_eds"] = drill_disp["eds_occim"].fillna("").replace("", "—")
+                    else:
+                        drill_disp["_eds"] = "—"
+
+                    # Selección ordenada y limpia — sin Modalidad (ya no entra al KPI)
                     drill_disp = drill_disp[[
-                        "_cumple", "_x4", "folio", "station", "_tipo",
+                        "_cumple", "_x4", "folio", "_eds", "tecnico", "station", "_tipo",
                         "score_total",
-                        "_col_tiempo", "_col_causa", "_col_numeral", "_col_modal",
+                        "_col_tiempo", "_col_causa", "_col_numeral",
                         "_obs", "_fecha",
                     ]].copy()
 
                     drill_disp.columns = [
-                        "Cumple", "X/3", "OT", "Estación", "Tipo",
+                        "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación", "Tipo",
                         "Score",
-                        "⏱ Tiempo", "🔍 Causa raíz", "🔢 Numeral", "ℹ️ Modalidad",
+                        "⏱ Tiempo", "🔍 Causa raíz", "🔢 Numeral",
                         "💬 Observación", "Fecha",
                     ]
 
@@ -8160,18 +8167,19 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             "X/3":              st.column_config.TextColumn(width=80,
                                 help="Componentes correctos de los 3 del KPI"),
                             "OT":               st.column_config.TextColumn(width=110),
+                            "EDS":              st.column_config.TextColumn(width=85,
+                                help="Código EDS Occimiano."),
+                            "Técnico":          st.column_config.TextColumn(width=180),
                             "Estación":         st.column_config.TextColumn(width=200),
                             "Tipo":             st.column_config.TextColumn(width=130),
                             "Score":            st.column_config.ProgressColumn(
                                 min_value=0, max_value=75, format="%.1f"),
                             "⏱ Tiempo":         st.column_config.TextColumn(width=110,
-                                help="Minutos con Fracttal abierto · ✅ cumple el umbral"),
+                                help="Minutos con Fracttal abierto. ✅ cumple ≥75% del estimado neto · MC no aplica (auto-25)."),
                             "🔍 Causa raíz":    st.column_config.TextColumn(width=240,
-                                help="Causa registrada por el técnico · PM no requiere causa"),
-                            "🔢 Numeral":       st.column_config.TextColumn(width=130,
-                                help="Si registró o no un número de ficha ≥4 dígitos en la nota"),
-                            "ℹ️ Modalidad":     st.column_config.TextColumn(width=230,
-                                help="Modalidad de atención — dato informativo, no entra al KPI"),
+                                help="Causa registrada por el técnico. Solo se evalúa en MC; MP siempre da 25 auto."),
+                            "🔢 Numeral":       st.column_config.TextColumn(width=160,
+                                help="Calidad del numeral en lavadora/aspiradora (MC+MP). Motivo del dato malo si no cumple."),
                             "💬 Observación":   st.column_config.TextColumn(width=260,
                                 help="Resumen de cumplimiento de la OT (3 componentes)"),
                             "Fecha":            st.column_config.TextColumn(width=90),
