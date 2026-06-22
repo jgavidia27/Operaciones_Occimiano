@@ -5840,16 +5840,47 @@ elif _page == _NAV_PAGES[0]:
         # Clientes evaluados en reincidencias (mismos que numerador)
         _CLIENTES_SLA_RC = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
 
+        # ── Aplicar mismos filtros temporales al UNIVERSO de PMs ─────────────
+        # El numerador (fallas post-PM, _df_rc) se filtra por trimestre/mes/semana.
+        # El denominador (PMs totales) DEBE filtrarse por el mismo período para
+        # que la división sea coherente. Antes el denominador era todo 2026, lo
+        # que inflaba la exactitud (numerador chico / denominador grande).
+        _pm_universo = df_wo[
+            (df_wo["maint_type"] == "Preventiva") &
+            (df_wo["client"].isin(_CLIENTES_SLA_RC) if "client" in df_wo.columns else True)
+        ].copy()
+        # Fecha que cuenta para el PM = final_date (cuando se realizó)
+        if "final_date" in _pm_universo.columns:
+            _pm_universo["_fecha_pm"] = pd.to_datetime(
+                _pm_universo["final_date"], errors="coerce", utc=True
+            ).dt.tz_convert(None)
+            # Filtro trimestre
+            if _trim_rc != "Todos":
+                _pm_universo = _pm_universo[
+                    _pm_universo["_fecha_pm"].dt.month.isin(_TRIMESTRES_RC[_trim_rc])
+                ]
+            # Filtro mes (lista)
+            if _mes_rc:
+                _meses_int = {int(str(m).split("-")[1]) for m in _mes_rc if "-" in str(m)}
+                _años_int  = {int(str(m).split("-")[0]) for m in _mes_rc if "-" in str(m)}
+                _pm_universo = _pm_universo[
+                    _pm_universo["_fecha_pm"].dt.year.isin(_años_int) &
+                    _pm_universo["_fecha_pm"].dt.month.isin(_meses_int)
+                ]
+            # Filtro semana (solo si 1 mes seleccionado)
+            if _sem_rc != "Todas" and len(_mes_rc) == 1:
+                _sem_rc_match2 = next((s for s in _sems_rc if s[0] == _sem_rc), None)
+                if _sem_rc_match2:
+                    _pm_universo = _pm_universo[
+                        (_pm_universo["_fecha_pm"].dt.date >= _sem_rc_match2[1]) &
+                        (_pm_universo["_fecha_pm"].dt.date <= _sem_rc_match2[2])
+                    ]
+
         _cal_cols = st.columns(len(_eq_label_cal_iter))
         for _ci, (_gk, _gl) in enumerate(zip(_eq_label_cal_iter.keys(), _eq_label_cal_iter.values())):
             _senior_cal = GRUPOS_TERRENO.get(_gk, {}).get("senior", "")
-            # Denominador: solo PMs de los mismos clientes que el numerador (COPEC/ESMAX/SHELL/Abastible).
-            # Incluir otros clientes no evaluados inflaría el denominador → efectividad % falsa.
-            _pm_equipo = df_wo[
-                (df_wo["maint_type"] == "Preventiva") &
-                (df_wo["equipo"] == _gk) &
-                (df_wo["client"].isin(_CLIENTES_SLA_RC) if "client" in df_wo.columns else True)
-            ]
+            # Denominador: PMs del MISMO período seleccionado, no de todo 2026.
+            _pm_equipo = _pm_universo[_pm_universo["equipo"] == _gk]
             _n_pm = _pm_equipo["folio"].nunique() if "folio" in _pm_equipo.columns else len(_pm_equipo)
             _n_pm_sla = _n_pm  # ahora el denominador ya es solo clientes SLA
             # Fallas post-PM del período filtrado
