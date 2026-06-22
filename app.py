@@ -7424,7 +7424,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _det_te["creation_date"] = _det_te_cd.dt.strftime("%d/%m/%Y")
 
                 _det_te_disp = _det_te[[c for c in
-                    ["folio","tecnico","creation_date","maint_type",
+                    ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
                      "estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"]
                     if c in _det_te.columns]].copy()
                 _det_te_disp["T. Estimado"]   = _det_te_disp["estimated_sec"].apply(_fmt_seg)
@@ -7433,17 +7433,31 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
                 _det_te_disp["Estado"]         = _det_te_disp["_te_ok"].apply(
                     lambda v: "✅ Cumple" if v else "❌ No cumple")
+                # Normalizar Equipo/EDS para display
+                if "equipment_code" in _det_te_disp.columns:
+                    _det_te_disp["equipment_code"] = _det_te_disp["equipment_code"].fillna("").replace("", "—")
+                if "eds_occim" in _det_te_disp.columns:
+                    _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
                 _det_te_disp = _det_te_disp.drop(
                     columns=["estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"],
                     errors="ignore"
                 ).rename(columns={
-                    "folio":"OT","tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
+                    "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
+                    "tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
                 }).sort_values("Fecha", ascending=False)
+                # Orden: OT - Equipo - EDS - Técnico - resto
+                _orden_te = ["OT","Equipo","EDS","Técnico","Fecha","Tipo",
+                             "T. Estimado","Mín. 75%","T. Ejecución","% Ejecutado","Estado"]
+                _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
                 with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({len(_det_te_disp):,} preventivos con estimado)", expanded=False):
                     _show_df(_det_te_disp, hide_index=True, width="stretch",
                         column_config={
                             "OT":          st.column_config.TextColumn(width=110),
+                            "Equipo":      st.column_config.TextColumn(width=95,
+                                help="Código del activo en Fracttal (ej. EQ-6249)."),
+                            "EDS":         st.column_config.TextColumn(width=85,
+                                help="Código EDS Occimiano donde se realizó el MP/MC."),
                             "Técnico":     st.column_config.TextColumn(width=190),
                             "Fecha":       st.column_config.TextColumn(width=100),
                             "Tipo":        st.column_config.TextColumn(width=200),
