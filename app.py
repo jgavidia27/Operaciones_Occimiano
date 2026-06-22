@@ -7214,7 +7214,7 @@ elif _page == _NAV_PAGES[0]:
                 # ── Tabla detalle de Causa Raíz ───────────────────────────────
                 with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} OTs MC+MP)", expanded=False):
                     _det_cr = _df_cr_base[[c for c in
-                        ["folio","eds_occim","tecnico","creation_date","maint_type",
+                        ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
                          "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok",
                          "es_correctiva"]
                         if c in _df_cr_base.columns]].copy()
@@ -7270,28 +7270,34 @@ elif _page == _NAV_PAGES[0]:
                     if "comentario_tecnico" in _det_cr.columns:
                         _det_cr["comentario_tecnico"] = (
                             _det_cr["comentario_tecnico"].fillna("").apply(_strip_comentario_headers))
-                    # Normalizar EDS para display (Equipo se omite: una OT puede tener
-                    # varios activos; el KPI evalúa la OT como unidad).
+                    # Causa raíz: SÍ mostrar Equipo. En Fracttal las correctivas
+                    # siempre tienen 1 activo por OT (la falla es por equipo),
+                    # así que cada fila corresponde inequívocamente a un equipo.
+                    # Las preventivas multi-subtarea no tienen causa raíz registrada.
+                    if "equipment_code" in _det_cr.columns:
+                        _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
                     if "eds_occim" in _det_cr.columns:
                         _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
                     _det_cr = _det_cr.drop(
                         columns=["_causa_ok","es_correctiva"], errors="ignore"
                     ).rename(columns={
-                        "folio":"OT","eds_occim":"EDS",
+                        "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
                         "tecnico":"Técnico","creation_date":"Fecha",
                         "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
                         "causa_clasif":"Clasificación",
                         "comentario_tecnico":"Comentario técnico / qué hizo",
                         "_diagnostico":"Diagnóstico del error"
                     }).sort_values("Fecha", ascending=False)
-                    # Orden final: OT - EDS - resto, Comentario y Diagnóstico al final
-                    _orden_cr = ["OT","EDS","Técnico","Fecha","Tipo","Causa Raíz",
+                    # Orden final: OT - Equipo - EDS - resto, Comentario y Diagnóstico al final
+                    _orden_cr = ["OT","Equipo","EDS","Técnico","Fecha","Tipo","Causa Raíz",
                                  "Clasificación","Estado",
                                  "Comentario técnico / qué hizo","Diagnóstico del error"]
                     _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
                     _show_df(_det_cr, hide_index=True, width="stretch",
                         column_config={
                             "OT":            st.column_config.TextColumn(width=110),
+                            "Equipo":        st.column_config.TextColumn(width=95,
+                                help="Código del activo en Fracttal (ej. EQ-6249). En correctivas siempre hay 1 equipo por OT."),
                             "EDS":           st.column_config.TextColumn(width=85,
                                 help="Código EDS Occimiano donde se realizó el MP/MC."),
                             "Técnico":       st.column_config.TextColumn(width=190),
