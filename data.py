@@ -1020,15 +1020,34 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     ot["quick_tick_label"] = ot.apply(_quick_tick_label, axis=1)
 
     # ── Etiqueta causa raíz (informativa) ─────────────────────────────────────
+    # Caso especial: el técnico DEJÓ "SIN CLASIFICAR" pero SÍ describió la falla
+    # en el texto libre → sabía qué pasaba y no clasificó = descuido de llenado.
+    # Es un error atribuible más grave que simplemente no documentar nada.
+    def _desglosa_falla(coment: str) -> bool:
+        c = (coment or "").upper()
+        return any(k in c for k in ("FALLA", "TRABAJO REALIZADO", "OBSERVACI"))
+
     def _causa_label(row) -> str:
         if not row["es_correctiva"]:
             return "✅ PM (no aplica)"
         c = row["causa_clasif"]
         if c == "tecnico":   return "✅ Causa: Técnico"
         if c == "cliente":   return "✅ Causa: Cliente"
+        # sin clasificar: distinguir descuido (describió pero no clasificó) de vacío total
+        if _desglosa_falla(row.get("comentario_tecnico", "")):
+            return "🔴 Sin clasificar (describió la falla)"
         return "❌ Sin causa / Vaga"
 
     ot["causa_label"] = ot.apply(_causa_label, axis=1)
+    # Flag booleano para filtrar/contar este descuido específico
+    ot["causa_sin_clasif_con_desglose"] = ot.apply(
+        lambda r: bool(
+            r["es_correctiva"]
+            and r["causa_clasif"] not in ("tecnico", "cliente")
+            and _desglosa_falla(r.get("comentario_tecnico", ""))
+        ),
+        axis=1,
+    )
 
     # ── Etiqueta método de detección (informativa) ────────────────────────────
     ot["deteccion_label"] = ot["deteccion_ok"].apply(

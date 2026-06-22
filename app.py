@@ -7871,6 +7871,9 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             return "✅ PM (no aplica)"
                         if ok:
                             return f"✅ {raw[:38]}" if raw else "✅ Registrada"
+                        # Descuido atribuible: no clasificó pero SÍ describió la falla
+                        if r.get("causa_sin_clasif_con_desglose", False):
+                            return "🔴 No clasificó (sí describió la falla)"
                         return f"❌ {raw[:35]}" if raw else "❌ Sin causa"
                     drill_disp["_col_causa"] = drill_disp.apply(_fmt_causa, axis=1)
 
