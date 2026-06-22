@@ -7126,6 +7126,10 @@ elif _page == _NAV_PAGES[0]:
                         "causa_clasif":"Clasificación",
                         "comentario_tecnico":"Comentario técnico / qué hizo"
                     }).sort_values("Fecha", ascending=False)
+                    # Orden final: Comentario AL FINAL (después de Estado)
+                    _orden_cr = ["OT","Técnico","Fecha","Tipo","Causa Raíz",
+                                 "Clasificación","Estado","Comentario técnico / qué hizo"]
+                    _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
                     _show_df(_det_cr, hide_index=True, width="stretch",
                         column_config={
                             "OT":            st.column_config.TextColumn(width=110),
