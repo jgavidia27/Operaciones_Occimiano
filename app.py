@@ -7886,24 +7886,24 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _sub = _sub[_sub["tipo_activo"].isin(("lavadora","aspiradora","lavainterior"))]
                     if not _sub.empty:
                         _sub = _sub.rename(columns={"id_ot": "folio"})
-                        # Joinear contra _det_num (meta de la OT: técnico, fecha, cliente, EDS, tipo).
+                        # Meta de la OT (técnico, fecha, cliente, EDS, tipo, comentario).
                         _meta_cols = [c for c in [
                             "folio","tecnico","creation_date","client","station","maint_type",
-                            "comentario_tecnico","es_correctiva"]
+                            "eds_occim","comentario_tecnico","es_correctiva"]
                             if c in _det_num.columns]
                         _meta = _det_num[_meta_cols].drop_duplicates("folio")
-                        _exp = _sub.merge(_meta, on="folio", how="left")
-                        # En la versión expandida, las columnas "por OT" del original son
-                        # reemplazadas por las "por subtarea":
-                        _exp["numeral_inicial"] = _exp["numeral_inicial"]
-                        _exp["numeral_final"]   = _exp["numeral_final"]
-                        _exp["numeral_ok"]      = _exp["numeral_ok"]
-                        _exp["numeral_motivo"]  = _exp["motivo"]
-                        _exp["es_lavadora"]     = True
-                        # Valor para columna "numeral" (último valor visible)
-                        _exp["numeral_valor"] = _exp["numeral_final"].fillna(_exp["numeral_inicial"]).fillna("")
-                        # Añadimos código y nombre del activo
-                        _det_num = _exp
+                        # INNER merge: solo OTs en el scope actual (período/equipo/técnico).
+                        # Antes era left desde _sub (todo 2026) → filas huérfanas con
+                        # metadatos vacíos (None en técnico/fecha/cliente).
+                        _exp = _meta.merge(_sub, on="folio", how="inner")
+                        if not _exp.empty:
+                            _exp["numeral_motivo"] = _exp["motivo"]
+                            _exp["es_lavadora"]    = True
+                            _exp["numeral_valor"]  = (
+                                _exp["numeral_final"].fillna(_exp["numeral_inicial"]).fillna(""))
+                            # Equipo = código del activo de ESTA subtarea (EQ-XXXX)
+                            _exp["_equipo_sub"] = _exp["codigo_activo"].fillna("—")
+                            _det_num = _exp
 
                 # Columna Numeral y Estado con tres casos claros:
                 #   🔵 No aplica  → equipo no es lavadora (no se exige numeral)
@@ -7956,17 +7956,27 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
 
                 # Comentario / conclusión del técnico (texto libre del PDF de la OT).
                 # Clave para rastrear la causa raíz cuando el numeral viene malo.
-                _det_num["_comentario"] = _det_num.get(
-                    "comentario_tecnico", pd.Series("", index=_det_num.index)
-                ).apply(_strip_comentario_headers)
+                # fillna("") evita que NaN llegue como "nan" al sanitizer.
+                _serie_com = (_det_num["comentario_tecnico"].fillna("")
+                              if "comentario_tecnico" in _det_num.columns
+                              else pd.Series("", index=_det_num.index))
+                _det_num["_comentario"] = _serie_com.apply(_strip_comentario_headers)
+
+                # Equipo (código del activo). En vista expandida = activo de la subtarea;
+                # en vista normal (sin desglose) = no disponible a este nivel.
+                if "_equipo_sub" in _det_num.columns:
+                    _det_num["_equipo"] = _det_num["_equipo_sub"].fillna("—")
+                else:
+                    _det_num["_equipo"] = "—"
 
                 # Construir df de display
                 _cols_num = [c for c in
-                    ["folio","tecnico","_fecha","client","station","maint_type",
+                    ["folio","_equipo","tecnico","_fecha","client","station","maint_type",
                      "_n_ini","_n_fin","_fichas","_estado","_comentario"]
                     if c in _det_num.columns]
                 _det_num_disp = _det_num[_cols_num].rename(columns={
                     "folio":      "OT",
+                    "_equipo":    "Equipo",
                     "tecnico":    "Técnico",
                     "_fecha":     "Fecha",
                     "client":     "Cliente",
@@ -7977,7 +7987,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     "_fichas":    "Fichas período",
                     "_estado":    "Estado",
                     "_comentario":"Comentario técnico / causa raíz",
-                }).sort_values(["Estado", "Fecha"], ascending=[True, False])
+                }).sort_values(["OT", "Estado"], ascending=[True, True])
 
                 _n_sin      = int((~_df_num_base["numeral_ok"]).sum())
                 _n_lav_ok   = int((_df_num_base["es_lavadora"] & _df_num_base["numeral_ok"]).sum()) \
@@ -8005,6 +8015,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _show_df(_det_num_disp, hide_index=True, width="stretch",
                         column_config={
                             "OT":            st.column_config.TextColumn(width=110),
+                            "Equipo":        st.column_config.TextColumn(width=95,
+                                help="Código del activo (EQ-XXXX). Una OT compuesta muestra una fila por activo con numeral."),
                             "Técnico":       st.column_config.TextColumn(width=180),
                             "Fecha":         st.column_config.TextColumn(width=95),
                             "Cliente":       st.column_config.TextColumn(width=85),
