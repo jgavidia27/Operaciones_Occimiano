@@ -426,8 +426,12 @@ def analizar_secuencias(df_hist: pd.DataFrame, n: "int | None" = 10) -> pd.DataF
 
     df["_vi"] = df["numeral_inicial"].apply(_numeral_raw_int)
     df["_vf"] = df["numeral_final"].apply(_numeral_raw_int)
-    # Final de la visita previa del mismo equipo
-    df["prev_final"] = df.groupby("equipment_code")["_vf"].shift(1)
+    # Final de la visita previa del mismo equipo.
+    # ffill() primero: si una OT no tiene numeral final, no rompe la cadena
+    # para la siguiente visita (usamos el último final conocido del equipo).
+    df["prev_final"] = df.groupby("equipment_code")["_vf"].transform(
+        lambda s: s.ffill().shift(1)
+    )
 
     def _seq(row):
         pf, ci = row["prev_final"], row["_vi"]

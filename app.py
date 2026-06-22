@@ -3475,8 +3475,22 @@ elif _page == _NAV_PAGES[3]:
                     _d = _grp.copy()
                     _d["Fecha"] = pd.to_datetime(_d["fecha"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
                     _d["Salto secuencia"] = _d["salto_seq"].replace("", "✅ OK")
+
+                    # Detectar el primer registro donde comenzó el error (cronológico)
+                    _eq_chron = _d.sort_values("Fecha")
+                    _origen_folio = None
+                    for _, _or in _eq_chron.iterrows():
+                        _seq_alert  = _or.get("seq_severidad") == "alert"
+                        _intra_mal  = _or.get("categoria") in ("anomalo","incongruente")
+                        if _seq_alert or _intra_mal:
+                            _origen_folio = _or.get("folio")
+                            break
+                    _d["Origen"] = _d["folio"].apply(
+                        lambda f: "🔴 Origen del error" if f == _origen_folio and _origen_folio else ""
+                    )
+
                     _cols_d = ["Fecha","folio","technician","numeral_inicial","numeral_final",
-                               "estado","Salto secuencia"]
+                               "estado","Salto secuencia","Origen"]
                     _d = _d[[c for c in _cols_d if c in _d.columns]].rename(columns={
                         "folio":           "OT",
                         "technician":      "Técnico",
@@ -3486,14 +3500,16 @@ elif _page == _NAV_PAGES[3]:
                     })
                     _show_df(_d, use_container_width=True, hide_index=True,
                         column_config={
-                            "Fecha":      st.column_config.TextColumn(width=90),
-                            "OT":         st.column_config.TextColumn(width=95),
-                            "Técnico":    st.column_config.TextColumn(width=155),
-                            "N. Inicial": st.column_config.TextColumn(width=90),
-                            "N. Final":   st.column_config.TextColumn(width=90),
-                            "Fichas (intra-OT)": st.column_config.TextColumn(width=175),
-                            "Salto secuencia":   st.column_config.TextColumn(width=235,
+                            "Fecha":      st.column_config.TextColumn(width=85),
+                            "OT":         st.column_config.TextColumn(width=90),
+                            "Técnico":    st.column_config.TextColumn(width=130),
+                            "N. Inicial": st.column_config.TextColumn(width=85),
+                            "N. Final":   st.column_config.TextColumn(width=85),
+                            "Fichas (intra-OT)": st.column_config.TextColumn(width=165),
+                            "Salto secuencia":   st.column_config.TextColumn(width=210,
                                 help="Compara el inicial de esta visita con el final de la anterior."),
+                            "Origen": st.column_config.TextColumn(width=155,
+                                help="Primera OT donde el contador dejó de ser coherente."),
                         })
 
     # ── Renderizar tabs ──────────────────────────────────────────────────────
