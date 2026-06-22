@@ -7784,21 +7784,23 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
             st.markdown('<div class="section-header">🔢  Registro de Numerales — OTs con número de ficha</div>',
                         unsafe_allow_html=True)
             st.caption(
-                "Solo **preventivas (MP)**. Porcentaje donde el técnico registró un número de ficha "
-                "(≥4 dígitos) en lavadoras. Correctivas no se evalúan en este indicador."
+                "Aplica a **lavadoras y aspiradoras** en MC y MP. El formulario Fracttal "
+                "exige el numeral en ambos tipos, así que un valor faltante o basura "
+                "penaliza igual sea correctiva o preventiva."
             )
 
-            # Numeral solo aplica a preventivas → filtrar correctivas desde la base
-            _df_num_base = df_ot_scores[~df_ot_scores["es_correctiva"]].copy() \
-                if "es_correctiva" in df_ot_scores.columns else df_ot_scores.copy()
+            # Numeral aplica a TODA lavadora/aspiradora (MC + MP) — se incluyen
+            # correctivas y preventivas. Los equipos no-lavadora aportan score=25
+            # auto (no_aplica), igual no distorsionan el indicador.
+            _df_num_base = df_ot_scores.copy()
             if not _df_num_base.empty:
                 _num_ok  = int(_df_num_base["numeral_ok"].sum())
                 _num_tot = len(_df_num_base)
                 _num_pct = _num_ok / _num_tot * 100 if _num_tot > 0 else 0.0
 
                 # ── Evolución (respeta selección: semanas si 1 mes, meses si varios) ─
-                _df_num_hist = df_ot_all[~df_ot_all["es_correctiva"]].copy() \
-                    if "es_correctiva" in df_ot_all.columns else df_ot_all.copy()
+                # Incluye MC + MP (el numeral aplica a ambos en lavadora/aspiradora).
+                _df_num_hist = df_ot_all.copy()
                 if equipo_kpi != "Todos":
                     _grp_num = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
                     _df_num_hist = _df_num_hist[_df_num_hist["equipo"] == _grp_num]
