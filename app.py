@@ -24,6 +24,7 @@ from data import (
     build_work_orders_df, build_third_parties_df, station_summary, CLIENT_COLORS,
     build_kpi_llenado_df, score_llenado_por_ot, score_llenado_por_tecnico,
     build_reincidencias, build_numeral_historial, analizar_secuencias, CAT_LABEL,
+    NUMERAL_MOTIVO_LABEL,
     GRUPOS_TERRENO, get_grupo_tecnico, TECNICOS_NO_APLICA,
     SENIORS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
@@ -54,7 +55,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v13-eds-occim"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v14-numeral-calidad"  # bump para invalidar disco al cambiar data.py
 
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def _cached_build_kpi_llenado(raw_wo: list, cache_v: str = _KPI_CACHE_VERSION) -> pd.DataFrame:
@@ -7581,12 +7582,13 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 def _fmt_numeral_estado(row):
                     if not row.get("es_lavadora", True):
                         return "🔵 No aplica"
-                    v = str(row.get("numeral_valor", "") or "").strip()
-                    if row.get("numeral_ok", False) and v:
-                        return f"✅ {v}"          # muestra el número real
+                    # Motivo del veredicto de calidad (sin numeral / basura / exceso / etc.)
+                    _motivo = str(row.get("numeral_motivo", "") or "")
                     if row.get("numeral_ok", False):
-                        return "✅ Registrado"    # fallback si numeral_valor vacío
-                    return "❌ Sin numeral"
+                        v = str(row.get("numeral_valor", "") or "").strip()
+                        return f"✅ {v}" if v else "✅ Registrado"
+                    # Dato MALO → mostrar la razón concreta (no solo "sin numeral")
+                    return NUMERAL_MOTIVO_LABEL.get(_motivo, "❌ Dato inválido")
 
                 def _fmt_numeral_ini_fin(row, campo):
                     if not row.get("es_lavadora", True):
@@ -7855,11 +7857,14 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         return f"❌ {raw[:35]}" if raw else "❌ Sin causa"
                     drill_disp["_col_causa"] = drill_disp.apply(_fmt_causa, axis=1)
 
-                    # Columna 6: 🔢 Numeral — tres casos: no aplica / registrado / sin numeral
+                    # Columna 6: 🔢 Numeral — calidad: no aplica / registrado / motivo del dato malo
                     def _fmt_col_numeral(r):
                         if not r.get("es_lavadora", True):
                             return "🔵 No aplica"
-                        return "✅ Registrado" if r.get("numeral_ok", False) else "❌ Sin numeral"
+                        if r.get("numeral_ok", False):
+                            return "✅ Registrado"
+                        return NUMERAL_MOTIVO_LABEL.get(
+                            str(r.get("numeral_motivo", "") or ""), "❌ Dato inválido")
                     drill_disp["_col_numeral"] = drill_disp.apply(
                         _fmt_col_numeral,
                         axis=1)

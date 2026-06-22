@@ -293,9 +293,9 @@ def clasificar_numeral(inicial, final) -> tuple:
     DENTRO de una misma OT (fichas que el técnico usó probando la máquina).
 
     Categorías:
-      'normal'        1–50 fichas (prueba normal)
-      'raro'          50–100 fichas (a revisar)
-      'anomalo'       >100 fichas  o  Final < Inicial
+      'normal'        1–20 fichas (prueba normal)
+      'raro'          21–50 fichas (a revisar)
+      'anomalo'       >50 fichas  o  Final < Inicial
       'incongruente'  diferencia imposible (>400.000), salto de orden de
                       magnitud (ej. 5.000→50.000) o valor basura (≥8 díg.)
       'sin_dato'      sin valores suficientes para evaluar
@@ -320,15 +320,79 @@ def clasificar_numeral(inicial, final) -> tuple:
         return ("incongruente", f"🟣 Salto de magnitud ({vi:,}→{vf:,})", fichas)
 
     # ── Anómalo ───────────────────────────────────────────────────────────────
+    # Criterio Occimiano: un técnico rara vez gasta >20 fichas probando la máquina.
     if fichas < 0:
         return ("anomalo", f"🔴 Final < Inicial ({fichas:,})", fichas)
-    if fichas > 100:
-        return ("anomalo", f"🔴 {fichas:,} fichas (>100)", fichas)
+    if fichas > 50:
+        return ("anomalo", f"🔴 {fichas:,} fichas (>50)", fichas)
 
     # ── Raro / Normal ─────────────────────────────────────────────────────────
-    if fichas > 50:
-        return ("raro", f"🟡 {fichas} fichas (50–100)", fichas)
+    if fichas > 20:
+        return ("raro", f"🟡 {fichas} fichas (21–50)", fichas)
     return ("normal", f"✅ {fichas} fichas", fichas)
+
+
+# ── Calidad del numeral para el KPI Precisión Fracttal ───────────────────────
+# A diferencia de clasificar_numeral (que da granularidad para el historial), esto
+# devuelve un veredicto BINARIO + motivo, usado para puntuar el bono.
+# Criterio Occimiano: un técnico rara vez gasta >20 fichas probando una máquina.
+# Un valor basura (≥8 díg, ej. 99.999.999) o un salto imposible = dato malo.
+_NUMERAL_FICHAS_MAX = 20          # > esto dentro de una misma OT = sospechoso
+# (_VALOR_GARBAGE ya definido arriba = 10_000_000)
+
+# Motivos de numeral malo (para etiquetar y mostrar el comentario del técnico)
+NUMERAL_MOTIVO_LABEL = {
+    "ok":             "✅ Numeral válido",
+    "no_aplica":      "🔵 No aplica",
+    "sin_numeral":    "❌ Sin numeral",
+    "basura":         "🟣 Valor basura (≥8 díg.)",
+    "negativo":       "🔴 Final < Inicial",
+    "salto_magnitud": "🟣 Salto de magnitud (cero de más)",
+    "exceso_fichas":  "🔴 Exceso de fichas (>20 en una OT)",
+}
+
+
+def eval_numeral_kpi(es_lavadora: bool, inicial, final) -> tuple:
+    """
+    Veredicto BINARIO de calidad del numeral para el KPI Precisión.
+    Returns (numeral_ok: bool, motivo: str).
+
+    Solo exige numeral a lavadoras/aspiradoras. Reglas (de peor a mejor):
+      • sin_numeral    → lavadora sin ningún valor registrado
+      • basura         → algún valor ≥8 díg (tecleo imposible, ej. 99.999.999)
+      • negativo       → final < inicial (imposible, el contador no retrocede)
+      • salto_magnitud → final ≥ 9× inicial (un cero de más al teclear)
+      • exceso_fichas  → final − inicial > 20 (un técnico no gasta tantas fichas)
+      • ok             → numeral coherente
+    """
+    if not es_lavadora:
+        return True, "no_aplica"
+
+    _ni = str(inicial or "").strip()
+    _nf = str(final or "").strip()
+    _ni = "" if _ni.lower() in ("none", "null") else _ni
+    _nf = "" if _nf.lower() in ("none", "null") else _nf
+    if not _ni and not _nf:
+        return False, "sin_numeral"
+
+    vi, vf = _numeral_raw_int(_ni), _numeral_raw_int(_nf)
+
+    # Basura: cualquier valor con ≥8 dígitos
+    if (vi is not None and vi >= _VALOR_GARBAGE) or (vf is not None and vf >= _VALOR_GARBAGE):
+        return False, "basura"
+
+    # Con ambos valores se valida la diferencia dentro de la OT
+    if vi is not None and vf is not None:
+        dif = vf - vi
+        if dif < 0:
+            return False, "negativo"
+        if vi >= 100 and vf >= vi * 9:
+            return False, "salto_magnitud"
+        if dif > _NUMERAL_FICHAS_MAX:
+            return False, "exceso_fichas"
+
+    # Un solo valor presente (y no basura) → registrado, no se puede validar la diff
+    return True, "ok"
 
 
 def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
@@ -716,10 +780,9 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         else:
             _fichas_periodo = None   # negativo, reseteo de contador o dato corrupto
 
-        numeral_ok = (
-            not _es_lavadora                                 # no aplica → OK automático
-            or bool(_numeral_valor)                          # aplica → requiere numeral
-        )
+        # CALIDAD del numeral (no solo presencia): un 99.999.999 o un salto de
+        # >20 fichas dentro de la OT ahora cuenta como dato MALO (numeral_ok=False).
+        numeral_ok, numeral_motivo = eval_numeral_kpi(_es_lavadora, _num_inicial, _num_final)
 
         # ── Método de detección de falla ──────────────────────────────────────
         # Campo detection_method_description de Fracttal (Análisis de Fallas).
@@ -759,6 +822,7 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "causa_clasif":      causa_clasif,
             "causa_ok":          causa_ok,
             "numeral_ok":        numeral_ok,
+            "numeral_motivo":    numeral_motivo,
             "es_lavadora":       _es_lavadora,
             "numeral_valor":     _numeral_valor,
             "numeral_inicial":   _num_inicial,
@@ -847,6 +911,19 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     if "numeral_inicial" not in ot.columns: ot["numeral_inicial"] = ""
     if "numeral_final"   not in ot.columns: ot["numeral_final"]   = ""
     if "fichas_periodo"  not in ot.columns: ot["fichas_periodo"]  = None
+
+    # Re-evaluar la CALIDAD del numeral a nivel OT desde los valores agregados
+    # (inicial/final = primer no-vacío). Garantiza que el veredicto coincida con
+    # lo que se muestra en la tabla, y aplica la regla de calidad aunque el caché
+    # venga de antes del cambio (donde numeral_ok era solo presencia).
+    _num_eval = ot.apply(
+        lambda r: eval_numeral_kpi(
+            r.get("es_lavadora", True), r.get("numeral_inicial", ""), r.get("numeral_final", "")
+        ),
+        axis=1,
+    )
+    ot["numeral_ok"]     = _num_eval.apply(lambda t: t[0])
+    ot["numeral_motivo"] = _num_eval.apply(lambda t: t[1])
 
     # Agregar campos de tiempo condicionalmente (pueden faltar en caché viejo)
     if "duration_sec" in df_kpi.columns:
