@@ -894,8 +894,8 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     │ 1. Tiempo de ejecución           │ 0–25 │ MC: >15min→25 | 5-15→12 | <5→0                    │
     │                                  │      │ MP (con estim.): ≥70%→25 | 35-69%→12 | <35%→0     │
     │                                  │      │ MP (sin estim.): >30min→25 | 15-30→12 | <15→0      │
-    │ 2. Causa raíz llenada            │ 0–25 │ MC: causa específica → 25 | vacía/vaga → 0         │
-    │                                  │      │ PM: no aplica → 25 siempre                         │
+    │ 2. Causa raíz llenada            │ 0–25 │ MC: código Fracttal válido → 25 | vacía/vaga → 0   │
+    │                                  │      │ MP: no aplica (sin falla que documentar) → 25 auto │
     │ 3. Numeral registrado            │ 0–25 │ lavadora/aspiradora (MC+MP): numeral válido → 25  │
     │                                  │      │ basura/exceso>20/salto/negativo/sin dato → 0      │
     │                                  │      │ equipo sin numeral (no lavadora) → 25 (no aplica) │
@@ -1042,8 +1042,13 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     ot["score_tiempo"] = ot.apply(_score_tiempo, axis=1)
 
     # ── Componente 2: Causa raíz llenada (0–25 pts) ───────────────────────────
-    # Aplica a AMBOS tipos: MC exige código Fracttal; MP exige cualquier texto.
-    ot["score_causa"] = ot["causa_ok"].apply(lambda ok: 25 if ok else 0)
+    # SOLO aplica a CORRECTIVAS. Una preventiva no responde a una falla — no
+    # hay causa raíz que documentar — así que MP siempre da 25 pts auto (mismo
+    # criterio que Tiempo en MC: no se penaliza lo que no aplica).
+    ot["score_causa"] = ot.apply(
+        lambda r: 25 if not r["es_correctiva"] else (25 if r["causa_ok"] else 0),
+        axis=1,
+    )
 
     # ── Componente 3: Numeral registrado (0–25 pts) ───────────────────────────
     # Aplica a TODA lavadora/aspiradora (MC y MP): el formulario exige el numeral

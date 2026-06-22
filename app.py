@@ -55,7 +55,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v17-estim-neta"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v18-causa-solo-mc"  # bump para invalidar disco al cambiar data.py
 
 
 # Limpia los encabezados verbosos del comentario consolidado del técnico (data
@@ -6522,7 +6522,7 @@ elif _page == _NAV_PAGES[0]:
                 '(<b>$105.000 bruto/trimestre</b> máximo, pago trimestral). '
                 'Mide <b>3 componentes</b> por OT (25 pts c/u = 75 total): '
                 '<b>Tiempo de ejecución</b> (solo MP), '
-                '<b>Causa raíz</b> (MC+MP) y '
+                '<b>Causa raíz</b> (solo MC — MP no responde a falla) y '
                 '<b>Numeral registrado</b> (MC+MP en lavadoras/aspiradoras). '
                 f'<span style="font-size:0.82rem;color:{_t["muted"]};">'
                 'Una OT es "mala" si falla en <b>cualquiera</b> de los componentes que le aplican. '
@@ -6880,13 +6880,13 @@ elif _page == _NAV_PAGES[0]:
         else:
             total_ots_mes = len(df_ot_scores)
             score_global = df_ot_scores["score_total"].mean()
-            # Tiempo: solo se mide en preventivas. Causa: MC+MP.
+            # Tiempo: solo MP. Causa: solo MC (MP no responde a falla).
             # Numeral: toda lavadora/aspiradora (MC+MP) — el formulario lo exige en ambas.
             _df_mp_kpi = df_ot_scores[~df_ot_scores["es_correctiva"]] if "es_correctiva" in df_ot_scores.columns else df_ot_scores
             _df_mc_kpi = df_ot_scores[df_ot_scores["es_correctiva"]]  if "es_correctiva" in df_ot_scores.columns else pd.DataFrame()
             _df_lav_kpi = df_ot_scores[df_ot_scores["es_lavadora"]] if "es_lavadora" in df_ot_scores.columns else df_ot_scores
             pct_tiempo  = (_df_mp_kpi["score_tiempo"] >= 25).mean() * 100 if not _df_mp_kpi.empty else 0.0
-            pct_causa   = df_ot_scores["causa_ok"].mean() * 100  # aplica a todas
+            pct_causa   = _df_mc_kpi["causa_ok"].mean() * 100 if not _df_mc_kpi.empty else 0.0
             pct_numeral = _df_lav_kpi["numeral_ok"].mean() * 100  if not _df_lav_kpi.empty else 0.0
             tecnicos_con_bono = (df_tec_scores_rank["umbral_bono"]).sum() if not df_tec_scores_rank.empty else 0
             total_tecnicos = len(df_tec_scores_rank)
@@ -6899,7 +6899,7 @@ elif _page == _NAV_PAGES[0]:
             gk2.metric("OTs evaluadas", f"{total_ots_mes:,}")
             gk3.metric("Tiempo OK · solo MP (≥75%)", f"{pct_tiempo:.1f}%",
                        delta=f"{'✅' if pct_tiempo >= 75 else '⚠️'}")
-            gk4.metric("Causa raíz OK · MC+MP", f"{pct_causa:.1f}%",
+            gk4.metric("Causa raíz OK · solo MC", f"{pct_causa:.1f}%",
                        delta=f"{'✅' if pct_causa >= 80 else '⚠️'}")
             gk5.metric("Técnicos con bono (≥90% exactitud)", f"{tecnicos_con_bono} / {total_tecnicos}")
 
@@ -6914,7 +6914,7 @@ elif _page == _NAV_PAGES[0]:
 
             # Usar pct_* ya calculadas con el denominador correcto:
             #   pct_tiempo  → solo preventivas (MC tienen 25 auto, no cuentan)
-            #   pct_causa   → MC+MP (aplica a todos)
+            #   pct_causa   → solo correctivas (MP tienen 25 auto, no aplica)
             #   pct_numeral → toda lavadora/aspiradora (MC+MP) — el formulario lo exige
             dim_avg = {
                 "⏱ Tiempo ejecución (25 pts)":   pct_tiempo  / 100 * 25,
@@ -7164,11 +7164,12 @@ elif _page == _NAV_PAGES[0]:
             # ── Gráfico Causa Raíz (diseño apilado igual que Numerales) ──────
             _periodo_lbl_cr = ("por semanas" if len(_meses_sel_raw) == 1
                                else "por mes seleccionado")
-            st.markdown(f"**Evolución {_periodo_lbl_cr} — % OTs (MC+MP) con Causa Raíz correctamente llenada**")
+            st.markdown(f"**Evolución {_periodo_lbl_cr} — % correctivas con Causa Raíz correctamente llenada**")
 
-            # df_kpi_raw tiene columna "causa_raiz_raw" y "causa_ok" (calculada en data.py)
-            # causa_ok en MC: código Fracttal válido o keyword. En MP: cualquier texto no vacío.
-            _df_cr_base = df_kpi_raw.copy()  # incluye MC y MP
+            # Causa raíz solo aplica a correctivas. Las preventivas no responden
+            # a una falla, así que se excluyen del análisis y del KPI.
+            _df_cr_base = df_kpi_raw[df_kpi_raw["es_correctiva"]].copy() \
+                if "es_correctiva" in df_kpi_raw.columns else df_kpi_raw.copy()
 
             if equipo_kpi != "Todos":
                 _grp_cr = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
@@ -7207,12 +7208,12 @@ elif _page == _NAV_PAGES[0]:
                             st.session_state[_cr_sig] = _fig_apilada(
                                 _g_cr, color_ok="#22c55e",
                                 label_ok="Causa correcta", label_err="Sin causa / Vaga",
-                                meta=80.0, titulo_y="% OTs (MC+MP)",
+                                meta=80.0, titulo_y="% correctivas",
                             )
                         st.plotly_chart(st.session_state[_cr_sig], width="stretch")
 
                 # ── Tabla detalle de Causa Raíz ───────────────────────────────
-                with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} OTs MC+MP)", expanded=False):
+                with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} correctivas)", expanded=False):
                     _det_cr = _df_cr_base[[c for c in
                         ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
                          "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok",
