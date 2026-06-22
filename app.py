@@ -5477,19 +5477,33 @@ elif _page == _NAV_PAGES[0]:
                 else:
                     _df_sla_disp["_hora_cierre"] = "—"
 
-                # c) Observación del técnico — join con df_wo por os_fracttal = folio
-                _note_map = (
-                    df_wo.dropna(subset=["note"])
-                    .set_index("folio")["note"]
-                    .to_dict()
-                ) if not df_wo.empty and "note" in df_wo.columns else {}
+                # c) Observación del técnico — texto libre del formulario Fracttal
+                # (DESCRIPCIÓN DE LA FALLA + TRABAJO REALIZADO + OBSERVACIONES),
+                # consolidado por sync_numerales.py en `comentario_tecnico`.
+                # Antes usábamos `note`, que siempre viene vacío en Fracttal.
+                _COMENTARIO_RESUMEN_MAX = 280   # tope para la columna del cuadro
+                _note_map = {}
+                if not df_wo.empty and "comentario_tecnico" in df_wo.columns:
+                    _note_map = (
+                        df_wo[df_wo["comentario_tecnico"].astype(str).str.strip() != ""]
+                        .set_index("folio")["comentario_tecnico"]
+                        .to_dict()
+                    )
+
+                def _resumen_comentario(folio: str) -> str:
+                    txt = _note_map.get(str(folio).strip(), "")
+                    if not txt:
+                        return "—"
+                    # Quitar los encabezados verbosos ("DESCRIPCIÓN DE LA FALLA: …")
+                    txt = _strip_comentario_headers(txt)
+                    if not txt or txt == "—":
+                        return "—"
+                    return txt if len(txt) <= _COMENTARIO_RESUMEN_MAX \
+                              else txt[:_COMENTARIO_RESUMEN_MAX].rstrip() + "…"
 
                 if "os_fracttal" in _df_sla_disp.columns and _note_map:
                     _df_sla_disp["_observacion"] = (
-                        _df_sla_disp["os_fracttal"]
-                        .astype(str).str.strip()
-                        .map(_note_map)
-                        .fillna("—")
+                        _df_sla_disp["os_fracttal"].apply(_resumen_comentario)
                     )
                 else:
                     _df_sla_disp["_observacion"] = "—"
@@ -5538,7 +5552,8 @@ elif _page == _NAV_PAGES[0]:
                         "Hora inicio SLA":     st.column_config.TextColumn(width=110),
                         "Hora cierre OT":      st.column_config.TextColumn(width=105),
                         "Horas resolución":    st.column_config.NumberColumn(format="%.1f h"),
-                        "Observación técnico": st.column_config.TextColumn(width=300),
+                        "Observación técnico": st.column_config.TextColumn(width=380,
+                            help="Resumen del texto libre del técnico en Fracttal: falla encontrada, trabajo realizado y observaciones del formulario de la OT."),
                         "Estación":            st.column_config.TextColumn(width=200),
                     },
                 )
