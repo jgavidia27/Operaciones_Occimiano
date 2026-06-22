@@ -7116,6 +7116,12 @@ elif _page == _NAV_PAGES[0]:
                         .dt.tz_convert(None).dt.strftime("%d/%m/%Y")
                     _det_cr["Estado"] = _det_cr["_causa_ok"].apply(
                         lambda v: "✅ Correcto" if v else "❌ Error")
+                    # Simplificar tipo: cualquier variante de preventiva (mensual, trimestral,
+                    # por horas, etc.) → "PREVENTIVA". En esta tabla no aporta el subtipo.
+                    if "maint_type" in _det_cr.columns:
+                        _det_cr["maint_type"] = _det_cr["maint_type"].astype(str).str.upper().apply(
+                            lambda t: "PREVENTIVA" if "PREVENTIVA" in t or "INSPECC" in t
+                                      else ("CORRECTIVA" if "CORRECTIVA" in t else t.title()))
                     # Comentario del técnico (texto libre del PDF) — explica el "OTROS" / "SIN CLASIFICAR"
                     if "comentario_tecnico" in _det_cr.columns:
                         _det_cr["comentario_tecnico"] = (
@@ -7145,7 +7151,7 @@ elif _page == _NAV_PAGES[0]:
                                 help="Código EDS Occimiano."),
                             "Técnico":       st.column_config.TextColumn(width=190),
                             "Fecha":         st.column_config.TextColumn(width=100),
-                            "Tipo":          st.column_config.TextColumn(width=180),
+                            "Tipo":          st.column_config.TextColumn(width=110),
                             "Causa Raíz":    st.column_config.TextColumn(width=220),
                             "Clasificación": st.column_config.TextColumn(width=110),
                             "Comentario técnico / qué hizo": st.column_config.TextColumn(width=380,
