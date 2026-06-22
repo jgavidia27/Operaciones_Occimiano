@@ -3506,12 +3506,13 @@ elif _page == _NAV_PAGES[3]:
                     _d["Fecha"] = pd.to_datetime(_d["fecha"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
                     _d["Salto secuencia"] = _d["salto_seq"].replace("", "✅ OK")
 
-                    # Detectar el primer registro donde comenzó el error (cronológico)
-                    _eq_chron = _d.sort_values("Fecha")
+                    # Detectar el primer registro donde comenzó el error (cronológico).
+                    # IMPORTANTE: usar _grp["fecha"] (datetime), NO _d["Fecha"] (string DD/MM/YYYY
+                    # que ordena lexicalmente mal: "03/04" < "17/03" por el día "03" < "17").
                     _origen_folio = None
-                    for _, _or in _eq_chron.iterrows():
-                        _seq_alert  = _or.get("seq_severidad") == "alert"
-                        _intra_mal  = _or.get("categoria") in ("anomalo","incongruente")
+                    for _, _or in _grp.sort_values("fecha").iterrows():
+                        _seq_alert = _or.get("seq_severidad") == "alert"
+                        _intra_mal = _or.get("categoria") in ("anomalo","incongruente")
                         if _seq_alert or _intra_mal:
                             _origen_folio = _or.get("folio")
                             break
