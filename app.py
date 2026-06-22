@@ -3242,10 +3242,9 @@ elif _page == _NAV_PAGES[3]:
                         _disp["Fecha"] = pd.to_datetime(
                             _disp["fecha"], errors="coerce"
                         ).dt.strftime("%d/%m/%Y").fillna("—")
-                        _disp = _disp[[
-                            "Fecha", "technician", "numeral_inicial",
-                            "numeral_final", "estado"
-                        ]].rename(columns={
+                        _cols_disp = ["Fecha","folio","technician","numeral_inicial","numeral_final","estado"]
+                        _disp = _disp[[c for c in _cols_disp if c in _disp.columns]].rename(columns={
+                            "folio":           "OT",
                             "technician":      "Técnico",
                             "numeral_inicial": "N. Inicial",
                             "numeral_final":   "N. Final",
@@ -3254,10 +3253,11 @@ elif _page == _NAV_PAGES[3]:
                         _show_df(_disp, use_container_width=True, hide_index=True,
                             column_config={
                                 "Fecha":      st.column_config.TextColumn(width=95),
-                                "Técnico":    st.column_config.TextColumn(width=180),
-                                "N. Inicial": st.column_config.TextColumn(width=100),
-                                "N. Final":   st.column_config.TextColumn(width=100),
-                                "Fichas (prueba)": st.column_config.TextColumn(width=170,
+                                "OT":         st.column_config.TextColumn(width=95),
+                                "Técnico":    st.column_config.TextColumn(width=165),
+                                "N. Inicial": st.column_config.TextColumn(width=95),
+                                "N. Final":   st.column_config.TextColumn(width=95),
+                                "Fichas (prueba)": st.column_config.TextColumn(width=165,
                                     help="Final − Inicial dentro de la OT = fichas de prueba."),
                             })
 
@@ -3475,10 +3475,10 @@ elif _page == _NAV_PAGES[3]:
                     _d = _grp.copy()
                     _d["Fecha"] = pd.to_datetime(_d["fecha"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
                     _d["Salto secuencia"] = _d["salto_seq"].replace("", "✅ OK")
-                    _d = _d[[
-                        "Fecha","technician","numeral_inicial","numeral_final",
-                        "estado","Salto secuencia",
-                    ]].rename(columns={
+                    _cols_d = ["Fecha","folio","technician","numeral_inicial","numeral_final",
+                               "estado","Salto secuencia"]
+                    _d = _d[[c for c in _cols_d if c in _d.columns]].rename(columns={
+                        "folio":           "OT",
                         "technician":      "Técnico",
                         "numeral_inicial": "N. Inicial",
                         "numeral_final":   "N. Final",
@@ -3487,11 +3487,12 @@ elif _page == _NAV_PAGES[3]:
                     _show_df(_d, use_container_width=True, hide_index=True,
                         column_config={
                             "Fecha":      st.column_config.TextColumn(width=90),
-                            "Técnico":    st.column_config.TextColumn(width=160),
-                            "N. Inicial": st.column_config.TextColumn(width=95),
-                            "N. Final":   st.column_config.TextColumn(width=95),
-                            "Fichas (intra-OT)": st.column_config.TextColumn(width=180),
-                            "Salto secuencia":   st.column_config.TextColumn(width=240,
+                            "OT":         st.column_config.TextColumn(width=95),
+                            "Técnico":    st.column_config.TextColumn(width=155),
+                            "N. Inicial": st.column_config.TextColumn(width=90),
+                            "N. Final":   st.column_config.TextColumn(width=90),
+                            "Fichas (intra-OT)": st.column_config.TextColumn(width=175),
+                            "Salto secuencia":   st.column_config.TextColumn(width=235,
                                 help="Compara el inicial de esta visita con el final de la anterior."),
                         })
 
