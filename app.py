@@ -7091,16 +7091,21 @@ elif _page == _NAV_PAGES[0]:
                 with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} OTs MC+MP)", expanded=False):
                     _det_cr = _df_cr_base[[c for c in
                         ["folio","tecnico","creation_date","maint_type",
-                         "causa_raiz_raw","causa_clasif","_causa_ok"]
+                         "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok"]
                         if c in _df_cr_base.columns]].copy()
                     _det_cr["creation_date"] = pd.to_datetime(_det_cr["creation_date"], errors="coerce")\
                         .dt.tz_convert(None).dt.strftime("%d/%m/%Y")
                     _det_cr["Estado"] = _det_cr["_causa_ok"].apply(
                         lambda v: "✅ Correcto" if v else "❌ Error")
+                    # Comentario del técnico (texto libre del PDF) — explica el "OTROS" / "SIN CLASIFICAR"
+                    if "comentario_tecnico" in _det_cr.columns:
+                        _det_cr["comentario_tecnico"] = (
+                            _det_cr["comentario_tecnico"].fillna("").replace("", "—"))
                     _det_cr = _det_cr.drop(columns=["_causa_ok"], errors="ignore").rename(columns={
                         "folio":"OT","tecnico":"Técnico","creation_date":"Fecha",
                         "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
-                        "causa_clasif":"Clasificación"
+                        "causa_clasif":"Clasificación",
+                        "comentario_tecnico":"Comentario técnico / qué hizo"
                     }).sort_values("Fecha", ascending=False)
                     _show_df(_det_cr, hide_index=True, width="stretch",
                         column_config={
@@ -7108,8 +7113,10 @@ elif _page == _NAV_PAGES[0]:
                             "Técnico":       st.column_config.TextColumn(width=190),
                             "Fecha":         st.column_config.TextColumn(width=100),
                             "Tipo":          st.column_config.TextColumn(width=180),
-                            "Causa Raíz":    st.column_config.TextColumn(width=280),
+                            "Causa Raíz":    st.column_config.TextColumn(width=220),
                             "Clasificación": st.column_config.TextColumn(width=110),
+                            "Comentario técnico / qué hizo": st.column_config.TextColumn(width=380,
+                                help="Texto libre del técnico en Fracttal (falla encontrada, trabajo realizado, observaciones). Explica el 'OTROS'/'SIN CLASIFICAR' o lo deja en evidencia si está vacío."),
                             "Estado":        st.column_config.TextColumn(width=110),
                         })
             else:
