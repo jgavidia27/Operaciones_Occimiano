@@ -127,13 +127,22 @@ def patch_numeral(folio: str, inicial, final, comentario=None, form_tiene_numera
         payload["comentario_tecnico"] = comentario
     if form_tiene_numeral is not None:
         payload["form_tiene_numeral"] = bool(form_tiene_numeral)
-    r = requests.patch(
-        f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?id_ot=eq.{folio}",
-        headers=_sb_headers(write=True),
-        data=json.dumps(payload),
-        timeout=15,
-    )
-    return r.status_code in (200, 204)
+    # Reintentos ante cortes de red transitorios (ConnectionReset, timeouts).
+    # Un solo blip no debe abortar todo el backfill.
+    for intento in range(3):
+        try:
+            r = requests.patch(
+                f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?id_ot=eq.{folio}",
+                headers=_sb_headers(write=True),
+                data=json.dumps(payload),
+                timeout=20,
+            )
+            return r.status_code in (200, 204)
+        except requests.exceptions.RequestException:
+            if intento == 2:
+                return False
+            time.sleep(2 * (intento + 1))
+    return False
 
 
 # ── Extracción de numerales + comentario del técnico por folio ───────────────
