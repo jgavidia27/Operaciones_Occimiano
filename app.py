@@ -7074,7 +7074,13 @@ elif _page == _NAV_PAGES[0]:
                            .agg(total=(col_ok,"count"), ok=(col_ok,"sum"))
                            .reset_index().sort_values("mes"))
                     g["bucket_lbl"] = g["mes"].apply(_m2l)
-                g["pct_ok"]  = (g["ok"] / g["total"].clip(lower=1) * 100).round(1)
+                # Excluir buckets sin datos (semanas futuras, meses sin OTs).
+                # Sin esto, una semana con total=0 aparece como "100% error" porque
+                # 100 - 0/1*100 = 100. Sólo mostrar buckets con al menos 1 OT.
+                g = g[g["total"] > 0].copy()
+                if g.empty:
+                    return g
+                g["pct_ok"]  = (g["ok"] / g["total"] * 100).round(1)
                 g["pct_err"] = (100 - g["pct_ok"]).round(1)
                 return g
 
