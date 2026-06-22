@@ -7036,8 +7036,129 @@ elif _page == _NAV_PAGES[0]:
                 p = str(ym).split("-")
                 return f"{_MN2.get(int(p[1]),p[1])} '{p[0][2:]}" if len(p)==2 else str(ym)
 
-            # ── Gráfico evolución mensual Causa Raíz ─────────────────────────
-            st.markdown("**Evolución mensual — % OTs (MC+MP) con Causa Raíz correctamente llenada**")
+            # ── Agrupador que respeta la selección de meses/semanas ────────────
+            # Regla: 1 mes seleccionado → desglose por semanas DENTRO de ese mes.
+            #        ≥2 meses (o "Todos") → solo esos meses agrupados.
+            def _agrupar_por_periodo(df_in, col_ok: str):
+                """Devuelve DataFrame con columnas: bucket_lbl, ok, total, pct_ok, pct_err.
+                df_in debe traer "mes" y "creation_date_local". col_ok = nombre de bool col."""
+                if df_in.empty or col_ok not in df_in.columns:
+                    return pd.DataFrame()
+                df = df_in.copy()
+                # ¿1 solo mes seleccionado? → semanas; si no, meses.
+                un_mes = len(_meses_sel_raw) == 1
+                if un_mes:
+                    ym = _meses_sel_raw[0]
+                    _sems = _semanas_del_mes(ym)
+                    if "creation_date_local" not in df.columns:
+                        return pd.DataFrame()
+                    rows = []
+                    for lbl, ini, fin in _sems:
+                        m = ((df["creation_date_local"] >= ini) &
+                             (df["creation_date_local"] <= fin))
+                        sub = df[m]
+                        tot = len(sub)
+                        ok  = int(sub[col_ok].sum()) if tot else 0
+                        # Etiqueta compacta "S1\n07-13/06" para el eje
+                        n = lbl.split()[1]
+                        rango = lbl.split("(")[1].rstrip(")")
+                        rows.append(dict(bucket_lbl=f"S{n}<br>{rango}",
+                                         ok=ok, total=tot))
+                    g = pd.DataFrame(rows)
+                else:
+                    # Multi-mes: solo los meses que el usuario seleccionó
+                    df = df[df["mes"].astype(str).isin(set(_meses_prec_str))]
+                    if df.empty:
+                        return pd.DataFrame()
+                    g = (df.groupby("mes")
+                           .agg(total=(col_ok,"count"), ok=(col_ok,"sum"))
+                           .reset_index().sort_values("mes"))
+                    g["bucket_lbl"] = g["mes"].apply(_m2l)
+                g["pct_ok"]  = (g["ok"] / g["total"].clip(lower=1) * 100).round(1)
+                g["pct_err"] = (100 - g["pct_ok"]).round(1)
+                return g
+
+            # ── Builder de gráfico apilado (mismo diseño que Numerales) ────────
+            def _fig_apilada(g: pd.DataFrame, color_ok: str, label_ok: str,
+                             label_err: str, meta: float = None,
+                             titulo_y: str = "% OTs") -> "go.Figure":
+                """Barras apiladas verde (OK) + rojo (Error). %OK CENTRADO en barra
+                verde; %ERR fuera con flecha cuando la barra roja es pequeña.
+                Si la barra roja es >=10% pone el % adentro."""
+                fig = go.Figure()
+                # Texto para barra verde: % centrado + fracción debajo
+                txt_ok = g.apply(lambda r:
+                    f"<b>{r['pct_ok']:.1f}%</b><br><span style='font-size:10px;'>"
+                    f"{int(r['ok'])}/{int(r['total'])}</span>", axis=1).tolist()
+                fig.add_trace(go.Bar(
+                    x=g["bucket_lbl"], y=g["pct_ok"],
+                    name=label_ok, marker_color=color_ok, opacity=0.95,
+                    text=txt_ok, textposition="inside", insidetextanchor="middle",
+                    textfont=dict(size=14, color="#ffffff",
+                                  family="Inter, system-ui, sans-serif"),
+                    customdata=g[["ok","total"]].values,
+                    hovertemplate="%{x}<br>%{customdata[0]}/%{customdata[1]} OK"
+                                  "<br>%{y:.1f}%<extra></extra>",
+                ))
+                # Barra roja: solo texto adentro si hay espacio (≥10%); si no, anotación externa con flecha
+                txt_err_in = g["pct_err"].apply(
+                    lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
+                fig.add_trace(go.Bar(
+                    x=g["bucket_lbl"], y=g["pct_err"],
+                    name=label_err, marker_color="#ef4444", opacity=0.92,
+                    text=txt_err_in, textposition="inside", insidetextanchor="middle",
+                    textfont=dict(size=12, color="#ffffff"),
+                    customdata=g[["ok","total","pct_err"]].values,
+                    hovertemplate="%{x}<br>Error: %{customdata[2]:.1f}%<extra></extra>",
+                ))
+                # Flecha externa para errores pequeños (<10%)
+                for _, r in g.iterrows():
+                    if r["pct_err"] < 10 and r["pct_err"] > 0:
+                        fig.add_annotation(
+                            x=r["bucket_lbl"], y=100, ax=0, ay=-35,
+                            xref="x", yref="y", axref="pixel", ayref="pixel",
+                            showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+                            arrowcolor="#ef4444",
+                            text=f"<b style='color:#ef4444;'>{r['pct_err']:.1f}% error</b>",
+                            font=dict(size=11, color="#ef4444"),
+                            bgcolor="rgba(255,255,255,0.95)",
+                            bordercolor="#ef4444", borderwidth=1, borderpad=3,
+                        )
+                if meta is not None:
+                    fig.add_hline(y=meta, line_dash="dash", line_color=color_ok,
+                                  annotation_text=f"Meta {meta:.0f}%",
+                                  annotation_position="top left", line_width=1.5)
+                fig.update_layout(
+                    barmode="stack", height=320,
+                    margin=dict(t=40, b=30, l=10, r=20),
+                    yaxis=dict(range=[0, 115], ticksuffix="%", title=titulo_y),
+                    legend=dict(orientation="h", y=1.14, x=0), bargap=0.35,
+                )
+                _apply_plot_theme(fig)
+                return fig
+
+            # KPI card lateral (mismo diseño que el panel verde de Numerales)
+            def _kpi_card(pct: float, ok: int, total: int, label: str,
+                         meta_pct: float = 90.0) -> None:
+                color = ("#22c55e" if pct >= meta_pct else
+                         ("#f59e0b" if pct >= max(meta_pct - 20, 50) else "#ef4444"))
+                st.markdown(
+                    f'<div style="background:{_t["card"]};border:2px solid {color}33;'
+                    f'border-radius:10px;padding:20px;text-align:center;">'
+                    f'<div style="font-size:2.2rem;font-weight:800;color:{color};">'
+                    f'{pct:.1f}%</div>'
+                    f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
+                    f'{ok:,} / {total:,} OTs</div>'
+                    f'<div style="font-size:0.8rem;color:{_t["muted"]};">{label}</div>'
+                    f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
+                    f'Meta: ≥{meta_pct:.0f}%</div></div>',
+                    unsafe_allow_html=True
+                )
+
+            # ── Gráfico Causa Raíz (diseño apilado igual que Numerales) ──────
+            _periodo_lbl_cr = ("por semanas" if len(_meses_sel_raw) == 1
+                               else "por mes seleccionado")
+            st.markdown(f"**Evolución {_periodo_lbl_cr} — % OTs (MC+MP) con Causa Raíz correctamente llenada**")
 
             # df_kpi_raw tiene columna "causa_raiz_raw" y "causa_ok" (calculada en data.py)
             # causa_ok en MC: código Fracttal válido o keyword. En MP: cualquier texto no vacío.
@@ -7053,58 +7174,36 @@ elif _page == _NAV_PAGES[0]:
                 _df_cr_base = _df_cr_base.copy()
                 # Usar causa_ok ya calculada en data.py (MC: código Fracttal; MP: texto no vacío)
                 _df_cr_base["_causa_ok"] = _df_cr_base["causa_ok"].fillna(False).astype(bool)
+                # Subset al periodo seleccionado (para el KPI lateral y el gráfico)
+                _df_cr_periodo = _df_cr_base[_df_cr_base["mes"].astype(str).isin(set(_meses_prec_str))].copy()
+                if _sem_prec != "Todas":
+                    _sem_match_cr = next((s for s in _sems_prec if s[0] == _sem_prec), None)
+                    if _sem_match_cr and "creation_date_local" in _df_cr_periodo.columns:
+                        _df_cr_periodo = _df_cr_periodo[
+                            (_df_cr_periodo["creation_date_local"] >= _sem_match_cr[1]) &
+                            (_df_cr_periodo["creation_date_local"] <= _sem_match_cr[2])
+                        ]
+                _cr_tot = len(_df_cr_periodo)
+                _cr_ok  = int(_df_cr_periodo["_causa_ok"].sum()) if _cr_tot else 0
+                _cr_pct = (_cr_ok / _cr_tot * 100) if _cr_tot else 0.0
 
-                _cr_mes = (
-                    _df_cr_base.groupby("mes")
-                    .agg(total=("_causa_ok","count"), ok=("_causa_ok","sum"))
-                    .reset_index().sort_values("mes")
-                )
-                _cr_mes["pct_ok"]  = (_cr_mes["ok"] / _cr_mes["total"] * 100).round(1)
-                _cr_mes["pct_err"] = (100 - _cr_mes["pct_ok"]).round(1)
-                _cr_mes["mes_lbl"] = _cr_mes["mes"].apply(_m2l)
+                _g_cr = _agrupar_por_periodo(_df_cr_base, "_causa_ok")
 
-                _cr_sig = f"_fig_cr_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
-                if _cr_sig not in st.session_state:
-                    _fig_cr = make_subplots(specs=[[{"secondary_y": True}]])
-                    _fig_cr.add_trace(go.Bar(
-                        x=_cr_mes["mes_lbl"], y=_cr_mes["total"],
-                        name="OTs (MC+MP)", marker_color="#94a3b8", opacity=0.85,
-                        text=_cr_mes["total"], textposition="inside",
-                        textfont=dict(size=11, color="#ffffff"),
-                    ), secondary_y=False)
-                    _fig_cr.add_trace(go.Scatter(
-                        x=_cr_mes["mes_lbl"], y=_cr_mes["pct_ok"],
-                        name="% Causa correcta", mode="lines+markers",
-                        line=dict(color="#22c55e", width=3),
-                        marker=dict(size=10, color="#22c55e", line=dict(color="#fff", width=2)),
-                    ), secondary_y=True)
-                    # Anotaciones con caja blanca
-                    for _, _rr in _cr_mes.iterrows():
-                        _fig_cr.add_annotation(
-                            x=_rr["mes_lbl"], y=_rr["pct_ok"], yref="y2",
-                            text=f"<b>{_rr['pct_ok']:.1f}%</b>  {int(_rr['ok'])}/{int(_rr['total'])}",
-                            showarrow=False, yanchor="bottom", yshift=10,
-                            font=dict(size=11, color="#16a34a"),
-                            bgcolor="rgba(255,255,255,0.88)",
-                            bordercolor="#22c55e", borderwidth=1.5, borderpad=4,
-                        )
-                    _fig_cr.add_trace(go.Scatter(
-                        x=_cr_mes["mes_lbl"], y=_cr_mes["pct_err"],
-                        name="% Error causa", mode="lines+markers",
-                        line=dict(color="#ef4444", width=2, dash="dot"),
-                        marker=dict(size=7, color="#ef4444"),
-                        visible="legendonly",
-                    ), secondary_y=True)
-                    _fig_cr.update_layout(
-                        height=380, margin=dict(t=40, b=20),
-                        legend=dict(orientation="h", y=1.08, x=0), bargap=0.3,
-                    )
-                    _fig_cr.update_yaxes(title_text="OTs (MC+MP)", secondary_y=False)
-                    _fig_cr.update_yaxes(title_text="% Causa raíz OK", secondary_y=True,
-                                         tickformat=".1f", ticksuffix="%", range=[0, 110])
-                    _apply_plot_theme(_fig_cr)
-                    st.session_state[_cr_sig] = _fig_cr
-                st.plotly_chart(st.session_state.get(_cr_sig), width="stretch")
+                cc1, cc2 = st.columns([1, 3])
+                with cc1:
+                    _kpi_card(_cr_pct, _cr_ok, _cr_tot,
+                              "con causa raíz correcta", meta_pct=80.0)
+                with cc2:
+                    if not _g_cr.empty:
+                        _cr_sig = (f"_fig_cr_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
+                                   f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
+                        if _cr_sig not in st.session_state:
+                            st.session_state[_cr_sig] = _fig_apilada(
+                                _g_cr, color_ok="#22c55e",
+                                label_ok="Causa correcta", label_err="Sin causa / Vaga",
+                                meta=80.0, titulo_y="% OTs (MC+MP)",
+                            )
+                        st.plotly_chart(st.session_state[_cr_sig], width="stretch")
 
                 # ── Tabla detalle de Causa Raíz ───────────────────────────────
                 with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} OTs MC+MP)", expanded=False):
@@ -7238,8 +7337,10 @@ Si el técnico no llenó el campo de duración de tareas pero tuvo el OT abierto
 esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
 """)
 
-            # ── Gráfico evolución mensual Tiempo de Ejecución ────────────────
-            st.markdown("**Evolución mensual — % preventivos con tiempo de ejecución correcto**")
+            # ── Gráfico Tiempo de Ejecución (diseño apilado igual que Numerales) ─
+            _periodo_lbl_te = ("por semanas" if len(_meses_sel_raw) == 1
+                               else "por mes seleccionado")
+            st.markdown(f"**Evolución {_periodo_lbl_te} — % preventivos con tiempo de ejecución correcto**")
 
             _df_te_base = df_kpi_raw[df_kpi_raw["maint_type"] != "CORRECTIVA"].copy() \
                           if "maint_type" in df_kpi_raw.columns else df_kpi_raw.copy()
@@ -7260,60 +7361,37 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _df_te["_effective_sec"] = _df_te[["duration_sec","elapsed_sec"]].fillna(0).max(axis=1)
                 _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75
 
-                _te_mes = (
-                    _df_te.groupby("mes")
-                    .agg(total=("_te_ok","count"), ok=("_te_ok","sum"))
-                    .reset_index()
-                    .sort_values("mes")
-                )
-                _te_mes["pct_ok"]  = (_te_mes["ok"] / _te_mes["total"] * 100).round(1)
-                _te_mes["pct_err"] = (100 - _te_mes["pct_ok"]).round(1)
-                _te_mes["mes_lbl"] = _te_mes["mes"].apply(_m2l)
+                # KPI del periodo seleccionado
+                _df_te_periodo = _df_te[_df_te["mes"].astype(str).isin(set(_meses_prec_str))].copy()
+                if _sem_prec != "Todas":
+                    _sem_match_te2 = next((s for s in _sems_prec if s[0] == _sem_prec), None)
+                    if _sem_match_te2 and "creation_date_local" in _df_te_periodo.columns:
+                        _df_te_periodo = _df_te_periodo[
+                            (_df_te_periodo["creation_date_local"] >= _sem_match_te2[1]) &
+                            (_df_te_periodo["creation_date_local"] <= _sem_match_te2[2])
+                        ]
+                _te_tot = len(_df_te_periodo)
+                _te_ok  = int(_df_te_periodo["_te_ok"].sum()) if _te_tot else 0
+                _te_pct = (_te_ok / _te_tot * 100) if _te_tot else 0.0
 
-                _te_sig = f"_fig_te_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
-                if _te_sig not in st.session_state:
-                    _fig_te = make_subplots(specs=[[{"secondary_y": True}]])
-                    _fig_te.add_trace(go.Bar(
-                        x=_te_mes["mes_lbl"], y=_te_mes["total"],
-                        name="OTs preventivas", marker_color="#94a3b8", opacity=0.85,
-                        text=_te_mes["total"], textposition="inside",
-                        textfont=dict(size=11, color="#ffffff"),
-                    ), secondary_y=False)
-                    _fig_te.add_trace(go.Scatter(
-                        x=_te_mes["mes_lbl"], y=_te_mes["pct_ok"],
-                        name="% Tiempo correcto (≥75%)", mode="lines+markers",
-                        line=dict(color="#3b82f6", width=3),
-                        marker=dict(size=10, color="#3b82f6", line=dict(color="#fff", width=2)),
-                    ), secondary_y=True)
-                    # Anotaciones con caja blanca
-                    for _, _tr in _te_mes.iterrows():
-                        _fig_te.add_annotation(
-                            x=_tr["mes_lbl"], y=_tr["pct_ok"], yref="y2",
-                            text=f"<b>{_tr['pct_ok']:.1f}%</b>  {int(_tr['ok'])}/{int(_tr['total'])}",
-                            showarrow=False, yanchor="bottom", yshift=10,
-                            font=dict(size=11, color="#1d4ed8"),
-                            bgcolor="rgba(255,255,255,0.88)",
-                            bordercolor="#3b82f6", borderwidth=1.5, borderpad=4,
-                        )
-                    _fig_te.add_trace(go.Scatter(
-                        x=_te_mes["mes_lbl"], y=_te_mes["pct_err"],
-                        name="% Tiempo insuficiente", mode="lines+markers",
-                        line=dict(color="#ef4444", width=2, dash="dot"),
-                        marker=dict(size=7, color="#ef4444"),
-                        visible="legendonly",
-                    ), secondary_y=True)
-                    _fig_te.update_layout(
-                        height=380, margin=dict(t=40, b=20),
-                        legend=dict(orientation="h", y=1.08, x=0), bargap=0.3,
-                    )
-                    _fig_te.update_yaxes(title_text="OTs preventivas", secondary_y=False)
-                    _fig_te.update_yaxes(
-                        title_text="% Tiempo correcto", secondary_y=True,
-                        tickformat=".1f", ticksuffix="%", range=[0, 110]
-                    )
-                    _apply_plot_theme(_fig_te)
-                    st.session_state[_te_sig] = _fig_te
-                st.plotly_chart(st.session_state.get(_te_sig), width="stretch")
+                _g_te = _agrupar_por_periodo(_df_te, "_te_ok")
+
+                tc1, tc2 = st.columns([1, 3])
+                with tc1:
+                    _kpi_card(_te_pct, _te_ok, _te_tot,
+                              "preventivos con tiempo OK (≥75%)", meta_pct=75.0)
+                with tc2:
+                    if not _g_te.empty:
+                        _te_sig = (f"_fig_te_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
+                                   f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
+                        if _te_sig not in st.session_state:
+                            st.session_state[_te_sig] = _fig_apilada(
+                                _g_te, color_ok="#3b82f6",
+                                label_ok="Tiempo correcto (≥75%)",
+                                label_err="Tiempo insuficiente",
+                                meta=75.0, titulo_y="% preventivos",
+                            )
+                        st.plotly_chart(st.session_state[_te_sig], width="stretch")
 
                 # ── Filtro de periodo para tablas y gráficos de dona/barras ──
                 # (el gráfico de evolución mensual siempre muestra todos los meses)
@@ -7595,7 +7673,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _num_tot = len(_df_num_base)
                 _num_pct = _num_ok / _num_tot * 100 if _num_tot > 0 else 0.0
 
-                # ── Evolución mensual de registro de numerales ────────────────
+                # ── Evolución (respeta selección: semanas si 1 mes, meses si varios) ─
                 _df_num_hist = df_ot_all[~df_ot_all["es_correctiva"]].copy() \
                     if "es_correctiva" in df_ot_all.columns else df_ot_all.copy()
                 if equipo_kpi != "Todos":
@@ -7603,65 +7681,27 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _df_num_hist = _df_num_hist[_df_num_hist["equipo"] == _grp_num]
                 if tec_kpi_sel != "Todos":
                     _df_num_hist = _df_num_hist[_df_num_hist["tecnico"] == tec_kpi_sel]
-                _df_num_hist = _df_num_hist[_df_num_hist["mes"].isin(meses_disp[:6])].copy()
+
+                # _agrupar_por_periodo aplica la regla: 1 mes → semanas; varios → meses.
+                _g_num = _agrupar_por_periodo(_df_num_hist, "numeral_ok")
+
+                _periodo_lbl_num = ("por semanas" if len(_meses_sel_raw) == 1
+                                    else "por mes seleccionado")
 
                 nc1, nc2 = st.columns([1, 3])
                 with nc1:
-                    _color_num = "#22c55e" if _num_pct >= 90 else ("#f59e0b" if _num_pct >= 70 else "#ef4444")
-                    st.markdown(
-                        f'<div style="background:{_t["card"]};border:2px solid {_color_num}33;'
-                        f'border-radius:10px;padding:20px;text-align:center;">'
-                        f'<div style="font-size:2.2rem;font-weight:800;color:{_color_num};">'
-                        f'{_num_pct:.1f}%</div>'
-                        f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
-                        f'{_num_ok:,} / {_num_tot:,} OTs</div>'
-                        f'<div style="font-size:0.8rem;color:{_t["muted"]};">con numeral registrado</div>'
-                        f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
-                        f'Meta: ≥90%</div></div>',
-                        unsafe_allow_html=True
-                    )
+                    _kpi_card(_num_pct, _num_ok, _num_tot,
+                              "con numeral registrado", meta_pct=90.0)
                 with nc2:
-                    if not _df_num_hist.empty and "numeral_ok" in _df_num_hist.columns:
-                        _num_mes = (
-                            _df_num_hist.groupby("mes")
-                            .agg(total=("numeral_ok","count"), ok=("numeral_ok","sum"))
-                            .reset_index().sort_values("mes")
-                        )
-                        _num_mes["pct_ok"]  = (_num_mes["ok"]  / _num_mes["total"] * 100).round(1)
-                        _num_mes["pct_err"] = (100 - _num_mes["pct_ok"]).round(1)
-                        _num_mes["mes_lbl"] = _num_mes["mes"].apply(_m2l)
-
-                        _num_sig = f"_fig_num_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
+                    if not _g_num.empty:
+                        _num_sig = (f"_fig_num_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
+                                    f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
                         if _num_sig not in st.session_state:
-                            _fig_num = go.Figure()
-                            _fig_num.add_trace(go.Bar(
-                                x=_num_mes["mes_lbl"], y=_num_mes["pct_ok"],
-                                name="Registró numeral", marker_color="#22c55e", opacity=0.9,
-                                text=_num_mes.apply(
-                                    lambda r: f"{r['pct_ok']:.1f}%<br>{int(r['ok'])}/{int(r['total'])}",
-                                    axis=1),
-                                textposition="inside",
-                                textfont=dict(size=11, color="#ffffff"),
-                            ))
-                            _fig_num.add_trace(go.Bar(
-                                x=_num_mes["mes_lbl"], y=_num_mes["pct_err"],
-                                name="Sin numeral", marker_color="#ef4444", opacity=0.9,
-                                text=_num_mes["pct_err"].apply(lambda v: f"{v:.1f}%"),
-                                textposition="inside",
-                                textfont=dict(size=11, color="#ffffff"),
-                            ))
-                            _fig_num.add_hline(y=90, line_dash="dash", line_color="#22c55e",
-                                               annotation_text="Meta 90%",
-                                               annotation_position="top left", line_width=1.5)
-                            _fig_num.update_layout(
-                                barmode="stack", height=280,
-                                margin=dict(t=20, b=20, l=10, r=20),
-                                yaxis=dict(range=[0, 105], ticksuffix="%", title="% OTs"),
-                                legend=dict(orientation="h", y=1.12, x=0),
-                                bargap=0.3,
+                            st.session_state[_num_sig] = _fig_apilada(
+                                _g_num, color_ok="#22c55e",
+                                label_ok="Registró numeral", label_err="Sin numeral",
+                                meta=90.0, titulo_y="% OTs",
                             )
-                            _apply_plot_theme(_fig_num)
-                            st.session_state[_num_sig] = _fig_num
                         st.plotly_chart(st.session_state[_num_sig], width="stretch")
 
                 # ── Tabla detalle OTs numerales (cumple + no cumple) ──────────
