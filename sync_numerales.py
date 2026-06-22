@@ -151,7 +151,9 @@ def patch_numeral(folio: str, inicial, final, comentario=None, form_tiene_numera
 _COMENTARIO_MAX = 600   # tope de caracteres del comentario consolidado
 
 def _consolidar_comentario(items: list) -> str:
-    """Une los campos de texto libre del técnico en un solo string legible."""
+    """Une los campos de texto libre del técnico en un solo string legible.
+    Solo el contenido — sin las etiquetas tipo "DESCRIPCIÓN DE LA FALLA:" que
+    saturan visualmente y no aportan información para el operador."""
     partes = []
     for it in items:
         if it.get("id_task_form_item_type") != 1:
@@ -164,7 +166,7 @@ def _consolidar_comentario(items: list) -> str:
             continue
         # Normalizar saltos de línea internos a un espacio
         val = " ".join(val.split())
-        partes.append(f"{desc}: {val}" if desc else val)
+        partes.append(val)
     texto = " | ".join(partes)
     return texto[:_COMENTARIO_MAX]
 

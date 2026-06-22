@@ -57,6 +57,25 @@ _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
 _KPI_CACHE_VERSION = "v15-numeral-mc"  # bump para invalidar disco al cambiar data.py
 
+
+# Limpia los encabezados verbosos del comentario consolidado del técnico (data
+# antigua del sync trae "DESCRIPCIÓN DE LA FALLA ENCONTRADA: xxx | TRABAJO
+# REALIZADO ...: yyy"). Devuelve solo el contenido, separado por " | ".
+import re as _re
+_COMENT_HEADER_RE = _re.compile(
+    r"(?:DESCRIPCI[ÓO]N DE LA FALLA[^:|]*|"
+    r"TRABAJO REALIZADO[^:|]*|"
+    r"OBSERVACI[ÓO]NES?|"
+    r"PENDIENTES?)\s*:\s*",
+    flags=_re.IGNORECASE,
+)
+
+def _strip_comentario_headers(txt) -> str:
+    s = str(txt or "").strip()
+    if not s or s == "—":
+        return "—"
+    return _COMENT_HEADER_RE.sub("", s).strip(" |") or "—"
+
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def _cached_build_kpi_llenado(raw_wo: list, cache_v: str = _KPI_CACHE_VERSION) -> pd.DataFrame:
     """Wrapper con caché persistente en disco. Sobrevive reinicios de Streamlit.
@@ -3534,7 +3553,7 @@ elif _page == _NAV_PAGES[3]:
                     )
 
                     if "comentario_tecnico" in _d.columns:
-                        _d["comentario_tecnico"] = _d["comentario_tecnico"].fillna("").replace("", "—")
+                        _d["comentario_tecnico"] = _d["comentario_tecnico"].fillna("").apply(_strip_comentario_headers)
                     _cols_d = ["Fecha","folio","technician","numeral_inicial","numeral_final",
                                "estado","Salto secuencia","Origen","comentario_tecnico"]
                     _d = _d[[c for c in _cols_d if c in _d.columns]].rename(columns={
@@ -7100,7 +7119,7 @@ elif _page == _NAV_PAGES[0]:
                     # Comentario del técnico (texto libre del PDF) — explica el "OTROS" / "SIN CLASIFICAR"
                     if "comentario_tecnico" in _det_cr.columns:
                         _det_cr["comentario_tecnico"] = (
-                            _det_cr["comentario_tecnico"].fillna("").replace("", "—"))
+                            _det_cr["comentario_tecnico"].fillna("").apply(_strip_comentario_headers))
                     _det_cr = _det_cr.drop(columns=["_causa_ok"], errors="ignore").rename(columns={
                         "folio":"OT","tecnico":"Técnico","creation_date":"Fecha",
                         "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
@@ -7634,10 +7653,9 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
 
                 # Comentario / conclusión del técnico (texto libre del PDF de la OT).
                 # Clave para rastrear la causa raíz cuando el numeral viene malo.
-                def _fmt_comentario(row):
-                    c = str(row.get("comentario_tecnico", "") or "").strip()
-                    return c if c else "—"
-                _det_num["_comentario"] = _det_num.apply(_fmt_comentario, axis=1)
+                _det_num["_comentario"] = _det_num.get(
+                    "comentario_tecnico", pd.Series("", index=_det_num.index)
+                ).apply(_strip_comentario_headers)
 
                 # Construir df de display
                 _cols_num = [c for c in
