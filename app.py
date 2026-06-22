@@ -3319,22 +3319,34 @@ elif _page == _NAV_PAGES[3]:
         _seq = analizar_secuencias(_hist, n=10)
 
         # ── Lookup de metadatos EDS (eds_occim → nombre, loc, macrozona) ─────────
-        _NORTE_KW = ("arica","tarapaca","antofagasta","atacama","coquimbo")
-        _SUR_KW   = ("maule","nuble","biobio","araucania","araucan",
-                     "los rios","los lagos","aysen","magallanes")
+        # Fuente primaria: zona_occim ya trae "Norte"/"Sur"/"Santiago" directamente.
+        # Fallback: número romano de región para estaciones sin zona asignada (SHELL, RP, RT…).
+        _ZONA_DIRECTA = {
+            "Norte":          "Norte",
+            "Centro III y IV": "Norte",   # Atacama (III) + Coquimbo (IV)
+            "Sur":            "Sur",
+            "Santiago":       "Santiago",
+            "Centro":         "Santiago", # Mayoría en RM y V (Valparaíso)
+        }
+        _NORTE_REG = {"I", "II", "III", "IV", "XV"}
+        _SUR_REG   = {"VII", "VIII", "IX", "X", "XI", "XII", "XIV", "XVI",
+                      "LOS LAGOS", "LOS RIOS"}
         _eds_meta = {}
         if not df_eds.empty and "eds_occim" in df_eds.columns:
             for _, _row in df_eds.iterrows():
                 _mk = str(_row.get("eds_occim", "") or "").strip()
                 if _mk:
-                    _reg_raw = str(_row.get("region", "") or "").lower()
-                    _reg = unicodedata.normalize("NFKD", _reg_raw).encode("ascii","ignore").decode()
-                    if any(k in _reg for k in _NORTE_KW):
-                        _mz = "Norte"
-                    elif any(k in _reg for k in _SUR_KW):
-                        _mz = "Sur"
+                    _zo = str(_row.get("zona_occim", "") or "").strip()
+                    if _zo in _ZONA_DIRECTA:
+                        _mz = _ZONA_DIRECTA[_zo]
                     else:
-                        _mz = "Santiago"
+                        _reg = str(_row.get("region", "") or "").strip().upper()
+                        if _reg in _NORTE_REG:
+                            _mz = "Norte"
+                        elif _reg in _SUR_REG:
+                            _mz = "Sur"
+                        else:
+                            _mz = "Santiago"
                     _eds_meta[_mk] = {
                         "nombre":    str(_row.get("nombre", "") or ""),
                         "loc":       str(_row.get("_loc_code", "") or ""),
