@@ -713,13 +713,22 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "resources_hours", "resources_services",
         ])
 
-        # Duración de ejecución real (tasks_duration) y estimada (duration)
+        # Duración real (tasks_duration) y estimada (duration).
+        # Preferir las versiones "netas" cuando existan: para OTs de LAVADORA en
+        # Fracttal, las subtareas BOMBA y ABLANDADOR son sistemas integrados y
+        # su tiempo (~10 min c/u) infla artificialmente el estimado. El sync
+        # `sync_estim_neta.py` recalcula sin esas subtareas. Si la OT no es de
+        # lavadora, los campos netos copian los originales (fallback transparente).
+        _real_neto  = wo.get("duracion_real_neta_seg")
+        _estim_neto = wo.get("duracion_estim_neta_seg")
         try:
-            duration_sec = int(wo.get("tasks_duration") or 0)
+            duration_sec = int(_real_neto if _real_neto not in (None, "", "None")
+                               else (wo.get("tasks_duration") or 0))
         except (ValueError, TypeError):
             duration_sec = 0
         try:
-            estimated_sec = int(wo.get("duration") or 0)
+            estimated_sec = int(_estim_neto if _estim_neto not in (None, "", "None")
+                                else (wo.get("duration") or 0))
         except (ValueError, TypeError):
             estimated_sec = 0
         # Tiempo OK: ejecución >= 75% de la duración estimada
