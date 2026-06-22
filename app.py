@@ -7110,12 +7110,51 @@ elif _page == _NAV_PAGES[0]:
                 with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} OTs MC+MP)", expanded=False):
                     _det_cr = _df_cr_base[[c for c in
                         ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
-                         "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok"]
+                         "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok",
+                         "es_correctiva"]
                         if c in _df_cr_base.columns]].copy()
                     _det_cr["creation_date"] = pd.to_datetime(_det_cr["creation_date"], errors="coerce")\
                         .dt.tz_convert(None).dt.strftime("%d/%m/%Y")
                     _det_cr["Estado"] = _det_cr["_causa_ok"].apply(
                         lambda v: "✅ Correcto" if v else "❌ Error")
+
+                    # Diagnóstico breve del error de llenado (solo cuando _causa_ok=False)
+                    # Explica por qué se imputa el error; vacío cuando está correcto.
+                    import re as _re_diag
+                    _DIAG_PREFIJO = _re_diag.compile(r"^0[1-4]\.\d", _re_diag.IGNORECASE)
+                    def _diagnostico_causa(row) -> str:
+                        if bool(row.get("_causa_ok", False)):
+                            return ""
+                        causa = str(row.get("causa_raiz_raw","") or "").strip()
+                        com   = str(row.get("comentario_tecnico","") or "").strip()
+                        com   = "" if com in ("—", "-") else com
+                        es_mc = bool(row.get("es_correctiva", True))
+                        tiene_com = bool(com) and len(com) > 5
+                        causa_vacia = (not causa) or causa.upper() in ("SIN CLASIFICAR","N/A","NA")
+                        # Caso PM: el form exige cualquier texto, igual quedó vacío
+                        if not es_mc:
+                            if causa_vacia:
+                                return ("Preventiva sin observación de causa — el técnico cerró el form "
+                                        "sin documentar qué encontró.")
+                            return "Causa de preventiva no clasificable."
+                        # Caso MC
+                        if causa_vacia and tiene_com:
+                            return ("Describió la falla en texto libre pero NO seleccionó la "
+                                    "clasificación Fracttal — descuido de llenado.")
+                        if causa_vacia and not tiene_com:
+                            return ("No documentó NADA: ni clasificación Fracttal ni desglose en "
+                                    "texto libre.")
+                        # Tiene texto en la causa pero no clasifica → código no es Fracttal válido
+                        if not _DIAG_PREFIJO.match(causa):
+                            return (f"Valor en causa ('{causa[:40]}') no es código Fracttal válido "
+                                    "(01.x–04.x).")
+                        # Código tipo "OTROS" sin keyword reconocible
+                        if "OTROS" in causa.upper():
+                            extra = " El comentario aclara el detalle." if tiene_com else " Sin comentario que aclare."
+                            return f"Código '{causa[:30]}' demasiado genérico.{extra}"
+                        return "Clasificación no reconocida como técnico/cliente."
+
+                    _det_cr["_diagnostico"] = _det_cr.apply(_diagnostico_causa, axis=1)
                     # Simplificar tipo: cualquier variante de preventiva (mensual, trimestral,
                     # por horas, etc.) → "PREVENTIVA". En esta tabla no aporta el subtipo.
                     if "maint_type" in _det_cr.columns:
@@ -7131,16 +7170,20 @@ elif _page == _NAV_PAGES[0]:
                         _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
                     if "eds_occim" in _det_cr.columns:
                         _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
-                    _det_cr = _det_cr.drop(columns=["_causa_ok"], errors="ignore").rename(columns={
+                    _det_cr = _det_cr.drop(
+                        columns=["_causa_ok","es_correctiva"], errors="ignore"
+                    ).rename(columns={
                         "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
                         "tecnico":"Técnico","creation_date":"Fecha",
                         "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
                         "causa_clasif":"Clasificación",
-                        "comentario_tecnico":"Comentario técnico / qué hizo"
+                        "comentario_tecnico":"Comentario técnico / qué hizo",
+                        "_diagnostico":"Diagnóstico del error"
                     }).sort_values("Fecha", ascending=False)
-                    # Orden final: OT - Equipo - EDS - resto, Comentario al final
+                    # Orden final: OT - Equipo - EDS - resto, Comentario y Diagnóstico al final
                     _orden_cr = ["OT","Equipo","EDS","Técnico","Fecha","Tipo","Causa Raíz",
-                                 "Clasificación","Estado","Comentario técnico / qué hizo"]
+                                 "Clasificación","Estado",
+                                 "Comentario técnico / qué hizo","Diagnóstico del error"]
                     _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
                     _show_df(_det_cr, hide_index=True, width="stretch",
                         column_config={
@@ -7154,8 +7197,10 @@ elif _page == _NAV_PAGES[0]:
                             "Tipo":          st.column_config.TextColumn(width=110),
                             "Causa Raíz":    st.column_config.TextColumn(width=220),
                             "Clasificación": st.column_config.TextColumn(width=110),
-                            "Comentario técnico / qué hizo": st.column_config.TextColumn(width=380,
+                            "Comentario técnico / qué hizo": st.column_config.TextColumn(width=340,
                                 help="Texto libre del técnico en Fracttal (falla encontrada, trabajo realizado, observaciones). Explica el 'OTROS'/'SIN CLASIFICAR' o lo deja en evidencia si está vacío."),
+                            "Diagnóstico del error": st.column_config.TextColumn(width=320,
+                                help="Razón por la que el KPI imputa el error: qué llenó mal o qué omitió. Vacío si la fila está correcta."),
                             "Estado":        st.column_config.TextColumn(width=110),
                         })
             else:
