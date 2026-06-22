@@ -1,0 +1,25 @@
+2026-06-18 12:24:09.236 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.239 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.240 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.241 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.242 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.242 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.242 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.243 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.243 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-06-18 12:24:09.243 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+======================================================================
+AUDITORÍA SLA ENE–MAR 2026
+======================================================================
+
+[1] Total registros en v_llamados_sla (Ene-Mar): 881
+
+[2] PRE-FILTRO (requiere ambas fechas en app.py):
+Traceback (most recent call last):
+  File "C:\Users\jgavi\Documents\occimiano_dashboard\_auditoria_sla_enero_marzo.py", line 57, in <module>
+    print(f"    Sin fecha_llamado:  {sin_fecha_llamado:>5} registros \u2192 EXCLUIDOS")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 40: character maps to <undefined>

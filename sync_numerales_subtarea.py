@@ -192,7 +192,8 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             if r.status_code in (200, 201, 204):
                 return len(payload), 0
             if intento == 2:
-                log(f"PATCH {folio} → {r.status_code}: {r.text[:200]}", "ERR")
+                # Usar ASCII en el log (Windows cp1252 explota con flechas Unicode)
+                log(f"upsert {folio} -> HTTP {r.status_code}: {r.text[:200]}", "ERR")
                 return 0, len(payload)
         except requests.exceptions.RequestException:
             if intento == 2:

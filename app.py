@@ -24,7 +24,7 @@ from data import (
     build_work_orders_df, build_third_parties_df, station_summary, CLIENT_COLORS,
     build_kpi_llenado_df, score_llenado_por_ot, score_llenado_por_tecnico,
     build_reincidencias, build_numeral_historial, analizar_secuencias, CAT_LABEL,
-    NUMERAL_MOTIVO_LABEL,
+    NUMERAL_MOTIVO_LABEL, aplicar_numerales_subtarea,
     GRUPOS_TERRENO, get_grupo_tecnico, TECNICOS_NO_APLICA,
     SENIORS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
@@ -43,6 +43,7 @@ from gdrive import (
 # ── SUPABASE — nueva capa de datos (reemplaza Fracttal API y Excel) ───────────
 from supabase_client import (
     load_work_orders_supabase,
+    load_numerales_subtarea_supabase,
     load_listado_eds_supabase,
     load_tecnicos_supabase,
     load_equipos_supabase,
@@ -6621,9 +6622,22 @@ elif _page == _NAV_PAGES[0]:
         # ── Pre-computar scores de TODAS las OTs una sola vez por carga ──────────
         # Cada cambio de filtro (mes/semana/equipo/técnico) solo hace un slice
         # sobre este DataFrame ya calculado → órdenes de magnitud más rápido.
+        # Cargar el desglose por subtarea (1 fila por OT × activo con numeral).
+        # Vacío si la tabla aún no existe o no se corrió el sync.
+        df_num_sub = _sc("df_num_sub_v1", _wo_sig, load_numerales_subtarea_supabase)
+
         def _build_ot_all():
             _df = score_llenado_por_ot(df_kpi_raw)
             if not _df.empty:
+                # Recalcular numeral_ok/motivo a partir de las subtareas
+                # cuando estén disponibles. Una OT pasa solo si TODAS sus
+                # subtareas-numeral pasan; el motivo es el más severo.
+                _df = aplicar_numerales_subtarea(_df, df_num_sub)
+                _df["score_numeral"] = _df["numeral_ok"].apply(lambda ok: 25 if ok else 0)
+                # Recalcular score_total con la nueva columna
+                _df["score_total"] = (
+                    _df["score_tiempo"] + _df["score_causa"] + _df["score_numeral"]
+                ).clip(upper=75).round(1)
                 _df["equipo"] = _df["tecnico"].apply(_get_equipo)
                 _df["mes"] = (
                     _df["creation_date"].dt.tz_convert(None)
@@ -6633,7 +6647,7 @@ elif _page == _NAV_PAGES[0]:
                     _df["creation_date"].dt.tz_convert(None).dt.date
                 )
             return _df
-        df_ot_all = _sc("df_ot_all_scores", _wo_sig, _build_ot_all)
+        df_ot_all = _sc("df_ot_all_scores_v2_sub", _wo_sig, _build_ot_all)
 
         _meses_prec_nums = {int(str(m).split("-")[1]) for m in meses_disp if "-" in str(m)}
         _TRIMESTRES_PREC = {
@@ -7830,7 +7844,35 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         st.plotly_chart(st.session_state[_num_sig], width="stretch")
 
                 # ── Tabla detalle OTs numerales (cumple + no cumple) ──────────
+                # Si tenemos el desglose por subtarea (numerales_subtarea), una
+                # OT con varios activos se EXPANDE: 1 fila por (OT, activo) con
+                # su numeral propio y motivo individual. La OT entera se considera
+                # mala si CUALQUIER subtarea falla.
                 _det_num = _df_num_base.copy()
+                if df_num_sub is not None and not df_num_sub.empty:
+                    _sub = df_num_sub.copy()
+                    # Solo subtareas en activos donde aplica numeral
+                    _sub = _sub[_sub["tipo_activo"].isin(("lavadora","aspiradora","lavainterior"))]
+                    if not _sub.empty:
+                        _sub = _sub.rename(columns={"id_ot": "folio"})
+                        # Joinear contra _det_num (meta de la OT: técnico, fecha, cliente, EDS, tipo).
+                        _meta_cols = [c for c in [
+                            "folio","tecnico","creation_date","client","station","maint_type",
+                            "comentario_tecnico","es_correctiva"]
+                            if c in _det_num.columns]
+                        _meta = _det_num[_meta_cols].drop_duplicates("folio")
+                        _exp = _sub.merge(_meta, on="folio", how="left")
+                        # En la versión expandida, las columnas "por OT" del original son
+                        # reemplazadas por las "por subtarea":
+                        _exp["numeral_inicial"] = _exp["numeral_inicial"]
+                        _exp["numeral_final"]   = _exp["numeral_final"]
+                        _exp["numeral_ok"]      = _exp["numeral_ok"]
+                        _exp["numeral_motivo"]  = _exp["motivo"]
+                        _exp["es_lavadora"]     = True
+                        # Valor para columna "numeral" (último valor visible)
+                        _exp["numeral_valor"] = _exp["numeral_final"].fillna(_exp["numeral_inicial"]).fillna("")
+                        # Añadimos código y nombre del activo
+                        _det_num = _exp
 
                 # Columna Numeral y Estado con tres casos claros:
                 #   🔵 No aplica  → equipo no es lavadora (no se exige numeral)

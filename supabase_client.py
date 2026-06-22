@@ -201,6 +201,27 @@ def upsert_usuario_dashboard(
 # ═════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
+def load_numerales_subtarea_supabase() -> pd.DataFrame:
+    """
+    Carga numerales_subtarea (1 fila por (id_ot, codigo_activo)).
+    Es resiliente: si la tabla todavía no se creó, devuelve DataFrame vacío.
+    """
+    try:
+        rows = _query(
+            "numerales_subtarea",
+            "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
+            "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
+            "numeral_ok,motivo&order=id_ot.desc",
+            limit=20_000,
+        )
+    except Exception:
+        return pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def load_work_orders_supabase() -> list:
     """
     Retorna lista de dicts compatible con el formato raw de Fracttal.

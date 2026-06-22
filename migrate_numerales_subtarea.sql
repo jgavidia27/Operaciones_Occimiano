@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS numerales_subtarea (
 CREATE INDEX IF NOT EXISTS idx_numerales_subtarea_id_ot
   ON numerales_subtarea (id_ot);
 
+-- Permisos para el service_role (necesarios para insertar desde el sync)
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.numerales_subtarea TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE numerales_subtarea_id_seq TO service_role;
+
 -- Verificación
 SELECT
   COUNT(*)                                    AS total_filas,

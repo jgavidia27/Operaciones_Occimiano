@@ -419,6 +419,56 @@ def eval_numeral_kpi(es_lavadora: bool, inicial, final,
     return True, "ok"
 
 
+# Severidad: peor a mejor. Cuando varias subtareas conviven en una OT, el motivo
+# de la OT entera es el peor de las subtareas (la prueba más fuerte de descuido).
+_MOTIVO_SEVERIDAD = {
+    "basura":          5,
+    "negativo":        4,
+    "salto_magnitud":  3,
+    "exceso_fichas":   2,
+    "sin_numeral":     1,
+    "ok":              0,
+    "no_aplica_mc":    0,
+    "no_aplica":       0,
+}
+
+
+def aplicar_numerales_subtarea(ot: pd.DataFrame, df_sub: pd.DataFrame) -> pd.DataFrame:
+    """Combina el scoring de numeral por OT con el desglose por subtarea.
+
+    Si una OT está en `df_sub` (al menos una subtarea con numeral o un activo
+    con campo numeral en el formulario), su `numeral_ok` se RECALCULA con la
+    regla: pasa solo si TODAS sus subtareas pasan. Y `numeral_motivo` toma el
+    motivo más severo presente en sus subtareas.
+
+    Para OTs no presentes en `df_sub`, se conserva el numeral_ok original
+    calculado por eval_numeral_kpi a nivel OT (compatibilidad pre-backfill).
+    """
+    if df_sub is None or df_sub.empty or "folio" not in ot.columns:
+        return ot
+    sub = df_sub.copy()
+    # Solo subtareas en activos donde aplica numeral (lavadora/aspira/lavainterior)
+    sub = sub[sub["tipo_activo"].isin(("lavadora","aspiradora","lavainterior"))]
+    if sub.empty:
+        return ot
+    # Agregado por OT: la OT pasa solo si TODAS las subtareas-numeral pasan;
+    # tomamos el motivo más severo presente.
+    sub["_sev"] = sub["motivo"].map(_MOTIVO_SEVERIDAD).fillna(0)
+    agg = (sub.groupby("id_ot")
+              .agg(_n_ok=("numeral_ok", "min"),       # min(True,True,..)=True; con un False → False
+                   _n_sev=("_sev", "max"),
+                   _n_motivo=("motivo", lambda s: s.iloc[s.map(_MOTIVO_SEVERIDAD).fillna(0).argmax()]),
+                   _n_subs=("numeral_ok", "count"))
+              .reset_index()
+              .rename(columns={"id_ot": "folio"}))
+    out = ot.merge(agg, on="folio", how="left")
+    # Solo sobrescribimos para OTs presentes en df_sub
+    _mask = out["_n_subs"].notna() & (out["_n_subs"] > 0)
+    out.loc[_mask, "numeral_ok"]     = out.loc[_mask, "_n_ok"].astype(bool)
+    out.loc[_mask, "numeral_motivo"] = out.loc[_mask, "_n_motivo"]
+    return out.drop(columns=["_n_ok","_n_sev","_n_motivo","_n_subs"], errors="ignore")
+
+
 def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
                             n: "int | None" = 10) -> pd.DataFrame:
     """
@@ -1066,6 +1116,10 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     # Aplica a TODA lavadora/aspiradora (MC y MP): el formulario exige el numeral
     # en ambos tipos, así que un dato basura en una correctiva también penaliza.
     # numeral_ok ya devuelve True para equipos que no son lavadora (no_aplica).
+    # NOTA: si hay datos en numerales_subtarea (1 fila/activo), se reemplaza este
+    # numeral_ok al inicio (en aplicar_numerales_subtarea) por la regla:
+    # "una OT pasa SOLO si TODAS sus subtareas-numeral pasan". Aquí solo
+    # mapeamos el booleano a 25/0.
     ot["score_numeral"] = ot["numeral_ok"].apply(lambda ok: 25 if ok else 0)
 
     # ── Componente 4: Método de detección de falla (0–25 pts) ────────────────
