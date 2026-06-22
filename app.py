@@ -7686,11 +7686,13 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _det_abs["T. Estimado"]  = _det_abs["estimated_sec"].apply(_fmt_seg)
                     _det_abs["T. Ejecución"] = _det_abs["_effective_sec"].apply(_fmt_seg)
                     _det_abs["% Ejecutado"]  = _det_abs["_pct_ej_abs"]
+                    if "eds_occim" in _det_abs.columns:
+                        _det_abs["eds_occim"] = _det_abs["eds_occim"].fillna("").replace("", "—")
                     _det_abs_disp = _det_abs[[c for c in
-                        ["folio","tecnico","creation_date","maint_type",
+                        ["folio","eds_occim","tecnico","creation_date","maint_type",
                          "T. Estimado","T. Ejecución","% Ejecutado"]
                         if c in _det_abs.columns]].rename(columns={
-                            "folio":"OT","tecnico":"Técnico",
+                            "folio":"OT","eds_occim":"EDS","tecnico":"Técnico",
                             "creation_date":"Fecha","maint_type":"Tipo",
                         }).sort_values("Fecha", ascending=False)
 
@@ -7700,6 +7702,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         _show_df(_det_abs_disp, hide_index=True, width="stretch",
                             column_config={
                                 "OT":          st.column_config.TextColumn(width=110),
+                                "EDS":         st.column_config.TextColumn(width=85,
+                                    help="Código EDS Occimiano donde se realizó el MP."),
                                 "Técnico":     st.column_config.TextColumn(width=190),
                                 "Fecha":       st.column_config.TextColumn(width=100),
                                 "Tipo":        st.column_config.TextColumn(width=200),
