@@ -7214,7 +7214,7 @@ elif _page == _NAV_PAGES[0]:
                 # ── Tabla detalle de Causa Raíz ───────────────────────────────
                 with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} OTs MC+MP)", expanded=False):
                     _det_cr = _df_cr_base[[c for c in
-                        ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
+                        ["folio","eds_occim","tecnico","creation_date","maint_type",
                          "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok",
                          "es_correctiva"]
                         if c in _df_cr_base.columns]].copy()
@@ -7270,33 +7270,30 @@ elif _page == _NAV_PAGES[0]:
                     if "comentario_tecnico" in _det_cr.columns:
                         _det_cr["comentario_tecnico"] = (
                             _det_cr["comentario_tecnico"].fillna("").apply(_strip_comentario_headers))
-                    # Normalizar Equipo y EDS para display (— si vacío)
-                    if "equipment_code" in _det_cr.columns:
-                        _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
+                    # Normalizar EDS para display (Equipo se omite: una OT puede tener
+                    # varios activos; el KPI evalúa la OT como unidad).
                     if "eds_occim" in _det_cr.columns:
                         _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
                     _det_cr = _det_cr.drop(
                         columns=["_causa_ok","es_correctiva"], errors="ignore"
                     ).rename(columns={
-                        "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
+                        "folio":"OT","eds_occim":"EDS",
                         "tecnico":"Técnico","creation_date":"Fecha",
                         "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
                         "causa_clasif":"Clasificación",
                         "comentario_tecnico":"Comentario técnico / qué hizo",
                         "_diagnostico":"Diagnóstico del error"
                     }).sort_values("Fecha", ascending=False)
-                    # Orden final: OT - Equipo - EDS - resto, Comentario y Diagnóstico al final
-                    _orden_cr = ["OT","Equipo","EDS","Técnico","Fecha","Tipo","Causa Raíz",
+                    # Orden final: OT - EDS - resto, Comentario y Diagnóstico al final
+                    _orden_cr = ["OT","EDS","Técnico","Fecha","Tipo","Causa Raíz",
                                  "Clasificación","Estado",
                                  "Comentario técnico / qué hizo","Diagnóstico del error"]
                     _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
                     _show_df(_det_cr, hide_index=True, width="stretch",
                         column_config={
                             "OT":            st.column_config.TextColumn(width=110),
-                            "Equipo":        st.column_config.TextColumn(width=95,
-                                help="Código del activo en Fracttal (ej. EQ-6249)."),
                             "EDS":           st.column_config.TextColumn(width=85,
-                                help="Código EDS Occimiano."),
+                                help="Código EDS Occimiano donde se realizó el MP/MC."),
                             "Técnico":       st.column_config.TextColumn(width=190),
                             "Fecha":         st.column_config.TextColumn(width=100),
                             "Tipo":          st.column_config.TextColumn(width=110),
@@ -7424,7 +7421,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _det_te["creation_date"] = _det_te_cd.dt.strftime("%d/%m/%Y")
 
                 _det_te_disp = _det_te[[c for c in
-                    ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
+                    ["folio","eds_occim","tecnico","creation_date","maint_type",
                      "estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"]
                     if c in _det_te.columns]].copy()
                 _det_te_disp["T. Estimado"]   = _det_te_disp["estimated_sec"].apply(_fmt_seg)
@@ -7433,20 +7430,19 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
                 _det_te_disp["Estado"]         = _det_te_disp["_te_ok"].apply(
                     lambda v: "✅ Cumple" if v else "❌ No cumple")
-                # Normalizar Equipo/EDS para display
-                if "equipment_code" in _det_te_disp.columns:
-                    _det_te_disp["equipment_code"] = _det_te_disp["equipment_code"].fillna("").replace("", "—")
+                # Normalizar EDS para display (Equipo se omite: una OT puede tener
+                # subtareas con activos distintos; lo que evalúa el KPI es la OT completa).
                 if "eds_occim" in _det_te_disp.columns:
                     _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
                 _det_te_disp = _det_te_disp.drop(
                     columns=["estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"],
                     errors="ignore"
                 ).rename(columns={
-                    "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
+                    "folio":"OT","eds_occim":"EDS",
                     "tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
                 }).sort_values("Fecha", ascending=False)
-                # Orden: OT - Equipo - EDS - Técnico - resto
-                _orden_te = ["OT","Equipo","EDS","Técnico","Fecha","Tipo",
+                # Orden: OT - EDS - Técnico - resto
+                _orden_te = ["OT","EDS","Técnico","Fecha","Tipo",
                              "T. Estimado","Mín. 75%","T. Ejecución","% Ejecutado","Estado"]
                 _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
@@ -7454,8 +7450,6 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _show_df(_det_te_disp, hide_index=True, width="stretch",
                         column_config={
                             "OT":          st.column_config.TextColumn(width=110),
-                            "Equipo":      st.column_config.TextColumn(width=95,
-                                help="Código del activo en Fracttal (ej. EQ-6249)."),
                             "EDS":         st.column_config.TextColumn(width=85,
                                 help="Código EDS Occimiano donde se realizó el MP/MC."),
                             "Técnico":     st.column_config.TextColumn(width=190),
