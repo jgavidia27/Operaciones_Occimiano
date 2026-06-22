@@ -230,6 +230,17 @@ CLIENT_COLORS = {
 }
 
 
+def _eds_occim_str(raw) -> str:
+    """Normaliza el código EDS Occimiano: '60079.0' → '60079', deja strings
+    no numéricos tal cual (ej. 'EE_S045')."""
+    if raw in (None, "", "None"):
+        return ""
+    try:
+        return str(int(float(raw)))
+    except (ValueError, TypeError):
+        return str(raw).strip()
+
+
 def _parse_hierarchy(parent_description: str) -> tuple[str, str]:
     """
     Extract (client, station) from strings like:
@@ -823,6 +834,8 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "tecnico":          (wo.get("personnel_description") or "").strip(),
             "client":           client,
             "station":          station,
+            "equipment_code":   (wo.get("code") or "").strip(),
+            "eds_occim":        _eds_occim_str(wo.get("groups_2_description")),
             "creation_date":    pd.to_datetime(wo.get("creation_date"), utc=True, errors="coerce"),
             "initial_date":     initial_ts,
             "final_date":       final_ts,
@@ -928,6 +941,10 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     if "form_tiene_numeral" in df_kpi.columns:
         # True si CUALQUIER tarea de la OT tenía el campo numeral en el formulario
         _agg["form_tiene_numeral"] = ("form_tiene_numeral", lambda x: bool(any(bool(v) for v in x)))
+    if "equipment_code" in df_kpi.columns:
+        _agg["equipment_code"] = ("equipment_code", "first")
+    if "eds_occim" in df_kpi.columns:
+        _agg["eds_occim"] = ("eds_occim", "first")
     if "fichas_periodo" in df_kpi.columns:
         _agg["fichas_periodo"]  = ("fichas_periodo",  lambda x: next((v for v in x if v is not None), None))
 
@@ -943,6 +960,8 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     if "fichas_periodo"  not in ot.columns: ot["fichas_periodo"]  = None
     if "comentario_tecnico" not in ot.columns: ot["comentario_tecnico"] = ""
     if "form_tiene_numeral" not in ot.columns: ot["form_tiene_numeral"] = None
+    if "equipment_code" not in ot.columns: ot["equipment_code"] = ""
+    if "eds_occim" not in ot.columns: ot["eds_occim"] = ""
 
     # Re-evaluar la CALIDAD del numeral a nivel OT desde los valores agregados
     # (inicial/final = primer no-vacío). Garantiza que el veredicto coincida con

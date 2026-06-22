@@ -55,7 +55,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v15-numeral-mc"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v16-equipo-eds"  # bump para invalidar disco al cambiar data.py
 
 
 # Limpia los encabezados verbosos del comentario consolidado del técnico (data
@@ -7109,7 +7109,7 @@ elif _page == _NAV_PAGES[0]:
                 # ── Tabla detalle de Causa Raíz ───────────────────────────────
                 with st.expander(f"📋 Detalle de OTs — Causa Raíz ({len(_df_cr_base):,} OTs MC+MP)", expanded=False):
                     _det_cr = _df_cr_base[[c for c in
-                        ["folio","tecnico","creation_date","maint_type",
+                        ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
                          "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok"]
                         if c in _df_cr_base.columns]].copy()
                     _det_cr["creation_date"] = pd.to_datetime(_det_cr["creation_date"], errors="coerce")\
@@ -7120,19 +7120,29 @@ elif _page == _NAV_PAGES[0]:
                     if "comentario_tecnico" in _det_cr.columns:
                         _det_cr["comentario_tecnico"] = (
                             _det_cr["comentario_tecnico"].fillna("").apply(_strip_comentario_headers))
+                    # Normalizar Equipo y EDS para display (— si vacío)
+                    if "equipment_code" in _det_cr.columns:
+                        _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
+                    if "eds_occim" in _det_cr.columns:
+                        _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
                     _det_cr = _det_cr.drop(columns=["_causa_ok"], errors="ignore").rename(columns={
-                        "folio":"OT","tecnico":"Técnico","creation_date":"Fecha",
+                        "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
+                        "tecnico":"Técnico","creation_date":"Fecha",
                         "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
                         "causa_clasif":"Clasificación",
                         "comentario_tecnico":"Comentario técnico / qué hizo"
                     }).sort_values("Fecha", ascending=False)
-                    # Orden final: Comentario AL FINAL (después de Estado)
-                    _orden_cr = ["OT","Técnico","Fecha","Tipo","Causa Raíz",
+                    # Orden final: OT - Equipo - EDS - resto, Comentario al final
+                    _orden_cr = ["OT","Equipo","EDS","Técnico","Fecha","Tipo","Causa Raíz",
                                  "Clasificación","Estado","Comentario técnico / qué hizo"]
                     _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
                     _show_df(_det_cr, hide_index=True, width="stretch",
                         column_config={
                             "OT":            st.column_config.TextColumn(width=110),
+                            "Equipo":        st.column_config.TextColumn(width=95,
+                                help="Código del activo en Fracttal (ej. EQ-6249)."),
+                            "EDS":           st.column_config.TextColumn(width=85,
+                                help="Código EDS Occimiano."),
                             "Técnico":       st.column_config.TextColumn(width=190),
                             "Fecha":         st.column_config.TextColumn(width=100),
                             "Tipo":          st.column_config.TextColumn(width=180),
