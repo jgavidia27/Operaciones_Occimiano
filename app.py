@@ -1424,18 +1424,10 @@ with st.sidebar:
             f'text-align:center;padding:2px 0 4px;">👤 {_auth_user}</div>',
             unsafe_allow_html=True,
         )
-    _bcol_pw, _bcol_lo = st.columns(2) if _sb_open else (st.container(), st.container())
-    with _bcol_pw:
-        if st.button("🔑  Cambiar clave" if _sb_open else "🔑",
-                     use_container_width=True, key="chg_pw_btn",
-                     help="Te enviaremos un correo con el enlace para definir una nueva contraseña."):
-            ok, msg = request_password_reset(_auth_email, proposito="reset")
-            (st.success if ok else st.error)(msg)
-    with _bcol_lo:
-        if st.button("⎋  Cerrar sesión" if _sb_open else "⎋",
-                     use_container_width=True, key="logout_btn"):
-            logout()
-            st.rerun()
+    if st.button("⎋  Cerrar sesión" if _sb_open else "⎋",
+                 use_container_width=True, key="logout_btn"):
+        logout()
+        st.rerun()
     if _sb_open:
         st.caption(f"Cache: 30 min · disco  |  {datetime.now().strftime('%H:%M:%S')}")
 
