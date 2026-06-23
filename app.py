@@ -12,7 +12,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 
-from auth import init_cookie_manager, is_authenticated, try_login, logout
+from auth import (
+    init_cookie_manager, is_authenticated, try_login, logout,
+    request_password_reset, consume_reset_token,
+    get_pending_reset_token_from_url, clear_reset_token_from_url,
+)
 
 from api import (
     load_work_orders, load_third_parties,
@@ -728,6 +732,84 @@ def _show_login_page() -> None:
                 st.session_state["_login_failed"] = True
                 st.rerun()
 
+        # ── Link "Olvidé mi contraseña" ─────────────────────────────────
+        _, _link_col, _ = st.columns([1, 2, 1])
+        with _link_col:
+            if st.button("¿Olvidó su contraseña?",
+                         key="_btn_forgot", use_container_width=True):
+                st.session_state["_auth_view"] = "forgot"
+                st.rerun()
+
+
+def _show_forgot_page() -> None:
+    """Pantalla 'Ingresa tu correo' para iniciar recuperación de contraseña."""
+    _ = _login_page_wrapper_start("Recuperar contraseña")
+    with st.form("occim_forgot"):
+        st.caption("Ingresa el correo asociado a tu cuenta. Te enviaremos un "
+                   "enlace para crear una nueva contraseña.")
+        _email = st.text_input("Correo electrónico",
+                               placeholder="nombre@occimiano.cl",
+                               key="_lf_forgot_email")
+        _send = st.form_submit_button("Enviar enlace  →",
+                                      use_container_width=True, type="primary")
+    if _send:
+        ok, msg = request_password_reset(_email, proposito="reset")
+        if ok:
+            st.success(msg)
+        else:
+            st.error(msg)
+    _, _back_col, _ = st.columns([1, 2, 1])
+    with _back_col:
+        if st.button("← Volver al login", key="_btn_forgot_back",
+                     use_container_width=True):
+            st.session_state["_auth_view"] = "login"
+            st.rerun()
+
+
+def _show_reset_page(token: str) -> None:
+    """Pantalla 'Setea tu nueva contraseña' a la que se llega vía link del correo."""
+    _ = _login_page_wrapper_start("Define tu nueva contraseña")
+    with st.form("occim_reset"):
+        st.caption("Elige una contraseña de al menos 8 caracteres. Confírmala "
+                   "abajo y haz clic en Guardar.")
+        _pw1 = st.text_input("Nueva contraseña", type="password",
+                             key="_lf_reset_pw1")
+        _pw2 = st.text_input("Confirmar contraseña", type="password",
+                             key="_lf_reset_pw2")
+        _save = st.form_submit_button("Guardar  →",
+                                      use_container_width=True, type="primary")
+    if _save:
+        if _pw1 != _pw2:
+            st.error("Las contraseñas no coinciden.")
+        elif len(_pw1) < 8:
+            st.error("La contraseña debe tener al menos 8 caracteres.")
+        else:
+            ok, msg = consume_reset_token(token, _pw1)
+            if ok:
+                st.success(msg + " Redirigiendo al login…")
+                clear_reset_token_from_url()
+                st.session_state["_auth_view"] = "login"
+                import time as _t; _t.sleep(2)
+                st.rerun()
+            else:
+                st.error(msg)
+
+
+def _login_page_wrapper_start(title: str) -> None:
+    """Header visual común a las pantallas pre-login (login/forgot/reset)."""
+    _logo_b64 = _load_logo_b64()
+    _, _center, _ = st.columns([1, 2, 1])
+    with _center:
+        st.markdown(f"""
+        <div style="text-align:center;margin:42px 0 8px 0;">
+            {f'<img src="data:image/png;base64,{_logo_b64}" style="height:60px;">' if _logo_b64 else ''}
+            <p style="color:#01798A;letter-spacing:0.18em;font-weight:700;
+                margin:14px 0 4px 0;font-size:0.78rem;">INDICADORES OPERACIONALES</p>
+            <p style="color:#0d1427;font-size:1.45rem;font-weight:700;
+                margin:0;line-height:1.2;">{title}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
 
 st.set_page_config(
     page_title="Occimiano - Indicadores Operacionales",
@@ -753,7 +835,18 @@ if st.query_params.get("_lo") == "1":
 
 # ── Autenticación — mostrar login y detener si no hay sesión ─────────────────
 if not is_authenticated():
-    _show_login_page()
+    # Router de pantallas pre-login:
+    #   1. ?rst=<token>  → setear nueva contraseña (link del correo)
+    #   2. _auth_view = "forgot" → ingresar correo para recuperar
+    #   3. (default)     → login normal
+    _reset_token = get_pending_reset_token_from_url()
+    _auth_view   = st.session_state.get("_auth_view", "login")
+    if _reset_token:
+        _show_reset_page(_reset_token)
+    elif _auth_view == "forgot":
+        _show_forgot_page()
+    else:
+        _show_login_page()
     st.stop()
 
 # ── Tema (dark / light) — leer desde URL query param ─────────────────────────
@@ -1331,9 +1424,18 @@ with st.sidebar:
             f'text-align:center;padding:2px 0 4px;">👤 {_auth_user}</div>',
             unsafe_allow_html=True,
         )
-    if st.button("⎋  Cerrar sesión" if _sb_open else "⎋", use_container_width=True, key="logout_btn"):
-        logout()
-        st.rerun()
+    _bcol_pw, _bcol_lo = st.columns(2) if _sb_open else (st.container(), st.container())
+    with _bcol_pw:
+        if st.button("🔑  Cambiar clave" if _sb_open else "🔑",
+                     use_container_width=True, key="chg_pw_btn",
+                     help="Te enviaremos un correo con el enlace para definir una nueva contraseña."):
+            ok, msg = request_password_reset(_auth_email, proposito="reset")
+            (st.success if ok else st.error)(msg)
+    with _bcol_lo:
+        if st.button("⎋  Cerrar sesión" if _sb_open else "⎋",
+                     use_container_width=True, key="logout_btn"):
+            logout()
+            st.rerun()
     if _sb_open:
         st.caption(f"Cache: 30 min · disco  |  {datetime.now().strftime('%H:%M:%S')}")
 
@@ -9758,6 +9860,31 @@ elif _page == "🔐  Administración":
                         st.rerun()
                     else:
                         st.error("Error al guardar. Verifica los datos.")
+
+        # ── Acciones de contraseña (invitar / forzar reset) ─────────────
+        with st.expander("✉️ Enviar correo de invitación o reset de contraseña",
+                          expanded=False):
+            st.caption(
+                "**Invitar usuario nuevo** — manda un correo para que defina "
+                "su 1ª contraseña (link válido 24h).  \n"
+                "**Forzar reset** — útil si un usuario olvidó su contraseña y "
+                "no le llegó el correo automático (link válido 15min)."
+            )
+            _pc1, _pc2, _pc3 = st.columns([3, 2, 2])
+            with _pc1:
+                _pw_email = st.text_input("Correo del usuario",
+                                          placeholder="nombre@occimiano.cl",
+                                          key="pw_action_email")
+            with _pc2:
+                if st.button("📧 Enviar invitación", key="pw_invite_btn",
+                              use_container_width=True):
+                    ok, msg = request_password_reset(_pw_email, proposito="invite")
+                    (st.success if ok else st.error)(msg)
+            with _pc3:
+                if st.button("🔄 Forzar reset", key="pw_reset_btn",
+                              use_container_width=True):
+                    ok, msg = request_password_reset(_pw_email, proposito="reset")
+                    (st.success if ok else st.error)(msg)
 
         # Tabla de usuarios
         _df_usr = get_usuarios_admin()

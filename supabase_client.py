@@ -119,15 +119,81 @@ def _patch(tabla: str, filtro: str, data: dict) -> bool:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def get_usuario_dashboard(email: str) -> "dict | None":
-    """Retorna el usuario si está en la whitelist y activo, None si no."""
-    rows = _query(
-        "usuarios_dashboard",
-        f"select=email,nombre,rol,activo&email=eq.{email.lower()}",
-        limit=1,
-    )
+    """Retorna el usuario si está en la whitelist y activo, None si no.
+    Incluye password_hash para que auth.py pueda validar contraseñas individuales.
+    Fallback transparente: si las columnas nuevas no existen aún, reintenta sin ellas."""
+    base = f"select=email,nombre,rol,activo,password_hash,password_set_at"
+    rows = _query("usuarios_dashboard",
+                  f"{base}&email=eq.{email.lower()}", limit=1)
+    if not rows:
+        # Posible 400 por columnas inexistentes (migración no corrida)
+        rows = _query("usuarios_dashboard",
+                      f"select=email,nombre,rol,activo&email=eq.{email.lower()}", limit=1)
     if rows and rows[0].get("activo"):
         return rows[0]
     return None
+
+
+# ── Passwords individuales (migrate_auth_passwords.sql) ──────────────────────
+
+def update_user_password_hash(email: str, password_hash: str) -> bool:
+    """Setea password_hash + password_changed_at (y password_set_at si está null)."""
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        ok = _patch(
+            "usuarios_dashboard",
+            f"email=eq.{email.lower()}",
+            {
+                "password_hash":       password_hash,
+                "password_changed_at": now,
+                # password_set_at lo seteamos siempre; si ya existía, sobreescribir es inocuo
+                "password_set_at":     now,
+            },
+        )
+        return bool(ok)
+    except Exception:
+        return False
+
+
+def create_password_reset_token(email: str, token_hash: str,
+                                proposito: str,
+                                expires_at_utc: datetime) -> bool:
+    """Inserta un registro en password_resets. Devuelve True si se creó."""
+    try:
+        _post("password_resets", {
+            "email":      email.lower(),
+            "token_hash": token_hash,
+            "proposito":  proposito or "reset",
+            "expires_at": expires_at_utc.isoformat(),
+        })
+        return True
+    except Exception:
+        return False
+
+
+def find_password_reset(token_hash: str) -> "dict | None":
+    """Busca un token por su hash. Devuelve dict con email/expires_at/used_at/id."""
+    rows = _query(
+        "password_resets",
+        f"select=id,email,proposito,expires_at,used_at"
+        f"&token_hash=eq.{token_hash}",
+        limit=1,
+    )
+    return rows[0] if rows else None
+
+
+def mark_reset_used(reset_id) -> bool:
+    """Marca un token como utilizado (used_at = now). Idempotente."""
+    if reset_id is None:
+        return False
+    try:
+        return bool(_patch(
+            "password_resets",
+            f"id=eq.{reset_id}",
+            {"used_at": datetime.now(timezone.utc).isoformat()},
+        ))
+    except Exception:
+        return False
 
 
 def log_session_start(email: str, session_id: str) -> None:
