@@ -9423,17 +9423,37 @@ elif _page == _NAV_PAGES[2]:
         _df_cumpl["dias_atraso"] = (
             _df_cumpl["_ff_n"].fillna(_hoy_norm) - _df_cumpl["_fp_n"]
         ).dt.days
+
+        # Cumplimiento DIARIO (estricto: mismo día o antes)
         _df_cumpl["cumple"] = (
             _df_cumpl["_ff_n"].notna() & (_df_cumpl["dias_atraso"] <= 0)
         )
+
+        # Cumplimiento SEMANAL (flexible: misma semana ISO o antes)
+        # Cumple si fecha_finalización cae en la misma semana ISO de
+        # fecha_programada (o anterior). Si no hay fecha_finalización y aún
+        # estamos en la misma semana de programada → cumple (aún en plazo).
+        def _iso_yw(s):
+            ic = s.isocalendar()
+            # (year, week) — comparable directamente
+            return ic["year"] * 100 + ic["week"]
+        _yw_fp  = _iso_yw(_df_cumpl["_fp_n"])
+        _yw_ff  = _iso_yw(_df_cumpl["_ff_n"].fillna(_hoy_norm))
+        _df_cumpl["cumple_sem"] = (_yw_ff <= _yw_fp) & (
+            _df_cumpl["_ff_n"].notna() | (_yw_ff == _yw_fp)
+        )
+
         _cump_n  = int(_df_cumpl["cumple"].sum())
         _cump_tot= len(_df_cumpl)
         _cump_pct= round(_cump_n / _cump_tot * 100, 1) if _cump_tot > 0 else 0.0
         _atras_avg = round(_df_cumpl.loc[~_df_cumpl["cumple"], "dias_atraso"].mean(), 1) \
             if (~_df_cumpl["cumple"]).any() else 0.0
+
+        _cump_sem_n  = int(_df_cumpl["cumple_sem"].sum())
+        _cump_sem_pct= round(_cump_sem_n / _cump_tot * 100, 1) if _cump_tot > 0 else 0.0
     else:
-        _cump_n = _cump_tot = 0
-        _cump_pct = 0.0
+        _cump_n = _cump_tot = _cump_sem_n = 0
+        _cump_pct = _cump_sem_pct = 0.0
         _atras_avg = 0.0
 
     pk1,pk2,pk3,pk4,pk5 = st.columns(5)
@@ -9443,22 +9463,24 @@ elif _page == _NAV_PAGES[2]:
     pk4.metric("No Iniciadas",           f"{_pnoi:,}")
     pk5.metric("% Completadas",          f"{_ppct}%")
 
-    # ── Velocímetro de % Cumplimiento en tiempo y forma ───────────────────
-    _gc1, _gc2 = st.columns([1, 1.5])
-    with _gc1:
-        import plotly.graph_objects as _go
-        _gauge_color = "#10b981" if _cump_pct >= 90 else "#f59e0b" if _cump_pct >= 75 else "#ef4444"
-        _fig_g = _go.Figure(_go.Indicator(
+    # ── Velocímetros: cumplimiento diario y semanal ───────────────────────
+    import plotly.graph_objects as _go
+
+    def _gauge_color_of(pct: float) -> str:
+        return "#10b981" if pct >= 90 else "#f59e0b" if pct >= 75 else "#ef4444"
+
+    def _build_gauge(value: float, title_main: str, subtitle: str) -> "_go.Figure":
+        color = _gauge_color_of(value)
+        fig = _go.Figure(_go.Indicator(
             mode="gauge+number",
-            value=_cump_pct,
-            number={"suffix": " %", "font": {"size": 36}},
-            title={"text": "<b>% Cumplimiento MP en tiempo y forma</b><br>"
-                           "<span style='font-size:0.75rem;color:#94a3b8'>"
-                           "fecha_finalización ≤ fecha_programada · por OT</span>",
-                   "font": {"size": 14}},
+            value=value,
+            number={"suffix": " %", "font": {"size": 32}},
+            title={"text": f"<b>{title_main}</b><br>"
+                           f"<span style='font-size:0.72rem;color:#94a3b8'>{subtitle}</span>",
+                   "font": {"size": 13}},
             gauge={
-                "axis":    {"range": [0, 100], "tickwidth": 1, "tickfont": {"size": 11}},
-                "bar":     {"color": _gauge_color, "thickness": 0.32},
+                "axis":    {"range": [0, 100], "tickwidth": 1, "tickfont": {"size": 10}},
+                "bar":     {"color": color, "thickness": 0.32},
                 "bgcolor": "rgba(0,0,0,0)",
                 "borderwidth": 0,
                 "steps": [
@@ -9468,40 +9490,73 @@ elif _page == _NAV_PAGES[2]:
                 ],
             },
         ))
-        _fig_g.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10),
-                             paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(_fig_g, use_container_width=True, key="prev_gauge_cumpl")
-    with _gc2:
-        st.markdown(
-            f"""<div style="padding:14px 18px;background:rgba(148,163,184,0.08);
-                 border-radius:10px;border-left:3px solid {_gauge_color};">
-              <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
-                          font-weight:600;text-transform:uppercase;margin-bottom:6px;">
-                Detalle del cumplimiento</div>
-              <div style="font-size:1.55rem;font-weight:700;color:#e2e8f0;margin:4px 0;">
-                {_cump_n:,} / {_cump_tot:,} OTs a tiempo</div>
-              <div style="color:#94a3b8;font-size:0.85rem;">
-                <b style="color:#ef4444">{_cump_tot - _cump_n:,}</b> OTs con
-                atraso · promedio <b style="color:#ef4444">{_atras_avg}</b> días sobre la fecha programada.
-                <br><span style="font-size:0.78rem;">Solo OTs cuya fecha programada ya pasó.
-                Se excluyeron <b>{_excluidas_n:,}</b> OTs anuladas (Cancelado / Error de ingreso).</span>
-              </div>
-              <div style="color:#94a3b8;font-size:0.78rem;margin-top:10px;
-                          padding-top:8px;border-top:1px solid rgba(148,163,184,0.18);">
-                <b>Escala:</b>
-                <span style="color:#10b981">≥ 90% bien</span> ·
-                <span style="color:#f59e0b">75–90% revisar</span> ·
-                <span style="color:#ef4444">&lt; 75% crítico</span>
-              </div>
-            </div>""",
-            unsafe_allow_html=True,
+        fig.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10),
+                          paper_bgcolor="rgba(0,0,0,0)")
+        return fig
+
+    _gc1, _gc2 = st.columns(2)
+    with _gc1:
+        st.plotly_chart(
+            _build_gauge(_cump_pct, "% Cumplimiento — fecha exacta",
+                         "fecha_finalización ≤ fecha_programada · por OT"),
+            use_container_width=True, key="prev_gauge_diario",
         )
+    with _gc2:
+        st.plotly_chart(
+            _build_gauge(_cump_sem_pct, "% Cumplimiento — misma semana",
+                         "ejecutada dentro de la semana ISO programada · por OT"),
+            use_container_width=True, key="prev_gauge_semanal",
+        )
+
+    # Panel de detalle unificado debajo de ambos velocímetros
+    _gauge_color   = _gauge_color_of(_cump_pct)
+    _gauge_color_s = _gauge_color_of(_cump_sem_pct)
+    st.markdown(
+        f"""<div style="padding:14px 18px;background:rgba(148,163,184,0.08);
+             border-radius:10px;border-left:3px solid {_gauge_color};margin-top:-12px;">
+          <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
+                      font-weight:600;text-transform:uppercase;margin-bottom:8px;">
+            Detalle del cumplimiento</div>
+          <table style="width:100%;border-collapse:collapse;color:#e2e8f0;font-size:0.92rem;">
+            <tr style="border-bottom:1px solid rgba(148,163,184,0.18);">
+              <td style="padding:6px 0;font-weight:600;">Fecha exacta (estricto)</td>
+              <td style="padding:6px 0;text-align:right;">
+                <b style="color:{_gauge_color};font-size:1.05rem;">{_cump_n:,} / {_cump_tot:,}</b>
+                <span style="color:#94a3b8;font-size:0.82rem;"> OTs a tiempo · {_cump_pct}%</span>
+              </td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(148,163,184,0.18);">
+              <td style="padding:6px 0;font-weight:600;">Misma semana ISO (flexible)</td>
+              <td style="padding:6px 0;text-align:right;">
+                <b style="color:{_gauge_color_s};font-size:1.05rem;">{_cump_sem_n:,} / {_cump_tot:,}</b>
+                <span style="color:#94a3b8;font-size:0.82rem;"> OTs en plazo · {_cump_sem_pct}%</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:6px 0;color:#94a3b8;font-size:0.84rem;">Promedio de atraso (diario)</td>
+              <td style="padding:6px 0;text-align:right;color:#ef4444;font-weight:600;">
+                {_atras_avg} días
+              </td>
+            </tr>
+          </table>
+          <div style="color:#94a3b8;font-size:0.78rem;margin-top:10px;
+                      padding-top:8px;border-top:1px solid rgba(148,163,184,0.18);">
+            Solo OTs cuya fecha programada ya pasó.
+            Se excluyeron <b>{_excluidas_n:,}</b> OTs anuladas (Cancelado / Error de ingreso).
+            <b style="margin-left:8px;">Escala:</b>
+            <span style="color:#10b981">≥ 90% bien</span> ·
+            <span style="color:#f59e0b">75–90% revisar</span> ·
+            <span style="color:#ef4444">&lt; 75% crítico</span>
+          </div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
     # ── Desglose: tabla de OTs que NO cumplieron ─────────────────────────
     _df_incumpl = _df_cumpl[~_df_cumpl["cumple"]].copy() if _cump_tot > 0 else pd.DataFrame()
     with st.expander(
         f"🔍  Desglose del {_cump_pct}% — ver las {len(_df_incumpl):,} OTs que NO cumplieron",
-        expanded=False,
+        expanded=True,
     ):
         if _df_incumpl.empty:
             st.success("✅ Todas las OTs evaluadas cumplieron el plazo. Sin incumplimientos.")
