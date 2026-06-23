@@ -9793,6 +9793,13 @@ elif _page == "🔐  Administración":
     with _adm_tab2:
         st.markdown("#### Sesiones del dashboard")
         _df_ses = get_sesiones_admin()
+        # Excluir cuentas internas (desarrollo / administración) — su uso intensivo
+        # distorsiona la analítica a nivel usuario operativo.
+        _EMAILS_EXCLUIR_ANALITICA = {"jgavidia@occimiano.cl"}
+        if not _df_ses.empty and "email" in _df_ses.columns:
+            _df_ses = _df_ses[
+                ~_df_ses["email"].str.strip().str.lower().isin(_EMAILS_EXCLUIR_ANALITICA)
+            ].copy()
         if _df_ses.empty:
             st.info("No hay sesiones registradas todavía.")
         else:
