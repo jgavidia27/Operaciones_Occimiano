@@ -9384,19 +9384,35 @@ elif _page == _NAV_PAGES[2]:
     _ppct   = round(_pfin / _ptot * 100, 1) if _ptot > 0 else 0.0
 
     # ── % Cumplimiento en tiempo y forma ──────────────────────────────────
-    # Criterio Occimiano: fecha_finalizacion (cuando el técnico cierra la sub-
-    # tarea) debe ser ≤ fecha_programada (mismo día o antes). Si se ejecutó el
-    # día siguiente o después, NO cumple — aunque después se justifique con la
-    # estación. Se evalúa por sub-tarea individual (cada fila del DataFrame).
-    _df_cumpl = dfp[
-        dfp["fecha_finalizacion"].notna()
-        & dfp["fecha_programada"].notna()
-    ].copy()
+    # Criterio Occimiano: fecha_finalizacion debe ser ≤ fecha_programada (mismo
+    # día o antes). Si la OT se ejecutó el día siguiente o después, NO cumple
+    # — aunque después se justifique con la estación.
+    #
+    # Granularidad: el sync ya deduplica por id_ot, por lo que cada fila aquí
+    # es UNA OT completa. La fecha_finalizacion es la de la OT global, no de
+    # una sub-tarea individual.
+    #
+    # Universo evaluado: solo OTs cuya fecha_programada ya pasó. Las futuras
+    # no se evalúan (aún no son atraso).
+    _hoy_norm = pd.Timestamp.today().normalize()
+    _df_cumpl = dfp[dfp["fecha_programada"].notna()].copy()
     if not _df_cumpl.empty:
-        _fp = pd.to_datetime(_df_cumpl["fecha_programada"], errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
+        _fp = pd.to_datetime(_df_cumpl["fecha_programada"],   errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
         _ff = pd.to_datetime(_df_cumpl["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
-        _df_cumpl["dias_atraso"] = (_ff - _fp).dt.days
-        _df_cumpl["cumple"]      = _df_cumpl["dias_atraso"] <= 0
+        _df_cumpl["_fp_n"] = _fp
+        _df_cumpl["_ff_n"] = _ff
+        # Solo OTs cuya fecha programada ya pasó
+        _df_cumpl = _df_cumpl[_df_cumpl["_fp_n"] <= _hoy_norm]
+
+        # Días de atraso:
+        #   - Si está finalizada: ff - fp
+        #   - Si NO está finalizada: hoy - fp (atraso indefinido, en curso)
+        _df_cumpl["dias_atraso"] = (
+            _df_cumpl["_ff_n"].fillna(_hoy_norm) - _df_cumpl["_fp_n"]
+        ).dt.days
+        _df_cumpl["cumple"] = (
+            _df_cumpl["_ff_n"].notna() & (_df_cumpl["dias_atraso"] <= 0)
+        )
         _cump_n  = int(_df_cumpl["cumple"].sum())
         _cump_tot= len(_df_cumpl)
         _cump_pct= round(_cump_n / _cump_tot * 100, 1) if _cump_tot > 0 else 0.0
@@ -9425,7 +9441,7 @@ elif _page == _NAV_PAGES[2]:
             number={"suffix": " %", "font": {"size": 36}},
             title={"text": "<b>% Cumplimiento MP en tiempo y forma</b><br>"
                            "<span style='font-size:0.75rem;color:#94a3b8'>"
-                           "fecha_finalización ≤ fecha_programada · por sub-tarea</span>",
+                           "fecha_finalización ≤ fecha_programada · por OT</span>",
                    "font": {"size": 14}},
             gauge={
                 "axis":    {"range": [0, 100], "tickwidth": 1, "tickfont": {"size": 11}},
@@ -9450,10 +9466,11 @@ elif _page == _NAV_PAGES[2]:
                           font-weight:600;text-transform:uppercase;margin-bottom:6px;">
                 Detalle del cumplimiento</div>
               <div style="font-size:1.55rem;font-weight:700;color:#e2e8f0;margin:4px 0;">
-                {_cump_n:,} / {_cump_tot:,} sub-tareas a tiempo</div>
+                {_cump_n:,} / {_cump_tot:,} OTs a tiempo</div>
               <div style="color:#94a3b8;font-size:0.85rem;">
-                <b style="color:#ef4444">{_cump_tot - _cump_n:,}</b> sub-tareas con
+                <b style="color:#ef4444">{_cump_tot - _cump_n:,}</b> OTs con
                 atraso · promedio <b style="color:#ef4444">{_atras_avg}</b> días sobre la fecha programada.
+                <br><span style="font-size:0.78rem;">Solo se evalúan OTs cuya fecha programada ya pasó.</span>
               </div>
               <div style="color:#94a3b8;font-size:0.78rem;margin-top:10px;
                           padding-top:8px;border-top:1px solid rgba(148,163,184,0.18);">
@@ -9465,6 +9482,68 @@ elif _page == _NAV_PAGES[2]:
             </div>""",
             unsafe_allow_html=True,
         )
+
+    # ── Desglose: tabla de OTs que NO cumplieron ─────────────────────────
+    _df_incumpl = _df_cumpl[~_df_cumpl["cumple"]].copy() if _cump_tot > 0 else pd.DataFrame()
+    with st.expander(
+        f"🔍  Desglose del {_cump_pct}% — ver las {len(_df_incumpl):,} OTs que NO cumplieron",
+        expanded=False,
+    ):
+        if _df_incumpl.empty:
+            st.success("✅ Todas las OTs evaluadas cumplieron el plazo. Sin incumplimientos.")
+        else:
+            # Construir tabla explicativa
+            _df_incumpl = _df_incumpl.sort_values("dias_atraso", ascending=False)
+            _det = pd.DataFrame({
+                "OT":             _df_incumpl["id_ot"].values,
+                "Estación":       _df_incumpl.get("estacion", _df_incumpl.get("ubicacion", "")).fillna("—").values,
+                "Plan":           _df_incumpl.get("plan_tareas", pd.Series([""] * len(_df_incumpl))).fillna("—").values,
+                "Tarea":          _df_incumpl["nombre_tarea"].fillna("—").values,
+                "Equipo":         _df_incumpl["codigo_activo"].fillna("—").values,
+                "F. Programada":  _df_incumpl["_fp_n"].dt.strftime("%d/%m/%Y").values,
+                "F. Ejecución":   _df_incumpl["_ff_n"].dt.strftime("%d/%m/%Y").fillna("—").values,
+                "Días atraso":    _df_incumpl["dias_atraso"].astype(int).values,
+                "Estado":         _df_incumpl["estado_tarea"].fillna("—").values,
+                "Responsable":    _df_incumpl["responsable"].fillna("—").values,
+            })
+
+            # Columna resumen explicativa
+            def _resumen_row(r):
+                if r["F. Ejecución"] == "—" or pd.isna(r["F. Ejecución"]):
+                    return f"⏳ Pendiente — atraso de {r['Días atraso']} días sin ejecutar"
+                d = int(r["Días atraso"])
+                return f"⚠️ Ejecutada {d} día{'s' if d != 1 else ''} después de la fecha programada"
+            _det["Resumen"] = _det.apply(_resumen_row, axis=1)
+
+            # Reordenar columnas para mejor lectura
+            _det = _det[["OT", "Estación", "Plan", "Tarea", "Equipo",
+                         "F. Programada", "F. Ejecución", "Días atraso",
+                         "Resumen", "Estado", "Responsable"]]
+
+            _show_df(
+                _det.reset_index(drop=True),
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "OT":           st.column_config.TextColumn(width=85),
+                    "Estación":     st.column_config.TextColumn(width=200),
+                    "Plan":         st.column_config.TextColumn(width=200),
+                    "Tarea":        st.column_config.TextColumn(width=180),
+                    "Equipo":       st.column_config.TextColumn(width=90),
+                    "F. Programada":st.column_config.TextColumn(width=100),
+                    "F. Ejecución": st.column_config.TextColumn(width=100),
+                    "Días atraso":  st.column_config.NumberColumn(format="%d d", width=95),
+                    "Resumen":      st.column_config.TextColumn(width=320),
+                    "Estado":       st.column_config.TextColumn(width=110),
+                    "Responsable":  st.column_config.TextColumn(width=160),
+                },
+            )
+            st.caption(
+                f"Ordenadas por días de atraso descendente · "
+                f"{(_det['F. Ejecución'] == '—').sum():,} sin ejecutar · "
+                f"{(_det['F. Ejecución'] != '—').sum():,} ejecutadas fuera de plazo"
+            )
+
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
