@@ -9572,6 +9572,7 @@ elif _page == _NAV_PAGES[2]:
                 "F. Programada":  _df_incumpl["_fp_n"].dt.strftime("%d/%m/%Y").values,
                 "F. Ejecución":   _df_incumpl["_ff_n"].dt.strftime("%d/%m/%Y").fillna("—").values,
                 "Días atraso":    _df_incumpl["dias_atraso"].astype(int).values,
+                "¿Cumple semanal?": _df_incumpl["cumple_sem"].map({True: "✅ Sí", False: "❌ No"}).values,
                 "Estado":         _df_incumpl["estado_tarea"].fillna("—").values,
                 "Responsable":    _df_incumpl["responsable"].fillna("—").values,
             })
@@ -9581,36 +9582,43 @@ elif _page == _NAV_PAGES[2]:
                 if r["F. Ejecución"] == "—" or pd.isna(r["F. Ejecución"]):
                     return f"⏳ Pendiente — atraso de {r['Días atraso']} días sin ejecutar"
                 d = int(r["Días atraso"])
-                return f"⚠️ Ejecutada {d} día{'s' if d != 1 else ''} después de la fecha programada"
+                if r["¿Cumple semanal?"] == "✅ Sí":
+                    return f"🟡 Ejecutada {d} día{'s' if d != 1 else ''} después · misma semana"
+                return f"⚠️ Ejecutada {d} día{'s' if d != 1 else ''} después · semana(s) posterior(es)"
             _det["Resumen"] = _det.apply(_resumen_row, axis=1)
 
             # Reordenar columnas para mejor lectura
             _det = _det[["OT", "Estación", "Plan", "Tarea", "Equipo",
                          "F. Programada", "F. Ejecución", "Días atraso",
-                         "Resumen", "Estado", "Responsable"]]
+                         "¿Cumple semanal?", "Resumen", "Estado", "Responsable"]]
 
             _show_df(
                 _det.reset_index(drop=True),
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "OT":           st.column_config.TextColumn(width=85),
-                    "Estación":     st.column_config.TextColumn(width=200),
-                    "Plan":         st.column_config.TextColumn(width=200),
-                    "Tarea":        st.column_config.TextColumn(width=180),
-                    "Equipo":       st.column_config.TextColumn(width=90),
-                    "F. Programada":st.column_config.TextColumn(width=100),
-                    "F. Ejecución": st.column_config.TextColumn(width=100),
-                    "Días atraso":  st.column_config.NumberColumn(format="%d d", width=95),
-                    "Resumen":      st.column_config.TextColumn(width=320),
-                    "Estado":       st.column_config.TextColumn(width=110),
-                    "Responsable":  st.column_config.TextColumn(width=160),
+                    "OT":               st.column_config.TextColumn(width=85),
+                    "Estación":         st.column_config.TextColumn(width=200),
+                    "Plan":             st.column_config.TextColumn(width=200),
+                    "Tarea":            st.column_config.TextColumn(width=180),
+                    "Equipo":           st.column_config.TextColumn(width=90),
+                    "F. Programada":    st.column_config.TextColumn(width=100),
+                    "F. Ejecución":     st.column_config.TextColumn(width=100),
+                    "Días atraso":      st.column_config.NumberColumn(format="%d d", width=95),
+                    "¿Cumple semanal?": st.column_config.TextColumn(width=130),
+                    "Resumen":          st.column_config.TextColumn(width=340),
+                    "Estado":           st.column_config.TextColumn(width=110),
+                    "Responsable":      st.column_config.TextColumn(width=160),
                 },
             )
+            # Métricas del desglose
+            _sin_ejec   = (_det["F. Ejecución"] == "—").sum()
+            _ejec_tarde = (_det["F. Ejecución"] != "—").sum()
+            _ok_semana  = (_det["¿Cumple semanal?"] == "✅ Sí").sum()
             st.caption(
                 f"Ordenadas por días de atraso descendente · "
-                f"{(_det['F. Ejecución'] == '—').sum():,} sin ejecutar · "
-                f"{(_det['F. Ejecución'] != '—').sum():,} ejecutadas fuera de plazo"
+                f"{_sin_ejec:,} sin ejecutar · {_ejec_tarde:,} ejecutadas fuera de plazo diario · "
+                f"de esas, **{_ok_semana:,} sí cumplieron en la misma semana** (rescate por flexibilidad semanal)."
             )
 
     st.divider()
