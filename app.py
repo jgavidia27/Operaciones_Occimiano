@@ -9833,16 +9833,30 @@ elif _page == _NAV_PAGES[2]:
         _dom_actual = _lun_actual + pd.Timedelta(days=6)
         _lun_prox   = _lun_actual + pd.Timedelta(weeks=1)
         _dom_prox   = _lun_prox   + pd.Timedelta(days=6)
+        _semana_iso = _hoy.isocalendar().week
+
+        # Encabezado con número de semana ISO
+        st.markdown(
+            f"""<div style="background:rgba(1,121,138,0.10);border-left:3px solid #01798A;
+                 padding:10px 16px;border-radius:6px;margin-bottom:14px;">
+              <span style="color:#01798A;font-weight:700;font-size:0.95rem;letter-spacing:0.04em;">
+                📆  Semana ISO {_semana_iso}</span>
+              <span style="color:#94a3b8;font-size:0.85rem;margin-left:12px;">
+                Hoy: <b>{_hoy.strftime('%d/%m/%Y')}</b> · Rango actual:
+                <b>{_lun_actual.strftime('%d/%m')} – {_dom_actual.strftime('%d/%m/%Y')}</b></span>
+            </div>""",
+            unsafe_allow_html=True,
+        )
 
         _plan_sem_opts = {
-            f"Semana actual  ({_lun_actual.strftime('%d/%m')} – {_dom_actual.strftime('%d/%m/%Y')})":
-                (_lun_actual, _dom_actual),
-            f"Próxima semana ({_lun_prox.strftime('%d/%m')} – {_dom_prox.strftime('%d/%m/%Y')})":
-                (_lun_prox, _dom_prox),
+            f"Semana actual (S{_semana_iso}): {_lun_actual.strftime('%d/%m')} – {_dom_actual.strftime('%d/%m/%Y')}":
+                (_lun_actual, _dom_actual + pd.Timedelta(hours=23, minutes=59, seconds=59)),
+            f"Próxima semana (S{_semana_iso+1}): {_lun_prox.strftime('%d/%m')} – {_dom_prox.strftime('%d/%m/%Y')}":
+                (_lun_prox, _dom_prox + pd.Timedelta(hours=23, minutes=59, seconds=59)),
             "Últimas 2 semanas":
-                (_lun_actual - pd.Timedelta(weeks=2), _hoy),
+                (_lun_actual - pd.Timedelta(weeks=2), _hoy + pd.Timedelta(hours=23, minutes=59, seconds=59)),
             "Próximas 4 semanas":
-                (_hoy, _hoy + pd.Timedelta(weeks=4)),
+                (_hoy, _hoy + pd.Timedelta(weeks=4) + pd.Timedelta(hours=23, minutes=59, seconds=59)),
         }
         _plan_sel = st.radio("Período", list(_plan_sem_opts.keys()),
                              horizontal=True, key="prev_plan_sem")
@@ -9850,50 +9864,81 @@ elif _page == _NAV_PAGES[2]:
 
         _df_semana = _dfplan[
             (_dfplan["_fp_dt"] >= _plan_ini) & (_dfplan["_fp_dt"] <= _plan_fin)
-        ].sort_values("_fp_dt")
+        ].copy()
 
-        st.markdown('<div class="section-header">📅  OTs programadas en el período</div>',
-                    unsafe_allow_html=True)
+        # Tipo de equipo a partir del nombre (lavadora / aspiradora / etc.)
+        def _tipo_eq(s):
+            s = str(s or "").upper()
+            if "LAVADORA" in s:        return "🚿 Lavadora"
+            if "ASPIRA"   in s:        return "🌀 Aspiradora"
+            if "LAVAINTER" in s or "INTERIOR" in s: return "🧽 Lava-interior"
+            if "LAVABICI" in s:        return "🚲 Lava-bicicletas"
+            if "TERMO"    in s:        return "♨️ Termo"
+            if "BOMBA"    in s or "BBA" in s: return "🔧 Bomba"
+            if "ABLAND"   in s:        return "💧 Ablandador"
+            if "HIDROPACK" in s:       return "⚙️ Hidropack"
+            if "TWISTER"  in s:        return "🌪️ Twister"
+            if "SECADO"   in s or "DRY" in s: return "🌬️ Secador"
+            return "🔩 Otro"
+
+        # Plazo restante (en días) hasta la fecha programada
+        _df_semana["_fp_norm"] = _df_semana["_fp_dt"].dt.normalize()
+        _df_semana["dias_restantes"] = (_df_semana["_fp_norm"] - _hoy).dt.days
+
+        st.markdown(
+            f'<div class="section-header">📅  OTs programadas en el período '
+            f'<span style="color:#94a3b8;font-weight:500;font-size:0.85rem;">'
+            f'· {len(_df_semana)} encontradas</span></div>',
+            unsafe_allow_html=True,
+        )
+
         if _df_semana.empty:
-            st.info("No hay OTs programadas para este período.")
+            st.warning(
+                "No hay OTs preventivas programadas para este período en Supabase. "
+                "Esto puede indicar que: (a) el sync aún no trajo OTs futuras desde Fracttal, "
+                "o (b) las OTs de este período aún no se han generado en Fracttal."
+            )
         else:
-            _df_semana_show = _df_semana[[c for c in [
-                "fecha_programada","id_ot","responsable","nombre_tarea",
-                "tipo_tarea","activador","estado_tarea","estado",
-                "fecha_inicio_fmt","dur_est_fmt","dur_real_fmt","clasificacion_2"
-            ] if c in _df_semana.columns]].copy()
-            _df_semana_show["fecha_programada"] = pd.to_datetime(
-                _df_semana_show["fecha_programada"], errors="coerce").dt.strftime("%d/%m/%Y")
-            _df_semana_show.rename(columns={
-                "fecha_programada":"F.Prog.","id_ot":"OT","responsable":"Responsable",
-                "nombre_tarea":"Tarea","tipo_tarea":"Tipo","activador":"Activador",
-                "estado_tarea":"Estado Tarea","estado":"Estado",
-                "fecha_inicio_fmt":"F. Inicio",
-                "dur_est_fmt":"Dur. Est.","dur_real_fmt":"T. Ejec.",
-                "clasificacion_2":"Clasif."
-            }, inplace=True)
-            _show_df(_df_semana_show.reset_index(drop=True), hide_index=True, use_container_width=True,
+            _df_semana_sorted = _df_semana.sort_values("_fp_dt")
+            _df_show = pd.DataFrame({
+                "F. Programada": _df_semana_sorted["_fp_dt"].dt.strftime("%d/%m/%Y").values,
+                "Plazo":         _df_semana_sorted["dias_restantes"].apply(
+                    lambda d: f"⏳ en {d}d" if d > 0 else ("🟢 hoy" if d == 0 else f"⚠️ vencida hace {-d}d")
+                ).values,
+                "OT":            _df_semana_sorted["id_ot"].values,
+                "Código":        _df_semana_sorted["codigo_activo"].fillna("—").values,
+                "Tipo equipo":   _df_semana_sorted["nombre_activo"].apply(_tipo_eq).values,
+                "Activo":        _df_semana_sorted["nombre_activo"].fillna("—").values,
+                "Estación":      _df_semana_sorted.get("estacion", _df_semana_sorted.get("ubicacion","")).fillna("—").values,
+                "Plan":          _df_semana_sorted.get("plan_tareas", pd.Series([""]*len(_df_semana_sorted))).fillna("—").values,
+                "Tarea":         _df_semana_sorted["nombre_tarea"].fillna("—").values,
+                "Responsable":   _df_semana_sorted["responsable"].fillna("—").values,
+                "Estado":        _df_semana_sorted["estado"].fillna("—").values,
+                "Estado tarea":  _df_semana_sorted["estado_tarea"].fillna("—").values,
+            })
+            _show_df(_df_show.reset_index(drop=True), hide_index=True, use_container_width=True,
                 column_config={
-                    "F.Prog.":      st.column_config.TextColumn(width=90),
-                    "OT":           st.column_config.TextColumn(width=90),
-                    "Responsable":  st.column_config.TextColumn(width=180),
-                    "Tarea":        st.column_config.TextColumn(width=200),
-                    "Tipo":         st.column_config.TextColumn(width=160),
-                    "Activador":    st.column_config.TextColumn(width=100),
-                    "Estado Tarea": st.column_config.TextColumn(width=100),
-                    "Estado":       st.column_config.TextColumn(width=100),
-                    "F. Inicio":    st.column_config.TextColumn(width=130),
-                    "Dur. Est.":    st.column_config.TextColumn(width=75),
-                    "T. Ejec.":     st.column_config.TextColumn(width=75),
-                    "Clasif.":      st.column_config.TextColumn(width=80),
+                    "F. Programada": st.column_config.TextColumn(width=100),
+                    "Plazo":         st.column_config.TextColumn(width=120),
+                    "OT":            st.column_config.TextColumn(width=85),
+                    "Código":        st.column_config.TextColumn(width=85),
+                    "Tipo equipo":   st.column_config.TextColumn(width=130),
+                    "Activo":        st.column_config.TextColumn(width=240),
+                    "Estación":      st.column_config.TextColumn(width=200),
+                    "Plan":          st.column_config.TextColumn(width=200),
+                    "Tarea":         st.column_config.TextColumn(width=180),
+                    "Responsable":   st.column_config.TextColumn(width=160),
+                    "Estado":        st.column_config.TextColumn(width=100),
+                    "Estado tarea":  st.column_config.TextColumn(width=110),
                 })
             _sfin_m  = _df_semana["estado_tarea"].isin(["Finalizada"]) | _df_semana["estado"].isin(["Finalizadas"])
             _snoi_m  = _df_semana["estado_tarea"].isin(["No Iniciada"]) & ~_df_semana["estado"].isin(["Finalizadas"])
             _sfin    = int(_sfin_m.sum())
             _sproc   = int((~_sfin_m & ~_snoi_m & ~_df_semana["estado"].isin(["Cancelado"])).sum())
             _snoi    = int(_snoi_m.sum())
-            st.caption(f"{len(_df_semana_show):,} OTs en el período — "
-                       f"{_sfin} finalizadas · {_sproc} en proceso · {_snoi} no iniciadas")
+            _venc    = int((_df_semana["dias_restantes"] < 0).sum())
+            st.caption(f"{len(_df_show):,} OTs · {_sfin} finalizadas · {_sproc} en proceso · "
+                       f"{_snoi} no iniciadas · {_venc} ya vencidas dentro del período")
         st.divider()
 
         # ── OTs vencidas (programadas en pasado y no finalizadas) ─────────

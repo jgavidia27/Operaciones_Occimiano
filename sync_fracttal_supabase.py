@@ -273,6 +273,10 @@ def map_record(wo: dict) -> dict | None:
         "fecha_inicio":       wo.get("initial_date"),
         # event_date = "Fecha del Incidente" en Fracttal (T0 real llenado por el admin en la OT)
         "fecha_incidente":    wo.get("event_date"),
+        # date_maintenance = "Fecha Programada" en Fracttal (el día comprometido
+        # para ejecutar la OT). Es la referencia del KPI Cumplimiento MP.
+        # cal_date_maintenance es la fecha calculada inicial (suele coincidir).
+        "fecha_programada":   wo.get("date_maintenance") or wo.get("cal_date_maintenance"),
 
         # KPI Efectividad MP - causa de falla
         "causa_raiz":         _str(wo.get("causes_description"), 300),
