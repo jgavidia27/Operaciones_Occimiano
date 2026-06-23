@@ -197,7 +197,7 @@ def _load_wallpaper_b64(theme: str) -> str:
 @st.cache_resource(show_spinner=False)
 def _load_logo_b64() -> str:
     """Carga logo.png/.jpg como data-URI base64 (cacheado). PNG tiene prioridad."""
-    for name in ("logo_dashboard.jpg", "logo_occim.jpg", "logo_occim.png", "logo.png", "logo.jpg", "logo.jpeg"):
+    for name in ("logo.png", "logo_occim.png", "logo_login.png", "logo_dashboard.jpg", "logo_occim.jpg", "logo.jpg", "logo.jpeg"):
         path = os.path.join(_APP_DIR, name)
         if os.path.exists(path):
             with open(path, "rb") as fh:
@@ -529,7 +529,7 @@ def _inject_toggle(theme: str) -> None:
 # ── Pantalla de inicio de sesión ──────────────────────────────────────────────
 def _get_logo_path() -> str:
     """Retorna la ruta al archivo de logo."""
-    for name in ("logo_occim.jpg", "logo_occim.png", "logo.png", "logo.jpg", "logo.jpeg"):
+    for name in ("logo.png", "logo_occim.png", "logo_login.png", "logo_occim.jpg", "logo.jpg", "logo.jpeg"):
         path = os.path.join(_APP_DIR, name)
         if os.path.exists(path):
             return path
