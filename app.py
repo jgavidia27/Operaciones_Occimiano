@@ -9392,10 +9392,23 @@ elif _page == _NAV_PAGES[2]:
     # es UNA OT completa. La fecha_finalizacion es la de la OT global, no de
     # una sub-tarea individual.
     #
-    # Universo evaluado: solo OTs cuya fecha_programada ya pasó. Las futuras
-    # no se evalúan (aún no son atraso).
+    # Universo evaluado:
+    #   • Solo OTs cuya fecha_programada ya pasó (las futuras no son atraso).
+    #   • Excluye OTs no operativas: Cancelado / ERROR DE INGRESO / EQUIPO CON
+    #     RECAMBIO — esas se anularon por error de digitación o porque ya no
+    #     aplica el plan al equipo, no porque no se haya hecho el mantenimiento.
+    _ESTADOS_NO_CUENTAN = {
+        "Cancelado", "Canceladas", "Cancelada",
+        "ERROR DE INGRESO",
+        "EQUIPO CON RECAMBIO",
+    }
     _hoy_norm = pd.Timestamp.today().normalize()
-    _df_cumpl = dfp[dfp["fecha_programada"].notna()].copy()
+    _df_cumpl = dfp[
+        dfp["fecha_programada"].notna()
+        & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
+    ].copy()
+    _excluidas_n = int(dfp["estado"].isin(_ESTADOS_NO_CUENTAN).sum())
+
     if not _df_cumpl.empty:
         _fp = pd.to_datetime(_df_cumpl["fecha_programada"],   errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
         _ff = pd.to_datetime(_df_cumpl["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
@@ -9470,7 +9483,8 @@ elif _page == _NAV_PAGES[2]:
               <div style="color:#94a3b8;font-size:0.85rem;">
                 <b style="color:#ef4444">{_cump_tot - _cump_n:,}</b> OTs con
                 atraso · promedio <b style="color:#ef4444">{_atras_avg}</b> días sobre la fecha programada.
-                <br><span style="font-size:0.78rem;">Solo se evalúan OTs cuya fecha programada ya pasó.</span>
+                <br><span style="font-size:0.78rem;">Solo OTs cuya fecha programada ya pasó.
+                Se excluyeron <b>{_excluidas_n:,}</b> OTs anuladas (Cancelado / Error de ingreso).</span>
               </div>
               <div style="color:#94a3b8;font-size:0.78rem;margin-top:10px;
                           padding-top:8px;border-top:1px solid rgba(148,163,184,0.18);">
