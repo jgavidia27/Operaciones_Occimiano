@@ -147,7 +147,7 @@ def send_invite_email(to_email: str, nombre: str, link: str) -> tuple[bool, str]
     text = (f"Bienvenido al Dashboard de Occimiano.\n\n"
             f"Define tu contraseña: {link}\n\n"
             f"El enlace expira en 24 horas.")
-    return send_email(to_email, "Define tu contraseña — Dashboard Occimiano", html, text)
+    return send_email(to_email, "Define tu contraseña — Dashboard Indicadores Operacionales", html, text)
 
 
 def send_reset_email(to_email: str, nombre: str, link: str) -> tuple[bool, str]:
@@ -165,10 +165,10 @@ def send_reset_email(to_email: str, nombre: str, link: str) -> tuple[bool, str]:
       <p class="muted">El enlace expira en 15 minutos. Si no solicitaste este
          cambio, puedes ignorar el correo — tu contraseña actual sigue siendo válida.</p>
     """)
-    text = (f"Recuperación de contraseña — Dashboard Occimiano\n\n"
+    text = (f"Recuperación de contraseña — Dashboard Indicadores Operacionales\n\n"
             f"Restablece tu contraseña: {link}\n\n"
             f"El enlace expira en 15 minutos. Si no fuiste tú, ignora este correo.")
-    return send_email(to_email, "Restablece tu contraseña — Dashboard Occimiano", html, text)
+    return send_email(to_email, "Restablece tu contraseña — Dashboard Indicadores Operacionales", html, text)
 
 
 def send_password_changed_email(to_email: str, nombre: str) -> tuple[bool, str]:
@@ -181,6 +181,6 @@ def send_password_changed_email(to_email: str, nombre: str) -> tuple[bool, str]:
       <p class="muted">Si NO fuiste tú quien hizo este cambio, comunícate con
          el administrador (jgavidia@occimiano.cl) de inmediato.</p>
     """)
-    text = ("Tu contraseña del Dashboard Occimiano fue actualizada.\n"
+    text = ("Tu contraseña del Dashboard Indicadores Operacionales fue actualizada.\n"
             "Si no fuiste tú, contacta a jgavidia@occimiano.cl de inmediato.")
-    return send_email(to_email, "Contraseña actualizada — Dashboard Occimiano", html, text)
+    return send_email(to_email, "Contraseña actualizada — Dashboard Indicadores Operacionales", html, text)
