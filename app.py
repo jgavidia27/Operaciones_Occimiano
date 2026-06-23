@@ -9434,9 +9434,9 @@ elif _page == _NAV_PAGES[2]:
         # fecha_programada (o anterior). Si no hay fecha_finalización y aún
         # estamos en la misma semana de programada → cumple (aún en plazo).
         def _iso_yw(s):
-            ic = s.isocalendar()
-            # (year, week) — comparable directamente
-            return ic["year"] * 100 + ic["week"]
+            ic = s.dt.isocalendar()
+            # (year, week) — comparable directamente como entero
+            return ic["year"].astype("int64") * 100 + ic["week"].astype("int64")
         _yw_fp  = _iso_yw(_df_cumpl["_fp_n"])
         _yw_ff  = _iso_yw(_df_cumpl["_ff_n"].fillna(_hoy_norm))
         _df_cumpl["cumple_sem"] = (_yw_ff <= _yw_fp) & (
@@ -9497,13 +9497,13 @@ elif _page == _NAV_PAGES[2]:
     _gc1, _gc2 = st.columns(2)
     with _gc1:
         st.plotly_chart(
-            _build_gauge(_cump_pct, "% Cumplimiento — fecha exacta",
+            _build_gauge(_cump_pct, "% Cumplimiento — Criterio Crudo",
                          "fecha_finalización ≤ fecha_programada · por OT"),
             use_container_width=True, key="prev_gauge_diario",
         )
     with _gc2:
         st.plotly_chart(
-            _build_gauge(_cump_sem_pct, "% Cumplimiento — misma semana",
+            _build_gauge(_cump_sem_pct, "% Cumplimiento — Criterio Flexible (semana)",
                          "ejecutada dentro de la semana ISO programada · por OT"),
             use_container_width=True, key="prev_gauge_semanal",
         )
@@ -9519,21 +9519,21 @@ elif _page == _NAV_PAGES[2]:
             Detalle del cumplimiento</div>
           <table style="width:100%;border-collapse:collapse;color:#e2e8f0;font-size:0.92rem;">
             <tr style="border-bottom:1px solid rgba(148,163,184,0.18);">
-              <td style="padding:6px 0;font-weight:600;">Fecha exacta (estricto)</td>
+              <td style="padding:6px 0;font-weight:600;">Criterio Crudo</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color};font-size:1.05rem;">{_cump_n:,} / {_cump_tot:,}</b>
                 <span style="color:#94a3b8;font-size:0.82rem;"> OTs a tiempo · {_cump_pct}%</span>
               </td>
             </tr>
             <tr style="border-bottom:1px solid rgba(148,163,184,0.18);">
-              <td style="padding:6px 0;font-weight:600;">Misma semana ISO (flexible)</td>
+              <td style="padding:6px 0;font-weight:600;">Criterio Flexible (semana)</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color_s};font-size:1.05rem;">{_cump_sem_n:,} / {_cump_tot:,}</b>
                 <span style="color:#94a3b8;font-size:0.82rem;"> OTs en plazo · {_cump_sem_pct}%</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:6px 0;color:#94a3b8;font-size:0.84rem;">Promedio de atraso (diario)</td>
+              <td style="padding:6px 0;color:#94a3b8;font-size:0.84rem;">Promedio de atraso (crudo)</td>
               <td style="padding:6px 0;text-align:right;color:#ef4444;font-weight:600;">
                 {_atras_avg} días
               </td>
