@@ -9319,7 +9319,7 @@ elif _page == _NAV_PAGES[2]:
         sel_presp = st.selectbox("Responsable", _presp_opts, key="prev_resp")
 
     # ── Filtros fila 2 ────────────────────────────────────────────────────
-    _pf6, _pf7, _pf8, _pf9, _ = st.columns([1.1, 1.3, 1.5, 1.5, 1.5])
+    _pf6, _pf7, _pf8, _pf9, _pf10 = st.columns([1.1, 1.3, 1.5, 1.5, 1.5])
     with _pf6:
         sel_pestado = st.selectbox("Estado",
             ["Todos"] + sorted(df_prev["estado"].dropna().unique().tolist()), key="prev_estado")
@@ -9329,6 +9329,14 @@ elif _page == _NAV_PAGES[2]:
     with _pf8:
         sel_pclasi = st.text_input("Clasificación 2", key="prev_clasi",
                                    placeholder="60198  ó  SH_736…")
+    with _pf9:
+        _ppl_opts = ["Todos"] + sorted(df_prev["plan_tareas"].dropna().unique().tolist()) \
+            if "plan_tareas" in df_prev.columns else ["Todos"]
+        sel_pplan = st.selectbox("Plan de tareas", _ppl_opts, key="prev_plan")
+    with _pf10:
+        sel_pcli = st.selectbox("Cliente",
+            ["Todos"] + sorted(df_prev["cliente"].dropna().unique().tolist()) if "cliente" in df_prev.columns else ["Todos"],
+            key="prev_cliente")
 
     # ── Aplicar filtros ───────────────────────────────────────────────────
     dfp = df_prev.copy()
@@ -9344,6 +9352,10 @@ elif _page == _NAV_PAGES[2]:
     if sel_pestarea!= "Todos": dfp = dfp[dfp["estado_tarea"]== sel_pestarea]
     if sel_pclasi.strip():
         dfp = dfp[dfp["clasificacion_2"].str.contains(sel_pclasi.strip(), case=False, na=False)]
+    if sel_pplan != "Todos" and "plan_tareas" in dfp.columns:
+        dfp = dfp[dfp["plan_tareas"] == sel_pplan]
+    if sel_pcli != "Todos" and "cliente" in dfp.columns:
+        dfp = dfp[dfp["cliente"] == sel_pcli]
 
     # ── df sin filtros de período (usado en tabs Planificación y EDS) ─────
     # Aplica tipo/activador/responsable/estado/clasif pero NO trimestre ni mes,
@@ -9357,6 +9369,10 @@ elif _page == _NAV_PAGES[2]:
     if sel_pclasi.strip():
         _dfp_full = _dfp_full[_dfp_full["clasificacion_2"].str.contains(
             sel_pclasi.strip(), case=False, na=False)]
+    if sel_pplan != "Todos" and "plan_tareas" in _dfp_full.columns:
+        _dfp_full = _dfp_full[_dfp_full["plan_tareas"] == sel_pplan]
+    if sel_pcli != "Todos" and "cliente" in _dfp_full.columns:
+        _dfp_full = _dfp_full[_dfp_full["cliente"] == sel_pcli]
 
     # ── KPIs ──────────────────────────────────────────────────────────────
     _ptot   = len(dfp)
@@ -9366,17 +9382,95 @@ elif _page == _NAV_PAGES[2]:
     _pproc  = int((~_fin_mask & ~_noi_mask & ~dfp["estado"].isin(["Cancelado"])).sum())
     _pnoi   = int(_noi_mask.sum())
     _ppct   = round(_pfin / _ptot * 100, 1) if _ptot > 0 else 0.0
+
+    # ── % Cumplimiento en tiempo y forma ──────────────────────────────────
+    # Criterio Occimiano: fecha_finalizacion (cuando el técnico cierra la sub-
+    # tarea) debe ser ≤ fecha_programada (mismo día o antes). Si se ejecutó el
+    # día siguiente o después, NO cumple — aunque después se justifique con la
+    # estación. Se evalúa por sub-tarea individual (cada fila del DataFrame).
+    _df_cumpl = dfp[
+        dfp["fecha_finalizacion"].notna()
+        & dfp["fecha_programada"].notna()
+    ].copy()
+    if not _df_cumpl.empty:
+        _fp = pd.to_datetime(_df_cumpl["fecha_programada"], errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
+        _ff = pd.to_datetime(_df_cumpl["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
+        _df_cumpl["dias_atraso"] = (_ff - _fp).dt.days
+        _df_cumpl["cumple"]      = _df_cumpl["dias_atraso"] <= 0
+        _cump_n  = int(_df_cumpl["cumple"].sum())
+        _cump_tot= len(_df_cumpl)
+        _cump_pct= round(_cump_n / _cump_tot * 100, 1) if _cump_tot > 0 else 0.0
+        _atras_avg = round(_df_cumpl.loc[~_df_cumpl["cumple"], "dias_atraso"].mean(), 1) \
+            if (~_df_cumpl["cumple"]).any() else 0.0
+    else:
+        _cump_n = _cump_tot = 0
+        _cump_pct = 0.0
+        _atras_avg = 0.0
+
     pk1,pk2,pk3,pk4,pk5 = st.columns(5)
     pk1.metric("Total OTs",              f"{_ptot:,}")
     pk2.metric("Finalizadas",            f"{_pfin:,}",  delta=f"{_ppct}%")
     pk3.metric("En Proceso / Revisión",  f"{_pproc:,}")
     pk4.metric("No Iniciadas",           f"{_pnoi:,}")
     pk5.metric("% Completadas",          f"{_ppct}%")
+
+    # ── Velocímetro de % Cumplimiento en tiempo y forma ───────────────────
+    _gc1, _gc2 = st.columns([1, 1.5])
+    with _gc1:
+        import plotly.graph_objects as _go
+        _gauge_color = "#10b981" if _cump_pct >= 90 else "#f59e0b" if _cump_pct >= 75 else "#ef4444"
+        _fig_g = _go.Figure(_go.Indicator(
+            mode="gauge+number",
+            value=_cump_pct,
+            number={"suffix": " %", "font": {"size": 36}},
+            title={"text": "<b>% Cumplimiento MP en tiempo y forma</b><br>"
+                           "<span style='font-size:0.75rem;color:#94a3b8'>"
+                           "fecha_finalización ≤ fecha_programada · por sub-tarea</span>",
+                   "font": {"size": 14}},
+            gauge={
+                "axis":    {"range": [0, 100], "tickwidth": 1, "tickfont": {"size": 11}},
+                "bar":     {"color": _gauge_color, "thickness": 0.32},
+                "bgcolor": "rgba(0,0,0,0)",
+                "borderwidth": 0,
+                "steps": [
+                    {"range": [0,  75], "color": "rgba(239,68,68,0.18)"},
+                    {"range": [75, 90], "color": "rgba(245,158,11,0.18)"},
+                    {"range": [90,100], "color": "rgba(16,185,129,0.18)"},
+                ],
+            },
+        ))
+        _fig_g.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10),
+                             paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(_fig_g, use_container_width=True, key="prev_gauge_cumpl")
+    with _gc2:
+        st.markdown(
+            f"""<div style="padding:14px 18px;background:rgba(148,163,184,0.08);
+                 border-radius:10px;border-left:3px solid {_gauge_color};">
+              <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
+                          font-weight:600;text-transform:uppercase;margin-bottom:6px;">
+                Detalle del cumplimiento</div>
+              <div style="font-size:1.55rem;font-weight:700;color:#e2e8f0;margin:4px 0;">
+                {_cump_n:,} / {_cump_tot:,} sub-tareas a tiempo</div>
+              <div style="color:#94a3b8;font-size:0.85rem;">
+                <b style="color:#ef4444">{_cump_tot - _cump_n:,}</b> sub-tareas con
+                atraso · promedio <b style="color:#ef4444">{_atras_avg}</b> días sobre la fecha programada.
+              </div>
+              <div style="color:#94a3b8;font-size:0.78rem;margin-top:10px;
+                          padding-top:8px;border-top:1px solid rgba(148,163,184,0.18);">
+                <b>Escala:</b>
+                <span style="color:#10b981">≥ 90% bien</span> ·
+                <span style="color:#f59e0b">75–90% revisar</span> ·
+                <span style="color:#ef4444">&lt; 75% crítico</span>
+              </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
-    _ptab_plan, _ptab_lista, _ptab_tipo, _ptab_tec, _ptab_eds = st.tabs([
-        "📅  Planificación", "📋  Listado", "🔧  Por Tipo", "👷  Por Técnico", "🏭  Por Activo/EDS"
+    _ptab_plan, _ptab_lista, _ptab_tipo, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
+        "📅  Planificación", "📋  Listado", "🔧  Por Tipo", "👷  Por Técnico",
+        "🏭  Por Activo/EDS", "⏱️  Uptime"
     ])
 
     # ── Tab 1: Listado ────────────────────────────────────────────────────
@@ -9808,6 +9902,83 @@ elif _page == _NAV_PAGES[2]:
                     "Próx. Resp.":      st.column_config.TextColumn(width=160),
                 })
             st.caption(f"{len(_df_eds_show):,} activos únicos · ordenados por proximidad de próxima PM")
+
+    # ── Tab 6: Uptime ─────────────────────────────────────────────────────
+    with _ptab_uptime:
+        st.markdown(
+            '<div class="section-header">⏱️  Uptime por mantención planificada</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Uptime = (Tiempo total del período − Tiempo total detenido por MP) / Tiempo total. "
+            "Solo cuenta como detención cuando la OT tiene **¿Paro de equipo? = SÍ**."
+        )
+
+        if "paro_equipo" not in dfp.columns or dfp["paro_equipo"].isna().all():
+            st.info(
+                "Sin datos de paro de equipo en este filtro. Verifica que el sync de "
+                "Fracttal haya poblado los campos `paro_equipo` y `tiempo_paro_real_seg`."
+            )
+        else:
+            # KPIs globales del filtro
+            _hoy = pd.Timestamp.today().normalize()
+            _rango_dias = max((_hoy - _rango_inicio).days, 1)
+            _total_periodo_seg = _rango_dias * 24 * 3600
+
+            _con_paro = dfp[dfp["paro_equipo"] == True].copy()
+            _paro_real = pd.to_numeric(_con_paro.get("tiempo_paro_real_seg"), errors="coerce").fillna(0)
+            _paro_estim= pd.to_numeric(_con_paro.get("tiempo_paro_estim_seg"), errors="coerce").fillna(0)
+            _paro_seg  = _paro_real.where(_paro_real > 0, _paro_estim).sum()
+
+            _uk1, _uk2, _uk3, _uk4 = st.columns(4)
+            _uk1.metric("OTs con paro de equipo", f"{len(_con_paro):,}",
+                        delta=f"de {len(dfp):,} OTs")
+            _uk2.metric("Tiempo total detenido",
+                        f"{int(_paro_seg // 3600):,}h {int((_paro_seg % 3600) // 60):02d}m")
+            _uk3.metric("Días evaluados", f"{_rango_dias:,}")
+            _uptime_pct_global = max(0.0, round((1 - _paro_seg / _total_periodo_seg) * 100, 3))
+            _uk4.metric("Uptime global", f"{_uptime_pct_global}%")
+
+            st.divider()
+
+            # Uptime por equipo (top 30 con más tiempo detenido)
+            st.markdown(
+                '<div class="section-header">🔧  Uptime por equipo</div>',
+                unsafe_allow_html=True,
+            )
+            if _con_paro.empty:
+                st.info("Ninguna OT del filtro tiene paro de equipo registrado.")
+            else:
+                _paro_seg_serie = _paro_real.where(_paro_real > 0, _paro_estim)
+                _con_paro = _con_paro.assign(_paro_calc_seg=_paro_seg_serie.values)
+                _gp = (_con_paro.groupby(["codigo_activo", "nombre_activo"], dropna=False)
+                       .agg(OTs_con_paro=("id_ot", "count"),
+                            Tiempo_paro_seg=("_paro_calc_seg", "sum"))
+                       .reset_index())
+                _gp["Tiempo paro (h:mm)"] = _gp["Tiempo_paro_seg"].apply(
+                    lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m" if s else "—"
+                )
+                _gp["Uptime %"] = (1 - _gp["Tiempo_paro_seg"] / _total_periodo_seg).clip(lower=0) * 100
+                _gp["Uptime %"] = _gp["Uptime %"].round(3)
+                _gp = _gp.sort_values("Tiempo_paro_seg", ascending=False).head(30)
+                _gp_show = _gp[["codigo_activo", "nombre_activo", "OTs_con_paro",
+                                "Tiempo paro (h:mm)", "Uptime %"]].copy()
+                _gp_show.rename(columns={
+                    "codigo_activo": "Código",
+                    "nombre_activo": "Activo",
+                    "OTs_con_paro":  "OTs c/paro",
+                }, inplace=True)
+                _show_df(_gp_show.reset_index(drop=True), hide_index=True,
+                         use_container_width=True,
+                         column_config={
+                             "Código":             st.column_config.TextColumn(width=90),
+                             "Activo":             st.column_config.TextColumn(width=320),
+                             "OTs c/paro":         st.column_config.NumberColumn(format="%d", width=95),
+                             "Tiempo paro (h:mm)": st.column_config.TextColumn(width=140),
+                             "Uptime %":           st.column_config.NumberColumn(format="%.3f%%", width=110),
+                         })
+                st.caption(f"Top 30 equipos ordenados por tiempo total detenido · "
+                           f"período evaluado: {_rango_inicio.strftime('%d/%m/%Y')} → {_hoy.strftime('%d/%m/%Y')}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PÁGINA ADMINISTRACIÓN (solo admins)

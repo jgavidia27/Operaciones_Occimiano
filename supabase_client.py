@@ -640,7 +640,9 @@ def load_preventivas_supabase() -> list:
         "select=id_ot,estado,estado_tarea,nombre_tarea,tipo_tarea,"
         "activador,fecha_inicio,duracion_estim_seg,duracion_real_seg,"
         "codigo_activo,nombre_activo,ubicacion,clasificacion_2,"
-        "responsable,fecha_creacion,fecha_finalizacion,fecha_programada"
+        "cliente,estacion,codigo_eds,"
+        "responsable,fecha_creacion,fecha_finalizacion,fecha_programada,"
+        "paro_equipo,tiempo_paro_estim_seg,tiempo_paro_real_seg,plan_tareas"
         "&tipo_tarea=ilike.*PREVENTIV*"
         "&fecha_creacion=gte.2026-01-01"
         "&order=fecha_programada.desc",

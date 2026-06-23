@@ -123,6 +123,49 @@ def fetch_page(start: int) -> list:
             time.sleep(3 * attempt)
     return []
 
+# ── Pre-carga del mapa de Planes de Tareas ─────────────────────────────────
+# Fracttal expone el nombre del plan ("PLAN MTTO MSELF GENERAL", etc.) en el
+# endpoint /api/tasks (campo groups_tasks_description), no en /api/work_orders.
+# Pre-cargamos {id_group_task → nombre_del_plan} para resolverlo al mapear.
+
+FRACTTAL_TASKS_URL = f"{FRACTTAL_BASE}/api/tasks"
+_PLAN_MAP: dict[int, str] = {}
+
+def build_plan_map() -> dict[int, str]:
+    """Devuelve {id_group_task: nombre_plan} consultando /api/tasks paginadamente."""
+    global _PLAN_MAP
+    if _PLAN_MAP:
+        return _PLAN_MAP
+    log("Cargando mapa de planes de tareas...", "PROG")
+    headers = {**CHROME_HEADERS, "Authorization": f"Bearer {get_token()}"}
+    start, m = 0, {}
+    while True:
+        try:
+            r = requests.get(FRACTTAL_TASKS_URL, headers=headers,
+                             params={"start": start, "limit": PAGE_SIZE}, timeout=30)
+            if r.status_code in (401, 403):
+                headers["Authorization"] = f"Bearer {get_token()}"
+                continue
+            r.raise_for_status()
+            items = r.json().get("data") or []
+        except requests.exceptions.RequestException as e:
+            log(f"Error cargando planes: {e}", "WARN")
+            break
+        if not items:
+            break
+        for t in items:
+            gid = t.get("id_group_task")
+            name = t.get("groups_tasks_description")
+            if gid and name:
+                m[int(gid)] = str(name).strip()
+        start += PAGE_SIZE
+        if len(items) < PAGE_SIZE:
+            break
+    _PLAN_MAP = m
+    log(f"Planes cargados: {len(m)} grupos de tareas", "OK")
+    return m
+
+
 # ── Mapeo Fracttal → Supabase ──────────────────────────────────────────────
 
 # Mapeo de prioridad a P1-P4
@@ -250,6 +293,14 @@ def map_record(wo: dict) -> dict | None:
         # Recursos
         "tiene_recursos":     _has_resources(wo),
 
+        # Mantenciones Preventivas — paro de equipo (cálculo Uptime)
+        "paro_equipo":           bool(wo.get("stop_assets")) if wo.get("stop_assets") is not None else None,
+        "tiempo_paro_estim_seg": _int(wo.get("stop_assets_sec")),
+        "tiempo_paro_real_seg":  _int(wo.get("real_stop_assets_sec")),
+
+        # Plan de tareas — resuelto via id_group_task → groups_tasks_description
+        "plan_tareas":           _PLAN_MAP.get(_int(wo.get("id_group_task"))) if wo.get("id_group_task") else None,
+
         # Sync metadata
         "updated_at":         datetime.now(timezone.utc).isoformat(),
     }
@@ -327,6 +378,9 @@ def main():
         log(f"Modo completo - desde {desde}")
 
     start, total = load_progress() if args.reanudar else (0, 0)
+
+    # Cargar mapa de planes ANTES del sync principal (para que map_record lo use)
+    build_plan_map()
 
     buffer, pages, stopped = [], 0, False
 
