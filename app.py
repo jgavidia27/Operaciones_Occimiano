@@ -7962,10 +7962,21 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                               else pd.Series("", index=_det_num.index))
                 _det_num["_comentario"] = _serie_com.apply(_strip_comentario_headers)
 
-                # Equipo (código del activo). En vista expandida = activo de la subtarea;
-                # en vista normal (sin desglose) = no disponible a este nivel.
+                # Equipo (código del activo + tipo legible). En vista expandida =
+                # activo de la subtarea; en vista normal = no disponible a este nivel.
+                _TIPO_LBL = {
+                    "lavadora":     "Lavadora",
+                    "aspiradora":   "Aspiradora",
+                    "lavainterior": "Lavatapiz",
+                }
+                def _fmt_equipo(row):
+                    code = str(row.get("_equipo_sub", "") or "").strip()
+                    if not code or code == "—":
+                        return "—"
+                    tipo = _TIPO_LBL.get(str(row.get("tipo_activo", "") or "").strip(), "")
+                    return f"{code} · {tipo}" if tipo else code
                 if "_equipo_sub" in _det_num.columns:
-                    _det_num["_equipo"] = _det_num["_equipo_sub"].fillna("—")
+                    _det_num["_equipo"] = _det_num.apply(_fmt_equipo, axis=1)
                 else:
                     _det_num["_equipo"] = "—"
 
@@ -8015,8 +8026,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _show_df(_det_num_disp, hide_index=True, width="stretch",
                         column_config={
                             "OT":            st.column_config.TextColumn(width=110),
-                            "Equipo":        st.column_config.TextColumn(width=95,
-                                help="Código del activo (EQ-XXXX). Una OT compuesta muestra una fila por activo con numeral."),
+                            "Equipo":        st.column_config.TextColumn(width=170,
+                                help="Código del activo (EQ-XXXX) + tipo (Lavadora/Aspiradora/Lavatapiz). Una OT compuesta muestra una fila por activo con numeral."),
                             "Técnico":       st.column_config.TextColumn(width=180),
                             "Fecha":         st.column_config.TextColumn(width=95),
                             "Cliente":       st.column_config.TextColumn(width=85),
