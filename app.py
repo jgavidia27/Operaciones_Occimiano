@@ -461,6 +461,8 @@ def _inject_theme(theme: str) -> None:
             }}
         }}
 
+        button[title="View fullscreen"] {{ display: none !important; }}
+
         </style>
         """,
         unsafe_allow_html=True,
