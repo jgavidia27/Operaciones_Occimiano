@@ -337,45 +337,59 @@ def load_work_orders_supabase() -> list:
             _base_cols + "&order=fecha_creacion.desc",
             limit=20_000
         )
-    # Mapear al formato que espera build_work_orders_df
+    # Mapear al formato que espera build_work_orders_df.
+    # EXPANSIÓN POR EQUIPO: el ETL combina varias sub-tareas en una sola fila
+    # (codigo_activo="EQ-001, EQ-002, EQ-003"). Para KPIs que matchean por
+    # equipment_code (build_reincidencias, etc.) hay que volver a expandir
+    # a una fila por equipo. La pantalla MP usa load_preventivas_supabase
+    # que mantiene la concat para mostrar todos los equipos juntos.
     mapped = []
     for r in rows:
-        mapped.append({
-            "wo_folio":                   r.get("id_ot"),
-            "parent_description":         r.get("ubicacion") or f"// {r.get('cliente','')}/{r.get('estacion','')}/",
-            "personnel_description":      r.get("responsable"),
-            "tasks_log_task_type_main":   r.get("tipo_tarea"),
-            "priorities_description":     r.get("prioridad_calc") or r.get("prioridad"),
-            "creation_date":              r.get("fecha_creacion"),
-            "final_date":                 r.get("fecha_finalizacion"),
-            "initial_date":               r.get("fecha_inicio"),   # <-- KPI Precision: elapsed_sec
-            "code":                       r.get("codigo_activo"),
-            "items_log_description":      r.get("nombre_activo"),
-            "groups_2_description":       r.get("codigo_eds"),
-            "id_status_work_order":       None,
-            "task_status":                r.get("estado_tarea"),
-            "done":                       r.get("completada", False),
-            "tasks_duration":             r.get("duracion_real_seg"),
-            "duration":                   r.get("duracion_estim_seg"),
-            "causes_description":         r.get("causa_raiz"),
-            "types_description":          r.get("tipo_falla"),
-            "detection_method_description": r.get("modalidad_atencion"),
-            "note":                       r.get("nota"),
-            "task_note":                  r.get("nota_tarea"),
-            # Numerales reales extraídos de las subtareas (type=3 inicial, type=5 final)
-            "numeral_inicial":            r.get("numeral_inicial"),
-            "numeral_final":              r.get("numeral_final"),
-            # Comentario/conclusión del técnico (texto libre del formulario, type=1)
-            "comentario_tecnico":         r.get("comentario_tecnico"),
-            # ¿El formulario incluía el campo de numeral? (para evaluar MC con justicia)
-            "form_tiene_numeral":         r.get("form_tiene_numeral"),
-            # Tiempo NETO (sin bomba/ablandador cuando hay lavadora) — sync_estim_neta.py
-            "duracion_estim_neta_seg":    r.get("duracion_estim_neta_seg"),
-            "duracion_real_neta_seg":     r.get("duracion_real_neta_seg"),
-            "stop_assets_sec":            0,
-            "total_cost_task":            None,
-            "resources_inventory":        "1" if r.get("tiene_recursos") else None,
-        })
+        _cod_raw = r.get("codigo_activo") or ""
+        _nom_raw = r.get("nombre_activo") or ""
+        if "," in _cod_raw:
+            _codes = [c.strip() for c in _cod_raw.split(",") if c.strip()]
+            _names = [n.strip() for n in _nom_raw.split(" · ")] if " · " in _nom_raw else []
+            # Pad/truncate nombres para que matchee la longitud
+            while len(_names) < len(_codes):
+                _names.append(_nom_raw)
+        else:
+            _codes = [_cod_raw] if _cod_raw else [None]
+            _names = [_nom_raw] if _nom_raw else [None]
+        for _i, _cod in enumerate(_codes):
+            _nom = _names[_i] if _i < len(_names) else _nom_raw
+            mapped.append({
+                "wo_folio":                   r.get("id_ot"),
+                "parent_description":         r.get("ubicacion") or f"// {r.get('cliente','')}/{r.get('estacion','')}/",
+                "personnel_description":      r.get("responsable"),
+                "tasks_log_task_type_main":   r.get("tipo_tarea"),
+                "priorities_description":     r.get("prioridad_calc") or r.get("prioridad"),
+                "creation_date":              r.get("fecha_creacion"),
+                "final_date":                 r.get("fecha_finalizacion"),
+                "initial_date":               r.get("fecha_inicio"),
+                "code":                       _cod,
+                "items_log_description":      _nom,
+                "groups_2_description":       r.get("codigo_eds"),
+                "id_status_work_order":       None,
+                "task_status":                r.get("estado_tarea"),
+                "done":                       r.get("completada", False),
+                "tasks_duration":             r.get("duracion_real_seg"),
+                "duration":                   r.get("duracion_estim_seg"),
+                "causes_description":         r.get("causa_raiz"),
+                "types_description":          r.get("tipo_falla"),
+                "detection_method_description": r.get("modalidad_atencion"),
+                "note":                       r.get("nota"),
+                "task_note":                  r.get("nota_tarea"),
+                "numeral_inicial":            r.get("numeral_inicial"),
+                "numeral_final":              r.get("numeral_final"),
+                "comentario_tecnico":         r.get("comentario_tecnico"),
+                "form_tiene_numeral":         r.get("form_tiene_numeral"),
+                "duracion_estim_neta_seg":    r.get("duracion_estim_neta_seg"),
+                "duracion_real_neta_seg":     r.get("duracion_real_neta_seg"),
+                "stop_assets_sec":            0,
+                "total_cost_task":            None,
+                "resources_inventory":        "1" if r.get("tiene_recursos") else None,
+            })
     return mapped
 
 
