@@ -5758,6 +5758,7 @@ elif _page == _NAV_PAGES[0]:
             _sem_rc     = "Todas"
             _eq_rc      = "Todos"
             _tec_rc_sel = "Todos"
+            _atrib_rc   = "Todos"
             _n_bruto = _n_excl = _n_fnao = _n_sin_info = _n_sin_dato = _n_fao = _n_espec = 0
         else:
             df_reinc["fecha_cm_dt"] = pd.to_datetime(df_reinc["fecha_cm"], errors="coerce")
@@ -5773,7 +5774,10 @@ elif _page == _NAV_PAGES[0]:
                 k for k, v in _TRIMESTRES_RC.items() if any(m in v for m in _meses_rc_nums)
             ]
             _grupos_con_datos = set(df_reinc["grupo_responsable"].dropna().unique())
-            _rc0, _rc1, _rc2, _rc3, _rc4 = st.columns([1.5, 1.4, 1.5, 2, 2])
+            _rcA, _rc0, _rc1, _rc2, _rc3, _rc4 = st.columns([1.6, 1.4, 1.4, 1.4, 2, 2])
+            with _rcA:
+                _ATRIB_OPTS = ["Todos", "F.A.O", "F.N.A.O"]
+                _atrib_rc = st.selectbox("Atribución", _ATRIB_OPTS, key="rc_atrib")
             with _rc0:
                 _trim_rc = st.selectbox("Período", _trim_opts_rc, key="rc_trim")
             with _rc1:
@@ -5869,6 +5873,12 @@ elif _page == _NAV_PAGES[0]:
                 _df_rc = _df_rc[~_df_rc["falla_tipo"].isin(["especial"])]
             else:
                 _n_fnao = _n_sin_info = _n_sin_dato = _n_fao = _n_espec = _n_excl = 0
+
+            # ── Filtro de atribución (F.A.O / F.N.A.O) ──────────────────────────
+            if _atrib_rc == "F.A.O":
+                _df_rc = _df_rc[_df_rc["falla_tipo"] == "fao"] if "falla_tipo" in _df_rc.columns else _df_rc
+            elif _atrib_rc == "F.N.A.O":
+                _df_rc = _df_rc[_df_rc["falla_tipo"] == "fnao"] if "falla_tipo" in _df_rc.columns else _df_rc
 
         # ── KPIs globales: Total PMs y PMs sin reincidencia ──────────────────────
         # Solo se cuentan PMs de los mismos clientes que el numerador (COPEC/ESMAX/SHELL/Abastible).
