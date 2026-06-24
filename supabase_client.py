@@ -643,7 +643,28 @@ def load_sla_umbrales_supabase() -> dict:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 6. MANTENCIONES PREVENTIVAS
+# 6a. MANTENCIONES CORRECTIVAS (para Uptime SLA)
+# ═════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=1800, show_spinner=False, persist="disk")
+def load_correctivas_supabase() -> list:
+    """OTs correctivas con campos de paro de equipo."""
+    return _query(
+        "ordenes_trabajo",
+        "select=id_ot,estado,estado_tarea,tipo_tarea,"
+        "codigo_activo,nombre_activo,ubicacion,"
+        "cliente,estacion,codigo_eds,"
+        "responsable,fecha_creacion,fecha_finalizacion,"
+        "paro_equipo,tiempo_paro_estim_seg,tiempo_paro_real_seg"
+        "&tipo_tarea=ilike.*CORRECTIV*"
+        "&fecha_creacion=gte.2026-01-01"
+        "&order=fecha_creacion.desc",
+        limit=10_000,
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 6b. MANTENCIONES PREVENTIVAS
 # ═════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
