@@ -9374,12 +9374,27 @@ elif _page == _NAV_PAGES[2]:
     if sel_pcli != "Todos" and "cliente" in _dfp_full.columns:
         _dfp_full = _dfp_full[_dfp_full["cliente"] == sel_pcli]
 
+    # ── Universo válido (sin OTs anuladas) — usado en todos los KPIs ──────
+    # OTs no operativas que NO representan trabajo real:
+    #   • Cancelado: anulada explícitamente
+    #   • ERROR DE INGRESO: creada por error de digitación
+    #   • EQUIPO CON RECAMBIO: el equipo ya no aplica al plan
+    # Las descontamos del total para que TODOS los KPIs (Total, Finalizadas,
+    # velocímetro de cumplimiento, etc.) hablen del mismo universo.
+    _ESTADOS_NO_CUENTAN = {
+        "Cancelado", "Canceladas", "Cancelada",
+        "ERROR DE INGRESO",
+        "EQUIPO CON RECAMBIO",
+    }
+    _dfp_op = dfp[~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)].copy()
+    _anuladas_n = int(dfp["estado"].isin(_ESTADOS_NO_CUENTAN).sum())
+
     # ── KPIs ──────────────────────────────────────────────────────────────
-    _ptot   = len(dfp)
-    _fin_mask = dfp["estado_tarea"].isin(["Finalizada"]) | dfp["estado"].isin(["Finalizadas"])
-    _noi_mask = dfp["estado_tarea"].isin(["No Iniciada"]) & ~dfp["estado"].isin(["Finalizadas"])
+    _ptot   = len(_dfp_op)
+    _fin_mask = _dfp_op["estado_tarea"].isin(["Finalizada"]) | _dfp_op["estado"].isin(["Finalizadas"])
+    _noi_mask = _dfp_op["estado_tarea"].isin(["No Iniciada"]) & ~_dfp_op["estado"].isin(["Finalizadas"])
     _pfin   = int(_fin_mask.sum())
-    _pproc  = int((~_fin_mask & ~_noi_mask & ~dfp["estado"].isin(["Cancelado"])).sum())
+    _pproc  = int((~_fin_mask & ~_noi_mask).sum())
     _pnoi   = int(_noi_mask.sum())
     _ppct   = round(_pfin / _ptot * 100, 1) if _ptot > 0 else 0.0
 
@@ -9394,20 +9409,10 @@ elif _page == _NAV_PAGES[2]:
     #
     # Universo evaluado:
     #   • Solo OTs cuya fecha_programada ya pasó (las futuras no son atraso).
-    #   • Excluye OTs no operativas: Cancelado / ERROR DE INGRESO / EQUIPO CON
-    #     RECAMBIO — esas se anularon por error de digitación o porque ya no
-    #     aplica el plan al equipo, no porque no se haya hecho el mantenimiento.
-    _ESTADOS_NO_CUENTAN = {
-        "Cancelado", "Canceladas", "Cancelada",
-        "ERROR DE INGRESO",
-        "EQUIPO CON RECAMBIO",
-    }
+    #   • Anuladas ya excluidas vía _dfp_op arriba.
     _hoy_norm = pd.Timestamp.today().normalize()
-    _df_cumpl = dfp[
-        dfp["fecha_programada"].notna()
-        & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
-    ].copy()
-    _excluidas_n = int(dfp["estado"].isin(_ESTADOS_NO_CUENTAN).sum())
+    _df_cumpl = _dfp_op[_dfp_op["fecha_programada"].notna()].copy()
+    _excluidas_n = _anuladas_n
 
     if not _df_cumpl.empty:
         # Convertir a hora local Chile antes de normalizar para no perder/ganar
@@ -9459,11 +9464,17 @@ elif _page == _NAV_PAGES[2]:
         _atras_avg = 0.0
 
     pk1,pk2,pk3,pk4,pk5 = st.columns(5)
-    pk1.metric("Total OTs",              f"{_ptot:,}")
+    pk1.metric("Total OTs (operativas)", f"{_ptot:,}",
+               help=f"Excluye {_anuladas_n} OTs anuladas (Cancelado / Error de ingreso / Equipo con recambio).")
     pk2.metric("Finalizadas",            f"{_pfin:,}",  delta=f"{_ppct}%")
     pk3.metric("En Proceso / Revisión",  f"{_pproc:,}")
     pk4.metric("No Iniciadas",           f"{_pnoi:,}")
     pk5.metric("% Completadas",          f"{_ppct}%")
+    if _anuladas_n > 0:
+        st.caption(
+            f"ℹ️  Hay **{_anuladas_n} OTs anuladas** que no se cuentan en estos KPIs "
+            f"(Cancelado / Error de ingreso / Equipo con recambio)."
+        )
 
     # ── Velocímetros: cumplimiento diario y semanal ───────────────────────
     import plotly.graph_objects as _go
