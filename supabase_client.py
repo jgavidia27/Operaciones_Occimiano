@@ -655,6 +655,7 @@ def load_correctivas_supabase() -> list:
         "codigo_activo,nombre_activo,ubicacion,"
         "cliente,estacion,codigo_eds,"
         "responsable,fecha_creacion,fecha_finalizacion,"
+        "duracion_real_seg,duracion_estim_seg,"
         "paro_equipo,tiempo_paro_estim_seg,tiempo_paro_real_seg"
         "&tipo_tarea=ilike.*CORRECTIV*"
         "&fecha_creacion=gte.2026-01-01"
