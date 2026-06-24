@@ -9953,18 +9953,15 @@ elif _page == _NAV_PAGES[2]:
             _df_cumpl["_ff_n"].notna() & (_df_cumpl["dias_atraso"] <= 0)
         )
 
-        # Cumplimiento SEMANAL (flexible: misma semana ISO o antes)
-        # Cumple si fecha_finalización cae en la misma semana ISO de
-        # fecha_programada (o anterior). Si no hay fecha_finalización y aún
-        # estamos en la misma semana de programada → cumple (aún en plazo).
-        def _iso_yw(s):
-            ic = s.dt.isocalendar()
-            # (year, week) — comparable directamente como entero
-            return ic["year"].astype("int64") * 100 + ic["week"].astype("int64")
-        _yw_fp  = _iso_yw(_df_cumpl["_fp_n"])
-        _yw_ff  = _iso_yw(_df_cumpl["_ff_n"].fillna(_hoy_norm))
-        _df_cumpl["cumple_sem"] = (_yw_ff <= _yw_fp) & (
-            _df_cumpl["_ff_n"].notna() | (_yw_ff == _yw_fp)
+        # Cumplimiento FLEXIBLE (≤ 5 días desde fecha programada)
+        # Cumple si la OT se finalizó como máximo 5 días después de la
+        # fecha programada.  Si aún no tiene fecha_finalización y hoy
+        # está dentro de los 5 días → se considera en plazo.
+        _df_cumpl["cumple_sem"] = (
+            _df_cumpl["_ff_n"].notna() & (_df_cumpl["dias_atraso"] <= 5)
+        ) | (
+            _df_cumpl["_ff_n"].isna()
+            & ((_hoy_norm - _df_cumpl["_fp_n"]).dt.days <= 5)
         )
 
         _cump_n  = int(_df_cumpl["cumple"].sum())
@@ -10033,8 +10030,8 @@ elif _page == _NAV_PAGES[2]:
         )
     with _gc2:
         st.plotly_chart(
-            _build_gauge(_cump_sem_pct, "% Cumplimiento — Criterio Flexible (semana)",
-                         "ejecutada dentro de la semana ISO programada · por OT"),
+            _build_gauge(_cump_sem_pct, "% Cumplimiento — Criterio Flexible (≤ 5 días)",
+                         "ejecutada ≤ 5 días desde fecha programada · por OT"),
             use_container_width=True, key="prev_gauge_semanal",
         )
 
@@ -10056,7 +10053,7 @@ elif _page == _NAV_PAGES[2]:
               </td>
             </tr>
             <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Criterio Flexible (semana)</td>
+              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Criterio Flexible (≤ 5 días)</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color_s};font-size:1.05rem;">{_cump_sem_n:,} / {_cump_tot:,}</b>
                 <span style="color:var(--text-color, #475569);font-size:0.82rem;"> OTs en plazo · {_cump_sem_pct}%</span>
