@@ -9519,23 +9519,23 @@ elif _page == _NAV_PAGES[2]:
           <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
                       font-weight:600;text-transform:uppercase;margin-bottom:8px;">
             Detalle del cumplimiento</div>
-          <table style="width:100%;border-collapse:collapse;color:#e2e8f0;font-size:0.92rem;">
-            <tr style="border-bottom:1px solid rgba(148,163,184,0.18);">
-              <td style="padding:6px 0;font-weight:600;">Criterio Crudo</td>
+          <table style="width:100%;border-collapse:collapse;font-size:0.92rem;">
+            <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Criterio Crudo</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color};font-size:1.05rem;">{_cump_n:,} / {_cump_tot:,}</b>
-                <span style="color:#94a3b8;font-size:0.82rem;"> OTs a tiempo · {_cump_pct}%</span>
+                <span style="color:var(--text-color, #475569);font-size:0.82rem;"> OTs a tiempo · {_cump_pct}%</span>
               </td>
             </tr>
-            <tr style="border-bottom:1px solid rgba(148,163,184,0.18);">
-              <td style="padding:6px 0;font-weight:600;">Criterio Flexible (semana)</td>
+            <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Criterio Flexible (semana)</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color_s};font-size:1.05rem;">{_cump_sem_n:,} / {_cump_tot:,}</b>
-                <span style="color:#94a3b8;font-size:0.82rem;"> OTs en plazo · {_cump_sem_pct}%</span>
+                <span style="color:var(--text-color, #475569);font-size:0.82rem;"> OTs en plazo · {_cump_sem_pct}%</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:6px 0;color:#94a3b8;font-size:0.84rem;">Promedio de atraso (crudo)</td>
+              <td style="padding:6px 0;font-size:0.84rem;color:var(--text-color, #475569);">Promedio de atraso (crudo)</td>
               <td style="padding:6px 0;text-align:right;color:#ef4444;font-weight:600;">
                 {_atras_avg} días
               </td>
@@ -9568,8 +9568,8 @@ elif _page == _NAV_PAGES[2]:
             _det = pd.DataFrame({
                 "OT":             _df_incumpl["id_ot"].values,
                 "Estación":       _df_incumpl.get("estacion", _df_incumpl.get("ubicacion", "")).fillna("—").values,
+                "Cód. EDS":       _df_incumpl.get("codigo_eds", _df_incumpl.get("clasificacion_2", "")).fillna("—").values,
                 "Plan":           _df_incumpl.get("plan_tareas", pd.Series([""] * len(_df_incumpl))).fillna("—").values,
-                "Tarea":          _df_incumpl["nombre_tarea"].fillna("—").values,
                 "Equipo":         _df_incumpl["codigo_activo"].fillna("—").values,
                 "F. Programada":  _df_incumpl["_fp_n"].dt.strftime("%d/%m/%Y").values,
                 "F. Ejecución":   _df_incumpl["_ff_n"].dt.strftime("%d/%m/%Y").fillna("—").values,
@@ -9590,7 +9590,7 @@ elif _page == _NAV_PAGES[2]:
             _det["Resumen"] = _det.apply(_resumen_row, axis=1)
 
             # Reordenar columnas para mejor lectura
-            _det = _det[["OT", "Estación", "Plan", "Tarea", "Equipo",
+            _det = _det[["OT", "Estación", "Cód. EDS", "Plan", "Equipo",
                          "F. Programada", "F. Ejecución", "Días atraso",
                          "¿Cumple semanal?", "Resumen", "Estado", "Responsable"]]
 
@@ -9601,8 +9601,8 @@ elif _page == _NAV_PAGES[2]:
                 column_config={
                     "OT":               st.column_config.TextColumn(width=85),
                     "Estación":         st.column_config.TextColumn(width=200),
+                    "Cód. EDS":         st.column_config.TextColumn(width=90),
                     "Plan":             st.column_config.TextColumn(width=200),
-                    "Tarea":            st.column_config.TextColumn(width=180),
                     "Equipo":           st.column_config.TextColumn(width=90),
                     "F. Programada":    st.column_config.TextColumn(width=100),
                     "F. Ejecución":     st.column_config.TextColumn(width=100),
@@ -9942,8 +9942,8 @@ elif _page == _NAV_PAGES[2]:
                 "Tipo equipo":   _df_semana_sorted["nombre_activo"].apply(_tipo_eq).values,
                 "Activo":        _df_semana_sorted["nombre_activo"].fillna("—").values,
                 "Estación":      _df_semana_sorted.get("estacion", _df_semana_sorted.get("ubicacion","")).fillna("—").values,
+                "Cód. EDS":      _df_semana_sorted.get("codigo_eds", _df_semana_sorted.get("clasificacion_2","")).fillna("—").values,
                 "Plan":          _df_semana_sorted.get("plan_tareas", pd.Series([""]*len(_df_semana_sorted))).fillna("—").values,
-                "Tarea":         _df_semana_sorted["nombre_tarea"].fillna("—").values,
                 "Responsable":   _df_semana_sorted["responsable"].fillna("—").values,
                 "Estado":        _df_semana_sorted["estado"].fillna("—").values,
                 "Estado tarea":  _df_semana_sorted["estado_tarea"].fillna("—").values,
@@ -9958,8 +9958,8 @@ elif _page == _NAV_PAGES[2]:
                     "Tipo equipo":   st.column_config.TextColumn(width=130),
                     "Activo":        st.column_config.TextColumn(width=240),
                     "Estación":      st.column_config.TextColumn(width=200),
+                    "Cód. EDS":      st.column_config.TextColumn(width=90),
                     "Plan":          st.column_config.TextColumn(width=200),
-                    "Tarea":         st.column_config.TextColumn(width=180),
                     "Responsable":   st.column_config.TextColumn(width=160),
                     "Estado":        st.column_config.TextColumn(width=100),
                     "Estado tarea":  st.column_config.TextColumn(width=110),
@@ -9978,9 +9978,12 @@ elif _page == _NAV_PAGES[2]:
         # ── OTs vencidas (programadas en pasado y no finalizadas) ─────────
         st.markdown('<div class="section-header">⚠️  OTs vencidas (no finalizadas)</div>',
                     unsafe_allow_html=True)
+        # Excluir OTs anuladas — el mismo criterio que el velocímetro:
+        # Cancelado / ERROR DE INGRESO / EQUIPO CON RECAMBIO no representan
+        # mantenimientos pendientes, son OTs que se anularon por error.
         _df_venc = _dfplan[
             (_dfplan["_fp_dt"] < _hoy) &
-            (~_dfplan["estado"].isin(["Finalizadas","Cancelado"])) &
+            (~_dfplan["estado"].isin(_ESTADOS_NO_CUENTAN | {"Finalizadas"})) &
             (~_dfplan["estado_tarea"].isin(["Finalizada"]))   # excluir DONE normalizados
         ].copy()
         _df_venc["_atraso"] = (_hoy - _df_venc["_fp_dt"]).dt.days
