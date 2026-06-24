@@ -55,6 +55,7 @@ from supabase_client import (
     load_all_llamados_supabase,
     load_sla_umbrales_supabase,
     load_cotalker_index_supabase,
+    load_notas_tarea_index,
     load_ots_en_vivo_supabase,
 )
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
@@ -2254,15 +2255,42 @@ if _page == _NAV_PAGES[1]:
                 _dt_at  = _merge_dt(_df_sla_ot["fecha_atencion"], "hora_fin")
                 _df_sla_ot["horas_res"] = ((_dt_at - _dt_ll).dt.total_seconds() / 3600).clip(lower=0)
 
-                def _zona_key_ot(z: str) -> str:
-                    z = str(z).upper().strip()
+                # ── Zona derivada de la comuna (autoritativa) ───────────────
+                # Comunas de la Región Metropolitana de Santiago.
+                # Si la comuna está en esta lista → Santiago, si no → Regiones.
+                # Fallback: usar el campo "zona" del llamado solo si la comuna no se conoce.
+                import unicodedata as _ud
+                _RM_COMUNAS = {
+                    "SANTIAGO","LAS CONDES","VITACURA","PROVIDENCIA","NUNOA","LA REINA","MACUL",
+                    "PENALOLEN","LA FLORIDA","PUENTE ALTO","MAIPU","ESTACION CENTRAL","CERRILLOS",
+                    "PUDAHUEL","QUILICURA","RENCA","CONCHALI","INDEPENDENCIA","RECOLETA","HUECHURABA",
+                    "LO BARNECHEA","SAN MIGUEL","SAN JOAQUIN","LA GRANJA","LA CISTERNA","EL BOSQUE",
+                    "SAN BERNARDO","LO ESPEJO","PEDRO AGUIRRE CERDA","P.A. CERDA","SAN RAMON",
+                    "LA PINTANA","CERRO NAVIA","LO PRADO","QUINTA NORMAL","BUIN","CALERA DE TANGO",
+                    "COLINA","LAMPA","TALAGANTE","PENAFLOR","EL MONTE","PADRE HURTADO","MELIPILLA",
+                    "CURACAVI","MARIA PINTO","ISLA DE MAIPO","SAN PEDRO","ALHUE","PIRQUE","TILTIL",
+                    "BATUCO","PAINE",
+                }
+                def _norm_com(s):
+                    s = _ud.normalize("NFD", str(s or "").upper().strip()).encode("ascii","ignore").decode()
+                    return s
+                def _zona_por_comuna(com, zona_orig):
+                    cn = _norm_com(com)
+                    if cn and cn in _RM_COMUNAS:
+                        return "Santiago"
+                    if cn:
+                        return "Regiones"
+                    # Comuna desconocida → fallback al campo zona del llamado
+                    z = str(zona_orig or "").upper().strip()
                     if z in ("RM","R.M.") or any(k in z for k in ["SANTIAGO","METRO"]): return "Santiago"
-                    if any(k in z for k in ["NORTE","SUR","CENTRO","REGION","REGIONES","RG"]): return "Regiones"
-                    return "Santiago"
+                    return "Regiones"
 
+                # Inicializamos zona_ot temporal con el campo zona original; lo
+                # recalcularemos abajo después de resolver la ciudad final.
                 _df_sla_ot["zona_ot"] = (
-                    _df_sla_ot["zona"].fillna("").astype(str).apply(_zona_key_ot)
-                    if "zona" in _df_sla_ot.columns else "Santiago"
+                    _df_sla_ot["zona"].fillna("").astype(str).str.strip()
+                    if "zona" in _df_sla_ot.columns
+                    else pd.Series([""] * len(_df_sla_ot), index=_df_sla_ot.index)
                 )
                 _df_sla_ot["umbral_h"] = [
                     _get_sla_h(c, p, z)
@@ -2297,13 +2325,50 @@ if _page == _NAV_PAGES[1]:
                         for h, u in zip(_df_sla_ot["horas_res"], _df_sla_ot["umbral_h"])
                     ]
                 # Agregar ciudad: usar comuna del propio llamado, completar vacíos
-                # con el catálogo de EDS (eds_occim → comuna).
+                # con el catálogo de EDS. Para Aramco el eds_occim viene como
+                # "EE_S016" (formato Fracttal) → matchear con eds_occim_raw del catálogo.
                 _df_sla_ot["ciudad"] = _df_sla_ot["comuna"].fillna("") if "comuna" in _df_sla_ot.columns else ""
                 if not df_eds.empty and "comuna" in df_eds.columns and "eds_occim" in _df_sla_ot.columns:
-                    _eds_comuna_map = df_eds.dropna(subset=["comuna"]).drop_duplicates("eds_occim").set_index("eds_occim")["comuna"]
-                    _fill = _df_sla_ot["eds_occim"].map(_eds_comuna_map).fillna("")
-                    _df_sla_ot["ciudad"] = _df_sla_ot["ciudad"].where(_df_sla_ot["ciudad"].str.strip() != "", _fill)
+                    _eds_clean = df_eds.dropna(subset=["comuna"])
+                    # 1) Match por eds_occim directo (PBR-XX, etc.)
+                    _eds_comuna_map = _eds_clean.drop_duplicates("eds_occim").set_index("eds_occim")["comuna"]
+                    _fill1 = _df_sla_ot["eds_occim"].map(_eds_comuna_map).fillna("")
+                    # 2) Match por eds_occim_raw (EE_S### que usa Aramco)
+                    if "eds_occim_raw" in _eds_clean.columns:
+                        _eds_raw_map = (_eds_clean.dropna(subset=["eds_occim_raw"])
+                                                  .drop_duplicates("eds_occim_raw")
+                                                  .assign(_k=lambda d: d["eds_occim_raw"].str.upper().str.strip())
+                                                  .set_index("_k")["comuna"])
+                        _fill2 = _df_sla_ot["eds_occim"].astype(str).str.upper().str.strip().map(_eds_raw_map).fillna("")
+                    else:
+                        _fill2 = pd.Series([""] * len(_df_sla_ot), index=_df_sla_ot.index)
+                    # Aplicar fallback en cascada
+                    _df_sla_ot["ciudad"] = _df_sla_ot["ciudad"].where(_df_sla_ot["ciudad"].str.strip() != "", _fill1)
+                    _df_sla_ot["ciudad"] = _df_sla_ot["ciudad"].where(_df_sla_ot["ciudad"].str.strip() != "", _fill2)
+
+                # Recalcular zona_ot ahora que tenemos la comuna real
+                _df_sla_ot["zona_ot"] = [
+                    _zona_por_comuna(c, z) for c, z in zip(_df_sla_ot["ciudad"], _df_sla_ot["zona_ot"])
+                ]
                 _df_sla_ot["ciudad"] = _df_sla_ot["ciudad"].replace("", "—")
+
+                # Recalcular umbral SLA usando la zona corregida
+                _df_sla_ot["umbral_h"] = [
+                    _get_sla_h(c, p, z)
+                    for c, p, z in zip(
+                        _df_sla_ot.get("cliente", pd.Series([""] * len(_df_sla_ot), index=_df_sla_ot.index)),
+                        _df_sla_ot.get("prioridad", pd.Series([""] * len(_df_sla_ot), index=_df_sla_ot.index)),
+                        _df_sla_ot["zona_ot"],
+                    )
+                ]
+                _df_sla_ot["umbral_lbl"] = [
+                    f"{int(u)}h" if (u is not None and pd.notna(u)) else "—"
+                    for u in _df_sla_ot["umbral_h"]
+                ]
+                _df_sla_ot["pct_sla_ot"] = [
+                    round(h / u * 100, 1) if (u is not None and pd.notna(u) and u > 0 and pd.notna(h)) else None
+                    for h, u in zip(_df_sla_ot["horas_res"], _df_sla_ot["umbral_h"])
+                ]
 
                 # N° Aviso cliente — Aramco: N° Cotalker / COPEC: N° Aviso del email
                 _cotalker_idx = load_cotalker_index_supabase()
@@ -2316,10 +2381,38 @@ if _page == _NAV_PAGES[1]:
                 else:
                     _df_sla_ot["n_cotalker"] = ""
 
+                # Reporte de falla — extraído de nota_tarea:
+                #   Aramco: texto después de "Detalles del incidente:"
+                #   COPEC:  texto del nota_tarea (descripción del aviso)
+                #   SHELL:  texto descripción del incidente del Excel propio
+                _df_sla_ot["reporte"] = ""
+                if "os_fracttal" in _df_sla_ot.columns:
+                    try:
+                        _notas_idx = load_notas_tarea_index(tuple(sorted(_df_sla_ot["os_fracttal"].dropna().unique().tolist())))
+                        import re as _re_rep
+                        _pat_det = _re_rep.compile(r"Detalles\s*del\s*incidente\s*:\s*(.+)", _re_rep.IGNORECASE | _re_rep.DOTALL)
+                        def _extraer_reporte(ot):
+                            nota = _notas_idx.get(ot, "")
+                            if not nota:
+                                return ""
+                            m = _pat_det.search(nota)
+                            if m:
+                                return m.group(1).strip()
+                            # Fallback: para nota tipo "151022 - 169357 - ee_s268 - EDS:... - <texto>"
+                            # tomamos el último segmento tras último " - "
+                            parts = nota.split(" - ")
+                            return parts[-1].strip() if len(parts) >= 5 else ""
+                        _df_sla_ot["reporte"] = _df_sla_ot["os_fracttal"].apply(_extraer_reporte)
+                    except Exception:
+                        pass
+
                 _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
                                             "wo_cierre_ot","eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_ot"] if c in _df_sla_ot.columns]
-                _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla"]].copy()
+                _extra = ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla"]
+                if "reporte" in _df_sla_ot.columns:
+                    _extra.append("reporte")
+                _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + _extra].copy()
                 if "wo_cierre_ot" in _df_sla_ot_disp.columns:
                     _df_sla_ot_disp["wo_cierre_ot"] = pd.to_datetime(
                         _df_sla_ot_disp["wo_cierre_ot"], errors="coerce"
@@ -2336,7 +2429,7 @@ if _page == _NAV_PAGES[1]:
                              "prioridad":"Prioridad","ciudad":"Ciudad","zona_ot":"Zona",
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
                              "pct_sla_ot":"% Uso SLA","estado_sla":"Estado SLA",
-                             "n_cotalker":"N° Aviso"})
+                             "n_cotalker":"N° Aviso","reporte":"Reporte de falla"})
                 st.caption(f"**{len(_df_sla_ot_disp):,}** OTs con fechas de apertura y cierre registradas")
                 _show_df(_df_sla_ot_disp, width="stretch", hide_index=True,
                     column_config={
@@ -2360,6 +2453,10 @@ if _page == _NAV_PAGES[1]:
                             label="% Uso SLA", min_value=0, max_value=200, format="%.1f%%",
                             help=">100% = excedió el umbral SLA"),
                         "Estado SLA":        st.column_config.TextColumn(width=110),
+                        "Reporte de falla":  st.column_config.TextColumn(
+                            width=320,
+                            help="Descripción del problema reportado por el cliente (extraído de nota_tarea Fracttal / 'Detalles del incidente' de Cotalker)",
+                        ),
                     })
             else:
                 st.info("No hay llamados con fechas de apertura y cierre registradas en el período seleccionado.")

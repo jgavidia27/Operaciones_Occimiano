@@ -669,6 +669,31 @@ def load_preventivas_supabase() -> list:
 # ═════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=1800, show_spinner=False)
+def load_notas_tarea_index(ot_list: tuple) -> dict:
+    """
+    Retorna {id_ot: nota_tarea} para la lista de OTs solicitadas.
+    Usado para extraer 'Detalles del incidente' / descripciones de problema.
+    Recibe una tupla para que el cache funcione (las listas no son hashables).
+    """
+    if not ot_list:
+        return {}
+    result: dict = {}
+    # PostgREST tiene límite de URL: traer de a 200 OTs por request
+    ot_list = list(ot_list)
+    for i in range(0, len(ot_list), 200):
+        chunk = ot_list[i:i+200]
+        rows = _query(
+            "ordenes_trabajo",
+            f"select=id_ot,nota_tarea&id_ot=in.({','.join(chunk)})",
+            limit=500,
+        )
+        for r in rows:
+            if r.get("id_ot") and r.get("nota_tarea"):
+                result[r["id_ot"]] = r["nota_tarea"]
+    return result
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
 def load_cotalker_index_supabase() -> dict:
     """
     Retorna {id_ot: str} con el N° de aviso/referencia del cliente para cada OT:
