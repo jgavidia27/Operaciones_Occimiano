@@ -9875,33 +9875,19 @@ elif _page == _NAV_PAGES[2]:
             (_dfplan["_fp_dt"] >= _plan_ini) & (_dfplan["_fp_dt"] <= _plan_fin)
         ].copy()
 
-        # ── Reloj: Tiempo promedio de atención MP ─────────────────────────
-        # Mide cuántas HORAS en promedio se desvía la ejecución respecto a la
-        # fecha programada. Cálculo sobre OTs FINALIZADAS del filtro global.
-        # NO es desde la creación, es desde la fecha programada (el día
-        # comprometido para hacer la MP).
+        # ── Relojes: Tiempo de atención MP — dos métricas distintas ───────
+        # 1) PROGRAMADA → EJECUCIÓN  (cumplimiento del plazo comprometido)
+        # 2) CREACIÓN  → EJECUCIÓN  (velocidad de respuesta del técnico desde
+        #    que la OT existe en Fracttal)
+        # Ambos calculados sobre OTs FINALIZADAS del filtro global, en horas.
         _dfp_for_avg = dfp[
             dfp["fecha_finalizacion"].notna()
             & dfp["fecha_programada"].notna()
             & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
         ].copy()
-        if not _dfp_for_avg.empty:
-            # Conservamos la HORA real (sin normalize) para precisión sub-día
-            _fp_avg = pd.to_datetime(_dfp_for_avg["fecha_programada"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
-            _ff_avg = pd.to_datetime(_dfp_for_avg["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
-            _atraso_hrs   = (_ff_avg - _fp_avg).dt.total_seconds() / 3600
-            _avg_hrs      = round(_atraso_hrs.mean(), 1)
-            _med_hrs      = round(_atraso_hrs.median(), 1)
-            _ot_eval      = len(_dfp_for_avg)
-            # "A tiempo" = ejecutada el mismo día o antes (diferencia ≤ 0 días)
-            _pct_a_tiempo = round((_atraso_hrs <= 0).mean() * 100, 1)
-        else:
-            _avg_hrs = _med_hrs = 0.0
-            _ot_eval = 0
-            _pct_a_tiempo = 0
 
-        # Formatear "X días Y horas" o "Z horas" si < 24h
         def _fmt_h_d(hrs: float) -> str:
+            """Formato 'X días Y horas' o 'Z horas' si < 24h."""
             neg = hrs < 0
             h_abs = abs(hrs)
             if h_abs < 24:
@@ -9912,91 +9898,138 @@ elif _page == _NAV_PAGES[2]:
                 txt = f"{d} día{'s' if d != 1 else ''} {h:.1f} h" if h > 0 else f"{d} día{'s' if d != 1 else ''}"
             return f"-{txt}" if neg else txt
 
-        _avg_dias = _avg_hrs / 24
-        # Color según el promedio: ≤0 verde (anticipado), 0-3 días amarillo, >3 rojo
-        _color_avg = "#10b981" if _avg_dias <= 0 else "#f59e0b" if _avg_dias <= 3 else "#ef4444"
+        if not _dfp_for_avg.empty:
+            # Sin normalize → precisión sub-día
+            _fp_avg = pd.to_datetime(_dfp_for_avg["fecha_programada"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
+            _ff_avg = pd.to_datetime(_dfp_for_avg["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
+            _fc_avg = pd.to_datetime(_dfp_for_avg["fecha_creacion"],     errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
 
-        _rc1, _rc2 = st.columns([1, 1.6])
-        with _rc1:
-            import plotly.graph_objects as _go2
-            # Eje del gauge: -10 a +30 días (en horas: -240h a +720h)
-            # Mostramos en días en el gauge para que la escala sea legible
-            _fig_reloj = _go2.Figure(_go2.Indicator(
+            # Métrica 1: programada → ejecución
+            _h_prog        = (_ff_avg - _fp_avg).dt.total_seconds() / 3600
+            _avg_h_prog    = round(_h_prog.mean(), 1)
+            _med_h_prog    = round(_h_prog.median(), 1)
+            _pct_a_tiempo  = round((_h_prog <= 0).mean() * 100, 1)
+
+            # Métrica 2: creación → ejecución
+            _h_crea       = (_ff_avg - _fc_avg).dt.total_seconds() / 3600
+            _h_crea_pos   = _h_crea.where(_h_crea >= 0)   # filtrar negativos (datos sucios)
+            _avg_h_crea   = round(_h_crea_pos.mean(), 1) if _h_crea_pos.notna().any() else 0.0
+            _med_h_crea   = round(_h_crea_pos.median(), 1) if _h_crea_pos.notna().any() else 0.0
+            _ot_eval      = len(_dfp_for_avg)
+        else:
+            _avg_h_prog = _med_h_prog = _avg_h_crea = _med_h_crea = 0.0
+            _pct_a_tiempo = 0
+            _ot_eval = 0
+
+        _color_prog = "#10b981" if _avg_h_prog <= 0 else "#f59e0b" if _avg_h_prog <= 72 else "#ef4444"
+        # Para creación→ejecución no hay "anticipado", solo más rápido es mejor
+        _color_crea = "#10b981" if _avg_h_crea <= 48 else "#f59e0b" if _avg_h_crea <= 168 else "#ef4444"
+
+        import plotly.graph_objects as _go2
+
+        def _build_clock(value, color, title, subtitle, axis_range, tickvals, steps):
+            fig = _go2.Figure(_go2.Indicator(
                 mode="gauge+number",
-                value=_avg_dias,
-                number={"suffix": " d", "font": {"size": 30}, "valueformat": ".1f"},
-                title={"text": "<b>⏱ Tiempo promedio de atención MP</b><br>"
-                               "<span style='font-size:0.72rem;color:#94a3b8'>"
-                               "días entre fecha programada y ejecución · respeta filtros</span>",
+                value=value,
+                number={"suffix": " h", "font": {"size": 28}, "valueformat": ".1f"},
+                title={"text": f"<b>{title}</b><br>"
+                               f"<span style='font-size:0.72rem;color:#94a3b8'>{subtitle}</span>",
                        "font": {"size": 13}},
                 gauge={
-                    "axis":    {"range": [-10, 30], "tickwidth": 1, "tickfont": {"size": 10},
-                                "tickvals": [-10, -5, 0, 3, 7, 15, 30]},
-                    "bar":     {"color": _color_avg, "thickness": 0.32},
+                    "axis":    {"range": axis_range, "tickwidth": 1, "tickfont": {"size": 9},
+                                "tickvals": tickvals},
+                    "bar":     {"color": color, "thickness": 0.32},
                     "bgcolor": "rgba(0,0,0,0)",
                     "borderwidth": 0,
-                    "steps": [
-                        {"range": [-10, 0], "color": "rgba(16,185,129,0.18)"},
-                        {"range": [0,   3], "color": "rgba(245,158,11,0.18)"},
-                        {"range": [3,  30], "color": "rgba(239,68,68,0.18)"},
-                    ],
-                    "threshold": {
-                        "line": {"color": "#0f172a", "width": 2},
-                        "thickness": 0.85, "value": 0,
-                    },
+                    "steps": steps,
                 },
             ))
-            _fig_reloj.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10),
-                                     paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(_fig_reloj, use_container_width=True, key="prev_reloj_atencion")
-        with _rc2:
-            st.markdown(
-                f"""<div style="padding:14px 18px;background:rgba(148,163,184,0.08);
-                     border-radius:10px;border-left:3px solid {_color_avg};margin-top:10px;">
-                  <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
-                              font-weight:600;text-transform:uppercase;margin-bottom:8px;">
-                    Detalle del tiempo de atención</div>
-                  <table style="width:100%;border-collapse:collapse;font-size:0.92rem;">
-                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Promedio</td>
-                      <td style="padding:6px 0;text-align:right;color:{_color_avg};font-weight:600;font-size:1.05rem;">
-                        {_fmt_h_d(_avg_hrs)}
-                      </td>
-                    </tr>
-                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Mediana</td>
-                      <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">
-                        {_fmt_h_d(_med_hrs)}
-                      </td>
-                    </tr>
-                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Promedio en horas</td>
-                      <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">
-                        {_avg_hrs:.1f} h
-                      </td>
-                    </tr>
-                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">OTs evaluadas</td>
-                      <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">
-                        {_ot_eval:,}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Atendidas a tiempo</td>
-                      <td style="padding:6px 0;text-align:right;color:#10b981;font-weight:600;">
-                        {_pct_a_tiempo}%
-                      </td>
-                    </tr>
-                  </table>
-                  <div style="color:var(--text-color, #475569);font-size:0.78rem;margin-top:10px;
-                              padding-top:8px;border-top:1px solid rgba(148,163,184,0.25);">
-                    Mide <b>fecha_finalización − fecha_programada</b>. Valores negativos =
-                    ejecutadas antes de lo programado. Respeta los filtros de arriba (Mes,
-                    Trimestre, Plan, Cliente, etc.).
-                  </div>
-                </div>""",
-                unsafe_allow_html=True,
+            fig.update_layout(height=250, margin=dict(l=10, r=10, t=60, b=10),
+                              paper_bgcolor="rgba(0,0,0,0)")
+            return fig
+
+        _rc1, _rc2 = st.columns(2)
+        with _rc1:
+            # Eje del gauge programada→ejecución: -120 a +360h (-5d a +15d)
+            _fig_prog = _build_clock(
+                _avg_h_prog, _color_prog,
+                "⏱ Programada → Ejecución",
+                "horas entre fecha programada y ejecución",
+                [-120, 360], [-120, -48, 0, 24, 72, 168, 360],
+                [
+                    {"range": [-120, 0], "color": "rgba(16,185,129,0.18)"},
+                    {"range": [0,    72], "color": "rgba(245,158,11,0.18)"},
+                    {"range": [72,  360], "color": "rgba(239,68,68,0.18)"},
+                ],
             )
+            # Línea de "fecha programada" (objetivo = 0)
+            _fig_prog.update_traces(gauge_threshold={"line": {"color": "#0f172a", "width": 2},
+                                                     "thickness": 0.85, "value": 0})
+            st.plotly_chart(_fig_prog, use_container_width=True, key="prev_reloj_prog")
+        with _rc2:
+            # Eje del gauge creación→ejecución: 0 a +480h (0 a +20d)
+            _fig_crea = _build_clock(
+                _avg_h_crea, _color_crea,
+                "⏱ Creación OT → Ejecución",
+                "horas entre creación de la OT y ejecución",
+                [0, 480], [0, 24, 48, 96, 168, 336, 480],
+                [
+                    {"range": [0,    48], "color": "rgba(16,185,129,0.18)"},
+                    {"range": [48,  168], "color": "rgba(245,158,11,0.18)"},
+                    {"range": [168, 480], "color": "rgba(239,68,68,0.18)"},
+                ],
+            )
+            st.plotly_chart(_fig_crea, use_container_width=True, key="prev_reloj_crea")
+
+        # Panel de detalle unificado debajo
+        st.markdown(
+            f"""<div style="padding:14px 18px;background:rgba(148,163,184,0.08);
+                 border-radius:10px;border-left:3px solid {_color_prog};margin-top:-8px;">
+              <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
+                          font-weight:600;text-transform:uppercase;margin-bottom:8px;">
+                Detalle del tiempo de atención
+              </div>
+              <table style="width:100%;border-collapse:collapse;font-size:0.92rem;">
+                <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Programada → Ejecución</td>
+                  <td style="padding:6px 0;text-align:right;color:{_color_prog};font-weight:600;font-size:1.05rem;">
+                    {_fmt_h_d(_avg_h_prog)}
+                  </td>
+                  <td style="padding:6px 16px;color:var(--text-color, #475569);font-size:0.82rem;text-align:right;">
+                    mediana {_fmt_h_d(_med_h_prog)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Creación OT → Ejecución</td>
+                  <td style="padding:6px 0;text-align:right;color:{_color_crea};font-weight:600;font-size:1.05rem;">
+                    {_fmt_h_d(_avg_h_crea)}
+                  </td>
+                  <td style="padding:6px 16px;color:var(--text-color, #475569);font-size:0.82rem;text-align:right;">
+                    mediana {_fmt_h_d(_med_h_crea)}
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">OTs evaluadas</td>
+                  <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">{_ot_eval:,}</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Atendidas a tiempo (criterio crudo)</td>
+                  <td style="padding:6px 0;text-align:right;color:#10b981;font-weight:600;">{_pct_a_tiempo}%</td>
+                  <td></td>
+                </tr>
+              </table>
+              <div style="color:var(--text-color, #475569);font-size:0.78rem;margin-top:10px;
+                          padding-top:8px;border-top:1px solid rgba(148,163,184,0.25);">
+                Métrica 1 (<b>Programada → Ejecución</b>): cumplimiento del plazo
+                comprometido. Valores negativos = ejecutada antes de lo programado.<br>
+                Métrica 2 (<b>Creación OT → Ejecución</b>): velocidad de respuesta del
+                técnico desde que la OT existe en Fracttal. Suele ser más corta porque
+                muchas OTs se crean el mismo día de la mantención.
+              </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
 
         st.divider()
 
