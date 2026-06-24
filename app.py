@@ -2965,7 +2965,7 @@ if _page == _NAV_PAGES[1]:
                 _df_up["_mes_p"]   = _fl_up_norm.dt.to_period("M").astype(str)
                 _df_up["_month_n"] = _fl_up_norm.dt.month.astype("Int64")
 
-                _ff1, _ff2 = st.columns([1.3, 2])
+                _ff1, _ff2, _ff3 = st.columns([1.2, 1.8, 1.3])
                 with _ff1:
                     _up_trim = st.selectbox("Período", _trim_opts, key="upsla_trim")
                 with _ff2:
@@ -2977,12 +2977,26 @@ if _page == _NAV_PAGES[1]:
                         _meses_up_disp = _meses_disp_lbl[1:]
                     _up_meses = st.multiselect("Mes", _meses_up_disp, key="upsla_mes",
                                                placeholder="Todos los meses")
+                with _ff3:
+                    _up_prio = st.selectbox(
+                        "Prioridad a contar",
+                        ["Solo P1 (máquina detenida)", "P1 + P2", "Todas"],
+                        key="upsla_prio",
+                        help="Solo las P1 implican máquina detenida en el negocio. "
+                             "Las P2/P3/P4 son fallas donde la máquina sigue operativa."
+                    )
 
                 if _up_trim != "Todos":
                     _df_up = _df_up[_df_up["_month_n"].isin(_TRIMESTRES_DEF[_up_trim])]
                 if _up_meses:
                     _meses_periodo = [_lbl_to_period.get(l) for l in _up_meses if _lbl_to_period.get(l)]
                     _df_up = _df_up[_df_up["_mes_p"].isin(_meses_periodo)]
+                # Filtro de prioridad — para uptime real solo cuentan llamados con máquina detenida
+                _prio_norm = _df_up["prioridad"].astype(str).str.upper().str.strip()
+                if _up_prio == "Solo P1 (máquina detenida)":
+                    _df_up = _df_up[_prio_norm == "P1"]
+                elif _up_prio == "P1 + P2":
+                    _df_up = _df_up[_prio_norm.isin(["P1", "P2"])]
 
                 # ── Período evaluado dinámico según filtros de fecha ───
                 _hoy_up = pd.Timestamp.today().normalize()
@@ -3045,11 +3059,11 @@ if _page == _NAV_PAGES[1]:
                     unsafe_allow_html=True,
                 )
                 st.caption(
-                    "**Fórmula**: Uptime % = 1 − (Σ horas detenidas por correctivas) ÷ "
-                    "(N EDS × horas del período) · "
-                    "**Horas detenidas** = `fecha_atención − fecha_llamado` (tiempo entre que "
-                    "se reportó la falla y el técnico la resolvió). "
-                    "Mide qué % del tiempo la red estuvo operativa sin emergencias activas."
+                    "**Fórmula**: Uptime % = 1 − (Σ horas detenidas) ÷ (N EDS × horas del período) · "
+                    "**Horas detenidas** = `fecha_atención − fecha_llamado` por cada llamado. "
+                    "⚠️ Por defecto cuenta **solo P1** porque en el negocio P1 = máquina detenida; "
+                    "las P2/P3/P4 son fallas donde la máquina sigue operando "
+                    "(usa el selector \"Prioridad a contar\" si quieres incluirlas)."
                 )
 
                 # ── Clasificación regional por eds_nombre / comuna ────
@@ -3107,8 +3121,9 @@ if _page == _NAV_PAGES[1]:
 
                 # ── KPIs ───────────────────────────────────────────────
                 _k1s, _k2s, _k3s, _k4s, _k5s = st.columns(5)
-                _k1s.metric("Llamados atendidos", f"{len(_df_up):,}",
-                            delta="con fecha de atención")
+                _prio_lbl = {"Solo P1 (máquina detenida)": "P1", "P1 + P2": "P1+P2", "Todas": "Todas"}[_up_prio]
+                _k1s.metric("Llamados contados", f"{len(_df_up):,}",
+                            delta=f"prioridad: {_prio_lbl}")
                 _k2s.metric("Tiempo total detenido",
                             f"{int(_paro_total_seg // 3600):,}h "
                             f"{int((_paro_total_seg % 3600) // 60):02d}m")
