@@ -6600,24 +6600,33 @@ elif _page == _NAV_PAGES[0]:
                 "falla_raw", "falla_tipo",
                 "causa_raiz", "causa_clasif",
                 "es_reincidencia_tecnico",
-                "observacion",
                 "comentario_tecnico_cm",
+                "conclusion",
             ]
             # falla_raw / falla_tipo solo existen si el DF fue generado con la nueva lógica
             _rc_disp = _df_rc[[c for c in _rc_cols_base if c in _df_rc.columns]].copy()
             _rc_disp["fecha_pm"] = pd.to_datetime(_rc_disp["fecha_pm"]).dt.strftime("%d/%m/%Y")
             _rc_disp["fecha_cm"] = pd.to_datetime(_rc_disp["fecha_cm"]).dt.strftime("%d/%m/%Y")
 
-            # ── Columna Observación — generada con valores raw de falla_tipo ────
-            _OBS_MAP = {
+            # ── Limpiar prefijo redundante del comentario STO ────────────────
+            if "comentario_tecnico_cm" in _rc_disp.columns:
+                import re as _re_sto
+                _rc_disp["comentario_tecnico_cm"] = _rc_disp["comentario_tecnico_cm"].apply(
+                    lambda x: _re_sto.sub(
+                        r"^DESCRIPCI[OÓ]N DE LA FALLA ENCONTRADA:\s*", "", str(x or ""), flags=_re_sto.IGNORECASE
+                    ).strip()
+                )
+
+            # ── Columna Conclusión — generada con valores raw de falla_tipo ────
+            _CONCL_MAP = {
                 "fao":      "Error del técnico del PM — falla confirmada como F.A.O",
-                "sin_info": "⚠️ Atribuible por omisión: técnico del correctivo seleccionó 'Sin Información' — no se puede descartar responsabilidad de Occimiano",
-                "sin_dato": "⚠️ Atribuible por omisión: campo 'Falla' dejado vacío en Fracttal — no se puede descartar responsabilidad de Occimiano",
+                "sin_info": "⚠️ Atribuible por omisión: técnico seleccionó 'Sin Información'",
+                "sin_dato": "⚠️ Atribuible por omisión: campo 'Falla' vacío en Fracttal",
                 "especial": "Trabajo Especial — no imputa KPI Calidad",
                 "fnao":     "Excluida — F.N.A.O declarada por el técnico",
             }
             if "falla_tipo" in _rc_disp.columns:
-                _rc_disp["observacion"] = _rc_disp["falla_tipo"].map(_OBS_MAP).fillna("")
+                _rc_disp["conclusion"] = _rc_disp["falla_tipo"].map(_CONCL_MAP).fillna("")
 
             _rc_disp["es_reincidencia_tecnico"] = _rc_disp["es_reincidencia_tecnico"].apply(
                 lambda x: "🔴 Técnico" if x else "🟢 No técnico"
@@ -6649,10 +6658,10 @@ elif _page == _NAV_PAGES[0]:
             if "falla_raw" in _rc_disp.columns:
                 _rc_col_names += ["Tipo Falla", "Clasif. Falla"]
             _rc_col_names += ["Causa raíz", "Clasif. causa", "Responsabilidad"]
-            if "observacion" in _rc_disp.columns:
-                _rc_col_names += ["Observación"]
             if "comentario_tecnico_cm" in _rc_disp.columns:
                 _rc_col_names += ["Comentario STO"]
+            if "conclusion" in _rc_disp.columns:
+                _rc_col_names += ["Conclusión"]
             _rc_disp.columns = _rc_col_names
 
             _show_df(
@@ -6666,13 +6675,13 @@ elif _page == _NAV_PAGES[0]:
                     "Causa raíz":    st.column_config.TextColumn(width=220),
                     "Técnico MC":    st.column_config.TextColumn(width=160),
                     "Técnico MP":    st.column_config.TextColumn(width=160),
-                    "Observación":   st.column_config.TextColumn(
-                        width=340,
-                        help="Criterio por el cual esta falla se considera atribuible o no al técnico del preventivo",
-                    ),
                     "Comentario STO": st.column_config.TextColumn(
-                        width=360,
-                        help="Comentario del técnico en el formulario del correctivo (descripción de la falla encontrada y trabajo realizado)",
+                        width=340,
+                        help="Comentario del técnico en el formulario del correctivo — descripción de la falla encontrada",
+                    ),
+                    "Conclusión":    st.column_config.TextColumn(
+                        width=300,
+                        help="Veredicto del sistema según la clasificación F.A.O / F.N.A.O registrada",
                     ),
                 },
             )
