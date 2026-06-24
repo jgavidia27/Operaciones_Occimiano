@@ -9336,7 +9336,7 @@ elif _page == _NAV_PAGES[2]:
 
     # Helper: orden de clientes — primero los 3 principales, luego alfabético
     def _orden_clientes(series_clientes) -> list:
-        _principales = ["COPEC", "ESMAX (Aramco)", "SHELL (Enex)"]
+        _principales = ["COPEC", "Aramco (Esmax)", "SHELL (Enex)"]
         _unicos = set(series_clientes.dropna().unique().tolist())
         _ord = [c for c in _principales if c in _unicos]
         _resto = sorted(c for c in _unicos if c not in _principales)
@@ -9686,8 +9686,8 @@ elif _page == _NAV_PAGES[2]:
                 _dfcli_eval["_ff_n"].notna() & (_dfcli_eval["dias_atraso"] <= 0)
             )
 
-            _CLIENTES = ["COPEC", "ESMAX (Aramco)", "SHELL (Enex)"]
-            _ICON = {"COPEC": "🟢", "ESMAX (Aramco)": "🟠", "SHELL (Enex)": "🟡"}
+            _CLIENTES = ["COPEC", "Aramco (Esmax)", "SHELL (Enex)"]
+            _ICON = {"COPEC": "🟢", "Aramco (Esmax)": "🟠", "SHELL (Enex)": "🟡"}
 
             # Resumen comparativo arriba
             _resumen = []
