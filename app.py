@@ -52,7 +52,6 @@ from supabase_client import (
     load_tecnicos_supabase,
     load_equipos_supabase,
     load_preventivas_supabase,
-    load_correctivas_supabase,
     load_all_llamados_supabase,
     load_sla_umbrales_supabase,
     load_cotalker_index_supabase,
@@ -2943,7 +2942,9 @@ if _page == _NAV_PAGES[1]:
                 })
 
         # ══════════════════════════════════════════════════════════════════════
-        # SUB-PESTAÑA: UPTIME (correctivas / emergencias)
+        # SUB-PESTAÑA: UPTIME (llamados de emergencia / correctivas)
+        # Tiempo detenido = (fecha_atencion - fecha_llamado) por cada llamado.
+        # Granularidad: EDS (df_llamados no tiene codigo_activo individual).
         # ══════════════════════════════════════════════════════════════════════
         with _tab_uptime_sla:
             st.markdown(
@@ -2951,266 +2952,228 @@ if _page == _NAV_PAGES[1]:
                 unsafe_allow_html=True,
             )
 
-            with st.spinner("Cargando OTs correctivas…"):
-                _raw_corr = load_correctivas_supabase()
+            _df_up = df_llamados.copy()
+            _df_up = _df_up[_df_up["fecha_llamado"].notna() & _df_up["fecha_atencion"].notna()]
 
-            if not _raw_corr:
-                st.warning("Sin datos de OTs correctivas. Verifica la sincronización con Fracttal.")
+            if _df_up.empty:
+                st.info("Sin llamados atendidos en el período.")
             else:
-                _df_corr = pd.DataFrame(_raw_corr)
-                _df_corr["fecha_creacion"] = pd.to_datetime(
-                    _df_corr["fecha_creacion"], errors="coerce", utc=True)
-                _df_corr["fecha_finalizacion"] = pd.to_datetime(
-                    _df_corr["fecha_finalizacion"], errors="coerce", utc=True)
-                _fc_corr = _df_corr["fecha_creacion"].dt.tz_convert(None)
-                if "cliente" in _df_corr.columns:
-                    _df_corr["cliente"] = _df_corr["cliente"].replace(
-                        {"ESMAX (Aramco)": "Aramco (Esmax)"})
-
                 _rango_inicio_up = pd.Timestamp("2026-01-01")
                 _hoy_up = pd.Timestamp.today().normalize()
-                _df_corr = _df_corr[
-                    (_fc_corr >= _rango_inicio_up) & (_fc_corr <= _hoy_up)
-                ].copy()
+                _rango_dias_up = max((_hoy_up - _rango_inicio_up).days, 1)
+                _seg_equipo_up = _rango_dias_up * 24 * 3600
 
-                if _df_corr.empty:
-                    st.info("Sin OTs correctivas en el período.")
-                elif "paro_equipo" not in _df_corr.columns or _df_corr["paro_equipo"].isna().all():
-                    st.info(
-                        "Sin datos de paro de equipo en correctivas. "
-                        "Verifica que Fracttal haya poblado `paro_equipo` y `tiempo_paro_real_seg`."
-                    )
+                # Tiempo detenido por llamado (segundos)
+                def _merge_dt_up(d, h):
+                    d_ts = pd.to_datetime(d, errors="coerce")
+                    h_str = h.astype(str).fillna("00:00:00").str[:8].replace(
+                        {"nan": "00:00:00", "NaT": "00:00:00", "":"00:00:00"})
+                    return pd.to_datetime(
+                        d_ts.dt.strftime("%Y-%m-%d") + " " + h_str,
+                        errors="coerce")
+
+                _dt_ll_up = _merge_dt_up(_df_up["fecha_llamado"],
+                                         _df_up.get("hora_llamado", pd.Series("", index=_df_up.index)))
+                _dt_at_up = _merge_dt_up(_df_up["fecha_atencion"],
+                                         _df_up.get("hora_fin", pd.Series("", index=_df_up.index)))
+                _df_up = _df_up.assign(
+                    _paro_seg = (_dt_at_up - _dt_ll_up).dt.total_seconds().clip(lower=0).fillna(0)
+                )
+
+                st.markdown(
+                    f"""<div style="background:rgba(1,121,138,0.10);border-left:3px solid #01798A;
+                         padding:10px 16px;border-radius:6px;margin-bottom:14px;">
+                      <span style="color:#01798A;font-weight:700;font-size:0.95rem;">📅 Período evaluado:</span>
+                      <span style="color:var(--text-color, #475569);font-size:0.9rem;margin-left:8px;">
+                        <b>{_rango_inicio_up.strftime('%d/%m/%Y')}</b> → <b>{_hoy_up.strftime('%d/%m/%Y')}</b>
+                        ({_rango_dias_up} días · {_rango_dias_up * 24:,} horas por EDS).</span>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "**Fórmula**: Uptime % = 1 − (Σ horas detenidas por correctivas) ÷ "
+                    "(N EDS × horas del período) · "
+                    "**Horas detenidas** = `fecha_atención − fecha_llamado` (tiempo entre que "
+                    "se reportó la falla y el técnico la resolvió). "
+                    "Mide qué % del tiempo la red estuvo operativa sin emergencias activas."
+                )
+
+                # ── Clasificación regional por eds_nombre / comuna ────
+                def _region_ll(s):
+                    s = str(s or "").upper()
+                    _NORTE = ["IQUIQUE","ARICA","ANTOFAGASTA","CALAMA","COPIAPÓ","COPIAPO",
+                              "OVALLE","LA SERENA","COQUIMBO","VALLENAR","ILLAPEL","HUASCO",
+                              "ALTO HOSPICIO","TOCOPILLA","MEJILLONES"]
+                    _SUR   = ["CONCEPCIÓN","CONCEPCION","OSORNO","TEMUCO","VALDIVIA",
+                              "PUERTO MONTT","CHILLÁN","CHILLAN","LOS ANGELES","LOS ÁNGELES",
+                              "LINARES","TALCA","CURICÓ","CURICO","RANCAGUA","FRUTILLAR",
+                              "VICTORIA","RENGO","SAN FERNANDO","PUERTO VARAS","ANCUD",
+                              "CASTRO","COIHAIQUE","LA UNION","LA UNIÓN"]
+                    if any(c in s for c in _NORTE): return "Norte"
+                    if any(c in s for c in _SUR):   return "Sur"
+                    return "Santiago"
+
+                _src_reg = _df_up.get("eds_nombre",
+                    pd.Series("", index=_df_up.index)).fillna("").astype(str)
+                if "comuna" in _df_up.columns:
+                    _src_reg = _src_reg + " " + _df_up["comuna"].fillna("").astype(str)
+                _df_up["_region"] = _src_reg.apply(_region_ll)
+
+                # ── Filtros: Cliente + Región + EDS ────────────────────
+                _fu1s, _fu2s, _fu3s = st.columns(3)
+                with _fu1s:
+                    _CLI_PREF = ["COPEC", "Aramco (Esmax)", "SHELL (Enex)"]
+                    _cli_present = set(_df_up["cliente"].dropna().unique())
+                    _cli_up_opts = ["Todos"] + [c for c in _CLI_PREF if c in _cli_present] + \
+                        sorted([c for c in _cli_present if c not in _CLI_PREF])
+                    _up_sla_cli = st.selectbox("Cliente", _cli_up_opts, key="upsla_cli")
+                with _fu2s:
+                    _up_sla_reg = st.selectbox("Región",
+                        ["Todas", "Santiago", "Norte", "Sur"], key="upsla_reg")
+                with _fu3s:
+                    _eds_pool = sorted(
+                        _df_up["eds_nombre"].dropna().unique().tolist()
+                    ) if "eds_nombre" in _df_up.columns else []
+                    _up_sla_eds = st.selectbox("Estación / EDS",
+                        ["Todas"] + _eds_pool, key="upsla_eds")
+
+                if _up_sla_cli != "Todos":
+                    _df_up = _df_up[_df_up["cliente"] == _up_sla_cli]
+                if _up_sla_reg != "Todas":
+                    _df_up = _df_up[_df_up["_region"] == _up_sla_reg]
+                if _up_sla_eds != "Todas":
+                    _df_up = _df_up[_df_up["eds_nombre"] == _up_sla_eds]
+
+                # ── Cálculo principal ──────────────────────────────────
+                _paro_total_seg = _df_up["_paro_seg"].sum()
+                _eds_unicas = _df_up["eds_occim"].dropna().astype(str).str.strip()
+                _eds_unicas = set(_eds_unicas[_eds_unicas != ""].unique())
+                _n_eds_up = max(len(_eds_unicas), 1)
+                _total_seg_up = _seg_equipo_up * _n_eds_up
+
+                # ── KPIs ───────────────────────────────────────────────
+                _k1s, _k2s, _k3s, _k4s, _k5s = st.columns(5)
+                _k1s.metric("Llamados atendidos", f"{len(_df_up):,}",
+                            delta="con fecha de atención")
+                _k2s.metric("Tiempo total detenido",
+                            f"{int(_paro_total_seg // 3600):,}h "
+                            f"{int((_paro_total_seg % 3600) // 60):02d}m")
+                _k3s.metric("EDS evaluadas", f"{_n_eds_up:,}",
+                            delta="únicas en filtro")
+                _k4s.metric("Días evaluados", f"{_rango_dias_up:,}",
+                            delta="desde 01/01/2026")
+                _upt_pct = max(0.0, round(
+                    (1 - _paro_total_seg / _total_seg_up) * 100, 3))
+                _k5s.metric("Uptime global", f"{_upt_pct}%",
+                            help=f"({_n_eds_up:,} EDS × {_rango_dias_up} días × 24h)"
+                                 f" − {int(_paro_total_seg//3600):,}h detenidas")
+
+                st.divider()
+
+                # ── Ranking: 5 EDS con mayor paro ──────────────────────
+                st.markdown(
+                    '<div class="section-header">'
+                    '🏆  Ranking · 5 estaciones con mayor tiempo detenido'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                if _df_up.empty or _paro_total_seg == 0:
+                    st.info("Sin tiempo detenido en el filtro.")
                 else:
-                    _rango_dias_up = max((_hoy_up - _rango_inicio_up).days, 1)
-                    _seg_equipo_up = _rango_dias_up * 24 * 3600
+                    _rk = (_df_up.groupby(
+                        ["eds_nombre", "eds_occim"], dropna=False, as_index=False
+                    ).agg(
+                        Llamados=("os_fracttal", "count"),
+                        Tiempo_paro_seg=("_paro_seg", "sum"),
+                    ))
+                    _rk["Tiempo detenido (h:mm)"] = _rk["Tiempo_paro_seg"].apply(
+                        lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m"
+                        if s else "—")
+                    _rk["Tiempo detenido (h)"] = (_rk["Tiempo_paro_seg"] / 3600).round(1)
+                    _rk = _rk.sort_values("Tiempo_paro_seg", ascending=False).head(5)
+                    _rk["#"] = ["🥇","🥈","🥉","4️⃣","5️⃣"][:len(_rk)]
 
-                    st.markdown(
-                        f"""<div style="background:rgba(1,121,138,0.10);border-left:3px solid #01798A;
-                             padding:10px 16px;border-radius:6px;margin-bottom:14px;">
-                          <span style="color:#01798A;font-weight:700;font-size:0.95rem;">📅 Período evaluado:</span>
-                          <span style="color:var(--text-color, #475569);font-size:0.9rem;margin-left:8px;">
-                            <b>{_rango_inicio_up.strftime('%d/%m/%Y')}</b> → <b>{_hoy_up.strftime('%d/%m/%Y')}</b>
-                            ({_rango_dias_up} días · {_rango_dias_up * 24:,} horas por equipo).</span>
-                        </div>""",
-                        unsafe_allow_html=True,
-                    )
-                    st.caption(
-                        "**Fórmula**: Uptime % = 1 − (Σ horas detenidas por correctiva) ÷ "
-                        "(N equipos × horas del período) · "
-                        "Solo cuenta cuando la OT correctiva tiene **¿Paro de equipo? = SÍ**. "
-                        "Mide qué % del tiempo la flota estuvo operativa sin fallas de emergencia."
-                    )
-
-                    # ── Función región ────────────────────────────────────
-                    def _region_corr(s):
-                        s = str(s or "").upper()
-                        _NORTE = ["IQUIQUE","ARICA","ANTOFAGASTA","CALAMA","COPIAPÓ","COPIAPO",
-                                  "OVALLE","LA SERENA","COQUIMBO","VALLENAR","ILLAPEL","HUASCO",
-                                  "ALTO HOSPICIO","TOCOPILLA","MEJILLONES"]
-                        _SUR   = ["CONCEPCIÓN","CONCEPCION","OSORNO","TEMUCO","VALDIVIA",
-                                  "PUERTO MONTT","CHILLÁN","CHILLAN","LOS ANGELES","LOS ÁNGELES",
-                                  "LINARES","TALCA","CURICÓ","CURICO","RANCAGUA","FRUTILLAR",
-                                  "VICTORIA","RENGO","SAN FERNANDO","PUERTO VARAS","ANCUD",
-                                  "CASTRO","COIHAIQUE","LA UNION","LA UNIÓN"]
-                        if any(c in s for c in _NORTE): return "Norte"
-                        if any(c in s for c in _SUR):   return "Sur"
-                        return "Santiago"
-
-                    _dfup_sla = _df_corr.copy()
-                    _dfup_sla["_region"] = _dfup_sla["estacion"].fillna(
-                        _dfup_sla.get("ubicacion", "")).apply(_region_corr)
-
-                    # ── Filtros: Cliente + Región + EDS ───────────────────
-                    _fu1s, _fu2s, _fu3s = st.columns(3)
-                    with _fu1s:
-                        _CLI_PREF = ["COPEC", "Aramco (Esmax)", "SHELL (Enex)"]
-                        if "cliente" in _dfup_sla.columns:
-                            _cli_present = set(_dfup_sla["cliente"].dropna().unique())
-                            _cli_up_opts = ["Todos"] + [c for c in _CLI_PREF if c in _cli_present] + \
-                                sorted([c for c in _cli_present if c not in _CLI_PREF])
-                        else:
-                            _cli_up_opts = ["Todos"]
-                        _up_sla_cli = st.selectbox("Cliente", _cli_up_opts, key="upsla_cli")
-                    with _fu2s:
-                        _up_sla_reg = st.selectbox("Región",
-                            ["Todas", "Santiago", "Norte", "Sur"], key="upsla_reg")
-                    with _fu3s:
-                        _eds_pool = sorted(
-                            _dfup_sla["estacion"].dropna().unique().tolist()
-                        ) if "estacion" in _dfup_sla.columns else []
-                        _up_sla_eds = st.selectbox("Estación / EDS",
-                            ["Todas"] + _eds_pool, key="upsla_eds")
-
-                    if _up_sla_cli != "Todos":
-                        _dfup_sla = _dfup_sla[_dfup_sla["cliente"] == _up_sla_cli]
-                    if _up_sla_reg != "Todas":
-                        _dfup_sla = _dfup_sla[_dfup_sla["_region"] == _up_sla_reg]
-                    if _up_sla_eds != "Todas":
-                        _dfup_sla = _dfup_sla[_dfup_sla["estacion"] == _up_sla_eds]
-
-                    # ── Cálculo principal ─────────────────────────────────
-                    _cparo = _dfup_sla[_dfup_sla["paro_equipo"] == True].copy()
-                    _pr_real  = pd.to_numeric(_cparo.get("tiempo_paro_real_seg"),
-                                              errors="coerce").fillna(0)
-                    _pr_estim = pd.to_numeric(_cparo.get("tiempo_paro_estim_seg"),
-                                              errors="coerce").fillna(0)
-                    _pr_serie = _pr_real.where(_pr_real > 0, _pr_estim)
-                    _pr_total = _pr_serie.sum()
-                    if not _cparo.empty:
-                        _cparo = _cparo.assign(_paro_calc_seg=_pr_serie.values)
-
-                    _eq_unic_up = set()
-                    for _cod in _dfup_sla.get("codigo_activo",
-                                              pd.Series(dtype=str)).dropna():
-                        for _c in str(_cod).split(","):
-                            _c = _c.strip()
-                            if _c:
-                                _eq_unic_up.add(_c)
-                    _n_eq_up = max(len(_eq_unic_up), 1)
-
-                    _total_seg_up = _seg_equipo_up * _n_eq_up
-
-                    # ── KPIs ──────────────────────────────────────────────
-                    _k1s, _k2s, _k3s, _k4s, _k5s = st.columns(5)
-                    _k1s.metric("OTs con paro", f"{len(_cparo):,}",
-                                delta=f"de {len(_dfup_sla):,} correctivas")
-                    _k2s.metric("Tiempo total detenido",
-                                f"{int(_pr_total // 3600):,}h "
-                                f"{int((_pr_total % 3600) // 60):02d}m")
-                    _k3s.metric("Equipos evaluados", f"{_n_eq_up:,}",
-                                delta="únicos en filtro")
-                    _k4s.metric("Días evaluados", f"{_rango_dias_up:,}",
-                                delta="desde 01/01/2026")
-                    _upt_pct = max(0.0, round(
-                        (1 - _pr_total / _total_seg_up) * 100, 3))
-                    _k5s.metric("Uptime global", f"{_upt_pct}%",
-                                help=f"({_n_eq_up:,} equipos × {_rango_dias_up} días × 24h)"
-                                     f" − {int(_pr_total//3600):,}h detenidas")
-
-                    st.divider()
-
-                    # ── Ranking: 5 EDS con mayor paro por correctivas ─────
-                    st.markdown(
-                        '<div class="section-header">'
-                        '🏆  Ranking · 5 estaciones con mayor tiempo de paro (correctivas)'
-                        '</div>',
-                        unsafe_allow_html=True,
-                    )
-                    if _cparo.empty:
-                        st.info("Ninguna OT correctiva del filtro tiene paro de equipo.")
-                    else:
-                        _rk = (_cparo.groupby(
-                            ["estacion", "codigo_eds"], dropna=False, as_index=False
-                        ).agg(
-                            OTs_con_paro=("id_ot", "count"),
-                            Tiempo_paro_seg=("_paro_calc_seg", "sum"),
-                        ))
-                        _rk["Tiempo paro (h:mm)"] = _rk["Tiempo_paro_seg"].apply(
-                            lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m"
-                            if s else "—")
-                        _rk["Tiempo paro (h)"] = (_rk["Tiempo_paro_seg"] / 3600).round(1)
-                        _rk = _rk.sort_values("Tiempo_paro_seg", ascending=False).head(5)
-                        _rk["#"] = ["🥇","🥈","🥉","4️⃣","5️⃣"][:len(_rk)]
-
-                        _rk_show = _rk[[
-                            "#", "estacion", "codigo_eds", "OTs_con_paro",
-                            "Tiempo paro (h:mm)", "Tiempo paro (h)"
-                        ]].rename(columns={
-                            "estacion":     "Estación",
-                            "codigo_eds":   "Cód. EDS",
-                            "OTs_con_paro": "OTs con paro",
+                    _rk_show = _rk[[
+                        "#", "eds_nombre", "eds_occim", "Llamados",
+                        "Tiempo detenido (h:mm)", "Tiempo detenido (h)"
+                    ]].rename(columns={
+                        "eds_nombre":   "Estación",
+                        "eds_occim":    "Cód. EDS",
+                    })
+                    _show_df(_rk_show.reset_index(drop=True), hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "#":                       st.column_config.TextColumn(width=50),
+                            "Estación":                st.column_config.TextColumn(width=260),
+                            "Cód. EDS":                st.column_config.TextColumn(width=100),
+                            "Llamados":                st.column_config.NumberColumn(format="%d", width=100),
+                            "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=150),
+                            "Tiempo detenido (h)":     st.column_config.ProgressColumn(
+                                format="%.1f h", min_value=0,
+                                max_value=float(_rk["Tiempo detenido (h)"].max()) if not _rk.empty else 1,
+                                width=200),
                         })
-                        _show_df(_rk_show.reset_index(drop=True), hide_index=True,
-                            use_container_width=True,
-                            column_config={
-                                "#":                  st.column_config.TextColumn(width=50),
-                                "Estación":           st.column_config.TextColumn(width=260),
-                                "Cód. EDS":           st.column_config.TextColumn(width=100),
-                                "OTs con paro":       st.column_config.NumberColumn(format="%d", width=120),
-                                "Tiempo paro (h:mm)": st.column_config.TextColumn(width=140),
-                                "Tiempo paro (h)":    st.column_config.ProgressColumn(
-                                    format="%.1f h", min_value=0,
-                                    max_value=float(_rk["Tiempo paro (h)"].max()) if not _rk.empty else 1,
-                                    width=200),
-                            })
 
-                    st.divider()
+                st.divider()
 
-                    # ── Uptime por equipo ─────────────────────────────────
-                    st.markdown(
-                        '<div class="section-header">🔧  Uptime por equipo</div>',
-                        unsafe_allow_html=True,
-                    )
+                # ── Uptime por EDS ─────────────────────────────────────
+                st.markdown(
+                    '<div class="section-header">🏭  Uptime por EDS</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "Cada fila es una EDS. **Uptime %** = % del tiempo del período "
+                    "en que la EDS NO tuvo emergencias activas. 100% = nunca tuvo llamados."
+                )
+                if _df_up.empty or _paro_total_seg == 0:
+                    st.info("Sin tiempo detenido en el filtro.")
+                else:
+                    _gpe = (_df_up.groupby(
+                        ["eds_occim", "eds_nombre", "cliente"],
+                        dropna=False, as_index=False,
+                    ).agg(
+                        Llamados=("os_fracttal", "count"),
+                        Tiempo_paro_seg=("_paro_seg", "sum"),
+                        _ultimo_llamado=("fecha_llamado", "max"),
+                    ))
+                    _gpe["Última emergencia"] = pd.to_datetime(
+                        _gpe["_ultimo_llamado"], errors="coerce"
+                    ).dt.strftime("%d/%m/%Y").fillna("—")
+                    _gpe["Tiempo detenido (h:mm)"] = _gpe["Tiempo_paro_seg"].apply(
+                        lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m"
+                        if s else "—")
+                    _gpe["Uptime %"] = (
+                        (1 - _gpe["Tiempo_paro_seg"] / _seg_equipo_up).clip(lower=0) * 100
+                    ).round(3)
+                    _gpe = _gpe.sort_values("Tiempo_paro_seg", ascending=False).head(30)
+
+                    _gpe_show = _gpe[[
+                        "eds_occim","eds_nombre","cliente",
+                        "Llamados","Tiempo detenido (h:mm)",
+                        "Última emergencia","Uptime %"
+                    ]].rename(columns={
+                        "eds_occim":  "Cód. EDS",
+                        "eds_nombre": "Estación",
+                        "cliente":    "Cliente",
+                    })
+                    _show_df(_gpe_show.reset_index(drop=True), hide_index=True,
+                             use_container_width=True,
+                             column_config={
+                                 "Cód. EDS":                st.column_config.TextColumn(width=100),
+                                 "Estación":                st.column_config.TextColumn(width=260),
+                                 "Cliente":                 st.column_config.TextColumn(width=130),
+                                 "Llamados":                st.column_config.NumberColumn(
+                                     format="%d", width=90),
+                                 "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=140),
+                                 "Última emergencia":       st.column_config.TextColumn(width=120),
+                                 "Uptime %":                st.column_config.NumberColumn(
+                                     format="%.3f%%", width=100),
+                             })
                     st.caption(
-                        "Cada fila es un equipo individual. "
-                        "**Uptime %** = % del tiempo en que el equipo NO estuvo "
-                        "detenido por reparaciones correctivas/emergencia. "
-                        "100% = nunca paró por correctiva."
+                        f"Top 30 EDS ordenadas por tiempo total detenido · "
+                        f"período: {_rango_inicio_up.strftime('%d/%m/%Y')}"
+                        f" → {_hoy_up.strftime('%d/%m/%Y')}"
                     )
-                    if _cparo.empty:
-                        st.info("Ninguna OT correctiva del filtro tiene paro de equipo.")
-                    else:
-                        _ult_tec_c = (
-                            _dfup_sla[_dfup_sla["fecha_finalizacion"].notna()]
-                            .sort_values("fecha_finalizacion", ascending=False)
-                            .groupby("codigo_activo", as_index=False)
-                            .first()[["codigo_activo","responsable","fecha_finalizacion"]]
-                            .rename(columns={
-                                "responsable":        "_ult_tec",
-                                "fecha_finalizacion": "_ult_fecha"})
-                        )
-                        _gpc = (_cparo.groupby(
-                            ["codigo_activo", "nombre_activo", "estacion", "codigo_eds"],
-                            dropna=False, as_index=False,
-                        ).agg(
-                            OTs_con_paro=("id_ot", "count"),
-                            Tiempo_paro_seg=("_paro_calc_seg", "sum"),
-                        ))
-                        _gpc = _gpc.merge(_ult_tec_c, on="codigo_activo", how="left")
-                        _gpc["Última correctiva"] = pd.to_datetime(
-                            _gpc["_ult_fecha"], errors="coerce", utc=True
-                        ).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.strftime(
-                            "%d/%m/%Y").fillna("—")
-                        _gpc["Tiempo paro (h:mm)"] = _gpc["Tiempo_paro_seg"].apply(
-                            lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m"
-                            if s else "—")
-                        _gpc["Uptime %"] = (
-                            (1 - _gpc["Tiempo_paro_seg"] / _seg_equipo_up).clip(lower=0) * 100
-                        ).round(3)
-                        _gpc = _gpc.sort_values("Tiempo_paro_seg", ascending=False).head(30)
-
-                        _gpc_show = _gpc[[
-                            "codigo_activo","nombre_activo","estacion","codigo_eds",
-                            "OTs_con_paro","Tiempo paro (h:mm)",
-                            "Última correctiva","_ult_tec","Uptime %"
-                        ]].rename(columns={
-                            "codigo_activo": "Código",
-                            "nombre_activo": "Activo",
-                            "estacion":      "Estación",
-                            "codigo_eds":    "Cód. EDS",
-                            "OTs_con_paro":  "OTs c/paro",
-                            "_ult_tec":      "Último técnico",
-                        })
-                        _show_df(_gpc_show.reset_index(drop=True), hide_index=True,
-                                 use_container_width=True,
-                                 column_config={
-                                     "Código":             st.column_config.TextColumn(width=130),
-                                     "Activo":             st.column_config.TextColumn(width=260),
-                                     "Estación":           st.column_config.TextColumn(width=200),
-                                     "Cód. EDS":           st.column_config.TextColumn(width=90),
-                                     "OTs c/paro":         st.column_config.NumberColumn(
-                                         format="%d", width=90),
-                                     "Tiempo paro (h:mm)": st.column_config.TextColumn(width=130),
-                                     "Última correctiva":  st.column_config.TextColumn(width=110),
-                                     "Último técnico":     st.column_config.TextColumn(width=180),
-                                     "Uptime %":           st.column_config.NumberColumn(
-                                         format="%.3f%%", width=100),
-                                 })
-                        st.caption(
-                            f"Top 30 equipos ordenados por tiempo total detenido · "
-                            f"período: {_rango_inicio_up.strftime('%d/%m/%Y')}"
-                            f" → {_hoy_up.strftime('%d/%m/%Y')}"
-                        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
