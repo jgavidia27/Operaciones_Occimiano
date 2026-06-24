@@ -672,42 +672,36 @@ def load_preventivas_supabase() -> list:
 def load_cotalker_index_supabase() -> dict:
     """
     Retorna {id_ot: str} con el N° de aviso/referencia del cliente para cada OT:
-      - ESMAX/Aramco: campo n_cotalker (sistema Cotalker)
-      - COPEC: campo nota_tarea parseado → "No. Aviso: XXXXXXXX"
+      - ESMAX/Aramco: PRIMER número de nota_tarea (formato "151022 - 169357 - ee_s268 - EDS:...")
+                     NOTA: NO usamos el campo n_cotalker porque robot_esmax.py asignó
+                     ~22% de los valores a OTs incorrectas (matching por EDS+fecha sin
+                     validar el N° real). La nota_tarea contiene el N° verdadero que
+                     Fracttal recibió al crear la OT.
+      - COPEC: nota_tarea parseado → "No. Aviso: XXXXXXXX"
+      - SHELL: nota_tarea parseado → "ID Solicitud: XXXX"
     """
     import re
     _pat_aviso = re.compile(r"No\.\s*Aviso\s*:\s*(\d+)", re.IGNORECASE)
     result: dict = {}
 
-    # 1) Aramco/ESMAX — campo n_cotalker directo
-    rows_cot = _query(
-        "ordenes_trabajo",
-        "select=id_ot,n_cotalker&n_cotalker=not.is.null",
-        limit=5_000,
-    )
-    for r in rows_cot:
-        if r.get("id_ot") and r.get("n_cotalker"):
-            result[r["id_ot"]] = str(int(r["n_cotalker"]))
-
-    # 2) Aramco/ESMAX fallback — n_cotalker NULL pero nota_tarea empieza con el número
-    #    Patrón: "153143 - 171422 - ee_s109 - EDS: ..."
-    rows_esmax_nota = _query(
+    # 1) Aramco/ESMAX — N° real desde nota_tarea (primer número antes del guión)
+    rows_esmax = _query(
         "ordenes_trabajo",
         "select=id_ot,nota_tarea"
-        "&n_cotalker=is.null"
         "&nota_tarea=not.is.null"
         "&cliente=eq.ESMAX (Aramco)",
         limit=10_000,
     )
     _pat_cot = re.compile(r"^(\d{5,8})\s*-")
-    for r in rows_esmax_nota:
+    for r in rows_esmax:
         ot = r.get("id_ot")
-        if ot and ot not in result:
-            m = _pat_cot.match(str(r.get("nota_tarea") or "").strip())
-            if m:
-                result[ot] = m.group(1)
+        if not ot:
+            continue
+        m = _pat_cot.match(str(r.get("nota_tarea") or "").strip())
+        if m:
+            result[ot] = m.group(1)
 
-    # 3) COPEC  → "No. Aviso: XXXXXXXX"
+    # 2) COPEC  → "No. Aviso: XXXXXXXX"
     #    SHELL  → 'ID Solicitud "XXXX"' o "ID Solicitud: XXXX"
     _pat_id_sol = re.compile(r'ID\s*Solicitud\s*["\s:]+(\d+)', re.IGNORECASE)
 
