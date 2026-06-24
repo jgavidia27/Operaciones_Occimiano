@@ -1636,7 +1636,8 @@ def build_reincidencias(df_wo: pd.DataFrame, excel_to_full: dict = None) -> pd.D
     # Columnas necesarias de cada lado
     _pm_cols = ["equipment_code","folio","fecha_dt","technician","tecnico_short",
                 "equipment","client","station"]
-    _cm_cols = ["equipment_code","folio","fecha_dt","technician","failure_type","failure_cause"]
+    _cm_cols = ["equipment_code","folio","fecha_dt","technician","failure_type","failure_cause",
+                "comentario_tecnico"]
     _pm_cols = [c for c in _pm_cols if c in prev.columns]
     _cm_cols = [c for c in _cm_cols if c in corr.columns]
 
@@ -1728,6 +1729,7 @@ def build_reincidencias(df_wo: pd.DataFrame, excel_to_full: dict = None) -> pd.D
         "causa_clasif":            merged["causa_clasif"],
         "dias_entre":              merged["dias_entre"],
         "es_reincidencia_tecnico": merged["es_reincidencia_tecnico"],
+        "comentario_tecnico_cm":   merged.get("comentario_tecnico", _s).fillna(""),
     }).reset_index(drop=True)
 
     df_r["fecha_pm"] = pd.to_datetime(df_r["fecha_pm"])
