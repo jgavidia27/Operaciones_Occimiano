@@ -9410,8 +9410,10 @@ elif _page == _NAV_PAGES[2]:
     _excluidas_n = int(dfp["estado"].isin(_ESTADOS_NO_CUENTAN).sum())
 
     if not _df_cumpl.empty:
-        _fp = pd.to_datetime(_df_cumpl["fecha_programada"],   errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
-        _ff = pd.to_datetime(_df_cumpl["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert(None).dt.normalize()
+        # Convertir a hora local Chile antes de normalizar para no perder/ganar
+        # un día en OTs nocturnas guardadas en UTC.
+        _fp = pd.to_datetime(_df_cumpl["fecha_programada"],   errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
+        _ff = pd.to_datetime(_df_cumpl["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
         _df_cumpl["_fp_n"] = _fp
         _df_cumpl["_ff_n"] = _ff
         # Solo OTs cuya fecha programada ya pasó
@@ -9823,9 +9825,16 @@ elif _page == _NAV_PAGES[2]:
     # ── Tab 4: Planificación ──────────────────────────────────────────────
     with _ptab_plan:
         # Parte de _dfp_full: respeta responsable/tipo/estado pero no trimestre/mes
+        # IMPORTANTE: Supabase guarda fechas en UTC. Hay que convertirlas a hora
+        # local de Chile (America/Santiago) ANTES de quitarles el tz, sino las
+        # OTs nocturnas aparecen un día corrido.
         _dfplan = _dfp_full.copy()
         _dfplan["_fp_dt"] = pd.to_datetime(
-            _dfplan["fecha_programada"], errors="coerce", utc=True).dt.tz_convert(None)
+            _dfplan["fecha_programada"], errors="coerce", utc=True
+        ).dt.tz_convert("America/Santiago").dt.tz_localize(None)
+        _dfplan["_ff_dt"] = pd.to_datetime(
+            _dfplan["fecha_finalizacion"], errors="coerce", utc=True
+        ).dt.tz_convert("America/Santiago").dt.tz_localize(None)
         _dfplan = _dfplan[_dfplan["_fp_dt"].notna()].copy()
 
         _hoy = pd.Timestamp.today().normalize()
@@ -9883,7 +9892,17 @@ elif _page == _NAV_PAGES[2]:
 
         # Plazo restante (en días) hasta la fecha programada
         _df_semana["_fp_norm"] = _df_semana["_fp_dt"].dt.normalize()
+        _df_semana["_ff_norm"] = _df_semana["_ff_dt"].dt.normalize()
         _df_semana["dias_restantes"] = (_df_semana["_fp_norm"] - _hoy).dt.days
+        # Atraso real cuando hay finalización: días entre ejecución y programada
+        _df_semana["dias_ejec_vs_prog"] = (
+            _df_semana["_ff_norm"] - _df_semana["_fp_norm"]
+        ).dt.days
+        # ¿Está finalizada? (mismo criterio que el resto de KPIs)
+        _df_semana["_esta_fin"] = (
+            _df_semana["estado_tarea"].isin(["Finalizada"])
+            | _df_semana["estado"].isin(["Finalizadas"])
+        )
 
         st.markdown(
             f'<div class="section-header">📅  OTs programadas en el período '
@@ -9900,11 +9919,24 @@ elif _page == _NAV_PAGES[2]:
             )
         else:
             _df_semana_sorted = _df_semana.sort_values("_fp_dt")
+
+            def _plazo_label(row):
+                # Si está finalizada → comparar fecha_ejecución vs programada
+                if row["_esta_fin"] and pd.notna(row["_ff_norm"]):
+                    d = int(row["dias_ejec_vs_prog"])
+                    if d < 0:   return f"✅ Cumplida {-d}d antes"
+                    if d == 0:  return "✅ Cumplida el día"
+                    return f"⚠️ Cumplida {d}d tarde"
+                # No finalizada → plazo hasta fecha programada
+                d = int(row["dias_restantes"])
+                if d > 0:   return f"⏳ en {d}d"
+                if d == 0:  return "🟢 hoy"
+                return f"⚠️ Vencida hace {-d}d"
+
             _df_show = pd.DataFrame({
                 "F. Programada": _df_semana_sorted["_fp_dt"].dt.strftime("%d/%m/%Y").values,
-                "Plazo":         _df_semana_sorted["dias_restantes"].apply(
-                    lambda d: f"⏳ en {d}d" if d > 0 else ("🟢 hoy" if d == 0 else f"⚠️ vencida hace {-d}d")
-                ).values,
+                "F. Ejecución":  _df_semana_sorted["_ff_dt"].dt.strftime("%d/%m/%Y").fillna("—").values,
+                "Plazo":         _df_semana_sorted.apply(_plazo_label, axis=1).values,
                 "OT":            _df_semana_sorted["id_ot"].values,
                 "Código":        _df_semana_sorted["codigo_activo"].fillna("—").values,
                 "Tipo equipo":   _df_semana_sorted["nombre_activo"].apply(_tipo_eq).values,
@@ -9919,7 +9951,8 @@ elif _page == _NAV_PAGES[2]:
             _show_df(_df_show.reset_index(drop=True), hide_index=True, use_container_width=True,
                 column_config={
                     "F. Programada": st.column_config.TextColumn(width=100),
-                    "Plazo":         st.column_config.TextColumn(width=120),
+                    "F. Ejecución":  st.column_config.TextColumn(width=100),
+                    "Plazo":         st.column_config.TextColumn(width=160),
                     "OT":            st.column_config.TextColumn(width=85),
                     "Código":        st.column_config.TextColumn(width=85),
                     "Tipo equipo":   st.column_config.TextColumn(width=130),
@@ -9931,14 +9964,15 @@ elif _page == _NAV_PAGES[2]:
                     "Estado":        st.column_config.TextColumn(width=100),
                     "Estado tarea":  st.column_config.TextColumn(width=110),
                 })
-            _sfin_m  = _df_semana["estado_tarea"].isin(["Finalizada"]) | _df_semana["estado"].isin(["Finalizadas"])
-            _snoi_m  = _df_semana["estado_tarea"].isin(["No Iniciada"]) & ~_df_semana["estado"].isin(["Finalizadas"])
+            _sfin_m  = _df_semana["_esta_fin"]
+            _snoi_m  = _df_semana["estado_tarea"].isin(["No Iniciada"]) & ~_sfin_m
             _sfin    = int(_sfin_m.sum())
             _sproc   = int((~_sfin_m & ~_snoi_m & ~_df_semana["estado"].isin(["Cancelado"])).sum())
             _snoi    = int(_snoi_m.sum())
-            _venc    = int((_df_semana["dias_restantes"] < 0).sum())
+            # Solo cuenta como vencida si NO está finalizada y ya pasó la fecha
+            _venc    = int(((_df_semana["dias_restantes"] < 0) & ~_sfin_m).sum())
             st.caption(f"{len(_df_show):,} OTs · {_sfin} finalizadas · {_sproc} en proceso · "
-                       f"{_snoi} no iniciadas · {_venc} ya vencidas dentro del período")
+                       f"{_snoi} no iniciadas · {_venc} pendientes vencidas")
         st.divider()
 
         # ── OTs vencidas (programadas en pasado y no finalizadas) ─────────
