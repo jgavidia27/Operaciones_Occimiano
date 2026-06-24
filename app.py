@@ -9626,8 +9626,8 @@ elif _page == _NAV_PAGES[2]:
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
-    _ptab_plan, _ptab_cli, _ptab_tipo, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
-        "📅  Planificación", "🏢  Por Cliente", "🔧  Por Tipo", "👷  Por Técnico",
+    _ptab_plan, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
+        "📅  Planificación", "🏢  Por Cliente", "👷  Por Técnico",
         "🏭  Por Activo/EDS", "⏱️  Uptime"
     ])
 
@@ -9790,61 +9790,7 @@ elif _page == _NAV_PAGES[2]:
                         )
                 st.divider()
 
-    # ── Tab 2: Por Tipo ───────────────────────────────────────────────────
-    with _ptab_tipo:
-        if dfp.empty:
-            st.info("Sin datos para mostrar.")
-        else:
-            # ── Por activador (frecuencia de mantención) ───────────────────
-            st.markdown('<div class="section-header">🔁  Por frecuencia / activador</div>',
-                        unsafe_allow_html=True)
-            _pt_activ = dfp.groupby("activador").agg(
-                Total    =("id_ot","count"),
-                Finaliz  =("estado_tarea", lambda s: (s == "Finalizada").sum()),
-                EnProceso=("estado_tarea", lambda s: s.isin(["En Proceso","En Revisión"]).sum()),
-                NoInicia =("estado_tarea", lambda s: s.isin(["No Iniciada","En Espera"]).sum()),
-            ).reset_index().sort_values("Total", ascending=False)
-            _pt_activ["% Comp."] = _pt_activ.apply(
-                lambda r: f"{round(r['Finaliz']/r['Total']*100,1)}%" if r["Total"]>0 else "—", axis=1)
-            _pt_activ.rename(columns={
-                "activador":"Activador","Finaliz":"Finalizadas",
-                "EnProceso":"En Proceso","NoInicia":"No Iniciada"}, inplace=True)
-            _show_df(_pt_activ.reset_index(drop=True), hide_index=True, use_container_width=True,
-                column_config={
-                    "Activador":   st.column_config.TextColumn(width=160),
-                    "Total":       st.column_config.NumberColumn(format="%d", width=65),
-                    "Finalizadas": st.column_config.NumberColumn(format="%d", width=90),
-                    "En Proceso":  st.column_config.NumberColumn(format="%d", width=90),
-                    "No Iniciada": st.column_config.NumberColumn(format="%d", width=90),
-                    "% Comp.":     st.column_config.TextColumn(width=75),
-                })
-            st.divider()
-
-            # ── Por tipo de tarea ─────────────────────────────────────────
-            st.markdown('<div class="section-header">📋  Por tipo de tarea</div>',
-                        unsafe_allow_html=True)
-            _pt_tipo = dfp.groupby("tipo_tarea").agg(
-                Total    =("id_ot","count"),
-                Finaliz  =("estado_tarea", lambda s: (s == "Finalizada").sum()),
-                EnProceso=("estado_tarea", lambda s: s.isin(["En Proceso","En Revisión"]).sum()),
-                NoInicia =("estado_tarea", lambda s: s.isin(["No Iniciada","En Espera"]).sum()),
-            ).reset_index().sort_values("Total", ascending=False)
-            _pt_tipo["% Comp."] = _pt_tipo.apply(
-                lambda r: f"{round(r['Finaliz']/r['Total']*100,1)}%" if r["Total"]>0 else "—", axis=1)
-            _pt_tipo.rename(columns={
-                "tipo_tarea":"Tipo de Tarea","Finaliz":"Finalizadas",
-                "EnProceso":"En Proceso","NoInicia":"No Iniciada"}, inplace=True)
-            _show_df(_pt_tipo.reset_index(drop=True), hide_index=True, use_container_width=True,
-                column_config={
-                    "Tipo de Tarea":st.column_config.TextColumn(width=280),
-                    "Total":        st.column_config.NumberColumn(format="%d", width=65),
-                    "Finalizadas":  st.column_config.NumberColumn(format="%d", width=90),
-                    "En Proceso":   st.column_config.NumberColumn(format="%d", width=90),
-                    "No Iniciada":  st.column_config.NumberColumn(format="%d", width=90),
-                    "% Comp.":      st.column_config.TextColumn(width=75),
-                })
-
-    # ── Tab 3: Por Técnico ────────────────────────────────────────────────
+    # ── Tab: Por Técnico ──────────────────────────────────────────────────
     with _ptab_tec:
         if dfp.empty:
             st.info("Sin datos para mostrar.")
