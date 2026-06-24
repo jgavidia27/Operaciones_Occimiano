@@ -10146,14 +10146,14 @@ elif _page == _NAV_PAGES[2]:
         st.markdown('<div class="section-header">🔮  Próximas OTs programadas (hoy en adelante)</div>',
                     unsafe_allow_html=True)
         st.caption(
-            "Todas las OTs preventivas con fecha programada hacia el futuro, "
-            "sin importar cuándo se generaron en Fracttal. "
-            "Se excluyen OTs anuladas (Cancelado / Error de ingreso)."
+            "Todas las OTs preventivas cuya fecha programada es de hoy en adelante, "
+            "sin importar si ya se finalizaron anticipadamente. "
+            "Se excluyen únicamente OTs anuladas (Cancelado / Error de ingreso). "
+            "La columna **Situación** indica si ya está hecha o sigue pendiente."
         )
         _df_fut = _dfplan[
-            (_dfplan["_fp_dt"] >= _hoy) &
-            (~_dfplan["estado"].isin(_ESTADOS_NO_CUENTAN | {"Finalizadas"})) &
-            (~_dfplan["estado_tarea"].isin(["Finalizada"]))
+            (_dfplan["_fp_dt"].dt.normalize() >= _hoy) &
+            (~_dfplan["estado"].isin(_ESTADOS_NO_CUENTAN))
         ].copy().sort_values("_fp_dt")
         if _df_fut.empty:
             st.info("No hay OTs preventivas futuras registradas.")
@@ -10162,13 +10162,27 @@ elif _page == _NAV_PAGES[2]:
             # Para la barra visual: usamos 30 días como horizonte máximo
             # (mensual). Valores >30 quedan al tope.
             _df_fut["_barra"] = _df_fut["_dias_rest"].clip(lower=0, upper=30)
+            # Estado normalizado: finalizada vs pendiente
+            _df_fut["_esta_fin_fut"] = (
+                _df_fut["estado_tarea"].isin(["Finalizada"])
+                | _df_fut["estado"].isin(["Finalizadas"])
+            )
+
+            def _situacion(row):
+                if row["_esta_fin_fut"]:
+                    return "✅ Finalizada anticipada"
+                if row["_dias_rest"] == 0:
+                    return "🟢 Para hoy"
+                return f"⏳ Pendiente"
+
             _fut_show = pd.DataFrame({
                 "F. Programada": _df_fut["_fp_dt"].dt.strftime("%d/%m/%Y").values,
                 "Plazo":         _df_fut["_dias_rest"].apply(
-                    lambda d: "🟢 hoy" if d == 0
-                    else (f"⏳ en {d} día{'s' if d != 1 else ''}")
+                    lambda d: "hoy" if d == 0
+                    else (f"en {d} día{'s' if d != 1 else ''}")
                 ).values,
                 "⏱ Barra (días)": _df_fut["_barra"].values,
+                "Situación":     _df_fut.apply(_situacion, axis=1).values,
                 "OT":            _df_fut["id_ot"].values,
                 "Código":        _df_fut["codigo_activo"].fillna("—").values,
                 "Tipo equipo":   _df_fut["nombre_activo"].apply(_tipo_eq).values,
@@ -10182,11 +10196,12 @@ elif _page == _NAV_PAGES[2]:
             _show_df(_fut_show.reset_index(drop=True), hide_index=True, use_container_width=True,
                 column_config={
                     "F. Programada":  st.column_config.TextColumn(width=100),
-                    "Plazo":          st.column_config.TextColumn(width=110),
+                    "Plazo":          st.column_config.TextColumn(width=90),
                     "⏱ Barra (días)": st.column_config.ProgressColumn(
                         help="Días restantes hasta la fecha programada (0–30+)",
                         format="%d d", min_value=0, max_value=30, width=140,
                     ),
+                    "Situación":      st.column_config.TextColumn(width=160),
                     "OT":             st.column_config.TextColumn(width=85),
                     "Código":         st.column_config.TextColumn(width=85),
                     "Tipo equipo":    st.column_config.TextColumn(width=130),
@@ -10197,12 +10212,15 @@ elif _page == _NAV_PAGES[2]:
                     "Activador":      st.column_config.TextColumn(width=100),
                     "Responsable":    st.column_config.TextColumn(width=160),
                 })
-            _hoy_n  = int((_df_fut["_dias_rest"] == 0).sum())
-            _3d     = int(((_df_fut["_dias_rest"] > 0) & (_df_fut["_dias_rest"] <= 3)).sum())
-            _7d     = int(((_df_fut["_dias_rest"] > 3) & (_df_fut["_dias_rest"] <= 7)).sum())
+            _fin_a = int(_df_fut["_esta_fin_fut"].sum())
+            _pend  = int(len(_df_fut) - _fin_a)
+            _hoy_n = int(((_df_fut["_dias_rest"] == 0) & ~_df_fut["_esta_fin_fut"]).sum())
+            _3d    = int(((_df_fut["_dias_rest"] > 0) & (_df_fut["_dias_rest"] <= 3) & ~_df_fut["_esta_fin_fut"]).sum())
+            _7d    = int(((_df_fut["_dias_rest"] > 3) & (_df_fut["_dias_rest"] <= 7) & ~_df_fut["_esta_fin_fut"]).sum())
             st.caption(
-                f"{len(_fut_show):,} OTs futuras · "
-                f"🟢 {_hoy_n} para hoy · ⏳ {_3d} en 1–3 días · {_7d} en 4–7 días."
+                f"**{len(_fut_show):,} OTs** con fecha programada ≥ hoy · "
+                f"✅ {_fin_a} ya finalizadas anticipadas · "
+                f"⏳ {_pend} pendientes ({_hoy_n} para hoy · {_3d} en 1–3 días · {_7d} en 4–7 días)."
             )
 
     # ── Tab 5: Por Activo/EDS ─────────────────────────────────────────────
