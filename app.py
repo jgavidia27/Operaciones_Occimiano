@@ -9876,39 +9876,58 @@ elif _page == _NAV_PAGES[2]:
         ].copy()
 
         # ── Reloj: Tiempo promedio de atención MP ─────────────────────────
-        # Mide cuántos días en promedio tarda el equipo en atender una MP
-        # desde la fecha programada. Calculado sobre OTs FINALIZADAS dentro
-        # del rango del filtro global (dfp), no del período seleccionado.
+        # Mide cuántas HORAS en promedio se desvía la ejecución respecto a la
+        # fecha programada. Cálculo sobre OTs FINALIZADAS del filtro global.
+        # NO es desde la creación, es desde la fecha programada (el día
+        # comprometido para hacer la MP).
         _dfp_for_avg = dfp[
             dfp["fecha_finalizacion"].notna()
             & dfp["fecha_programada"].notna()
             & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
         ].copy()
         if not _dfp_for_avg.empty:
-            _fp_avg = pd.to_datetime(_dfp_for_avg["fecha_programada"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
-            _ff_avg = pd.to_datetime(_dfp_for_avg["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
-            _atraso_serie = (_ff_avg - _fp_avg).dt.days
-            _avg_atraso = round(_atraso_serie.mean(), 1)
-            _med_atraso = int(_atraso_serie.median())
-            _ot_eval    = len(_dfp_for_avg)
-            _pct_a_tiempo = round((_atraso_serie <= 0).mean() * 100, 1)
+            # Conservamos la HORA real (sin normalize) para precisión sub-día
+            _fp_avg = pd.to_datetime(_dfp_for_avg["fecha_programada"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
+            _ff_avg = pd.to_datetime(_dfp_for_avg["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
+            _atraso_hrs   = (_ff_avg - _fp_avg).dt.total_seconds() / 3600
+            _avg_hrs      = round(_atraso_hrs.mean(), 1)
+            _med_hrs      = round(_atraso_hrs.median(), 1)
+            _ot_eval      = len(_dfp_for_avg)
+            # "A tiempo" = ejecutada el mismo día o antes (diferencia ≤ 0 días)
+            _pct_a_tiempo = round((_atraso_hrs <= 0).mean() * 100, 1)
         else:
-            _avg_atraso = _med_atraso = _ot_eval = _pct_a_tiempo = 0
+            _avg_hrs = _med_hrs = 0.0
+            _ot_eval = 0
+            _pct_a_tiempo = 0
 
-        # Color según el promedio: ≤0 verde (anticipado), 1-3 amarillo, >3 rojo
-        _color_avg = "#10b981" if _avg_atraso <= 0 else "#f59e0b" if _avg_atraso <= 3 else "#ef4444"
+        # Formatear "X días Y horas" o "Z horas" si < 24h
+        def _fmt_h_d(hrs: float) -> str:
+            neg = hrs < 0
+            h_abs = abs(hrs)
+            if h_abs < 24:
+                txt = f"{h_abs:.1f} h"
+            else:
+                d = int(h_abs // 24)
+                h = round(h_abs - d * 24, 1)
+                txt = f"{d} día{'s' if d != 1 else ''} {h:.1f} h" if h > 0 else f"{d} día{'s' if d != 1 else ''}"
+            return f"-{txt}" if neg else txt
+
+        _avg_dias = _avg_hrs / 24
+        # Color según el promedio: ≤0 verde (anticipado), 0-3 días amarillo, >3 rojo
+        _color_avg = "#10b981" if _avg_dias <= 0 else "#f59e0b" if _avg_dias <= 3 else "#ef4444"
 
         _rc1, _rc2 = st.columns([1, 1.6])
         with _rc1:
             import plotly.graph_objects as _go2
-            # Eje del gauge: -10 a +30 días (valores negativos = anticipado)
+            # Eje del gauge: -10 a +30 días (en horas: -240h a +720h)
+            # Mostramos en días en el gauge para que la escala sea legible
             _fig_reloj = _go2.Figure(_go2.Indicator(
                 mode="gauge+number",
-                value=_avg_atraso,
-                number={"suffix": " días", "font": {"size": 30}},
+                value=_avg_dias,
+                number={"suffix": " d", "font": {"size": 30}, "valueformat": ".1f"},
                 title={"text": "<b>⏱ Tiempo promedio de atención MP</b><br>"
                                "<span style='font-size:0.72rem;color:#94a3b8'>"
-                               "días entre fecha programada y fecha de ejecución · respeta filtros</span>",
+                               "días entre fecha programada y ejecución · respeta filtros</span>",
                        "font": {"size": 13}},
                 gauge={
                     "axis":    {"range": [-10, 30], "tickwidth": 1, "tickfont": {"size": 10},
@@ -9941,13 +9960,19 @@ elif _page == _NAV_PAGES[2]:
                     <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
                       <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Promedio</td>
                       <td style="padding:6px 0;text-align:right;color:{_color_avg};font-weight:600;font-size:1.05rem;">
-                        {_avg_atraso} días
+                        {_fmt_h_d(_avg_hrs)}
                       </td>
                     </tr>
                     <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
                       <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Mediana</td>
                       <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">
-                        {_med_atraso} días
+                        {_fmt_h_d(_med_hrs)}
+                      </td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Promedio en horas</td>
+                      <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">
+                        {_avg_hrs:.1f} h
                       </td>
                     </tr>
                     <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
@@ -9965,8 +9990,9 @@ elif _page == _NAV_PAGES[2]:
                   </table>
                   <div style="color:var(--text-color, #475569);font-size:0.78rem;margin-top:10px;
                               padding-top:8px;border-top:1px solid rgba(148,163,184,0.25);">
-                    Filtra por <b>Mes</b>, <b>Trimestre</b>, <b>Plan</b>, etc. arriba para ver
-                    el tiempo de atención de ese subconjunto. Valores negativos = ejecutadas antes de lo programado.
+                    Mide <b>fecha_finalización − fecha_programada</b>. Valores negativos =
+                    ejecutadas antes de lo programado. Respeta los filtros de arriba (Mes,
+                    Trimestre, Plan, Cliente, etc.).
                   </div>
                 </div>""",
                 unsafe_allow_html=True,
