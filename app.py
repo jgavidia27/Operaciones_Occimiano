@@ -9333,10 +9333,21 @@ elif _page == _NAV_PAGES[2]:
         _ppl_opts = ["Todos"] + sorted(df_prev["plan_tareas"].dropna().unique().tolist()) \
             if "plan_tareas" in df_prev.columns else ["Todos"]
         sel_pplan = st.selectbox("Plan de tareas", _ppl_opts, key="prev_plan")
+
+    # Helper: orden de clientes — primero los 3 principales, luego alfabético
+    def _orden_clientes(series_clientes) -> list:
+        _principales = ["COPEC", "ESMAX (Aramco)", "SHELL (Enex)"]
+        _unicos = set(series_clientes.dropna().unique().tolist())
+        _ord = [c for c in _principales if c in _unicos]
+        _resto = sorted(c for c in _unicos if c not in _principales)
+        return ["Todos"] + _ord + _resto
+
     with _pf10:
-        sel_pcli = st.selectbox("Cliente",
-            ["Todos"] + sorted(df_prev["cliente"].dropna().unique().tolist()) if "cliente" in df_prev.columns else ["Todos"],
-            key="prev_cliente")
+        sel_pcli = st.selectbox(
+            "Cliente",
+            _orden_clientes(df_prev["cliente"]) if "cliente" in df_prev.columns else ["Todos"],
+            key="prev_cliente",
+        )
 
     # ── Aplicar filtros ───────────────────────────────────────────────────
     dfp = df_prev.copy()
@@ -10517,7 +10528,7 @@ elif _page == _NAV_PAGES[2]:
 
             _fu1, _fu2 = st.columns(2)
             with _fu1:
-                _cli_opts = ["Todos"] + sorted(_dfup["cliente"].dropna().unique().tolist()) \
+                _cli_opts = _orden_clientes(_dfup["cliente"]) \
                     if "cliente" in _dfup.columns else ["Todos"]
                 _up_cli = st.selectbox("Cliente", _cli_opts, key="up_cliente")
             with _fu2:
