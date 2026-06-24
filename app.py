@@ -2296,16 +2296,14 @@ if _page == _NAV_PAGES[1]:
                          "❌ No cumple" if (u is not None and pd.notna(u)) else "⚪ Sin prioridad")
                         for h, u in zip(_df_sla_ot["horas_res"], _df_sla_ot["umbral_h"])
                     ]
-                # Agregar ciudad: primero desde columna "comuna" del propio llamado
-                # (Shell ya la incluye en su Excel). Si no existe, buscar en df_eds.
-                if "comuna" in _df_sla_ot.columns:
-                    _df_sla_ot["ciudad"] = _df_sla_ot["comuna"].fillna("—")
-                elif not df_eds.empty and "comuna" in df_eds.columns and "eds_occim" in _df_sla_ot.columns:
-                    _eds_ciudad = df_eds[["eds_occim","comuna"]].drop_duplicates("eds_occim")
-                    _df_sla_ot = _df_sla_ot.merge(_eds_ciudad, on="eds_occim", how="left")
-                    _df_sla_ot["ciudad"] = _df_sla_ot["comuna_y" if "comuna_y" in _df_sla_ot.columns else "comuna"].fillna("—")
-                else:
-                    _df_sla_ot["ciudad"] = "—"
+                # Agregar ciudad: usar comuna del propio llamado, completar vacíos
+                # con el catálogo de EDS (eds_occim → comuna).
+                _df_sla_ot["ciudad"] = _df_sla_ot["comuna"].fillna("") if "comuna" in _df_sla_ot.columns else ""
+                if not df_eds.empty and "comuna" in df_eds.columns and "eds_occim" in _df_sla_ot.columns:
+                    _eds_comuna_map = df_eds.dropna(subset=["comuna"]).drop_duplicates("eds_occim").set_index("eds_occim")["comuna"]
+                    _fill = _df_sla_ot["eds_occim"].map(_eds_comuna_map).fillna("")
+                    _df_sla_ot["ciudad"] = _df_sla_ot["ciudad"].where(_df_sla_ot["ciudad"].str.strip() != "", _fill)
+                _df_sla_ot["ciudad"] = _df_sla_ot["ciudad"].replace("", "—")
 
                 # N° Aviso cliente — Aramco: N° Cotalker / COPEC: N° Aviso del email
                 _cotalker_idx = load_cotalker_index_supabase()

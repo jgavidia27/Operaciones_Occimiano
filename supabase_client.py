@@ -689,7 +689,25 @@ def load_cotalker_index_supabase() -> dict:
         if r.get("id_ot") and r.get("n_cotalker"):
             result[r["id_ot"]] = str(int(r["n_cotalker"]))
 
-    # 2) COPEC  → "No. Aviso: XXXXXXXX"
+    # 2) Aramco/ESMAX fallback — n_cotalker NULL pero nota_tarea empieza con el número
+    #    Patrón: "153143 - 171422 - ee_s109 - EDS: ..."
+    rows_esmax_nota = _query(
+        "ordenes_trabajo",
+        "select=id_ot,nota_tarea"
+        "&n_cotalker=is.null"
+        "&nota_tarea=not.is.null"
+        "&cliente=eq.ESMAX (Aramco)",
+        limit=10_000,
+    )
+    _pat_cot = re.compile(r"^(\d{5,8})\s*-")
+    for r in rows_esmax_nota:
+        ot = r.get("id_ot")
+        if ot and ot not in result:
+            m = _pat_cot.match(str(r.get("nota_tarea") or "").strip())
+            if m:
+                result[ot] = m.group(1)
+
+    # 3) COPEC  → "No. Aviso: XXXXXXXX"
     #    SHELL  → 'ID Solicitud "XXXX"' o "ID Solicitud: XXXX"
     _pat_id_sol = re.compile(r'ID\s*Solicitud\s*["\s:]+(\d+)', re.IGNORECASE)
 
