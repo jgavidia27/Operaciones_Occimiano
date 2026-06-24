@@ -750,25 +750,39 @@ def load_cotalker_index_supabase() -> dict:
 
     # 2) COPEC  → "No. Aviso: XXXXXXXX"
     #    SHELL  → 'ID Solicitud "XXXX"' o "ID Solicitud: XXXX"
+    # NOTA: queries separadas porque `cliente=in.(COPEC,SHELL (Enex))` rompe
+    # el parser de PostgREST por los paréntesis internos en "SHELL (Enex)".
     _pat_id_sol = re.compile(r'ID\s*Solicitud\s*["\s:]+(\d+)', re.IGNORECASE)
 
-    rows_nota = _query(
+    rows_copec = _query(
         "ordenes_trabajo",
-        "select=id_ot,cliente,nota_tarea"
+        "select=id_ot,nota_tarea"
         "&nota_tarea=not.is.null"
-        "&cliente=in.(COPEC,SHELL (Enex))",
+        "&cliente=eq.COPEC",
         limit=10_000,
     )
-    for r in rows_nota:
-        ot      = r.get("id_ot")
-        cliente = str(r.get("cliente") or "")
-        nota    = str(r.get("nota_tarea") or "")
+    for r in rows_copec:
+        ot   = r.get("id_ot")
+        nota = str(r.get("nota_tarea") or "")
         if not ot or not nota:
             continue
-        if "COPEC" in cliente.upper():
-            m = _pat_aviso.search(nota)
-        else:                               # SHELL (Enex)
-            m = _pat_id_sol.search(nota)
+        m = _pat_aviso.search(nota)
+        if m:
+            result[ot] = m.group(1)
+
+    rows_shell = _query(
+        "ordenes_trabajo",
+        "select=id_ot,nota_tarea"
+        "&nota_tarea=not.is.null"
+        "&cliente=eq.SHELL (Enex)",
+        limit=10_000,
+    )
+    for r in rows_shell:
+        ot   = r.get("id_ot")
+        nota = str(r.get("nota_tarea") or "")
+        if not ot or not nota:
+            continue
+        m = _pat_id_sol.search(nota)
         if m:
             result[ot] = m.group(1)
 
