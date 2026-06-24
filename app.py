@@ -2382,25 +2382,38 @@ if _page == _NAV_PAGES[1]:
                     _df_sla_ot["n_cotalker"] = ""
 
                 # Reporte de falla — extraído de nota_tarea:
-                #   Aramco: texto después de "Detalles del incidente:"
-                #   COPEC:  texto del nota_tarea (descripción del aviso)
-                #   SHELL:  texto descripción del incidente del Excel propio
+                #   Aramco: texto después de "Detalles del incidente:"  (Cotalker)
+                #   COPEC:  texto después de "Falla reportada:"        (sistema COPEC)
+                #   SHELL:  texto entre comillas tras                  (correo SHELL)
+                #           "Descripción del Requerimiento:"
                 _df_sla_ot["reporte"] = ""
                 if "os_fracttal" in _df_sla_ot.columns:
                     try:
                         _notas_idx = load_notas_tarea_index(tuple(sorted(_df_sla_ot["os_fracttal"].dropna().unique().tolist())))
                         import re as _re_rep
-                        _pat_det = _re_rep.compile(r"Detalles\s*del\s*incidente\s*:\s*(.+)", _re_rep.IGNORECASE | _re_rep.DOTALL)
+                        _pat_aramco = _re_rep.compile(r"Detalles\s*del\s*incidente\s*:\s*(.+)", _re_rep.IGNORECASE | _re_rep.DOTALL)
+                        _pat_copec  = _re_rep.compile(r"Falla\s*reportada\s*:\s*(.+?)(?:\n|Tiempo\s*de\s*respuesta|Contacto|Direcc|$)", _re_rep.IGNORECASE | _re_rep.DOTALL)
+                        _pat_shell  = _re_rep.compile(r'Descripci[óo]n\s+del\s+Requerimiento\s*:\s*["“](.+?)["”]', _re_rep.IGNORECASE | _re_rep.DOTALL)
+
                         def _extraer_reporte(ot):
                             nota = _notas_idx.get(ot, "")
                             if not nota:
                                 return ""
-                            m = _pat_det.search(nota)
+                            nota_str = str(nota).replace("\xa0", " ")
+                            # Aramco
+                            m = _pat_aramco.search(nota_str)
                             if m:
                                 return m.group(1).strip()
-                            # Fallback: para nota tipo "151022 - 169357 - ee_s268 - EDS:... - <texto>"
-                            # tomamos el último segmento tras último " - "
-                            parts = nota.split(" - ")
+                            # COPEC
+                            m = _pat_copec.search(nota_str)
+                            if m:
+                                return m.group(1).strip().rstrip(":").strip()
+                            # SHELL
+                            m = _pat_shell.search(nota_str)
+                            if m:
+                                return m.group(1).strip()
+                            # Fallback Aramco legacy: "151022 - 169357 - ee_s268 - EDS:... - <texto>"
+                            parts = nota_str.split(" - ")
                             return parts[-1].strip() if len(parts) >= 5 else ""
                         _df_sla_ot["reporte"] = _df_sla_ot["os_fracttal"].apply(_extraer_reporte)
                     except Exception:
