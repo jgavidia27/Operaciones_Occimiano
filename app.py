@@ -9626,59 +9626,169 @@ elif _page == _NAV_PAGES[2]:
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
-    _ptab_plan, _ptab_lista, _ptab_tipo, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
-        "📅  Planificación", "📋  Listado", "🔧  Por Tipo", "👷  Por Técnico",
+    _ptab_plan, _ptab_cli, _ptab_tipo, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
+        "📅  Planificación", "🏢  Por Cliente", "🔧  Por Tipo", "👷  Por Técnico",
         "🏭  Por Activo/EDS", "⏱️  Uptime"
     ])
 
-    # ── Tab 1: Listado ────────────────────────────────────────────────────
-    with _ptab_lista:
+    # ── Tab 1: Por Cliente ────────────────────────────────────────────────
+    with _ptab_cli:
         if dfp.empty:
             st.info("Sin registros para el filtro seleccionado.")
         else:
-            _pcols = {
-                "id_ot":             "OT",
-                "fecha_programada":  "F. Programada",
-                "fecha_inicio_fmt":  "F. Inicio",
-                "activador":         "Activador",
-                "nombre_tarea":      "Tarea",
-                "tipo_tarea":        "Tipo",
-                "estado_tarea":      "Estado Tarea",
-                "estado":            "Estado",
-                "dur_est_fmt":       "Dur. Est.",
-                "dur_real_fmt":      "T. Ejec.",
-                "codigo_activo":     "Código",
-                "nombre_activo":     "Activo",
-                "clasificacion_2":   "Clasif. 2",
-                "ubicacion":         "Ubicación",
-                "responsable":       "Responsable",
-                "fecha_creacion":    "Creación",
-                "fecha_finalizacion":"Finalización",
-            }
-            _df_show = dfp[[c for c in _pcols if c in dfp.columns]].copy()
-            _df_show.rename(columns=_pcols, inplace=True)
-            for _dc in ["Creación", "Finalización", "F. Programada"]:
-                if _dc in _df_show.columns:
-                    _df_show[_dc] = pd.to_datetime(_df_show[_dc], errors="coerce").dt.strftime("%d/%m/%Y")
-            _show_df(_df_show.reset_index(drop=True), hide_index=True, use_container_width=True,
-                column_config={
-                    "OT":            st.column_config.TextColumn(width=90),
-                    "F. Programada": st.column_config.TextColumn(width=100),
-                    "F. Inicio":     st.column_config.TextColumn(width=120),
-                    "Activador":     st.column_config.TextColumn(width=100),
-                    "Tarea":         st.column_config.TextColumn(width=200),
-                    "Tipo":          st.column_config.TextColumn(width=200),
-                    "Estado Tarea":  st.column_config.TextColumn(width=100),
-                    "Estado":        st.column_config.TextColumn(width=100),
-                    "Dur. Est.":     st.column_config.TextColumn(width=75),
-                    "T. Ejec.":      st.column_config.TextColumn(width=75),
-                    "Código":        st.column_config.TextColumn(width=80),
-                    "Clasif. 2":     st.column_config.TextColumn(width=80),
-                    "Responsable":   st.column_config.TextColumn(width=160),
-                    "Creación":      st.column_config.TextColumn(width=90),
-                    "Finalización":  st.column_config.TextColumn(width=90),
+            st.caption(
+                "Cumplimiento de mantenciones preventivas dividido por cliente. "
+                "Se aplican los filtros de arriba (Mes, Trimestre, Plan, etc.). "
+                "**Criterio Crudo**: fecha_finalización ≤ fecha_programada (mismo día o antes). "
+                "Se excluyen OTs anuladas (Cancelado / Error de ingreso)."
+            )
+
+            # Preparar dataset evaluable por cliente
+            _dfcli = dfp[
+                dfp["fecha_programada"].notna()
+                & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
+            ].copy()
+            _dfcli["_fp_n"] = pd.to_datetime(
+                _dfcli["fecha_programada"],   errors="coerce", utc=True
+            ).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
+            _dfcli["_ff_n"] = pd.to_datetime(
+                _dfcli["fecha_finalizacion"], errors="coerce", utc=True
+            ).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
+            _hoy_cli = pd.Timestamp.today().normalize()
+            # Solo OTs cuya fecha programada ya pasó (universo evaluable)
+            _dfcli_eval = _dfcli[_dfcli["_fp_n"] <= _hoy_cli].copy()
+            _dfcli_eval["dias_atraso"] = (
+                _dfcli_eval["_ff_n"].fillna(_hoy_cli) - _dfcli_eval["_fp_n"]
+            ).dt.days
+            _dfcli_eval["cumple"] = (
+                _dfcli_eval["_ff_n"].notna() & (_dfcli_eval["dias_atraso"] <= 0)
+            )
+
+            _CLIENTES = ["COPEC", "ESMAX (Aramco)", "SHELL (Enex)"]
+            _ICON = {"COPEC": "🟢", "ESMAX (Aramco)": "🟠", "SHELL (Enex)": "🟡"}
+
+            # Resumen comparativo arriba
+            _resumen = []
+            for cli in _CLIENTES:
+                _sub = _dfcli_eval[_dfcli_eval["cliente"] == cli]
+                _tot = len(_sub)
+                _cump = int(_sub["cumple"].sum()) if _tot > 0 else 0
+                _no   = _tot - _cump
+                _pct  = round(_cump / _tot * 100, 1) if _tot > 0 else 0.0
+                _avg_atraso = round(_sub.loc[~_sub["cumple"], "dias_atraso"].mean(), 1) \
+                    if (~_sub["cumple"]).any() else 0.0
+                _resumen.append({
+                    "Cliente": f"{_ICON.get(cli,'⚫')} {cli}",
+                    "Total OTs evaluadas": _tot,
+                    "✅ Cumplieron": _cump,
+                    "❌ No cumplieron": _no,
+                    "% Cumplimiento": f"{_pct}%",
+                    "Atraso promedio (no cumplidas)": f"{_avg_atraso} días" if _no > 0 else "—",
                 })
-            st.caption(f"{len(_df_show):,} registros mostrados")
+            _df_resumen = pd.DataFrame(_resumen)
+            st.markdown(
+                '<div class="section-header">📊  Resumen comparativo por cliente</div>',
+                unsafe_allow_html=True,
+            )
+            _show_df(_df_resumen, hide_index=True, use_container_width=True,
+                column_config={
+                    "Cliente":                       st.column_config.TextColumn(width=180),
+                    "Total OTs evaluadas":           st.column_config.NumberColumn(format="%d", width=160),
+                    "✅ Cumplieron":                  st.column_config.NumberColumn(format="%d", width=130),
+                    "❌ No cumplieron":               st.column_config.NumberColumn(format="%d", width=140),
+                    "% Cumplimiento":                st.column_config.TextColumn(width=140),
+                    "Atraso promedio (no cumplidas)":st.column_config.TextColumn(width=220),
+                })
+            st.divider()
+
+            # Detalle por cliente
+            for cli in _CLIENTES:
+                _sub = _dfcli_eval[_dfcli_eval["cliente"] == cli]
+                _tot = len(_sub)
+                if _tot == 0:
+                    st.markdown(f"### {_ICON.get(cli,'⚫')} {cli}")
+                    st.info(f"Sin OTs evaluables para {cli} con los filtros actuales.")
+                    st.divider()
+                    continue
+
+                _cump = int(_sub["cumple"].sum())
+                _no   = _tot - _cump
+                _pct  = round(_cump / _tot * 100, 1)
+                _col_pct = "#10b981" if _pct >= 90 else "#f59e0b" if _pct >= 75 else "#ef4444"
+
+                st.markdown(
+                    f"""<div style="display:flex;align-items:center;gap:14px;margin-top:10px;">
+                      <h3 style="margin:0;">{_ICON.get(cli,'⚫')} {cli}</h3>
+                      <span style="background:{_col_pct};color:white;padding:4px 12px;
+                                   border-radius:12px;font-size:0.9rem;font-weight:600;">
+                        {_pct}% cumplimiento</span>
+                      <span style="color:var(--text-color, #475569);font-size:0.88rem;">
+                        {_cump:,} cumplieron · <b style="color:#ef4444;">{_no:,} no cumplieron</b>
+                        de {_tot:,} evaluadas</span>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+                # Dos columnas: cumplidas (resumen) y no cumplidas (tabla detalle)
+                _c1, _c2 = st.columns([1, 2.5])
+                with _c1:
+                    st.markdown(
+                        f"""<div style="padding:14px 18px;background:rgba(16,185,129,0.10);
+                             border-radius:10px;border-left:3px solid #10b981;margin-top:8px;">
+                          <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
+                                      font-weight:600;text-transform:uppercase;margin-bottom:6px;">
+                            ✅ Cumplieron en plazo</div>
+                          <div style="font-size:1.5rem;font-weight:700;color:#10b981;">
+                            {_cump:,} OTs</div>
+                          <div style="color:var(--text-color, #475569);font-size:0.82rem;margin-top:4px;">
+                            {_pct}% del total evaluable
+                          </div>
+                        </div>
+                        <div style="padding:14px 18px;background:rgba(239,68,68,0.10);
+                             border-radius:10px;border-left:3px solid #ef4444;margin-top:10px;">
+                          <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
+                                      font-weight:600;text-transform:uppercase;margin-bottom:6px;">
+                            ❌ No cumplieron</div>
+                          <div style="font-size:1.5rem;font-weight:700;color:#ef4444;">
+                            {_no:,} OTs</div>
+                          <div style="color:var(--text-color, #475569);font-size:0.82rem;margin-top:4px;">
+                            atraso promedio: <b>{round(_sub.loc[~_sub['cumple'], 'dias_atraso'].mean(), 1) if _no > 0 else 0} días</b>
+                          </div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
+                with _c2:
+                    _no_sub = _sub[~_sub["cumple"]].copy().sort_values("dias_atraso", ascending=False).head(15)
+                    if _no_sub.empty:
+                        st.success("Todas las OTs de este cliente cumplieron el plazo.")
+                    else:
+                        _det_cli = pd.DataFrame({
+                            "OT":            _no_sub["id_ot"].values,
+                            "Estación":      _no_sub.get("estacion", _no_sub.get("ubicacion","")).fillna("—").values,
+                            "Cód. EDS":      _no_sub.get("codigo_eds", _no_sub.get("clasificacion_2","")).fillna("—").values,
+                            "Plan":          _no_sub.get("plan_tareas", pd.Series([""]*len(_no_sub))).fillna("—").values,
+                            "F. Prog.":      _no_sub["_fp_n"].dt.strftime("%d/%m/%Y").values,
+                            "F. Ejec.":      _no_sub["_ff_n"].dt.strftime("%d/%m/%Y").fillna("—").values,
+                            "Días atraso":   _no_sub["dias_atraso"].astype(int).values,
+                        })
+                        _show_df(_det_cli.reset_index(drop=True), hide_index=True,
+                            use_container_width=True,
+                            column_config={
+                                "OT":           st.column_config.TextColumn(width=85),
+                                "Estación":     st.column_config.TextColumn(width=180),
+                                "Cód. EDS":     st.column_config.TextColumn(width=85),
+                                "Plan":         st.column_config.TextColumn(width=180),
+                                "F. Prog.":     st.column_config.TextColumn(width=90),
+                                "F. Ejec.":     st.column_config.TextColumn(width=90),
+                                "Días atraso":  st.column_config.NumberColumn(format="%d d", width=95),
+                            })
+                        st.caption(
+                            f"Top 15 OTs con mayor atraso · "
+                            f"{_no - 15 if _no > 15 else 0} adicionales no mostradas"
+                            if _no > 15 else
+                            f"Mostrando las {_no} OTs que no cumplieron"
+                        )
+                st.divider()
 
     # ── Tab 2: Por Tipo ───────────────────────────────────────────────────
     with _ptab_tipo:
