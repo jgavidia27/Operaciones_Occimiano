@@ -9876,9 +9876,9 @@ elif _page == _NAV_PAGES[2]:
         ].copy()
 
         # ── Relojes: Tiempo de atención MP — dos métricas distintas ───────
-        # 1) PROGRAMADA → EJECUCIÓN  (cumplimiento del plazo comprometido)
-        # 2) CREACIÓN  → EJECUCIÓN  (velocidad de respuesta del técnico desde
-        #    que la OT existe en Fracttal)
+        # 1) PROGRAMADA → EJECUCIÓN     (cumplimiento del plazo comprometido)
+        # 2) DURACIÓN REAL DEL TRABAJO  (fecha_inicio → fecha_finalización =
+        #    cuánto tarda el técnico ejecutando la OT desde que la abre)
         # Ambos calculados sobre OTs FINALIZADAS del filtro global, en horas.
         _dfp_for_avg = dfp[
             dfp["fecha_finalizacion"].notna()
@@ -9902,7 +9902,7 @@ elif _page == _NAV_PAGES[2]:
             # Sin normalize → precisión sub-día
             _fp_avg = pd.to_datetime(_dfp_for_avg["fecha_programada"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
             _ff_avg = pd.to_datetime(_dfp_for_avg["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
-            _fc_avg = pd.to_datetime(_dfp_for_avg["fecha_creacion"],     errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
+            _fi_avg = pd.to_datetime(_dfp_for_avg["fecha_inicio"],       errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
 
             # Métrica 1: programada → ejecución
             _h_prog        = (_ff_avg - _fp_avg).dt.total_seconds() / 3600
@@ -9910,20 +9910,23 @@ elif _page == _NAV_PAGES[2]:
             _med_h_prog    = round(_h_prog.median(), 1)
             _pct_a_tiempo  = round((_h_prog <= 0).mean() * 100, 1)
 
-            # Métrica 2: creación → ejecución
-            _h_crea       = (_ff_avg - _fc_avg).dt.total_seconds() / 3600
-            _h_crea_pos   = _h_crea.where(_h_crea >= 0)   # filtrar negativos (datos sucios)
-            _avg_h_crea   = round(_h_crea_pos.mean(), 1) if _h_crea_pos.notna().any() else 0.0
-            _med_h_crea   = round(_h_crea_pos.median(), 1) if _h_crea_pos.notna().any() else 0.0
+            # Métrica 2: duración real del trabajo (inicio → finalización)
+            # Solo cuenta cuando hay fecha_inicio (técnico abrió la OT)
+            _h_dur        = (_ff_avg - _fi_avg).dt.total_seconds() / 3600
+            _h_dur_valid  = _h_dur.where((_h_dur >= 0) & _fi_avg.notna())
+            _avg_h_dur    = round(_h_dur_valid.mean(), 1)  if _h_dur_valid.notna().any() else 0.0
+            _med_h_dur    = round(_h_dur_valid.median(), 1) if _h_dur_valid.notna().any() else 0.0
+            _ot_dur_n     = int(_h_dur_valid.notna().sum())
             _ot_eval      = len(_dfp_for_avg)
         else:
-            _avg_h_prog = _med_h_prog = _avg_h_crea = _med_h_crea = 0.0
+            _avg_h_prog = _med_h_prog = _avg_h_dur = _med_h_dur = 0.0
             _pct_a_tiempo = 0
-            _ot_eval = 0
+            _ot_eval = _ot_dur_n = 0
 
         _color_prog = "#10b981" if _avg_h_prog <= 0 else "#f59e0b" if _avg_h_prog <= 72 else "#ef4444"
-        # Para creación→ejecución no hay "anticipado", solo más rápido es mejor
-        _color_crea = "#10b981" if _avg_h_crea <= 48 else "#f59e0b" if _avg_h_crea <= 168 else "#ef4444"
+        # Duración real: <1h excelente, <4h bueno, >4h investigar (puede ser
+        # OT que el técnico dejó abierta sin cerrarla bien)
+        _color_dur = "#10b981" if _avg_h_dur <= 1 else "#f59e0b" if _avg_h_dur <= 4 else "#ef4444"
 
         import plotly.graph_objects as _go2
 
@@ -9967,19 +9970,19 @@ elif _page == _NAV_PAGES[2]:
                                                      "thickness": 0.85, "value": 0})
             st.plotly_chart(_fig_prog, use_container_width=True, key="prev_reloj_prog")
         with _rc2:
-            # Eje del gauge creación→ejecución: 0 a +480h (0 a +20d)
-            _fig_crea = _build_clock(
-                _avg_h_crea, _color_crea,
-                "⏱ Creación OT → Ejecución",
-                "horas entre creación de la OT y ejecución",
-                [0, 480], [0, 24, 48, 96, 168, 336, 480],
+            # Duración real del trabajo: escala 0 a 8h (rango operativo razonable)
+            _fig_dur = _build_clock(
+                _avg_h_dur, _color_dur,
+                "⏱ Duración real del trabajo",
+                "horas entre inicio del técnico y cierre de la OT",
+                [0, 8], [0, 0.5, 1, 2, 4, 6, 8],
                 [
-                    {"range": [0,    48], "color": "rgba(16,185,129,0.18)"},
-                    {"range": [48,  168], "color": "rgba(245,158,11,0.18)"},
-                    {"range": [168, 480], "color": "rgba(239,68,68,0.18)"},
+                    {"range": [0, 1], "color": "rgba(16,185,129,0.18)"},
+                    {"range": [1, 4], "color": "rgba(245,158,11,0.18)"},
+                    {"range": [4, 8], "color": "rgba(239,68,68,0.18)"},
                 ],
             )
-            st.plotly_chart(_fig_crea, use_container_width=True, key="prev_reloj_crea")
+            st.plotly_chart(_fig_dur, use_container_width=True, key="prev_reloj_dur")
 
         # Panel de detalle unificado debajo
         st.markdown(
@@ -10000,12 +10003,12 @@ elif _page == _NAV_PAGES[2]:
                   </td>
                 </tr>
                 <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Creación OT → Ejecución</td>
-                  <td style="padding:6px 0;text-align:right;color:{_color_crea};font-weight:600;font-size:1.05rem;">
-                    {_fmt_h_d(_avg_h_crea)}
+                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Duración real del trabajo</td>
+                  <td style="padding:6px 0;text-align:right;color:{_color_dur};font-weight:600;font-size:1.05rem;">
+                    {_fmt_h_d(_avg_h_dur)}
                   </td>
                   <td style="padding:6px 16px;color:var(--text-color, #475569);font-size:0.82rem;text-align:right;">
-                    mediana {_fmt_h_d(_med_h_crea)}
+                    mediana {_fmt_h_d(_med_h_dur)} · {_ot_dur_n:,} OTs con inicio
                   </td>
                 </tr>
                 <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
@@ -10023,9 +10026,9 @@ elif _page == _NAV_PAGES[2]:
                           padding-top:8px;border-top:1px solid rgba(148,163,184,0.25);">
                 Métrica 1 (<b>Programada → Ejecución</b>): cumplimiento del plazo
                 comprometido. Valores negativos = ejecutada antes de lo programado.<br>
-                Métrica 2 (<b>Creación OT → Ejecución</b>): velocidad de respuesta del
-                técnico desde que la OT existe en Fracttal. Suele ser más corta porque
-                muchas OTs se crean el mismo día de la mantención.
+                Métrica 2 (<b>Duración real del trabajo</b>): tiempo entre que el
+                técnico abre la OT en Fracttal (fecha_inicio) y la cierra
+                (fecha_finalización). Indica cuánto tarda haciendo el trabajo real.
               </div>
             </div>""",
             unsafe_allow_html=True,
