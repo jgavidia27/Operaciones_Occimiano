@@ -9875,6 +9875,105 @@ elif _page == _NAV_PAGES[2]:
             (_dfplan["_fp_dt"] >= _plan_ini) & (_dfplan["_fp_dt"] <= _plan_fin)
         ].copy()
 
+        # ── Reloj: Tiempo promedio de atención MP ─────────────────────────
+        # Mide cuántos días en promedio tarda el equipo en atender una MP
+        # desde la fecha programada. Calculado sobre OTs FINALIZADAS dentro
+        # del rango del filtro global (dfp), no del período seleccionado.
+        _dfp_for_avg = dfp[
+            dfp["fecha_finalizacion"].notna()
+            & dfp["fecha_programada"].notna()
+            & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
+        ].copy()
+        if not _dfp_for_avg.empty:
+            _fp_avg = pd.to_datetime(_dfp_for_avg["fecha_programada"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
+            _ff_avg = pd.to_datetime(_dfp_for_avg["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
+            _atraso_serie = (_ff_avg - _fp_avg).dt.days
+            _avg_atraso = round(_atraso_serie.mean(), 1)
+            _med_atraso = int(_atraso_serie.median())
+            _ot_eval    = len(_dfp_for_avg)
+            _pct_a_tiempo = round((_atraso_serie <= 0).mean() * 100, 1)
+        else:
+            _avg_atraso = _med_atraso = _ot_eval = _pct_a_tiempo = 0
+
+        # Color según el promedio: ≤0 verde (anticipado), 1-3 amarillo, >3 rojo
+        _color_avg = "#10b981" if _avg_atraso <= 0 else "#f59e0b" if _avg_atraso <= 3 else "#ef4444"
+
+        _rc1, _rc2 = st.columns([1, 1.6])
+        with _rc1:
+            import plotly.graph_objects as _go2
+            # Eje del gauge: -10 a +30 días (valores negativos = anticipado)
+            _fig_reloj = _go2.Figure(_go2.Indicator(
+                mode="gauge+number",
+                value=_avg_atraso,
+                number={"suffix": " días", "font": {"size": 30}},
+                title={"text": "<b>⏱ Tiempo promedio de atención MP</b><br>"
+                               "<span style='font-size:0.72rem;color:#94a3b8'>"
+                               "días entre fecha programada y fecha de ejecución · respeta filtros</span>",
+                       "font": {"size": 13}},
+                gauge={
+                    "axis":    {"range": [-10, 30], "tickwidth": 1, "tickfont": {"size": 10},
+                                "tickvals": [-10, -5, 0, 3, 7, 15, 30]},
+                    "bar":     {"color": _color_avg, "thickness": 0.32},
+                    "bgcolor": "rgba(0,0,0,0)",
+                    "borderwidth": 0,
+                    "steps": [
+                        {"range": [-10, 0], "color": "rgba(16,185,129,0.18)"},
+                        {"range": [0,   3], "color": "rgba(245,158,11,0.18)"},
+                        {"range": [3,  30], "color": "rgba(239,68,68,0.18)"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "#0f172a", "width": 2},
+                        "thickness": 0.85, "value": 0,
+                    },
+                },
+            ))
+            _fig_reloj.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10),
+                                     paper_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(_fig_reloj, use_container_width=True, key="prev_reloj_atencion")
+        with _rc2:
+            st.markdown(
+                f"""<div style="padding:14px 18px;background:rgba(148,163,184,0.08);
+                     border-radius:10px;border-left:3px solid {_color_avg};margin-top:10px;">
+                  <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
+                              font-weight:600;text-transform:uppercase;margin-bottom:8px;">
+                    Detalle del tiempo de atención</div>
+                  <table style="width:100%;border-collapse:collapse;font-size:0.92rem;">
+                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Promedio</td>
+                      <td style="padding:6px 0;text-align:right;color:{_color_avg};font-weight:600;font-size:1.05rem;">
+                        {_avg_atraso} días
+                      </td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Mediana</td>
+                      <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">
+                        {_med_atraso} días
+                      </td>
+                    </tr>
+                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">OTs evaluadas</td>
+                      <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">
+                        {_ot_eval:,}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Atendidas a tiempo</td>
+                      <td style="padding:6px 0;text-align:right;color:#10b981;font-weight:600;">
+                        {_pct_a_tiempo}%
+                      </td>
+                    </tr>
+                  </table>
+                  <div style="color:var(--text-color, #475569);font-size:0.78rem;margin-top:10px;
+                              padding-top:8px;border-top:1px solid rgba(148,163,184,0.25);">
+                    Filtra por <b>Mes</b>, <b>Trimestre</b>, <b>Plan</b>, etc. arriba para ver
+                    el tiempo de atención de ese subconjunto. Valores negativos = ejecutadas antes de lo programado.
+                  </div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        st.divider()
+
         # Tipo de equipo a partir del nombre (lavadora / aspiradora / etc.)
         def _tipo_eq(s):
             s = str(s or "").upper()
@@ -10020,36 +10119,65 @@ elif _page == _NAV_PAGES[2]:
         # ── Próximas OTs futuras ───────────────────────────────────────────
         st.markdown('<div class="section-header">🔮  Próximas OTs programadas (hoy en adelante)</div>',
                     unsafe_allow_html=True)
+        st.caption(
+            "Todas las OTs preventivas con fecha programada hacia el futuro, "
+            "sin importar cuándo se generaron en Fracttal. "
+            "Se excluyen OTs anuladas (Cancelado / Error de ingreso)."
+        )
         _df_fut = _dfplan[
             (_dfplan["_fp_dt"] >= _hoy) &
-            (~_dfplan["estado"].isin(["Finalizadas","Cancelado"])) &
+            (~_dfplan["estado"].isin(_ESTADOS_NO_CUENTAN | {"Finalizadas"})) &
             (~_dfplan["estado_tarea"].isin(["Finalizada"]))
-        ].sort_values("_fp_dt").head(50)
+        ].copy().sort_values("_fp_dt")
         if _df_fut.empty:
             st.info("No hay OTs preventivas futuras registradas.")
         else:
-            _df_fut_show = _df_fut[[c for c in [
-                "fecha_programada","id_ot","responsable","nombre_tarea",
-                "tipo_tarea","activador","clasificacion_2"
-            ] if c in _df_fut.columns]].copy()
-            _df_fut_show["fecha_programada"] = pd.to_datetime(
-                _df_fut_show["fecha_programada"], errors="coerce").dt.strftime("%d/%m/%Y")
-            _df_fut_show.rename(columns={
-                "fecha_programada":"F.Prog.","id_ot":"OT","responsable":"Responsable",
-                "nombre_tarea":"Tarea","tipo_tarea":"Tipo","activador":"Activador",
-                "clasificacion_2":"Clasif."
-            }, inplace=True)
-            _show_df(_df_fut_show.reset_index(drop=True), hide_index=True, use_container_width=True,
+            _df_fut["_dias_rest"] = (_df_fut["_fp_dt"].dt.normalize() - _hoy).dt.days
+            # Para la barra visual: usamos 30 días como horizonte máximo
+            # (mensual). Valores >30 quedan al tope.
+            _df_fut["_barra"] = _df_fut["_dias_rest"].clip(lower=0, upper=30)
+            _fut_show = pd.DataFrame({
+                "F. Programada": _df_fut["_fp_dt"].dt.strftime("%d/%m/%Y").values,
+                "Plazo":         _df_fut["_dias_rest"].apply(
+                    lambda d: "🟢 hoy" if d == 0
+                    else (f"⏳ en {d} día{'s' if d != 1 else ''}")
+                ).values,
+                "⏱ Barra (días)": _df_fut["_barra"].values,
+                "OT":            _df_fut["id_ot"].values,
+                "Código":        _df_fut["codigo_activo"].fillna("—").values,
+                "Tipo equipo":   _df_fut["nombre_activo"].apply(_tipo_eq).values,
+                "Activo":        _df_fut["nombre_activo"].fillna("—").values,
+                "Estación":      _df_fut.get("estacion", _df_fut.get("ubicacion","")).fillna("—").values,
+                "Cód. EDS":      _df_fut.get("codigo_eds", _df_fut.get("clasificacion_2","")).fillna("—").values,
+                "Plan":          _df_fut.get("plan_tareas", pd.Series([""]*len(_df_fut))).fillna("—").values,
+                "Activador":     _df_fut["activador"].fillna("—").values,
+                "Responsable":   _df_fut["responsable"].fillna("—").values,
+            })
+            _show_df(_fut_show.reset_index(drop=True), hide_index=True, use_container_width=True,
                 column_config={
-                    "F.Prog.":    st.column_config.TextColumn(width=90),
-                    "OT":         st.column_config.TextColumn(width=90),
-                    "Responsable":st.column_config.TextColumn(width=180),
-                    "Tarea":      st.column_config.TextColumn(width=200),
-                    "Tipo":       st.column_config.TextColumn(width=170),
-                    "Activador":  st.column_config.TextColumn(width=100),
-                    "Clasif.":    st.column_config.TextColumn(width=80),
+                    "F. Programada":  st.column_config.TextColumn(width=100),
+                    "Plazo":          st.column_config.TextColumn(width=110),
+                    "⏱ Barra (días)": st.column_config.ProgressColumn(
+                        help="Días restantes hasta la fecha programada (0–30+)",
+                        format="%d d", min_value=0, max_value=30, width=140,
+                    ),
+                    "OT":             st.column_config.TextColumn(width=85),
+                    "Código":         st.column_config.TextColumn(width=85),
+                    "Tipo equipo":    st.column_config.TextColumn(width=130),
+                    "Activo":         st.column_config.TextColumn(width=240),
+                    "Estación":       st.column_config.TextColumn(width=200),
+                    "Cód. EDS":       st.column_config.TextColumn(width=90),
+                    "Plan":           st.column_config.TextColumn(width=200),
+                    "Activador":      st.column_config.TextColumn(width=100),
+                    "Responsable":    st.column_config.TextColumn(width=160),
                 })
-            st.caption(f"Mostrando las próximas {len(_df_fut_show):,} OTs programadas")
+            _hoy_n  = int((_df_fut["_dias_rest"] == 0).sum())
+            _3d     = int(((_df_fut["_dias_rest"] > 0) & (_df_fut["_dias_rest"] <= 3)).sum())
+            _7d     = int(((_df_fut["_dias_rest"] > 3) & (_df_fut["_dias_rest"] <= 7)).sum())
+            st.caption(
+                f"{len(_fut_show):,} OTs futuras · "
+                f"🟢 {_hoy_n} para hoy · ⏳ {_3d} en 1–3 días · {_7d} en 4–7 días."
+            )
 
     # ── Tab 5: Por Activo/EDS ─────────────────────────────────────────────
     with _ptab_eds:
