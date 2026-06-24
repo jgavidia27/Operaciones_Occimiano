@@ -2444,6 +2444,16 @@ if _page == _NAV_PAGES[1]:
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
                              "pct_sla_ot":"% Uso SLA","estado_sla":"Estado SLA",
                              "n_cotalker":"N° Aviso","reporte":"Reporte de falla"})
+                _buscar_ot = st.text_input(
+                    "Buscar OT", placeholder="Ej: OS-33894",
+                    key="buscar_ot_sla",
+                    help="Escribe un número de OT (OS-XXXXX) y presiona Enter para filtrar",
+                )
+                if _buscar_ot.strip():
+                    _buscar_ot_clean = _buscar_ot.strip().upper()
+                    _df_sla_ot_disp = _df_sla_ot_disp[
+                        _df_sla_ot_disp["OS Fracttal"].str.upper().str.contains(_buscar_ot_clean, na=False)
+                    ]
                 st.caption(f"**{len(_df_sla_ot_disp):,}** OTs con fechas de apertura y cierre registradas")
                 _show_df(_df_sla_ot_disp, width="stretch", hide_index=True,
                     column_config={
