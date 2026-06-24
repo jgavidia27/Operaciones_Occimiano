@@ -52,6 +52,7 @@ from supabase_client import (
     load_tecnicos_supabase,
     load_equipos_supabase,
     load_preventivas_supabase,
+    load_correctivas_supabase,
     load_all_llamados_supabase,
     load_sla_umbrales_supabase,
     load_cotalker_index_supabase,
@@ -3048,6 +3049,35 @@ if _page == _NAV_PAGES[1]:
                     _paro_seg = (_dt_at_up - _dt_ll_up).dt.total_seconds().clip(lower=0).fillna(0)
                 )
 
+                # ── Cruce con OTs correctivas para traer equipo + duración real ──
+                # df_llamados solo tiene EDS; las OTs (ordenes_trabajo) tienen
+                # codigo_activo, nombre_activo y duracion_real_seg (tiempo neto
+                # que el técnico trabajó en el equipo, sin demoras administrativas).
+                with st.spinner("Cargando datos de OTs correctivas (equipos)…"):
+                    _raw_corr_up = load_correctivas_supabase()
+                if _raw_corr_up:
+                    _df_corr_up = pd.DataFrame(_raw_corr_up)[
+                        ["id_ot","codigo_activo","nombre_activo","duracion_real_seg"]
+                    ].copy()
+                    _df_corr_up["duracion_real_seg"] = pd.to_numeric(
+                        _df_corr_up["duracion_real_seg"], errors="coerce").fillna(0)
+                    # Una OT puede tener varios equipos concatenados — los unimos como vinieron
+                    _df_corr_up = _df_corr_up.groupby("id_ot", as_index=False).agg(
+                        codigo_activo=("codigo_activo",
+                            lambda s: ", ".join(sorted({str(x).strip() for x in s if pd.notna(x)}))),
+                        nombre_activo=("nombre_activo",
+                            lambda s: " · ".join(sorted({str(x).strip() for x in s if pd.notna(x)}))),
+                        duracion_real_seg=("duracion_real_seg", "sum"),
+                    )
+                    _df_up = _df_up.merge(
+                        _df_corr_up, how="left",
+                        left_on="os_fracttal", right_on="id_ot")
+                    _df_up["duracion_real_seg"] = _df_up["duracion_real_seg"].fillna(0)
+                else:
+                    _df_up["codigo_activo"] = ""
+                    _df_up["nombre_activo"] = ""
+                    _df_up["duracion_real_seg"] = 0
+
                 st.markdown(
                     f"""<div style="background:rgba(1,121,138,0.10);border-left:3px solid #01798A;
                          padding:10px 16px;border-radius:6px;margin-bottom:14px;">
@@ -3060,10 +3090,10 @@ if _page == _NAV_PAGES[1]:
                 )
                 st.caption(
                     "**Fórmula**: Uptime % = 1 − (Σ horas detenidas) ÷ (N EDS × horas del período) · "
-                    "**Horas detenidas** = `fecha_atención − fecha_llamado` por cada llamado. "
-                    "⚠️ Por defecto cuenta **solo P1** porque en el negocio P1 = máquina detenida; "
-                    "las P2/P3/P4 son fallas donde la máquina sigue operando "
-                    "(usa el selector \"Prioridad a contar\" si quieres incluirlas)."
+                    "**Tiempo detenido (SLA)** = `fecha_atención − fecha_llamado` (tiempo total de la OT abierta). "
+                    "**Reparación real** = `duración real Fracttal` (tiempo neto que el técnico trabajó en el equipo). "
+                    "Cuando \"SLA\" >> \"Reparación real\" significa que la OT estuvo abierta mucho tiempo después de la reparación. "
+                    "⚠️ Por defecto cuenta **solo P1** (máquina detenida); P2/P3/P4 son fallas con máquina operativa."
                 )
 
                 # ── Clasificación regional por eds_nombre / comuna ────
@@ -3203,40 +3233,64 @@ if _page == _NAV_PAGES[1]:
                     ).agg(
                         Llamados=("os_fracttal", "count"),
                         Tiempo_paro_seg=("_paro_seg", "sum"),
+                        Repar_real_seg=("duracion_real_seg", "sum"),
+                        Equipos_codigos=("codigo_activo",
+                            lambda s: ", ".join(sorted({c for x in s if pd.notna(x) and str(x)
+                                                        for c in str(x).split(",") if c.strip()}))),
+                        Equipos_nombres=("nombre_activo",
+                            lambda s: " · ".join(sorted({n.strip() for x in s if pd.notna(x) and str(x)
+                                                        for n in str(x).split(" · ") if n.strip()}))),
                         _ultimo_llamado=("fecha_llamado", "max"),
                     ))
                     _gpe["Última emergencia"] = pd.to_datetime(
                         _gpe["_ultimo_llamado"], errors="coerce"
                     ).dt.strftime("%d/%m/%Y").fillna("—")
-                    _gpe["Tiempo detenido (h:mm)"] = _gpe["Tiempo_paro_seg"].apply(
+                    _gpe["Tiempo SLA (h:mm)"] = _gpe["Tiempo_paro_seg"].apply(
                         lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m"
                         if s else "—")
-                    _gpe["Uptime %"] = (
+                    _gpe["Reparación real (h:mm)"] = _gpe["Repar_real_seg"].apply(
+                        lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m"
+                        if s else "—")
+                    _gpe["Uptime % (SLA)"] = (
                         (1 - _gpe["Tiempo_paro_seg"] / _seg_equipo_up).clip(lower=0) * 100
+                    ).round(3)
+                    _gpe["Uptime % (real)"] = (
+                        (1 - _gpe["Repar_real_seg"] / _seg_equipo_up).clip(lower=0) * 100
                     ).round(3)
                     _gpe = _gpe.sort_values("Tiempo_paro_seg", ascending=False).head(30)
 
                     _gpe_show = _gpe[[
-                        "eds_occim","eds_nombre","cliente",
-                        "Llamados","Tiempo detenido (h:mm)",
-                        "Última emergencia","Uptime %"
+                        "eds_occim","eds_nombre","cliente","Equipos_codigos","Equipos_nombres",
+                        "Llamados","Tiempo SLA (h:mm)","Reparación real (h:mm)",
+                        "Última emergencia","Uptime % (SLA)","Uptime % (real)"
                     ]].rename(columns={
-                        "eds_occim":  "Cód. EDS",
-                        "eds_nombre": "Estación",
-                        "cliente":    "Cliente",
+                        "eds_occim":       "Cód. EDS",
+                        "eds_nombre":      "Estación",
+                        "cliente":         "Cliente",
+                        "Equipos_codigos": "Equipo(s)",
+                        "Equipos_nombres": "Tipo equipo",
                     })
                     _show_df(_gpe_show.reset_index(drop=True), hide_index=True,
                              use_container_width=True,
                              column_config={
-                                 "Cód. EDS":                st.column_config.TextColumn(width=100),
-                                 "Estación":                st.column_config.TextColumn(width=260),
-                                 "Cliente":                 st.column_config.TextColumn(width=130),
+                                 "Cód. EDS":                st.column_config.TextColumn(width=90),
+                                 "Estación":                st.column_config.TextColumn(width=220),
+                                 "Cliente":                 st.column_config.TextColumn(width=120),
+                                 "Equipo(s)":               st.column_config.TextColumn(width=140),
+                                 "Tipo equipo":             st.column_config.TextColumn(width=200),
                                  "Llamados":                st.column_config.NumberColumn(
-                                     format="%d", width=90),
-                                 "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=140),
-                                 "Última emergencia":       st.column_config.TextColumn(width=120),
-                                 "Uptime %":                st.column_config.NumberColumn(
-                                     format="%.3f%%", width=100),
+                                     format="%d", width=80),
+                                 "Tiempo SLA (h:mm)":       st.column_config.TextColumn(width=120,
+                                     help="fecha_atención − fecha_llamado (tiempo total OT abierta)"),
+                                 "Reparación real (h:mm)":  st.column_config.TextColumn(width=130,
+                                     help="Duración real Fracttal — solo trabajo del técnico"),
+                                 "Última emergencia":       st.column_config.TextColumn(width=110),
+                                 "Uptime % (SLA)":          st.column_config.NumberColumn(
+                                     format="%.3f%%", width=110,
+                                     help="Usa el tiempo SLA — conservador, incluye demoras administrativas"),
+                                 "Uptime % (real)":         st.column_config.NumberColumn(
+                                     format="%.3f%%", width=110,
+                                     help="Usa solo el trabajo del técnico — más cercano al paro real"),
                              })
                     st.caption(
                         f"Top 30 EDS ordenadas por tiempo total detenido · "
