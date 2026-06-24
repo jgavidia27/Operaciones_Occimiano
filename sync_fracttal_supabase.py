@@ -314,22 +314,39 @@ def map_record(wo: dict) -> dict | None:
 def upsert_batch(records: list) -> int:
     if not records: return 0
 
-    # Deduplicar por id_ot (varias tareas por OT comparten wo_folio)
-    # Priorizar: el que tiene fecha_finalizacion (OT completa) y duracion real
-    dedup: dict = {}
+    # Deduplicar por id_ot (varias sub-tareas por OT comparten wo_folio)
+    # Estrategia:
+    #   1. Elegir la sub-tarea "ganadora" con más datos completos.
+    #   2. ACUMULAR los codigo_activo y nombre_activo de TODAS las sub-tareas
+    #      con el mismo id_ot — así no perdemos info cuando una OT tiene 4
+    #      equipos distintos en sus sub-tareas.
+    grupos: dict = {}
     for row in records:
         oid = row["id_ot"]
-        if oid not in dedup:
-            dedup[oid] = row
+        cod = row.get("codigo_activo")
+        nom = row.get("nombre_activo")
+        if oid not in grupos:
+            grupos[oid] = {"winner": row, "codes": [], "names": []}
         else:
-            prev = dedup[oid]
-            # Preferir registro con mas datos completos
+            prev = grupos[oid]["winner"]
             score_new  = sum(1 for v in row.values()  if v not in (None, False, ""))
             score_prev = sum(1 for v in prev.values() if v not in (None, False, ""))
             if score_new > score_prev:
-                dedup[oid] = row
+                grupos[oid]["winner"] = row
+        if cod and cod not in grupos[oid]["codes"]:
+            grupos[oid]["codes"].append(cod)
+        if nom and nom not in grupos[oid]["names"]:
+            grupos[oid]["names"].append(nom)
 
-    unique = list(dedup.values())
+    # Combinar: si hay más de un equipo distinto, juntarlos
+    unique = []
+    for oid, g in grupos.items():
+        winner = dict(g["winner"])  # copia
+        if len(g["codes"]) > 1:
+            winner["codigo_activo"] = ", ".join(g["codes"])[:200]
+        if len(g["names"]) > 1:
+            winner["nombre_activo"] = " · ".join(g["names"])[:300]
+        unique.append(winner)
 
     headers = {
         "apikey":        SUPABASE_KEY,

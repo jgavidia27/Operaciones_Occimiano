@@ -10146,43 +10146,29 @@ elif _page == _NAV_PAGES[2]:
         st.markdown('<div class="section-header">🔮  Próximas OTs programadas (hoy en adelante)</div>',
                     unsafe_allow_html=True)
         st.caption(
-            "Todas las OTs preventivas cuya fecha programada es de hoy en adelante, "
-            "sin importar si ya se finalizaron anticipadamente. "
-            "Se excluyen únicamente OTs anuladas (Cancelado / Error de ingreso). "
-            "La columna **Situación** indica si ya está hecha o sigue pendiente."
+            "Mantenciones preventivas **pendientes** con fecha programada de hoy en "
+            "adelante. Se excluyen OTs anuladas (Cancelado / Error de ingreso) y "
+            "las que ya se ejecutaron anticipadamente — éstas se ven en el cuadro "
+            "principal de la semana."
         )
         _df_fut = _dfplan[
-            (_dfplan["_fp_dt"].dt.normalize() >= _hoy) &
-            (~_dfplan["estado"].isin(_ESTADOS_NO_CUENTAN))
+            (_dfplan["_fp_dt"].dt.normalize() >= _hoy)
+            & (~_dfplan["estado"].isin(_ESTADOS_NO_CUENTAN | {"Finalizadas"}))
+            & (~_dfplan["estado_tarea"].isin(["Finalizada"]))
         ].copy().sort_values("_fp_dt")
         if _df_fut.empty:
-            st.info("No hay OTs preventivas futuras registradas.")
+            st.info("No hay OTs preventivas pendientes con fecha futura.")
         else:
             _df_fut["_dias_rest"] = (_df_fut["_fp_dt"].dt.normalize() - _hoy).dt.days
-            # Para la barra visual: usamos 30 días como horizonte máximo
-            # (mensual). Valores >30 quedan al tope.
             _df_fut["_barra"] = _df_fut["_dias_rest"].clip(lower=0, upper=30)
-            # Estado normalizado: finalizada vs pendiente
-            _df_fut["_esta_fin_fut"] = (
-                _df_fut["estado_tarea"].isin(["Finalizada"])
-                | _df_fut["estado"].isin(["Finalizadas"])
-            )
-
-            def _situacion(row):
-                if row["_esta_fin_fut"]:
-                    return "✅ Finalizada anticipada"
-                if row["_dias_rest"] == 0:
-                    return "🟢 Para hoy"
-                return f"⏳ Pendiente"
 
             _fut_show = pd.DataFrame({
                 "F. Programada": _df_fut["_fp_dt"].dt.strftime("%d/%m/%Y").values,
                 "Plazo":         _df_fut["_dias_rest"].apply(
-                    lambda d: "hoy" if d == 0
-                    else (f"en {d} día{'s' if d != 1 else ''}")
+                    lambda d: "🟢 hoy" if d == 0
+                    else (f"⏳ en {d} día{'s' if d != 1 else ''}")
                 ).values,
                 "⏱ Barra (días)": _df_fut["_barra"].values,
-                "Situación":     _df_fut.apply(_situacion, axis=1).values,
                 "OT":            _df_fut["id_ot"].values,
                 "Código":        _df_fut["codigo_activo"].fillna("—").values,
                 "Tipo equipo":   _df_fut["nombre_activo"].apply(_tipo_eq).values,
@@ -10192,16 +10178,16 @@ elif _page == _NAV_PAGES[2]:
                 "Plan":          _df_fut.get("plan_tareas", pd.Series([""]*len(_df_fut))).fillna("—").values,
                 "Activador":     _df_fut["activador"].fillna("—").values,
                 "Responsable":   _df_fut["responsable"].fillna("—").values,
+                "Estado":        _df_fut["estado"].fillna("—").values,
             })
             _show_df(_fut_show.reset_index(drop=True), hide_index=True, use_container_width=True,
                 column_config={
                     "F. Programada":  st.column_config.TextColumn(width=100),
-                    "Plazo":          st.column_config.TextColumn(width=90),
+                    "Plazo":          st.column_config.TextColumn(width=110),
                     "⏱ Barra (días)": st.column_config.ProgressColumn(
                         help="Días restantes hasta la fecha programada (0–30+)",
                         format="%d d", min_value=0, max_value=30, width=140,
                     ),
-                    "Situación":      st.column_config.TextColumn(width=160),
                     "OT":             st.column_config.TextColumn(width=85),
                     "Código":         st.column_config.TextColumn(width=85),
                     "Tipo equipo":    st.column_config.TextColumn(width=130),
@@ -10211,16 +10197,16 @@ elif _page == _NAV_PAGES[2]:
                     "Plan":           st.column_config.TextColumn(width=200),
                     "Activador":      st.column_config.TextColumn(width=100),
                     "Responsable":    st.column_config.TextColumn(width=160),
+                    "Estado":         st.column_config.TextColumn(width=110),
                 })
-            _fin_a = int(_df_fut["_esta_fin_fut"].sum())
-            _pend  = int(len(_df_fut) - _fin_a)
-            _hoy_n = int(((_df_fut["_dias_rest"] == 0) & ~_df_fut["_esta_fin_fut"]).sum())
-            _3d    = int(((_df_fut["_dias_rest"] > 0) & (_df_fut["_dias_rest"] <= 3) & ~_df_fut["_esta_fin_fut"]).sum())
-            _7d    = int(((_df_fut["_dias_rest"] > 3) & (_df_fut["_dias_rest"] <= 7) & ~_df_fut["_esta_fin_fut"]).sum())
+            _hoy_n = int((_df_fut["_dias_rest"] == 0).sum())
+            _3d    = int(((_df_fut["_dias_rest"] > 0) & (_df_fut["_dias_rest"] <= 3)).sum())
+            _7d    = int(((_df_fut["_dias_rest"] > 3) & (_df_fut["_dias_rest"] <= 7)).sum())
+            _mas   = int((_df_fut["_dias_rest"] > 7).sum())
             st.caption(
-                f"**{len(_fut_show):,} OTs** con fecha programada ≥ hoy · "
-                f"✅ {_fin_a} ya finalizadas anticipadas · "
-                f"⏳ {_pend} pendientes ({_hoy_n} para hoy · {_3d} en 1–3 días · {_7d} en 4–7 días)."
+                f"**{len(_fut_show):,} OTs pendientes** · "
+                f"🟢 {_hoy_n} para hoy · ⏳ {_3d} en 1–3 días · {_7d} en 4–7 días · "
+                f"{_mas} más allá de 7 días."
             )
 
     # ── Tab 5: Por Activo/EDS ─────────────────────────────────────────────
@@ -10229,11 +10215,17 @@ elif _page == _NAV_PAGES[2]:
             st.info("Sin datos de mantenciones preventivas.")
         else:
             _dfeds = _dfp_full.copy()
+            # Fechas en hora Chile (sino las nocturnas saltan un día)
             _dfeds["_fp_dt"] = pd.to_datetime(
-                _dfeds["fecha_programada"],   errors="coerce", utc=True).dt.tz_convert(None)
+                _dfeds["fecha_programada"],   errors="coerce", utc=True
+            ).dt.tz_convert("America/Santiago").dt.tz_localize(None)
             _dfeds["_ff_dt"] = pd.to_datetime(
-                _dfeds["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert(None)
+                _dfeds["fecha_finalizacion"], errors="coerce", utc=True
+            ).dt.tz_convert("America/Santiago").dt.tz_localize(None)
             _hoy_eds = pd.Timestamp.today().normalize()
+
+            # Excluir las OTs anuladas — no representan trabajos reales
+            _dfeds = _dfeds[~_dfeds["estado"].isin(_ESTADOS_NO_CUENTAN)].copy()
 
             # Última PM finalizada por activo (fecha_finalizacion más reciente)
             _df_ult = (
@@ -10241,21 +10233,23 @@ elif _page == _NAV_PAGES[2]:
                 .sort_values("_ff_dt", ascending=False)
                 .groupby(["codigo_activo","nombre_activo"], as_index=False)
                 .first()
-                [["codigo_activo","nombre_activo","ubicacion","clasificacion_2","activador","_ff_dt"]]
+                [["codigo_activo","nombre_activo","ubicacion","clasificacion_2",
+                  "codigo_eds","estacion","activador","_ff_dt","plan_tareas"]]
                 .rename(columns={"_ff_dt":"_ultima_pm"})
             )
 
-            # Próxima PM no finalizada por activo (fecha_programada futura más próxima)
+            # Próxima PM (OT real creada en Fracttal con fecha futura)
             _df_prx = (
                 _dfeds[
                     (_dfeds["_fp_dt"] >= _hoy_eds) &
-                    (~_dfeds["estado"].isin(["Finalizadas","Cancelado"]))
+                    (~_dfeds["estado"].isin(["Finalizadas"]))
                 ]
                 .sort_values("_fp_dt", ascending=True)
                 .groupby(["codigo_activo","nombre_activo"], as_index=False)
                 .first()
-                [["codigo_activo","nombre_activo","_fp_dt","responsable"]]
-                .rename(columns={"_fp_dt":"_prox_pm","responsable":"resp_prox"})
+                [["codigo_activo","nombre_activo","_fp_dt","responsable","tipo_tarea"]]
+                .rename(columns={"_fp_dt":"_prox_pm","responsable":"resp_prox",
+                                 "tipo_tarea":"tipo_prox"})
             )
 
             # Frecuencia histórica total por activo
@@ -10264,54 +10258,107 @@ elif _page == _NAV_PAGES[2]:
                 .agg(Total_PM=("id_ot","count"))
             )
 
-            # Merge: outer para incluir activos con sólo última o sólo próxima
+            # Merge
             _df_eds = _df_ult.merge(_df_prx,      on=["codigo_activo","nombre_activo"], how="outer")
             _df_eds = _df_eds.merge(_df_freq_eds, on=["codigo_activo","nombre_activo"], how="left")
 
+            # ── Cálculo: próxima MP teórica (cuando Fracttal aún no creó la OT) ──
+            # Parseamos el activador a días: "Cada 1 mes" → 30, "Cada 6 meses" → 180, etc.
+            import re as _re
+            def _activador_a_dias(s):
+                if pd.isna(s) or not s:
+                    return None
+                txt = str(s).lower()
+                m = _re.search(r"(\d+)\s*(d[ií]a|semana|mes|a[ñn]o|hora)", txt)
+                if not m:
+                    return None
+                n = int(m.group(1))
+                unit = m.group(2)
+                if   "hora"   in unit: return None  # depende de uso, no se puede proyectar
+                if   "dia"    in unit or "día" in unit: return n
+                if   "semana" in unit: return n * 7
+                if   "mes"    in unit: return n * 30
+                if   "año"    in unit or "ano" in unit: return n * 365
+                return None
+            _df_eds["_dias_freq"] = _df_eds["activador"].apply(_activador_a_dias)
+            _df_eds["_prox_teorica"] = _df_eds["_ultima_pm"] + pd.to_timedelta(
+                _df_eds["_dias_freq"], unit="D"
+            )
+
+            # Resolver "próxima a mostrar":
+            #   1. Si hay OT futura creada → esa (📅 OT creada)
+            #   2. Si no, pero podemos calcular teórica → esa (🔮 Proyección)
+            #   3. Si no hay nada → —
+            _df_eds["_es_real"] = _df_eds["_prox_pm"].notna()
+            _df_eds["_prox_efectiva"] = _df_eds["_prox_pm"].fillna(_df_eds["_prox_teorica"])
+
             # Días calculados
             _df_eds["_dias_ult"]  = (_hoy_eds - _df_eds["_ultima_pm"]).dt.days
-            _df_eds["_dias_prox"] = (_df_eds["_prox_pm"] - _hoy_eds).dt.days
+            _df_eds["_dias_prox"] = (_df_eds["_prox_efectiva"] - _hoy_eds).dt.days
 
-            # Ordenar por proximidad de próxima PM (activos sin próxima van al final)
+            # Ordenar por proximidad
             _df_eds = _df_eds.sort_values("_dias_prox", na_position="last")
+
+            # Origen visual
+            _df_eds["Origen"] = _df_eds.apply(
+                lambda r: "📅 OT en Fracttal" if r["_es_real"]
+                else ("🔮 Proyección teórica" if pd.notna(r["_prox_efectiva"]) else "—"),
+                axis=1,
+            )
 
             # Formatear
             _df_eds_show = _df_eds.copy()
             _df_eds_show["Última PM"]        = _df_eds["_ultima_pm"].dt.strftime("%d/%m/%Y").fillna("—")
-            _df_eds_show["Próxima PM"]       = _df_eds["_prox_pm"].dt.strftime("%d/%m/%Y").fillna("—")
+            _df_eds_show["Próxima PM"]       = _df_eds["_prox_efectiva"].dt.strftime("%d/%m/%Y").fillna("—")
             _df_eds_show["Días desde últ."]  = _df_eds["_dias_ult"].apply(
                 lambda x: int(x) if pd.notna(x) else None)
             _df_eds_show["Días hasta prox."] = _df_eds["_dias_prox"].apply(
                 lambda x: int(x) if pd.notna(x) else None)
 
             _df_eds_show = _df_eds_show[[
-                "codigo_activo","nombre_activo","clasificacion_2","ubicacion",
-                "Total_PM","activador","Última PM","Días desde últ.",
-                "Próxima PM","Días hasta prox.","resp_prox"
+                "codigo_activo","nombre_activo","estacion","codigo_eds",
+                "plan_tareas","Total_PM","activador",
+                "Última PM","Días desde últ.",
+                "Próxima PM","Días hasta prox.","Origen","resp_prox"
             ]].rename(columns={
                 "codigo_activo":"Código","nombre_activo":"Activo",
-                "clasificacion_2":"Clasif.","ubicacion":"Ubicación",
+                "estacion":"Estación","codigo_eds":"Cód. EDS",
+                "plan_tareas":"Plan",
                 "Total_PM":"Total PM","activador":"Activador",
                 "resp_prox":"Próx. Resp."
             })
 
             st.markdown('<div class="section-header">🏭  Estado de mantenciones por activo / EDS</div>',
                         unsafe_allow_html=True)
+            st.caption(
+                "**Próxima PM**: si Fracttal ya creó la OT → 📅 OT en Fracttal · si "
+                "no, se calcula 🔮 Proyección teórica = última PM + frecuencia del activador. "
+                "Activadores por horas de funcionamiento no se proyectan (depende del uso)."
+            )
             _show_df(_df_eds_show.reset_index(drop=True), hide_index=True, use_container_width=True,
                 column_config={
                     "Código":           st.column_config.TextColumn(width=90),
                     "Activo":           st.column_config.TextColumn(width=220),
-                    "Clasif.":          st.column_config.TextColumn(width=80),
-                    "Ubicación":        st.column_config.TextColumn(width=200),
+                    "Estación":         st.column_config.TextColumn(width=200),
+                    "Cód. EDS":         st.column_config.TextColumn(width=85),
+                    "Plan":             st.column_config.TextColumn(width=200),
                     "Total PM":         st.column_config.NumberColumn(format="%d", width=70),
                     "Activador":        st.column_config.TextColumn(width=110),
                     "Última PM":        st.column_config.TextColumn(width=90),
                     "Días desde últ.":  st.column_config.NumberColumn(format="%d", width=110),
                     "Próxima PM":       st.column_config.TextColumn(width=90),
                     "Días hasta prox.": st.column_config.NumberColumn(format="%d", width=115),
+                    "Origen":           st.column_config.TextColumn(width=160),
                     "Próx. Resp.":      st.column_config.TextColumn(width=160),
                 })
-            st.caption(f"{len(_df_eds_show):,} activos únicos · ordenados por proximidad de próxima PM")
+            _real = int(_df_eds["_es_real"].sum())
+            _teor = int(_df_eds["_prox_teorica"].notna().sum() - _real)
+            _sin  = int(len(_df_eds) - _real - _teor)
+            st.caption(
+                f"{len(_df_eds_show):,} activos únicos · "
+                f"📅 {_real} con OT en Fracttal · 🔮 {_teor} con proyección teórica · "
+                f"{_sin} sin datos para proyectar"
+            )
 
     # ── Tab 6: Uptime ─────────────────────────────────────────────────────
     with _ptab_uptime:
