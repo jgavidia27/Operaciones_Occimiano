@@ -3023,8 +3023,13 @@ if _page == _NAV_PAGES[1]:
                     # ── Filtros: Cliente + Región + EDS ───────────────────
                     _fu1s, _fu2s, _fu3s = st.columns(3)
                     with _fu1s:
-                        _cli_up_opts = _orden_clientes(_dfup_sla["cliente"]) \
-                            if "cliente" in _dfup_sla.columns else ["Todos"]
+                        _CLI_PREF = ["COPEC", "Aramco (Esmax)", "SHELL (Enex)"]
+                        if "cliente" in _dfup_sla.columns:
+                            _cli_present = set(_dfup_sla["cliente"].dropna().unique())
+                            _cli_up_opts = ["Todos"] + [c for c in _CLI_PREF if c in _cli_present] + \
+                                sorted([c for c in _cli_present if c not in _CLI_PREF])
+                        else:
+                            _cli_up_opts = ["Todos"]
                         _up_sla_cli = st.selectbox("Cliente", _cli_up_opts, key="upsla_cli")
                     with _fu2s:
                         _up_sla_reg = st.selectbox("Región",
