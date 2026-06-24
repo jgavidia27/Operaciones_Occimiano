@@ -2958,9 +2958,63 @@ if _page == _NAV_PAGES[1]:
             if _df_up.empty:
                 st.info("Sin llamados atendidos en el período.")
             else:
-                _rango_inicio_up = pd.Timestamp("2026-01-01")
+                # ── Filtros de fecha (Trimestre + Mes) ─────────────────
+                _fl_up_norm = _df_up["fecha_llamado"]
+                if _fl_up_norm.dt.tz is not None:
+                    _fl_up_norm = _fl_up_norm.dt.tz_convert(None)
+                _df_up["_mes_p"]   = _fl_up_norm.dt.to_period("M").astype(str)
+                _df_up["_month_n"] = _fl_up_norm.dt.month.astype("Int64")
+
+                _ff1, _ff2 = st.columns([1.3, 2])
+                with _ff1:
+                    _up_trim = st.selectbox("Período", _trim_opts, key="upsla_trim")
+                with _ff2:
+                    if _up_trim != "Todos":
+                        _trim_m_up = _TRIMESTRES_DEF[_up_trim]
+                        _meses_up_disp = [l for l in _meses_disp_lbl[1:]
+                                          if _MES_ABR_NUM_LL.get(l.split(" ")[0], 0) in _trim_m_up]
+                    else:
+                        _meses_up_disp = _meses_disp_lbl[1:]
+                    _up_meses = st.multiselect("Mes", _meses_up_disp, key="upsla_mes",
+                                               placeholder="Todos los meses")
+
+                if _up_trim != "Todos":
+                    _df_up = _df_up[_df_up["_month_n"].isin(_TRIMESTRES_DEF[_up_trim])]
+                if _up_meses:
+                    _meses_periodo = [_lbl_to_period.get(l) for l in _up_meses if _lbl_to_period.get(l)]
+                    _df_up = _df_up[_df_up["_mes_p"].isin(_meses_periodo)]
+
+                # ── Período evaluado dinámico según filtros de fecha ───
                 _hoy_up = pd.Timestamp.today().normalize()
-                _rango_dias_up = max((_hoy_up - _rango_inicio_up).days, 1)
+                if _up_meses:
+                    _meses_efectivos = [_lbl_to_period.get(l) for l in _up_meses if _lbl_to_period.get(l)]
+                elif _up_trim != "Todos":
+                    _trim_m_up = _TRIMESTRES_DEF[_up_trim]
+                    _meses_efectivos = [m for m in sorted(_lbl_to_period.values())
+                                        if int(m.split("-")[1]) in _trim_m_up]
+                else:
+                    _meses_efectivos = sorted(_lbl_to_period.values())
+
+                if _meses_efectivos:
+                    _meses_ord = sorted(_meses_efectivos)
+                    _rango_inicio_up = pd.Timestamp(_meses_ord[0] + "-01")
+                    _last = pd.Timestamp(_meses_ord[-1] + "-01") + pd.offsets.MonthEnd(1)
+                    _rango_fin_up = min(_last.normalize(), _hoy_up)
+                else:
+                    _rango_inicio_up = pd.Timestamp("2026-01-01")
+                    _rango_fin_up = _hoy_up
+
+                # Suma de días sobre los meses seleccionados (no es contiguo si saltas meses)
+                _total_dias = 0
+                for _ym in _meses_efectivos:
+                    _y, _m = map(int, _ym.split("-"))
+                    _first = pd.Timestamp(_y, _m, 1)
+                    if _first > _hoy_up:
+                        continue
+                    _last_m = (_first + pd.offsets.MonthEnd(1)).normalize()
+                    _last_m = min(_last_m, _hoy_up)
+                    _total_dias += (_last_m - _first).days + 1
+                _rango_dias_up = max(_total_dias, 1)
                 _seg_equipo_up = _rango_dias_up * 24 * 3600
 
                 # Tiempo detenido por llamado (segundos)
@@ -2985,7 +3039,7 @@ if _page == _NAV_PAGES[1]:
                          padding:10px 16px;border-radius:6px;margin-bottom:14px;">
                       <span style="color:#01798A;font-weight:700;font-size:0.95rem;">📅 Período evaluado:</span>
                       <span style="color:var(--text-color, #475569);font-size:0.9rem;margin-left:8px;">
-                        <b>{_rango_inicio_up.strftime('%d/%m/%Y')}</b> → <b>{_hoy_up.strftime('%d/%m/%Y')}</b>
+                        <b>{_rango_inicio_up.strftime('%d/%m/%Y')}</b> → <b>{_rango_fin_up.strftime('%d/%m/%Y')}</b>
                         ({_rango_dias_up} días · {_rango_dias_up * 24:,} horas por EDS).</span>
                     </div>""",
                     unsafe_allow_html=True,
@@ -3061,7 +3115,7 @@ if _page == _NAV_PAGES[1]:
                 _k3s.metric("EDS evaluadas", f"{_n_eds_up:,}",
                             delta="únicas en filtro")
                 _k4s.metric("Días evaluados", f"{_rango_dias_up:,}",
-                            delta="desde 01/01/2026")
+                            delta=f"del rango {_rango_inicio_up.strftime('%d/%m')}–{_rango_fin_up.strftime('%d/%m')}")
                 _upt_pct = max(0.0, round(
                     (1 - _paro_total_seg / _total_seg_up) * 100, 3))
                 _k5s.metric("Uptime global", f"{_upt_pct}%",
@@ -3172,7 +3226,7 @@ if _page == _NAV_PAGES[1]:
                     st.caption(
                         f"Top 30 EDS ordenadas por tiempo total detenido · "
                         f"período: {_rango_inicio_up.strftime('%d/%m/%Y')}"
-                        f" → {_hoy_up.strftime('%d/%m/%Y')}"
+                        f" → {_rango_fin_up.strftime('%d/%m/%Y')}"
                     )
 
 
