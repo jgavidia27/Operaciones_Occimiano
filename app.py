@@ -3079,14 +3079,19 @@ if _page == _NAV_PAGES[1]:
                     _df_up["fecha_finalizacion"] = pd.NaT
                     _df_up["duracion_real_seg"] = 0
 
-                # Tiempo detenido REAL = fecha_finalizacion_técnico − fecha_llamado
-                # Si no hay fecha_finalizacion (OT aún abierta o sin cierre técnico),
-                # caer al cierre SLA (fecha_atencion) como fallback.
+                # Tiempo detenido = primer cierre real del técnico
+                #   En este negocio:
+                #     - fecha_atencion (df_llamados): cuando el técnico cerró el SLA
+                #       con el cliente (= terminó el trabajo en terreno)
+                #     - fecha_finalizacion (ordenes_trabajo): cierre administrativo
+                #       en Fracttal — puede demorar días/semanas
+                #   Tomamos el MÍNIMO de ambos (el primer cierre que ocurrió),
+                #   que es el momento real en que la máquina volvió a operar.
                 _fin_tec = pd.to_datetime(
                     _df_up["fecha_finalizacion"], errors="coerce", utc=True)
-                if hasattr(_fin_tec.dt, "tz_convert") and _fin_tec.dt.tz is not None:
+                if hasattr(_fin_tec, "dt") and _fin_tec.dt.tz is not None:
                     _fin_tec = _fin_tec.dt.tz_convert(None)
-                _cierre = _fin_tec.fillna(_dt_at_up)
+                _cierre = pd.DataFrame({"a": _dt_at_up, "b": _fin_tec}).min(axis=1)
                 _df_up = _df_up.assign(
                     _paro_seg = (_cierre - _dt_ll_up).dt.total_seconds().clip(lower=0).fillna(0)
                 )
@@ -3103,10 +3108,9 @@ if _page == _NAV_PAGES[1]:
                 )
                 st.caption(
                     "**Fórmula**: Uptime % = 1 − (Σ horas detenidas) ÷ (N EDS × horas del período) · "
-                    "**Tiempo detenido** = `fecha_finalización_técnico − fecha_llamado` "
-                    "(desde que se reporta la falla hasta que el técnico cierra el trabajo en Fracttal — "
-                    "NO incluye el cierre administrativo posterior). "
-                    "Si la OT no tiene cierre técnico cargado todavía, usa `fecha_atención` como fallback. "
+                    "**Tiempo detenido** = desde `fecha_llamado` hasta el **primer cierre real** del trabajo "
+                    "(mínimo entre `fecha_atención` del SLA y `fecha_finalización` de Fracttal — el que ocurra "
+                    "primero refleja cuándo la máquina volvió a operar). "
                     "⚠️ Por defecto cuenta **solo P1** (máquina detenida); P2/P3/P4 son fallas con máquina operativa."
                 )
 
