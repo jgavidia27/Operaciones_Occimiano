@@ -10623,7 +10623,7 @@ elif _page == _NAV_PAGES[2]:
         else:
             _hoy = pd.Timestamp.today().normalize()
             _rango_dias = max((_hoy - _rango_inicio).days, 1)
-            _total_periodo_seg = _rango_dias * 24 * 3600
+            _seg_por_equipo = _rango_dias * 24 * 3600   # horas disponibles por equipo individual
 
             # Encabezado con período evaluado explícito
             st.markdown(
@@ -10632,14 +10632,15 @@ elif _page == _NAV_PAGES[2]:
                   <span style="color:#01798A;font-weight:700;font-size:0.95rem;">📅 Período evaluado:</span>
                   <span style="color:var(--text-color, #475569);font-size:0.9rem;margin-left:8px;">
                     <b>{_rango_inicio.strftime('%d/%m/%Y')}</b> → <b>{_hoy.strftime('%d/%m/%Y')}</b>
-                    ({_rango_dias} días · {_rango_dias * 24:,} horas totales).</span>
+                    ({_rango_dias} días · {_rango_dias * 24:,} horas por equipo).</span>
                 </div>""",
                 unsafe_allow_html=True,
             )
             st.caption(
-                "**Fórmula**: Uptime % = (Tiempo total del período − Tiempo total detenido por MP) ÷ Tiempo total × 100. "
+                "**Fórmula**: Uptime % = 1 − (Σ horas detenidas por MP) ÷ (N equipos × horas del período) · "
                 "Solo cuenta como detención cuando la OT tiene **¿Paro de equipo? = SÍ**. "
-                "Mide qué porcentaje del tiempo el equipo estuvo operativo (sin estar parado por mantención planificada)."
+                "El denominador es **horas-equipo disponibles** (cada equipo aporta sus 24h × días). "
+                "Mide qué % del tiempo la flota completa estuvo operativa."
             )
 
             # ── Filtros: Cliente + Región ────────────────────────────────
@@ -10682,15 +10683,31 @@ elif _page == _NAV_PAGES[2]:
             if not _con_paro.empty:
                 _con_paro = _con_paro.assign(_paro_calc_seg=_paro_seg_serie.values)
 
-            _uk1, _uk2, _uk3, _uk4 = st.columns(4)
+            # Universo de equipos en el filtro (codigo_activo puede venir
+            # concatenado por comas si una OT cubre múltiples equipos).
+            _eq_unicos = set()
+            for _cod in _dfup.get("codigo_activo", pd.Series(dtype=str)).dropna():
+                for _c in str(_cod).split(","):
+                    _c = _c.strip()
+                    if _c:
+                        _eq_unicos.add(_c)
+            _n_equipos = max(len(_eq_unicos), 1)
+
+            # Denominador correcto: horas-equipo (cada equipo aporta sus 24h × días)
+            _total_periodo_seg = _seg_por_equipo * _n_equipos
+
+            _uk1, _uk2, _uk3, _uk4, _uk5 = st.columns(5)
             _uk1.metric("OTs con paro de equipo", f"{len(_con_paro):,}",
                         delta=f"de {len(_dfup):,} OTs en filtro")
             _uk2.metric("Tiempo total detenido",
                         f"{int(_paro_seg // 3600):,}h {int((_paro_seg % 3600) // 60):02d}m")
-            _uk3.metric("Días evaluados", f"{_rango_dias:,}",
+            _uk3.metric("Equipos evaluados", f"{_n_equipos:,}",
+                        delta="únicos en el filtro")
+            _uk4.metric("Días evaluados", f"{_rango_dias:,}",
                         delta="desde 01/01/2026")
             _uptime_pct_global = max(0.0, round((1 - _paro_seg / _total_periodo_seg) * 100, 3))
-            _uk4.metric("Uptime global", f"{_uptime_pct_global}%")
+            _uk5.metric("Uptime global", f"{_uptime_pct_global}%",
+                        help=f"({_n_equipos:,} equipos × {_rango_dias} días × 24h) − {int(_paro_seg//3600):,}h detenidas")
 
             st.divider()
 
@@ -10776,7 +10793,9 @@ elif _page == _NAV_PAGES[2]:
                 _gp["Tiempo paro (h:mm)"] = _gp["Tiempo_paro_seg"].apply(
                     lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m" if s else "—"
                 )
-                _gp["Uptime %"] = (1 - _gp["Tiempo_paro_seg"] / _total_periodo_seg).clip(lower=0) * 100
+                # Uptime por equipo individual: cada equipo dispone de _seg_por_equipo
+                # horas en el período (no se multiplica por N: aquí cada fila ES un equipo).
+                _gp["Uptime %"] = (1 - _gp["Tiempo_paro_seg"] / _seg_por_equipo).clip(lower=0) * 100
                 _gp["Uptime %"] = _gp["Uptime %"].round(3)
                 _gp = _gp.sort_values("Tiempo_paro_seg", ascending=False).head(30)
 
