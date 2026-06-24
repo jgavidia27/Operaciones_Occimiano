@@ -3032,23 +3032,12 @@ if _page == _NAV_PAGES[1]:
                 _rango_dias_up = max(_total_dias, 1)
                 _seg_equipo_up = _rango_dias_up * 24 * 3600
 
-                # Tiempo detenido por llamado (segundos)
-                def _merge_dt_up(d, h):
-                    d_ts = pd.to_datetime(d, errors="coerce")
-                    h_str = h.astype(str).fillna("00:00:00").str[:8].replace(
-                        {"nan": "00:00:00", "NaT": "00:00:00", "":"00:00:00"})
-                    return pd.to_datetime(
-                        d_ts.dt.strftime("%Y-%m-%d") + " " + h_str,
-                        errors="coerce")
-
-                _dt_ll_up = _merge_dt_up(_df_up["fecha_llamado"],
-                                         _df_up.get("hora_llamado", pd.Series("", index=_df_up.index)))
-                _dt_at_up = _merge_dt_up(_df_up["fecha_atencion"],
-                                         _df_up.get("hora_fin", pd.Series("", index=_df_up.index)))
-                # ── Cruce con OTs correctivas para traer equipo + cierre técnico ──
-                # df_llamados solo tiene EDS y fecha_atencion (cierre SLA, puede ser
-                # administrativo). Las OTs tienen codigo_activo, nombre_activo y
-                # fecha_finalizacion = cuando el técnico marcó terminado el trabajo.
+                # ── Cruce con OTs correctivas para traer equipo + cierre Fracttal ──
+                # df_llamados solo tiene EDS y fecha_atencion (cierre SLA en terreno).
+                # ordenes_trabajo tiene codigo_activo, nombre_activo y fecha_finalizacion
+                # (cierre administrativo en Fracttal, puede demorar días/semanas).
+                # IMPORTANTE: el merge resetea índices, por eso lo hacemos ANTES de
+                # calcular fechas (si no, las Series no se alinean en la resta).
                 with st.spinner("Cargando datos de OTs correctivas (equipos)…"):
                     _raw_corr_up = load_correctivas_supabase()
                 if _raw_corr_up:
@@ -3071,30 +3060,41 @@ if _page == _NAV_PAGES[1]:
                     )
                     _df_up = _df_up.merge(
                         _df_corr_up, how="left",
-                        left_on="os_fracttal", right_on="id_ot")
+                        left_on="os_fracttal", right_on="id_ot"
+                    ).reset_index(drop=True)
                     _df_up["duracion_real_seg"] = _df_up["duracion_real_seg"].fillna(0)
                 else:
+                    _df_up = _df_up.reset_index(drop=True)
                     _df_up["codigo_activo"] = ""
                     _df_up["nombre_activo"] = ""
                     _df_up["fecha_finalizacion"] = pd.NaT
                     _df_up["duracion_real_seg"] = 0
 
-                # Tiempo detenido = primer cierre real del técnico
-                #   En este negocio:
-                #     - fecha_atencion (df_llamados): cuando el técnico cerró el SLA
-                #       con el cliente (= terminó el trabajo en terreno)
-                #     - fecha_finalizacion (ordenes_trabajo): cierre administrativo
-                #       en Fracttal — puede demorar días/semanas
-                #   Tomamos el MÍNIMO de ambos (el primer cierre que ocurrió),
-                #   que es el momento real en que la máquina volvió a operar.
+                # Tiempo detenido por llamado (en segundos), calculado DESPUÉS del merge
+                def _merge_dt_up(d, h):
+                    d_ts = pd.to_datetime(d, errors="coerce")
+                    h_str = h.astype(str).fillna("00:00:00").str[:8].replace(
+                        {"nan": "00:00:00", "NaT": "00:00:00", "":"00:00:00"})
+                    return pd.to_datetime(
+                        d_ts.dt.strftime("%Y-%m-%d") + " " + h_str,
+                        errors="coerce")
+
+                _dt_ll_up = _merge_dt_up(_df_up["fecha_llamado"],
+                                         _df_up.get("hora_llamado", pd.Series("", index=_df_up.index)))
+                _dt_at_up = _merge_dt_up(_df_up["fecha_atencion"],
+                                         _df_up.get("hora_fin", pd.Series("", index=_df_up.index)))
+
+                # Cierre real = MIN(fecha_atencion, fecha_finalizacion)
+                #   - fecha_atencion (df_llamados): cierre técnico en terreno (cuando
+                #     el técnico cerró el SLA con el cliente)
+                #   - fecha_finalizacion (ordenes_trabajo): cierre administrativo
+                #     Fracttal — puede demorar días/semanas
                 _fin_tec = pd.to_datetime(
                     _df_up["fecha_finalizacion"], errors="coerce", utc=True)
                 if hasattr(_fin_tec, "dt") and _fin_tec.dt.tz is not None:
                     _fin_tec = _fin_tec.dt.tz_convert(None)
                 _cierre = pd.DataFrame({"a": _dt_at_up, "b": _fin_tec}).min(axis=1)
-                _df_up = _df_up.assign(
-                    _paro_seg = (_cierre - _dt_ll_up).dt.total_seconds().clip(lower=0).fillna(0)
-                )
+                _df_up["_paro_seg"] = (_cierre - _dt_ll_up).dt.total_seconds().clip(lower=0).fillna(0)
 
                 st.markdown(
                     f"""<div style="background:rgba(1,121,138,0.10);border-left:3px solid #01798A;
