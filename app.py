@@ -816,8 +816,8 @@ def _login_page_wrapper_start(title: str) -> None:
 
 
 st.set_page_config(
-    page_title="Occimiano - Indicadores Operacionales",
-    page_icon="🔧",
+    page_title="Indicadores Operacionales - Occim",
+    page_icon="🫧",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -9429,7 +9429,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 st.markdown(
                     f'<div style="font-size:1.05rem;font-weight:700;color:{_t["text"]};'
                     f'margin:18px 0 8px 0;border-bottom:2px solid {_t["border"]};'
-                    f'padding-bottom:4px;">🔧 Equipo {_EQUIPO_LABEL.get(_grp_key, _grp_key)}'
+                    f'padding-bottom:4px;">🫧 Equipo {_EQUIPO_LABEL.get(_grp_key, _grp_key)}'
                     f' <span style="font-size:0.82rem;color:{_t["muted"]};font-weight:400;">'
                     f'— Senior: {_senior}</span></div>',
                     unsafe_allow_html=True,

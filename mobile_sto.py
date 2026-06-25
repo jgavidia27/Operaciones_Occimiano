@@ -455,7 +455,7 @@ def index():
 ERROR_TEMPLATE = r"""
 <!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Desempeño STO</title>
+<title>Indicadores Operacionales - Occim 📲</title>
 <style>
   body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0;
     display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
@@ -481,7 +481,7 @@ HTML_TEMPLATE = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Desempeño STO — Occimiano</title>
+<title>Indicadores Operacionales - Occim 📲</title>
 <style>
   :root {
     --bg: #0a1628; --card: rgba(15,22,42,.92); --border: rgba(51,65,85,.7);
@@ -595,7 +595,13 @@ HTML_TEMPLATE = r"""
 <div class="app-container">
 
 <div class="app-header">
-  <h1>Desempeño STO</h1>
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="font-size:.78rem;color:var(--muted);letter-spacing:.5px;margin-bottom:2px;">📲 Indicadores Operacionales - Occim</div>
+      <h1 style="margin:0;">Desempeño STO</h1>
+    </div>
+    <a href="javascript:location.reload()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.72rem;text-decoration:none;white-space:nowrap;display:flex;align-items:center;gap:4px;" title="Refrescar datos">🔄 Refresh</a>
+  </div>
   <p class="subtitle">Occimiano Operaciones · {{ now.strftime('%d/%m/%Y %H:%M') }}</p>
 </div>
 <div class="data-source">Datos del dashboard · actualizado {{ updated_at[:16] | replace('T',' ') }}</div>
@@ -764,7 +770,7 @@ HTML_TEMPLATE = r"""
   {% for eq in bono_equipos %}
   <div style="margin-top:14px;">
     <div style="font-size:.95rem;font-weight:700;color:var(--text);border-bottom:2px solid #01798A;padding-bottom:4px;margin-bottom:8px;">
-      Equipo {{ eq.label }} <span style="font-size:.75rem;color:var(--muted);font-weight:400;">— Senior: {{ eq.senior }}</span>
+      🫧 Equipo {{ eq.label }} <span style="font-size:.75rem;color:var(--muted);font-weight:400;">— Senior: {{ eq.senior }}</span>
     </div>
     <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <table style="width:100%;border-collapse:collapse;font-size:.75rem;color:var(--text);min-width:420px;">
@@ -889,7 +895,7 @@ HTML_TEMPLATE = r"""
 </div>
 
 <div class="footer">
-  Occimiano Operaciones · Datos del dashboard principal<br>
+  📲 Indicadores Operacionales - versión mobile 1.2<br>
   Última sincronización: {{ updated_at[:16] | replace('T',' ') }}
 </div>
 
