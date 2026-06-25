@@ -9800,6 +9800,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _sla_g = _sla_exp.groupby(["tecnico", "equipo", "mes_num"]).agg(
                     cumple=("cumple", "sum"), total=("cumple", "count"),
                 ).reset_index()
+                _sla_g["tecnico"] = _sla_g["tecnico"].str.replace(r'\s+', ' ', regex=True).str.strip()
                 _sla_records = _sla_g.to_dict(orient="records")
 
         # 2. Precisión — datos completos (sin filtro de trimestre)
@@ -9816,6 +9817,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _prec_g = _prec_exp.groupby(["tecnico", "equipo", "mes_num"]).agg(
                     buenas=("buena", "sum"), total=("buena", "count"),
                 ).reset_index()
+                _prec_g["tecnico"] = _prec_g["tecnico"].str.replace(r'\s+', ' ', regex=True).str.strip()
                 _prec_records = _prec_g.to_dict(orient="records")
 
         # 3. Efectividad — reincidencias completas
@@ -9848,6 +9850,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _pm_g = _pm_exp.groupby(["technician", "equipo", "mes_num"]).agg(
                     pms=("folio", "nunique") if "folio" in _pm_exp.columns else ("technician", "count"),
                 ).reset_index()
+                _pm_g["technician"] = _pm_g["technician"].str.replace(r'\s+', ' ', regex=True).str.strip()
                 _pm_records = _pm_g.rename(columns={"technician": "tecnico"}).to_dict(orient="records")
 
         # 5. Tech name maps y equipos

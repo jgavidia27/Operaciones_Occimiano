@@ -333,6 +333,22 @@ def index():
     bono_total = bc_sla + bc_cal + bc_prec
 
     # ═══ RESUMEN BONOS POR EQUIPO (estilo dashboard) ═══
+    _nn = lambda s: ' '.join(s.split())
+    seniors_set = set(data.get("seniors", []))
+
+    _pm_bono = {}
+    for r in [r for r in data.get("pms", []) if r.get("mes_num") in meses_filtro]:
+        t = _nn(r.get("tecnico", ""))
+        if t not in _pm_bono:
+            _pm_bono[t] = 0
+        _pm_bono[t] += int(r.get("pms", 0))
+    _fallas_bono = {}
+    for r in [r for r in data.get("reincidencias", []) if r.get("mes_num") in meses_filtro]:
+        ts = r.get("tecnico_short", "")
+        if ts not in _fallas_bono:
+            _fallas_bono[ts] = 0
+        _fallas_bono[ts] += int(r.get("fallas", 0))
+
     bono_equipos = []
     for eq_key, eq_info in equipos_info.items():
         miembros_full = eq_info.get("miembros", [])
@@ -340,7 +356,6 @@ def index():
             continue
         senior_name = eq_info.get("senior", "")
         eq_label = equipos_label.get(eq_key, eq_key)
-        n_eq = len(miembros_full)
 
         tec_rows = []
         eq_sla_ok = eq_sla_tot = 0
@@ -349,31 +364,29 @@ def index():
 
         for tf in miembros_full:
             ts = full_to_short.get(tf, tf)
-            # SLA del técnico
+            tf_n = _nn(tf)
             s_ok = s_tot = 0
             for r in [r for r in data.get("sla", []) if r.get("mes_num") in meses_filtro]:
-                if r.get("tecnico") == tf:
+                if _nn(r.get("tecnico", "")) == tf_n:
                     s_ok += int(r.get("cumple", 0))
                     s_tot += int(r.get("total", 0))
-            s_pct = round(s_ok / s_tot * 100, 1) if s_tot > 0 else None
             eq_sla_ok += s_ok; eq_sla_tot += s_tot
 
-            # Precisión del técnico
             p_b = p_t = 0
             for r in [r for r in data.get("precision", []) if r.get("mes_num") in meses_filtro]:
-                if r.get("tecnico") == tf:
+                if _nn(r.get("tecnico", "")) == tf_n:
                     p_b += int(r.get("buenas", 0))
                     p_t += int(r.get("total", 0))
-            p_pct = round(p_b / p_t * 100, 1) if p_t > 0 else None
             eq_prec_b += p_b; eq_prec_t += p_t
 
-            # Efectividad MP del técnico
-            n_pm = pm_by_tec.get(tf, {}).get("pms", 0)
-            n_f = fallas_by_short.get(ts, 0)
-            mp_pct = round((1 - n_f / n_pm) * 100, 1) if n_pm > 0 else None
+            n_pm = _pm_bono.get(tf_n, 0)
+            n_f = _fallas_bono.get(ts, 0)
             eq_fallas += n_f; eq_pms += n_pm
 
-            # Niveles de bono
+            s_pct = round(s_ok / s_tot * 100, 1) if s_tot > 0 else None
+            p_pct = round(p_b / p_t * 100, 1) if p_t > 0 else None
+            mp_pct = round((1 - n_f / n_pm) * 100, 1) if n_pm > 0 else None
+
             niv_sla = _bono_sla(s_pct)[0] if s_pct is not None else 0
             niv_mp = _bono_calidad(n_f, n_pm)[0] if n_pm > 0 else 0
             niv_prec = _bono_prec(p_pct)[0] if p_pct is not None else 0
@@ -387,7 +400,6 @@ def index():
                 "cumpl": cumpl,
             })
 
-        # Equipo agregado
         eq_sla_pct = round(eq_sla_ok / eq_sla_tot * 100, 1) if eq_sla_tot > 0 else None
         eq_mp_pct = round((1 - eq_fallas / eq_pms) * 100, 1) if eq_pms > 0 else None
         eq_prec_pct = round(eq_prec_b / eq_prec_t * 100, 1) if eq_prec_t > 0 else None
@@ -395,6 +407,19 @@ def index():
         eq_niv_mp = _bono_calidad(eq_fallas, eq_pms)[0] if eq_pms > 0 else 0
         eq_niv_prec = _bono_prec(eq_prec_pct)[0] if eq_prec_pct is not None else 0
         eq_cumpl = round(0.40 * eq_niv_sla + 0.30 * eq_niv_mp + 0.30 * eq_niv_prec, 1)
+
+        for row in tec_rows:
+            if row["short"] in seniors_set:
+                row["sla_pct"] = eq_sla_pct
+                row["sla_ok"] = eq_sla_ok
+                row["sla_tot"] = eq_sla_tot
+                row["mp_pct"] = eq_mp_pct
+                row["mp_f"] = eq_fallas
+                row["mp_pm"] = eq_pms
+                row["prec_pct"] = eq_prec_pct
+                row["prec_b"] = eq_prec_b
+                row["prec_t"] = eq_prec_t
+                row["cumpl"] = eq_cumpl
 
         bono_equipos.append({
             "key": eq_key, "label": eq_label, "senior": senior_name,
