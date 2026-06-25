@@ -7414,6 +7414,8 @@ elif _page == _NAV_PAGES[0]:
             _grp_kpi = _LABEL_TO_GRUPO.get(equipo_kpi)
             if _grp_kpi:
                 df_ot_scores = df_ot_scores[df_ot_scores["equipo"] == _grp_kpi]
+        # Snapshot pre-filtro técnico: para tarjeta equipo de seniors
+        _df_ot_pre_tec = df_ot_scores
         if tec_kpi_sel != "Todos":
             df_ot_scores = df_ot_scores[df_ot_scores["tecnico"] == tec_kpi_sel]
 
@@ -7569,13 +7571,15 @@ elif _page == _NAV_PAGES[0]:
                 _tec_indiv = df_tec_scores[df_tec_scores["tecnico"] == tec_kpi_sel]
                 _render_prec_card(_col_indiv, tec_kpi_sel, "Registro individual", _tec_indiv, _t)
 
-                # Tarjeta 2: promedio del equipo completo (incluido el senior)
-                _tec_equipo = df_tec_scores[df_tec_scores["tecnico"].apply(_get_equipo) == _pgk_snr]
-                _n_eq = len(_tec_equipo)
+                # Tarjeta 2: equipo completo — usar datos PRE-filtro técnico
+                _df_equipo_full = score_llenado_por_tecnico(
+                    _df_ot_pre_tec[_df_ot_pre_tec["equipo"] == _pgk_snr]
+                )
+                _n_eq = len(_df_equipo_full)
                 _render_prec_card(_col_equipo,
                     f"Equipo {_pgl_snr} ({_n_eq} téc.)",
                     "Promedio equipo · base bono senior",
-                    _tec_equipo, _t)
+                    _df_equipo_full, _t)
             else:
                 # Flujo normal: 1 tarjeta por equipo
                 _prec_eq_cols = st.columns(len(_EQUIPO_LABEL_PREC))
