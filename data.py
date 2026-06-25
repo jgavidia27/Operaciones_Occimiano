@@ -913,6 +913,7 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "maint_type":       maint_type_raw,
             "es_correctiva":    es_correctiva,
             "status_id":        wo.get("id_status_work_order"),
+            "wo_status":        wo.get("wo_status") or {1:"Por Iniciar",2:"En Progreso",3:"Finalizadas",4:"Por Validar",5:"Canceladas"}.get(wo.get("id_status_work_order"), ""),
             "task_status":      (wo.get("task_status") or "").upper(),
             "note":             best_note,
             "note_words":       len(best_note.split()) if best_note else 0,
@@ -1018,8 +1019,13 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         _agg["eds_occim"] = ("eds_occim", "first")
     if "fichas_periodo" in df_kpi.columns:
         _agg["fichas_periodo"]  = ("fichas_periodo",  lambda x: next((v for v in x if v is not None), None))
+    if "wo_status" in df_kpi.columns:
+        _agg["wo_status"] = ("wo_status", "first")
 
     ot = df_kpi.groupby("folio").agg(**_agg).reset_index()
+
+    if "wo_status" not in ot.columns:
+        ot["wo_status"] = ""
 
     # Guard: asegurar columnas nuevas aunque vengan de caché viejo
     if "deteccion_ok"  not in ot.columns: ot["deteccion_ok"]  = False

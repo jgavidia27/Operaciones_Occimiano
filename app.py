@@ -62,7 +62,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v19-numeral-form-flag"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v20-wo-status-filter"  # bump para invalidar disco al cambiar data.py
 
 
 def _filtro_ot_input(key: str, columna_ot: str = "OT") -> str:
@@ -7235,7 +7235,7 @@ elif _page == _NAV_PAGES[0]:
                 )
             return _df
         try:
-            df_kpi_raw = _sc("df_kpi_raw", _wo_sig, _build_kpi_raw_cached)
+            df_kpi_raw = _sc("df_kpi_raw_v2", _wo_sig, _build_kpi_raw_cached)
         except Exception as _e_prec:
             st.error(f"⚠️ Error al cargar datos de KPI de llenado: {_e_prec}")
             st.exception(_e_prec)
@@ -7259,9 +7259,35 @@ elif _page == _NAV_PAGES[0]:
         # Vacío si la tabla aún no existe o no se corrió el sync.
         df_num_sub = _sc("df_num_sub_v1", _wo_sig, load_numerales_subtarea_supabase)
 
+        _ESTADOS_NO_PUNTUAN = {
+            "Canceladas", "Cancelado", "Cancelada",
+            "ERROR DE INGRESO",
+            "EQUIPO CON RECAMBIO",
+            "DUPLICADO", "Duplicidad",
+            "DE PRUEBA",
+            "FUE REPETIDA EN OTRA OS",
+            "PLAN INCOMPLETO",
+        }
+
+        @st.cache_data(ttl=1800, show_spinner=False)
+        def _load_ot_estados() -> dict:
+            """Consulta directa a Supabase: {id_ot: estado} para filtrar OTs no operativas."""
+            from supabase_client import _query
+            _rows = _query("ordenes_trabajo", "select=id_ot,estado&fecha_creacion=gte.2026-01-01", limit=20_000)
+            return {r["id_ot"]: r.get("estado", "") for r in _rows if r.get("id_ot")}
+
+        _ot_estados = _load_ot_estados()
+        _folios_excluir = {f for f, e in _ot_estados.items() if e in _ESTADOS_NO_PUNTUAN}
+
         def _build_ot_all():
             _df = score_llenado_por_ot(df_kpi_raw)
             if not _df.empty:
+                # Excluir OTs con estado no operativo (consulta directa a Supabase)
+                if _folios_excluir and "folio" in _df.columns:
+                    _n_antes = len(_df)
+                    _df = _df[~_df["folio"].isin(_folios_excluir)].copy()
+                # Agregar estado como columna para visualización
+                _df["wo_status"] = _df["folio"].map(_ot_estados).fillna("")
                 # Recalcular numeral_ok/motivo a partir de las subtareas
                 # cuando estén disponibles. Una OT pasa solo si TODAS sus
                 # subtareas-numeral pasan; el motivo es el más severo.
@@ -7280,7 +7306,7 @@ elif _page == _NAV_PAGES[0]:
                     _df["creation_date"].dt.tz_convert(None).dt.date
                 )
             return _df
-        df_ot_all = _sc("df_ot_all_scores_v2_sub", _wo_sig, _build_ot_all)
+        df_ot_all = _sc("df_ot_all_scores_v4_direct", _wo_sig, _build_ot_all)
 
         _meses_prec_nums = {int(str(m).split("-")[1]) for m in meses_disp if "-" in str(m)}
         _TRIMESTRES_PREC = {
@@ -8884,17 +8910,23 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     else:
                         drill_disp["_eds"] = "—"
 
+                    # Estado OT
+                    if "wo_status" in drill_disp.columns:
+                        drill_disp["_estado_ot"] = drill_disp["wo_status"].fillna("").replace("", "—")
+                    else:
+                        drill_disp["_estado_ot"] = "—"
+
                     # Selección ordenada y limpia — sin Modalidad (ya no entra al KPI)
                     drill_disp = drill_disp[[
                         "_cumple", "_x4", "folio", "_eds", "tecnico", "station", "_tipo",
-                        "score_total",
+                        "_estado_ot", "score_total",
                         "_col_tiempo", "_col_causa", "_col_numeral",
                         "_obs", "_fecha",
                     ]].copy()
 
                     drill_disp.columns = [
                         "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación", "Tipo",
-                        "Score",
+                        "Estado", "Score",
                         "⏱ Tiempo", "🔍 Causa raíz", "🔢 Numeral",
                         "💬 Observación", "Fecha",
                     ]
@@ -8935,6 +8967,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             "Técnico":          st.column_config.TextColumn(width=180),
                             "Estación":         st.column_config.TextColumn(width=200),
                             "Tipo":             st.column_config.TextColumn(width=130),
+                            "Estado":           st.column_config.TextColumn(width=110,
+                                help="Estado de la OT en Fracttal."),
                             "Score":            st.column_config.ProgressColumn(
                                 min_value=0, max_value=75, format="%.1f"),
                             "⏱ Tiempo":         st.column_config.TextColumn(width=110,
@@ -9094,6 +9128,9 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 return pd.DataFrame()
             _df = score_llenado_por_ot(_raw)
             if not _df.empty:
+                if _folios_excluir and "folio" in _df.columns:
+                    _df = _df[~_df["folio"].isin(_folios_excluir)].copy()
+                _df["wo_status"] = _df["folio"].map(_ot_estados).fillna("")
                 _df["equipo"] = _df["tecnico"].apply(_get_equipo)
                 _df["_tech_norm"] = _df["tecnico"].fillna("").apply(
                     lambda s: " ".join(_norm_n(s).split())
@@ -9109,7 +9146,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
 
         # Clave DISTINTA a "df_ot_all_scores" (usada por tab Precisión) para evitar
         # que el builder del KPI screen sobrescriba estos datos sin _tech_norm.
-        _df_ot_bono = _sc("df_ot_bono_scores", _wo_sig, _build_ot_all_bono)
+        _df_ot_bono = _sc("df_ot_bono_scores_v2", _wo_sig, _build_ot_all_bono)
         if not _df_ot_bono.empty and "mes" in _df_ot_bono.columns:
             _df_ot_bono_filt = _df_ot_bono[
                 _df_ot_bono["mes"].astype(str).isin(_meses_bono_activos)
@@ -9745,6 +9782,108 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     "Datos no disponibles para: **" + "**, **".join(_missing) + "**. "
                     "Visita las pestañas correspondientes para que se carguen los datos."
                 )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # EXPORTAR DATOS STO PARA APP MÓVIL (sto_data.json)
+    # ══════════════════════════════════════════════════════════════════════════
+    try:
+        import json as _json_mod
+        _sto_export_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sto_data.json")
+
+        # 1. SLA — datos completos (sin filtro de trimestre)
+        _sla_full = st.session_state.get(f"_sla_proc_v5_{len(df_llamados)}", pd.DataFrame())
+        _sla_records = []
+        if not _sla_full.empty:
+            _sla_exp = _sla_full[["tecnico", "equipo", "cumple_sla", "mes"]].copy() if {"tecnico","equipo","cumple_sla","mes"}.issubset(_sla_full.columns) else pd.DataFrame()
+            if not _sla_exp.empty:
+                _sla_exp["mes_num"] = _sla_exp["mes"].apply(lambda m: int(str(m).split("-")[1]) if "-" in str(m) else int(m) if str(m).isdigit() else 0)
+                _sla_exp["cumple"] = _sla_exp["cumple_sla"].fillna(False).astype(bool)
+                _sla_g = _sla_exp.groupby(["tecnico", "equipo", "mes_num"]).agg(
+                    cumple=("cumple", "sum"), total=("cumple", "count"),
+                ).reset_index()
+                _sla_records = _sla_g.to_dict(orient="records")
+
+        # 2. Precisión — datos completos (sin filtro de trimestre)
+        # Usar df_ot_all_scores_v4_direct (incluye aplicar_numerales_subtarea + filtro canceladas)
+        # para que coincida con lo que muestra la pestaña Precisión Fracttal.
+        _ot_full = st.session_state.get("df_ot_all_scores_v4_direct",
+                   st.session_state.get("df_ot_bono_scores", pd.DataFrame()))
+        _prec_records = []
+        if not _ot_full.empty and "score_total" in _ot_full.columns:
+            _prec_exp = _ot_full[["tecnico", "equipo", "score_total", "mes"]].copy() if {"tecnico","equipo","score_total","mes"}.issubset(_ot_full.columns) else pd.DataFrame()
+            if not _prec_exp.empty:
+                _prec_exp["mes_num"] = _prec_exp["mes"].apply(lambda m: int(str(m).split("-")[1]) if "-" in str(m) else int(m) if str(m).isdigit() else 0)
+                _prec_exp["buena"] = _prec_exp["score_total"] >= 75
+                _prec_g = _prec_exp.groupby(["tecnico", "equipo", "mes_num"]).agg(
+                    buenas=("buena", "sum"), total=("buena", "count"),
+                ).reset_index()
+                _prec_records = _prec_g.to_dict(orient="records")
+
+        # 3. Efectividad — reincidencias completas
+        _reinc_full = st.session_state.get("df_reinc", pd.DataFrame())
+        _reinc_records = []
+        if not _reinc_full.empty and "falla_tipo" in _reinc_full.columns:
+            _reinc_exp = _reinc_full[~_reinc_full["falla_tipo"].isin(["especial"])].copy()
+            if "causa_clasif" in _reinc_exp.columns:
+                _reinc_exp["es_reinc_tec"] = (
+                    (_reinc_exp["falla_tipo"] != "especial") &
+                    (_reinc_exp["causa_clasif"] != "cliente")
+                )
+            else:
+                _reinc_exp["es_reinc_tec"] = True
+            if "fecha_cm" in _reinc_exp.columns:
+                _reinc_exp["mes_num"] = pd.to_datetime(_reinc_exp["fecha_cm"], errors="coerce").dt.month
+            if "tecnico_resp_short" in _reinc_exp.columns and "grupo_responsable" in _reinc_exp.columns:
+                _reinc_g = _reinc_exp[_reinc_exp["es_reinc_tec"]].groupby(
+                    ["tecnico_resp_short", "grupo_responsable", "mes_num"]
+                ).agg(fallas=("folio_cm", "nunique") if "folio_cm" in _reinc_exp.columns else ("es_reinc_tec", "count")).reset_index()
+                _reinc_records = _reinc_g.rename(columns={"tecnico_resp_short": "tecnico_short", "grupo_responsable": "equipo"}).to_dict(orient="records")
+
+        # 4. PMs — para denominador de efectividad
+        _CLIENTES_SLA_EXP = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
+        _pm_records = []
+        if not df_wo.empty:
+            _pm_exp = df_wo[
+                (df_wo["maint_type"] == "Preventiva") &
+                (~df_wo["technician"].apply(_es_excluido)) &
+                (df_wo["equipo"] != "Sin equipo") &
+                (df_wo["client"].isin(_CLIENTES_SLA_EXP) if "client" in df_wo.columns else True)
+            ].copy()
+            if not _pm_exp.empty:
+                _pm_dates = _pm_exp["creation_date"].dt.tz_convert(None) if _pm_exp["creation_date"].dt.tz is not None else _pm_exp["creation_date"]
+                _pm_exp["mes_num"] = _pm_dates.dt.month
+                _pm_exp["_tech_norm"] = _pm_exp["technician"].fillna("").apply(lambda s: " ".join(_norm_n(s).split()))
+                _pm_g = _pm_exp.groupby(["technician", "equipo", "mes_num"]).agg(
+                    pms=("folio", "nunique") if "folio" in _pm_exp.columns else ("technician", "count"),
+                ).reset_index()
+                _pm_records = _pm_g.rename(columns={"technician": "tecnico"}).to_dict(orient="records")
+
+        # 5. Tech name maps y equipos
+        _tech_map_exp = {k: v for k, v in TECH_NAME_MAP.items()}
+        _equipos_exp = {}
+        for _gk, _gv in GRUPOS_TERRENO.items():
+            _miembros = [TECH_NAME_MAP.get(m, m) for m in _gv.get("miembros", [])]
+            _equipos_exp[_gk] = {
+                "label": _EQUIPO_LABEL.get(_gk, _gk),
+                "senior": _gv.get("senior", ""),
+                "miembros": _miembros,
+            }
+
+        _export_obj = {
+            "updated_at": datetime.now().isoformat(),
+            "sla": _sla_records,
+            "precision": _prec_records,
+            "reincidencias": _reinc_records,
+            "pms": _pm_records,
+            "tech_name_map": _tech_map_exp,
+            "full_to_short": {v: k for k, v in TECH_NAME_MAP.items()},
+            "equipos": _equipos_exp,
+            "seniors": list(SENIORS),
+        }
+        with open(_sto_export_path, "w", encoding="utf-8") as _jf:
+            _json_mod.dump(_export_obj, _jf, ensure_ascii=False, default=str)
+    except Exception:
+        pass
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PÁGINA 5: MANTENCIONES PREVENTIVAS

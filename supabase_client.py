@@ -371,6 +371,7 @@ def load_work_orders_supabase() -> list:
                 "items_log_description":      _nom,
                 "groups_2_description":       r.get("codigo_eds"),
                 "id_status_work_order":       None,
+                "wo_status":                  r.get("estado"),
                 "task_status":                r.get("estado_tarea"),
                 "done":                       r.get("completada", False),
                 "tasks_duration":             r.get("duracion_real_seg"),
