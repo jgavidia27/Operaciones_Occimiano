@@ -227,16 +227,31 @@ def index():
             tec_data[t] = {"equipo": eq, "cumple": 0, "total": 0}
         tec_data[t]["cumple"] += int(r.get("cumple", 0))
         tec_data[t]["total"] += int(r.get("total", 0))
+    _sla_eq_agg = {}
+    for t, d in tec_data.items():
+        eq = d["equipo"]
+        if eq not in _sla_eq_agg:
+            _sla_eq_agg[eq] = {"cumple": 0, "total": 0}
+        _sla_eq_agg[eq]["cumple"] += int(d["cumple"])
+        _sla_eq_agg[eq]["total"] += int(d["total"])
     for t, d in tec_data.items():
         if not t or d["total"] == 0:
             continue
-        pct = round(d["cumple"] / d["total"] * 100, 1)
+        t_short = full_to_short.get(t, t)
+        _is_snr = t_short in seniors
+        if _is_snr:
+            eq_d = _sla_eq_agg.get(d["equipo"], d)
+            c, tot = eq_d["cumple"], eq_d["total"]
+            pct = round(c / tot * 100, 1) if tot > 0 else 0
+        else:
+            c, tot = d["cumple"], d["total"]
+            pct = round(c / tot * 100, 1)
         bp, bc = _bono_sla(pct)
         sla_tecnicos.append({
-            "nombre": full_to_short.get(t, t),
+            "nombre": t_short,
             "equipo": equipos_label.get(d["equipo"], d["equipo"]),
-            "pct": pct, "cumple": d["cumple"], "total": d["total"],
-            "bono_pct": bp, "bono_clp": bc,
+            "pct": pct, "cumple": c, "total": tot,
+            "bono_pct": bp, "bono_clp": bc, "es_senior": _is_snr,
         })
     sla_tecnicos.sort(key=lambda x: x["pct"], reverse=True)
 
@@ -356,15 +371,32 @@ def index():
             fallas_by_short[ts] = 0
         fallas_by_short[ts] += int(r.get("fallas", 0))
 
+    _cal_eq_pm = {}
+    _cal_eq_f = {}
+    for t, d in pm_by_tec.items():
+        eq = d["equipo"]
+        _cal_eq_pm[eq] = _cal_eq_pm.get(eq, 0) + d["pms"]
+    for ts, n_f in fallas_by_short.items():
+        t_full = tech_name_map.get(ts, ts)
+        eq = pm_by_tec.get(t_full, {}).get("equipo", "")
+        if eq:
+            _cal_eq_f[eq] = _cal_eq_f.get(eq, 0) + n_f
     for t, d in pm_by_tec.items():
         t_short = full_to_short.get(t, t)
-        n_f = fallas_by_short.get(t_short, 0)
-        n_pm = d["pms"]
+        _is_snr = t_short in seniors
+        if _is_snr:
+            eq = d["equipo"]
+            n_f = _cal_eq_f.get(eq, 0)
+            n_pm = _cal_eq_pm.get(eq, 0)
+        else:
+            n_f = fallas_by_short.get(t_short, 0)
+            n_pm = d["pms"]
         _, bc_t, ex_t = _bono_calidad(n_f, n_pm)
         cal_tecnicos.append({
             "nombre": t_short,
             "equipo": equipos_label.get(d["equipo"], d["equipo"]),
             "exactitud": round(ex_t, 1), "fallas": n_f, "pms": n_pm, "bono_clp": bc_t,
+            "es_senior": _is_snr,
         })
     cal_tecnicos.sort(key=lambda x: x["exactitud"], reverse=True)
 
@@ -714,7 +746,7 @@ HTML_TEMPLATE = r"""
   <div class="ranking">
     {% for t in sla.tecnicos %}
     <div class="rank-row">
-      <span class="rank-name">{{ t.nombre }} <span class="rank-eq">{{ t.equipo }}</span></span>
+      <span class="rank-name">{{ t.nombre }} <span class="rank-eq">{{ t.equipo }}</span>{% if t.es_senior %} <span style="background:#f59e0b;color:#000;border-radius:3px;padding:1px 5px;font-size:.6rem;font-weight:700;vertical-align:middle;">PROMEDIO EQUIPO</span>{% endif %}</span>
       <span class="rank-pct" style="color:{{ color_pct(t.pct) }}">{{ t.pct }}%</span>
       <span class="rank-clp">${{ '{:,.0f}'.format(t.bono_clp) }}</span>
     </div>
@@ -740,7 +772,7 @@ HTML_TEMPLATE = r"""
   <div class="ranking">
     {% for t in cal.tecnicos %}
     <div class="rank-row">
-      <span class="rank-name">{{ t.nombre }} <span class="rank-eq">{{ t.equipo }}</span></span>
+      <span class="rank-name">{{ t.nombre }} <span class="rank-eq">{{ t.equipo }}</span>{% if t.es_senior %} <span style="background:#f59e0b;color:#000;border-radius:3px;padding:1px 5px;font-size:.6rem;font-weight:700;vertical-align:middle;">PROMEDIO EQUIPO</span>{% endif %}</span>
       <span class="rank-pct" style="color:{{ color_pct(t.exactitud) }}">{{ t.exactitud }}%</span>
       <span class="rank-clp">{{ t.fallas }}F / {{ t.pms }}PM</span>
     </div>
