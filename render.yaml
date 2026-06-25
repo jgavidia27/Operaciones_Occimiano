@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: occimiano-sto-mobile
+    runtime: python
+    plan: free
+    buildCommand: pip install flask gunicorn requests
+    startCommand: gunicorn mobile_sto:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false

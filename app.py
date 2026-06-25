@@ -9874,6 +9874,16 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
         }
         with open(_sto_export_path, "w", encoding="utf-8") as _jf:
             _json_mod.dump(_export_obj, _jf, ensure_ascii=False, default=str)
+        # Subir a Supabase para que la app móvil lo lea remotamente
+        try:
+            from supabase_client import _post as _post_sb
+            _post_sb("sto_data_export", {
+                "id": "latest",
+                "data": _export_obj,
+                "updated_at": datetime.now().isoformat(),
+            })
+        except Exception:
+            pass
     except Exception:
         pass
 

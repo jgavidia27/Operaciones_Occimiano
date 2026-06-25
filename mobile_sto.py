@@ -68,6 +68,24 @@ def _color_pct(pct):
 
 
 def _load_sto_data():
+    # Primero intentar Supabase (deploy remoto)
+    try:
+        import requests as _req
+        _sb_url = os.getenv("SUPABASE_URL", "")
+        _sb_key = os.getenv("SUPABASE_KEY", "")
+        if _sb_url and _sb_key:
+            r = _req.get(
+                f"{_sb_url}/rest/v1/sto_data_export?id=eq.latest&select=data",
+                headers={"apikey": _sb_key, "Authorization": f"Bearer {_sb_key}"},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                rows = r.json()
+                if rows and isinstance(rows, list) and rows[0].get("data"):
+                    return rows[0]["data"]
+    except Exception:
+        pass
+    # Fallback: archivo local
     if not os.path.exists(_STO_DATA_PATH):
         return None
     with open(_STO_DATA_PATH, "r", encoding="utf-8") as f:
