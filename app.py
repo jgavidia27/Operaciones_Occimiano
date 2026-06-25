@@ -9875,6 +9875,88 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
             "equipos": _equipos_exp,
             "seniors": list(SENIORS),
         }
+
+        # 6. Bono table pre-computed for mobile app
+        try:
+            from datetime import date as _dt_cc
+            _yr = datetime.now().year
+            _TRIMS_E = {"T1":[1,2,3],"T2":[4,5,6],"T3":[7,8,9],"T4":[10,11,12]}
+            _CC_STGO_E = ["Juan Gallardo","Luis Pinto","Victor Bahamonde"]
+            _CC_REF_E = _dt_cc(2026,3,16)
+            _bono_tbl = {}
+            for _tk,_tm in _TRIMS_E.items():
+                _cc_w = {}
+                for _mm in _tm:
+                    _ps = f"{_yr}-{_mm:02d}"
+                    for _lun in pd.date_range(pd.Period(_ps,"M").start_time,pd.Period(_ps,"M").end_time,freq="W-MON"):
+                        _eq_r = _CC_STGO_E[(_lun.date()-_CC_REF_E).days//7 % 3]
+                        _cc_w[_eq_r] = _cc_w.get(_eq_r,0)+1
+                _sf = [r for r in _sla_records if r.get("mes_num") in _tm]
+                _pf = [r for r in _prec_records if r.get("mes_num") in _tm]
+                _mfr = [r for r in _pm_records if r.get("mes_num") in _tm]
+                _rfr = [r for r in _reinc_records if r.get("mes_num") in _tm]
+                _bt = []
+                for _gk,_gv in GRUPOS_TERRENO.items():
+                    _ms = [m for m in _gv.get("miembros",[]) if not _es_excluido(TECH_NAME_MAP.get(m,m))]
+                    _mfl = [TECH_NAME_MAP.get(m,m) for m in _ms]; _n = len(_mfl)
+                    if not _n: continue
+                    eso = sum(r.get("cumple",0) for r in _sf if r.get("equipo")==_gk)
+                    est = sum(r.get("total",0) for r in _sf if r.get("equipo")==_gk)
+                    epb = sum(r.get("buenas",0) for r in _pf if r.get("equipo")==_gk)
+                    ept = sum(r.get("total",0) for r in _pf if r.get("equipo")==_gk)
+                    epm = sum(r.get("pms",0) for r in _mfr if r.get("equipo")==_gk)
+                    efl = sum(r.get("fallas",0) for r in _rfr if r.get("equipo")==_gk)
+                    esp = round(eso/est*100,1) if est else None
+                    emp = round((1-efl/epm)*100,1) if epm else None
+                    epp = round(epb/ept*100,1) if ept else None
+                    ens = _bono_sla(esp)[0] if esp is not None else 0
+                    enm = _bono_calidad(efl,epm)[0] if epm else 0
+                    enp = _bono_prec(epp)[0] if epp is not None else 0
+                    ec = round(.40*ens+.30*enm+.30*enp,1)
+                    ppi = int(int(_BONO_TOTAL/_n)*.50); ppe = ppi
+                    ncc = _cc_w.get(_gk,0); bcc = int(100000*ncc/_n) if _n else 0
+                    be = int(ppe*.40*ens/100+ppe*.30*enm/100+ppe*.30*enp/100)
+                    _trs = []
+                    for tf in _mfl:
+                        ts = next((k for k,v in TECH_NAME_MAP.items() if v==tf),tf)
+                        iss = ts in SENIORS
+                        if iss:
+                            so,st2,pb,pt,fl,pm = eso,est,epb,ept,efl,epm
+                        else:
+                            so = sum(r.get("cumple",0) for r in _sf if r.get("tecnico")==tf)
+                            st2 = sum(r.get("total",0) for r in _sf if r.get("tecnico")==tf)
+                            pb = sum(r.get("buenas",0) for r in _pf if r.get("tecnico")==tf)
+                            pt = sum(r.get("total",0) for r in _pf if r.get("tecnico")==tf)
+                            pm = sum(r.get("pms",0) for r in _mfr if r.get("tecnico")==tf)
+                            fl = sum(r.get("fallas",0) for r in _rfr if r.get("tecnico_short")==ts)
+                        sp = round(so/st2*100,1) if st2 else None
+                        mp2 = round((1-fl/pm)*100,1) if pm else None
+                        pp2 = round(pb/pt*100,1) if pt else None
+                        ns = _bono_sla(sp)[0] if sp is not None else 0
+                        nm = _bono_calidad(fl,pm)[0] if pm else 0
+                        np2 = _bono_prec(pp2)[0] if pp2 is not None else 0
+                        c = round(.40*ns+.30*nm+.30*np2,1)
+                        bi = int(ppi*.40*ns/100+ppi*.30*nm/100+ppi*.30*np2/100)
+                        tot = bi+be+bcc
+                        _trs.append({"short":ts,"is_senior":iss,
+                            "sla_pct":sp,"sla_ok":so,"sla_tot":st2,"sla_niv":ns,
+                            "mp_pct":mp2,"mp_f":fl,"mp_pm":pm,"mp_niv":nm,
+                            "prec_pct":pp2,"prec_b":pb,"prec_t":pt,"prec_niv":np2,
+                            "cumpl":c,"bono_ind":bi,"bono_eq":be,"bono_cc":bcc,
+                            "total_trim":tot,"prom_mensual":tot//3})
+                    _bt.append({"key":_gk,"label":_EQUIPO_LABEL.get(_gk,_gk),
+                        "senior":_gv.get("senior",""),"n_eq":_n,
+                        "pp_ind":ppi,"pp_eq":ppe,"n_semanas_cc":ncc,"bono_cc_eq":100000*ncc,
+                        "tecs":_trs,
+                        "eq":{"sla_pct":esp,"sla_ok":eso,"sla_tot":est,"sla_niv":ens,
+                            "mp_pct":emp,"mp_f":efl,"mp_pm":epm,"mp_niv":enm,
+                            "prec_pct":epp,"prec_b":epb,"prec_t":ept,"prec_niv":enp,
+                            "cumpl":ec}})
+                _bono_tbl[_tk] = _bt
+            _export_obj["bono_table"] = _bono_tbl
+        except Exception:
+            pass
+
         with open(_sto_export_path, "w", encoding="utf-8") as _jf:
             _json_mod.dump(_export_obj, _jf, ensure_ascii=False, default=str)
         # Subir a Supabase para que la app móvil lo lea remotamente
