@@ -7488,6 +7488,60 @@ elif _page == _NAV_PAGES[0]:
         st.divider()
 
         # ── Tarjetas de bono por equipo (sin título, justo bajo los filtros) ─────
+
+        def _render_prec_card(col_st, titulo, subtitulo, tecs_df, theme):
+            """Genera el HTML de una tarjeta de Precisión Fracttal."""
+            _n = len(tecs_df)
+            _llen  = int(tecs_df["ots_evaluadas"].sum()) if _n > 0 else 0
+            _err   = int(tecs_df["n_errores"].sum())     if _n > 0 else 0
+            _ok    = _llen - _err
+            _pct   = (_ok / _llen * 100) if _llen > 0 else 100.0
+            _etd = int(tecs_df["err_total_dim"].sum()) if "err_total_dim" in tecs_df.columns else _err
+            _et = int(tecs_df["err_tiempo"].sum())    if "err_tiempo"    in tecs_df.columns else 0
+            _ec = int(tecs_df["err_causa"].sum())     if "err_causa"     in tecs_df.columns else 0
+            _en = int(tecs_df["err_numeral"].sum())   if "err_numeral"   in tecs_df.columns else 0
+            _ed = int(tecs_df["err_deteccion"].sum()) if "err_deteccion" in tecs_df.columns else 0
+            _bsum = int(tecs_df["bono_semanal"].sum()) if _n > 0 else 0
+            _cbon = int(tecs_df["umbral_bono"].sum())  if _n > 0 else 0
+            _bp, _bl, _bc, _bclp = _bono_prec(_pct)
+            _bw = min(100, max(0, _pct))
+            col_st.markdown(
+                f'<div style="background:{theme["card"]};border:2px solid {_bc}33;'
+                f'border-radius:8px;padding:12px 14px;text-align:center;">'
+                f'<div style="font-weight:700;font-size:0.92rem;color:{theme["text"]};">{titulo}</div>'
+                f'<div style="font-size:0.75rem;color:{theme["muted"]};margin-bottom:6px;">{subtitulo}</div>'
+                f'<div style="font-size:2rem;font-weight:800;line-height:1.1;color:{_bc};">'
+                f'{_pct:.1f}%</div>'
+                f'<div style="font-size:0.68rem;font-weight:600;letter-spacing:0.05em;'
+                f'text-transform:uppercase;color:{theme["muted"]};margin-bottom:6px;">cumplimiento</div>'
+                f'<div style="background:{theme["prog_bg"]};border-radius:4px;height:8px;margin-bottom:6px;">'
+                f'<div style="background:{_bc};width:{_bw:.0f}%;height:8px;border-radius:4px;"></div></div>'
+                f'<div style="background:{_bc};color:#fff;border-radius:4px;'
+                f'padding:3px 10px;font-size:0.82rem;font-weight:700;'
+                f'margin:0 auto 8px auto;display:inline-block;">{_bl}</div>'
+                f'<div style="border-top:1px solid {theme["muted"]}22;margin:6px 0;"></div>'
+                f'<div style="display:flex;justify-content:center;gap:8px;margin-bottom:4px;">'
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:1.0rem;font-weight:700;color:{theme["text"]};">{_llen}</div>'
+                f'<div style="font-size:0.60rem;color:{theme["muted"]};">llenadas</div></div>'
+                f'<div style="font-size:0.9rem;color:{theme["muted"]};padding-top:3px;">→</div>'
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:1.0rem;font-weight:700;color:#ef4444;">{_err}</div>'
+                f'<div style="font-size:0.60rem;color:{theme["muted"]};">con error</div></div>'
+                f'<div style="font-size:0.9rem;color:{theme["muted"]};padding-top:3px;">+</div>'
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:1.0rem;font-weight:700;color:#22c55e;">{_ok}</div>'
+                f'<div style="font-size:0.60rem;color:{theme["muted"]};">correctas</div></div>'
+                f'</div>'
+                f'<div style="font-size:0.64rem;color:{theme["muted"]};margin-bottom:5px;">'
+                f'Err.: {_etd} &nbsp;'
+                f'(⏱{_et} 🔍{_ec} 🔢{_en} 🎯{_ed})</div>'
+                f'<div style="font-size:0.68rem;color:{theme["muted"]};margin-top:2px;">'
+                f'{_cbon}/{_n} con bono · ${_bsum:,.0f}/sem</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
         if not df_tec_scores.empty and not df_ot_scores.empty:
             # Técnico específico → 1 tarjeta (su equipo)
             # Equipo específico  → 1 tarjeta (ese equipo)
@@ -7500,85 +7554,47 @@ elif _page == _NAV_PAGES[0]:
                 _EQUIPO_LABEL_PREC = {k: v for k, v in _EQUIPO_LABEL.items() if k == _grp_kpi_prec} or _EQUIPO_LABEL
             else:
                 _EQUIPO_LABEL_PREC = _EQUIPO_LABEL
-            _prec_eq_cols = st.columns(len(_EQUIPO_LABEL_PREC))
-            for _pi, (_pgk, _pgl) in enumerate(
-                zip(_EQUIPO_LABEL_PREC.keys(), _EQUIPO_LABEL_PREC.values())
-            ):
-                _senior_prec = GRUPOS_TERRENO.get(_pgk, {}).get("senior", "")
-                _tecs_grp = df_tec_scores[
-                    df_tec_scores["tecnico"].apply(_get_equipo) == _pgk
-                ] if not df_tec_scores.empty else pd.DataFrame()
-                _n_tecs_prec   = len(_tecs_grp)
-                _ots_llenadas  = int(_tecs_grp["ots_evaluadas"].sum()) if _n_tecs_prec > 0 else 0
-                _ots_erradas   = int(_tecs_grp["n_errores"].sum())     if _n_tecs_prec > 0 else 0
-                _ots_correctas = _ots_llenadas - _ots_erradas
-                _cumpl_pct     = (_ots_correctas / _ots_llenadas * 100) if _ots_llenadas > 0 else 100.0
-                _err_total_dim = int(_tecs_grp["err_total_dim"].sum()) if "err_total_dim" in _tecs_grp.columns else _ots_erradas
-                _err_t = int(_tecs_grp["err_tiempo"].sum())    if "err_tiempo"    in _tecs_grp.columns else 0
-                _err_c = int(_tecs_grp["err_causa"].sum())     if "err_causa"     in _tecs_grp.columns else 0
-                _err_n = int(_tecs_grp["err_numeral"].sum())   if "err_numeral"   in _tecs_grp.columns else 0
-                _err_d = int(_tecs_grp["err_deteccion"].sum()) if "err_deteccion" in _tecs_grp.columns else 0
-                _bono_sum_prec = int(_tecs_grp["bono_semanal"].sum()) if _n_tecs_prec > 0 else 0
-                _con_bono_prec = int(_tecs_grp["umbral_bono"].sum())  if _n_tecs_prec > 0 else 0
-                _pbpct, _pblbl, _pbcol, _pbclp = _bono_prec(_cumpl_pct)
 
-                # Barra de progreso de cumplimiento
-                _bar_w = min(100, max(0, _cumpl_pct))
-                _bar_col = _pbcol
+            # Detectar si el técnico seleccionado es un senior
+            _tec_short_sel = {v: k for k, v in TECH_NAME_MAP.items()}.get(tec_kpi_sel, "")
+            _es_senior_sel = tec_kpi_sel != "Todos" and _tec_short_sel in SENIORS
 
-                # Cuando hay un técnico específico seleccionado y esta tarjeta tiene sus datos,
-                # mostrar el nombre del técnico como título y el equipo como contexto.
-                if tec_kpi_sel != "Todos" and _n_tecs_prec > 0:
-                    _card_titulo    = tec_kpi_sel
-                    _card_subtitulo = f"Equipo: {_pgl}"
-                else:
-                    _card_titulo    = _pgl
-                    _card_subtitulo = f"Senior: {_senior_prec}"
+            if _es_senior_sel:
+                # Senior seleccionado → 2 tarjetas: individual + promedio equipo
+                _pgk_snr = _get_equipo(tec_kpi_sel)
+                _pgl_snr = _EQUIPO_LABEL.get(_pgk_snr, _pgk_snr)
+                _col_indiv, _col_equipo = st.columns(2)
 
-                _prec_eq_cols[_pi].markdown(
-                    f'<div style="background:{_t["card"]};border:2px solid {_pbcol}33;'
-                    f'border-radius:8px;padding:12px 14px;text-align:center;">'
-                    # Nombre técnico o equipo
-                    f'<div style="font-weight:700;font-size:0.92rem;color:{_t["text"]};">{_card_titulo}</div>'
-                    f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-bottom:6px;">{_card_subtitulo}</div>'
-                    # ── CUMPLIMIENTO — protagonista ──
-                    f'<div style="font-size:2rem;font-weight:800;line-height:1.1;color:{_pbcol};">'
-                    f'{_cumpl_pct:.1f}%</div>'
-                    f'<div style="font-size:0.68rem;font-weight:600;letter-spacing:0.05em;'
-                    f'text-transform:uppercase;color:{_t["muted"]};margin-bottom:6px;">cumplimiento</div>'
-                    # Barra de cumplimiento
-                    f'<div style="background:{_t["prog_bg"]};border-radius:4px;height:8px;margin-bottom:6px;">'
-                    f'<div style="background:{_bar_col};width:{_bar_w:.0f}%;height:8px;border-radius:4px;"></div></div>'
-                    # Chip bono
-                    f'<div style="background:{_pbcol};color:#fff;border-radius:4px;'
-                    f'padding:3px 10px;font-size:0.82rem;font-weight:700;'
-                    f'margin:0 auto 8px auto;display:inline-block;">{_pblbl}</div>'
-                    # Separador sutil
-                    f'<div style="border-top:1px solid {_t["muted"]}22;margin:6px 0;"></div>'
-                    # Fila: OTs llenadas / erradas / correctas  (secundario, más pequeño)
-                    f'<div style="display:flex;justify-content:center;gap:8px;margin-bottom:4px;">'
-                    f'<div style="text-align:center;">'
-                    f'<div style="font-size:1.0rem;font-weight:700;color:{_t["text"]};">{_ots_llenadas}</div>'
-                    f'<div style="font-size:0.60rem;color:{_t["muted"]};">llenadas</div></div>'
-                    f'<div style="font-size:0.9rem;color:{_t["muted"]};padding-top:3px;">→</div>'
-                    f'<div style="text-align:center;">'
-                    f'<div style="font-size:1.0rem;font-weight:700;color:#ef4444;">{_ots_erradas}</div>'
-                    f'<div style="font-size:0.60rem;color:{_t["muted"]};">con error</div></div>'
-                    f'<div style="font-size:0.9rem;color:{_t["muted"]};padding-top:3px;">+</div>'
-                    f'<div style="text-align:center;">'
-                    f'<div style="font-size:1.0rem;font-weight:700;color:#22c55e;">{_ots_correctas}</div>'
-                    f'<div style="font-size:0.60rem;color:{_t["muted"]};">correctas</div></div>'
-                    f'</div>'
-                    # Desglose errores individuales (informativo)
-                    f'<div style="font-size:0.64rem;color:{_t["muted"]};margin-bottom:5px;">'
-                    f'Err.: {_err_total_dim} &nbsp;'
-                    f'(⏱{_err_t} 🔍{_err_c} 🔢{_err_n} 🎯{_err_d})</div>'
-                    # Con bono
-                    f'<div style="font-size:0.68rem;color:{_t["muted"]};margin-top:2px;">'
-                    f'{_con_bono_prec}/{_n_tecs_prec} con bono · ${_bono_sum_prec:,.0f}/sem</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+                # Tarjeta 1: solo las OTs del senior
+                _tec_indiv = df_tec_scores[df_tec_scores["tecnico"] == tec_kpi_sel]
+                _render_prec_card(_col_indiv, tec_kpi_sel, "Registro individual", _tec_indiv, _t)
+
+                # Tarjeta 2: promedio del equipo completo (incluido el senior)
+                _tec_equipo = df_tec_scores[df_tec_scores["tecnico"].apply(_get_equipo) == _pgk_snr]
+                _n_eq = len(_tec_equipo)
+                _render_prec_card(_col_equipo,
+                    f"Equipo {_pgl_snr} ({_n_eq} téc.)",
+                    "Promedio equipo · base bono senior",
+                    _tec_equipo, _t)
+            else:
+                # Flujo normal: 1 tarjeta por equipo
+                _prec_eq_cols = st.columns(len(_EQUIPO_LABEL_PREC))
+                for _pi, (_pgk, _pgl) in enumerate(
+                    zip(_EQUIPO_LABEL_PREC.keys(), _EQUIPO_LABEL_PREC.values())
+                ):
+                    _senior_prec = GRUPOS_TERRENO.get(_pgk, {}).get("senior", "")
+                    _tecs_grp = df_tec_scores[
+                        df_tec_scores["tecnico"].apply(_get_equipo) == _pgk
+                    ] if not df_tec_scores.empty else pd.DataFrame()
+
+                    if tec_kpi_sel != "Todos" and len(_tecs_grp) > 0:
+                        _card_titulo    = tec_kpi_sel
+                        _card_subtitulo = f"Equipo: {_pgl}"
+                    else:
+                        _card_titulo    = _pgl
+                        _card_subtitulo = f"Senior: {_senior_prec}"
+
+                    _render_prec_card(_prec_eq_cols[_pi], _card_titulo, _card_subtitulo, _tecs_grp, _t)
             st.caption(
                 "**Llenadas** = OTs evaluadas en el período (base 100%)  ·  "
                 "**Con error** = OTs con ≥1 componente malo  ·  "
