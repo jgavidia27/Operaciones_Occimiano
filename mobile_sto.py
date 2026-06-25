@@ -456,6 +456,7 @@ ERROR_TEMPLATE = r"""
 <!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Indicadores Operacionales - Occim 📲</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📲</text></svg>">
 <style>
   body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0;
     display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
@@ -482,6 +483,7 @@ HTML_TEMPLATE = r"""
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Indicadores Operacionales - Occim 📲</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📲</text></svg>">
 <style>
   :root {
     --bg: #0a1628; --card: rgba(15,22,42,.92); --border: rgba(51,65,85,.7);

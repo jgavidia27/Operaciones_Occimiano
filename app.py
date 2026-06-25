@@ -817,7 +817,7 @@ def _login_page_wrapper_start(title: str) -> None:
 
 st.set_page_config(
     page_title="Indicadores Operacionales - Occim",
-    page_icon="🌐",
+    page_icon="🥇",
     layout="wide",
     initial_sidebar_state="expanded",
 )
