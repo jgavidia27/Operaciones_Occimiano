@@ -551,8 +551,7 @@ HTML_TEMPLATE = r"""
   }
   .app-header h1 {
     font-size: 1.35rem; font-weight: 800; letter-spacing: .02em;
-    background: linear-gradient(135deg, var(--teal), var(--blue));
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    color: #ffffff;
   }
   .subtitle { text-align: center; font-size: .75rem; color: var(--muted); margin-top: 2px; }
   h2 { font-size: 1.05rem; margin: 16px 0 8px; color: var(--muted); letter-spacing: .03em; }
