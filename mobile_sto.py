@@ -314,10 +314,85 @@ def index():
 
     bono_total = bc_sla + bc_cal + bc_prec
 
+    # ═══ RESUMEN BONOS POR EQUIPO (estilo dashboard) ═══
+    bono_equipos = []
+    for eq_key, eq_info in equipos_info.items():
+        miembros_full = eq_info.get("miembros", [])
+        if not miembros_full:
+            continue
+        senior_name = eq_info.get("senior", "")
+        eq_label = equipos_label.get(eq_key, eq_key)
+        n_eq = len(miembros_full)
+
+        tec_rows = []
+        eq_sla_ok = eq_sla_tot = 0
+        eq_prec_b = eq_prec_t = 0
+        eq_fallas = eq_pms = 0
+
+        for tf in miembros_full:
+            ts = full_to_short.get(tf, tf)
+            # SLA del técnico
+            s_ok = s_tot = 0
+            for r in [r for r in data.get("sla", []) if r.get("mes_num") in meses_filtro]:
+                if r.get("tecnico") == tf:
+                    s_ok += int(r.get("cumple", 0))
+                    s_tot += int(r.get("total", 0))
+            s_pct = round(s_ok / s_tot * 100, 1) if s_tot > 0 else None
+            eq_sla_ok += s_ok; eq_sla_tot += s_tot
+
+            # Precisión del técnico
+            p_b = p_t = 0
+            for r in [r for r in data.get("precision", []) if r.get("mes_num") in meses_filtro]:
+                if r.get("tecnico") == tf:
+                    p_b += int(r.get("buenas", 0))
+                    p_t += int(r.get("total", 0))
+            p_pct = round(p_b / p_t * 100, 1) if p_t > 0 else None
+            eq_prec_b += p_b; eq_prec_t += p_t
+
+            # Efectividad MP del técnico
+            n_pm = pm_by_tec.get(tf, {}).get("pms", 0)
+            n_f = fallas_by_short.get(ts, 0)
+            mp_pct = round((1 - n_f / n_pm) * 100, 1) if n_pm > 0 else None
+            eq_fallas += n_f; eq_pms += n_pm
+
+            # Niveles de bono
+            niv_sla = _bono_sla(s_pct)[0] if s_pct is not None else 0
+            niv_mp = _bono_calidad(n_f, n_pm)[0] if n_pm > 0 else 0
+            niv_prec = _bono_prec(p_pct)[0] if p_pct is not None else 0
+            cumpl = round(0.40 * niv_sla + 0.30 * niv_mp + 0.30 * niv_prec, 1)
+
+            tec_rows.append({
+                "short": ts, "full": tf,
+                "sla_pct": s_pct, "sla_ok": s_ok, "sla_tot": s_tot,
+                "mp_pct": mp_pct, "mp_f": n_f, "mp_pm": n_pm,
+                "prec_pct": p_pct, "prec_b": p_b, "prec_t": p_t,
+                "cumpl": cumpl,
+            })
+
+        # Equipo agregado
+        eq_sla_pct = round(eq_sla_ok / eq_sla_tot * 100, 1) if eq_sla_tot > 0 else None
+        eq_mp_pct = round((1 - eq_fallas / eq_pms) * 100, 1) if eq_pms > 0 else None
+        eq_prec_pct = round(eq_prec_b / eq_prec_t * 100, 1) if eq_prec_t > 0 else None
+        eq_niv_sla = _bono_sla(eq_sla_pct)[0] if eq_sla_pct is not None else 0
+        eq_niv_mp = _bono_calidad(eq_fallas, eq_pms)[0] if eq_pms > 0 else 0
+        eq_niv_prec = _bono_prec(eq_prec_pct)[0] if eq_prec_pct is not None else 0
+        eq_cumpl = round(0.40 * eq_niv_sla + 0.30 * eq_niv_mp + 0.30 * eq_niv_prec, 1)
+
+        bono_equipos.append({
+            "key": eq_key, "label": eq_label, "senior": senior_name,
+            "tecs": tec_rows,
+            "eq": {
+                "sla_pct": eq_sla_pct, "sla_ok": eq_sla_ok, "sla_tot": eq_sla_tot,
+                "mp_pct": eq_mp_pct, "mp_f": eq_fallas, "mp_pm": eq_pms,
+                "prec_pct": eq_prec_pct, "prec_b": eq_prec_b, "prec_t": eq_prec_t,
+                "cumpl": eq_cumpl,
+            },
+        })
+
     return render_template_string(
         HTML_TEMPLATE,
         sla=sla_data, cal=cal_data, prec=prec_data,
-        bono_total=bono_total,
+        bono_total=bono_total, bono_equipos=bono_equipos,
         max_sla=MAX_SLA, max_cal=MAX_CAL, max_prec=MAX_PREC,
         bono_pool=BONO_TOTAL,
         trim_key=trim_key, trim_label=trim["label"], trimestres=TRIMESTRES,
@@ -530,7 +605,7 @@ HTML_TEMPLATE = r"""
   <div class="tab-btn active" onclick="showTab('sla')">SLA</div>
   <div class="tab-btn" onclick="showTab('cal')">Efectividad MP</div>
   <div class="tab-btn" onclick="showTab('prec')">Precisión Fracttal</div>
-  <div class="tab-btn" onclick="showTab('bono')">Bonos</div>
+  <div class="tab-btn" onclick="showTab('bono')">Resumen Bonos</div>
 </div>
 
 <!-- TAB SLA -->
@@ -623,10 +698,10 @@ HTML_TEMPLATE = r"""
   {% endif %}
 </div>
 
-<!-- TAB BONOS -->
+<!-- TAB RESUMEN BONOS -->
 <div class="tab-content" id="tab-bono">
   <div class="kpi-card bono">
-    <div class="kpi-header"><span class="kpi-title">Resumen Bono · {{ trim_label }}</span></div>
+    <div class="kpi-header"><span class="kpi-title">Resumen Bonos · {{ trim_label }}</span></div>
     <div class="bono-grid">
       <div class="bono-item">
         <div class="label">SLA (40%)</div>
@@ -651,36 +726,72 @@ HTML_TEMPLATE = r"""
     </div>
   </div>
 
-  <div style="margin-top:12px;padding:12px;background:var(--card);border-radius:8px;font-size:.78rem;backdrop-filter:blur(12px);">
-    <div style="font-weight:700;color:var(--muted);margin-bottom:6px;">ESCALA BONOS</div>
-    <div style="margin-bottom:6px;">
-      <b>SLA (40% · $200K pool)</b><br>
-      <span style="color:#22c55e">≥95%→100%</span> ·
-      <span style="color:#16a34a">93→90%</span> ·
-      <span style="color:#4ade80">90→80%</span> ·
-      <span style="color:#f59e0b">85→50%</span> ·
-      <span style="color:#ef4444">&lt;85%→0%</span>
+  {% for eq in bono_equipos %}
+  <div style="margin-top:14px;">
+    <div style="font-size:.95rem;font-weight:700;color:var(--text);border-bottom:2px solid #01798A;padding-bottom:4px;margin-bottom:8px;">
+      Equipo {{ eq.label }} <span style="font-size:.75rem;color:var(--muted);font-weight:400;">— Senior: {{ eq.senior }}</span>
     </div>
-    <div style="margin-bottom:6px;">
-      <b>Calidad MP (30% · $150K pool)</b><br>
-      <span style="color:#22c55e">≥98%→100%</span> ·
-      <span style="color:#16a34a">96→90%</span> ·
-      <span style="color:#4ade80">94→80%</span> ·
-      <span style="color:#65a30d">92→70%</span> ·
-      <span style="color:#f59e0b">90→60%</span> ·
-      <span style="color:#ef4444">&lt;90%→0%</span>
-    </div>
-    <div>
-      <b>Precisión (30% · $150K pool)</b><br>
-      <span style="color:#22c55e">≥95%→100%</span> ·
-      <span style="color:#16a34a">90→90%</span> ·
-      <span style="color:#4ade80">85→80%</span> ·
-      <span style="color:#65a30d">80→70%</span> ·
-      <span style="color:#f59e0b">75→60%</span> ·
-      <span style="color:#f97316">70→50%</span> ·
-      <span style="color:#ef4444">&lt;70%→0%</span>
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+      <table style="width:100%;border-collapse:collapse;font-size:.75rem;color:var(--text);min-width:420px;">
+        <thead>
+          <tr style="background:#01798A;color:#fff;">
+            <th style="padding:6px 8px;text-align:left;border-radius:6px 0 0 0;">KPI</th>
+            {% for t in eq.tecs %}
+            <th style="padding:6px 8px;text-align:center;white-space:nowrap;">{{ t.short }}</th>
+            {% endfor %}
+            <th style="padding:6px 8px;text-align:center;font-style:italic;border-radius:0 6px 0 0;">EQUIPO</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:rgba(255,255,255,0.04);">
+            <td style="padding:6px 8px;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.08);">SLA <span style="color:var(--muted);font-size:.65rem;">(40%)</span></td>
+            {% for t in eq.tecs %}
+            <td style="padding:6px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.08);">
+              {% if t.sla_pct is not none %}<span style="color:{{ color_pct(t.sla_pct) }}">{{ t.sla_pct }}%</span><br><span style="font-size:.6rem;color:var(--muted);">{{ t.sla_ok }}/{{ t.sla_tot }}</span>{% else %}<span style="color:var(--muted);">—</span>{% endif %}
+            </td>
+            {% endfor %}
+            <td style="padding:6px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.08);font-style:italic;background:rgba(1,121,138,0.1);">
+              {% if eq.eq.sla_pct is not none %}<span style="color:{{ color_pct(eq.eq.sla_pct) }}">{{ eq.eq.sla_pct }}%</span><br><span style="font-size:.6rem;color:var(--muted);">{{ eq.eq.sla_ok }}/{{ eq.eq.sla_tot }}</span>{% else %}—{% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:6px 8px;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.08);">Efectividad MP <span style="color:var(--muted);font-size:.65rem;">(30%)</span></td>
+            {% for t in eq.tecs %}
+            <td style="padding:6px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.08);">
+              {% if t.mp_pct is not none %}<span style="color:{{ color_pct(t.mp_pct) }}">{{ t.mp_pct }}%</span><br><span style="font-size:.6rem;color:var(--muted);">{{ t.mp_f }}F/{{ t.mp_pm }}PM</span>{% else %}<span style="color:var(--muted);">—</span>{% endif %}
+            </td>
+            {% endfor %}
+            <td style="padding:6px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.08);font-style:italic;background:rgba(1,121,138,0.1);">
+              {% if eq.eq.mp_pct is not none %}<span style="color:{{ color_pct(eq.eq.mp_pct) }}">{{ eq.eq.mp_pct }}%</span><br><span style="font-size:.6rem;color:var(--muted);">{{ eq.eq.mp_f }}F/{{ eq.eq.mp_pm }}PM</span>{% else %}—{% endif %}
+            </td>
+          </tr>
+          <tr style="background:rgba(255,255,255,0.04);">
+            <td style="padding:6px 8px;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.08);">Precisión <span style="color:var(--muted);font-size:.65rem;">(30%)</span></td>
+            {% for t in eq.tecs %}
+            <td style="padding:6px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.08);">
+              {% if t.prec_pct is not none %}<span style="color:{{ color_pct(t.prec_pct) }}">{{ t.prec_pct }}%</span><br><span style="font-size:.6rem;color:var(--muted);">{{ t.prec_b }}/{{ t.prec_t }}</span>{% else %}<span style="color:var(--muted);">—</span>{% endif %}
+            </td>
+            {% endfor %}
+            <td style="padding:6px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.08);font-style:italic;background:rgba(1,121,138,0.1);">
+              {% if eq.eq.prec_pct is not none %}<span style="color:{{ color_pct(eq.eq.prec_pct) }}">{{ eq.eq.prec_pct }}%</span><br><span style="font-size:.6rem;color:var(--muted);">{{ eq.eq.prec_b }}/{{ eq.eq.prec_t }}</span>{% else %}—{% endif %}
+            </td>
+          </tr>
+          <tr style="background:rgba(1,121,138,0.08);">
+            <td style="padding:6px 8px;font-weight:700;border-top:2px solid rgba(255,255,255,0.15);">Cumpl. ponderado</td>
+            {% for t in eq.tecs %}
+            <td style="padding:6px 8px;text-align:center;font-weight:700;border-top:2px solid rgba(255,255,255,0.15);">
+              <span style="color:{{ color_pct(t.cumpl) }}">{{ t.cumpl }}%</span>
+            </td>
+            {% endfor %}
+            <td style="padding:6px 8px;text-align:center;font-weight:700;font-style:italic;border-top:2px solid rgba(255,255,255,0.15);background:rgba(1,121,138,0.1);">
+              <span style="color:{{ color_pct(eq.eq.cumpl) }}">{{ eq.eq.cumpl }}%</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
+  {% endfor %}
 </div>
 
 <div class="footer">
