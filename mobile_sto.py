@@ -770,7 +770,7 @@ HTML_TEMPLATE = r"""
   {% for eq in bono_equipos %}
   <div style="margin-top:14px;">
     <div style="font-size:.95rem;font-weight:700;color:var(--text);border-bottom:2px solid #01798A;padding-bottom:4px;margin-bottom:8px;">
-      🫧 Equipo {{ eq.label }} <span style="font-size:.75rem;color:var(--muted);font-weight:400;">— Senior: {{ eq.senior }}</span>
+      🌐 Equipo {{ eq.label }} <span style="font-size:.75rem;color:var(--muted);font-weight:400;">— Senior: {{ eq.senior }}</span>
     </div>
     <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <table style="width:100%;border-collapse:collapse;font-size:.75rem;color:var(--text);min-width:420px;">
