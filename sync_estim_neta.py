@@ -4,16 +4,13 @@ sync_estim_neta.py
 Pobla duracion_estim_neta_seg y duracion_real_neta_seg en ordenes_trabajo.
 
 Regla acordada con Occimiano:
-  - Una OT preventiva de LAVADORA en Fracttal suele venir con 4 subtareas:
-    lavadora + lavatapiz + bomba + ablandador. La bomba y el ablandador
-    son físicamente parte del sistema de la lavadora (mantención integrada),
-    pero Fracttal los suma como ~10 min cada uno al estimado, inflando
-    artificialmente el umbral del 75%.
-  - Si la OT incluye una LAVADORA (activo principal), restamos del estimado
-    y del real el tiempo de las subtareas BOMBA y ABLANDADOR.
-  - Si la OT no incluye lavadora (solo bomba sola, solo ablandador, solo
-    aspiradora/lavatapiz), los campos "netos" copian los originales — NO
-    se descuenta nada.
+  - Una OT preventiva de LAVADORA en Fracttal suele venir con múltiples
+    subtareas (lavadora, lavatapiz, bomba, ablandador, etc.). Para el
+    indicador de precisión solo interesa el tiempo de la LAVADORA.
+  - Si la OT incluye una subtarea LAVADORA, se toman SOLO los tiempos
+    estimado y real de esa subtarea (no el total de la OT).
+  - Si la OT no incluye lavadora, los campos "netos" copian los
+    originales (total de subtareas).
 
 Uso:
   python sync_estim_neta.py                      (backfill desde 2026-01-01)
@@ -155,12 +152,12 @@ def fetch_subtasks(folio: str) -> tuple:
         # No aplica descuento → neto = total
         return folio, estim_total, real_total, False
 
-    # Restar bomba + ablandador (solo cuando hay lavadora)
-    desc_estim = sum(s["estim"] for s in subtasks if s["tipo"] in ("bomba","ablandador"))
-    desc_real  = sum(s["real"]  for s in subtasks if s["tipo"] in ("bomba","ablandador"))
-    estim_neta = max(0, estim_total - desc_estim)
-    real_neta  = max(0, real_total  - desc_real)
-    ajustada = desc_estim > 0 or desc_real > 0
+    # Solo lavadora: el indicador de precisión usa únicamente el tiempo
+    # de la subtarea lavadora, no el total de la OT.
+    lav = [s for s in subtasks if s["tipo"] == "lavadora"]
+    estim_neta = sum(s["estim"] for s in lav) if lav else estim_total
+    real_neta  = sum(s["real"]  for s in lav) if lav else real_total
+    ajustada = bool(lav)
     return folio, estim_neta, real_neta, ajustada
 
 

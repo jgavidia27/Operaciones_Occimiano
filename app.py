@@ -8091,6 +8091,9 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 # N minutos, ese tiempo cuenta. Consistente con _score_tiempo en data.py.
                 _df_te["_effective_sec"] = _df_te[["duration_sec","elapsed_sec"]].fillna(0).max(axis=1)
                 _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75
+                # Una OT con múltiples equipos genera filas duplicadas con los
+                # mismos tiempos neta; mantener solo una fila por OT.
+                _df_te = _df_te.drop_duplicates(subset="folio", keep="first")
 
                 # KPI del periodo seleccionado
                 _df_te_periodo = _df_te[_df_te["mes"].astype(str).isin(set(_meses_prec_str))].copy()

@@ -763,12 +763,11 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "resources_hours", "resources_services",
         ])
 
-        # Duración real (tasks_duration) y estimada (duration).
-        # Preferir las versiones "netas" cuando existan: para OTs de LAVADORA en
-        # Fracttal, las subtareas BOMBA y ABLANDADOR son sistemas integrados y
-        # su tiempo (~10 min c/u) infla artificialmente el estimado. El sync
-        # `sync_estim_neta.py` recalcula sin esas subtareas. Si la OT no es de
-        # lavadora, los campos netos copian los originales (fallback transparente).
+        # Duración real y estimada.
+        # Preferir las versiones "netas" cuando existan: para OTs con LAVADORA,
+        # el sync `sync_estim_neta.py` extrae SOLO los tiempos de la subtarea
+        # lavadora (el indicador de precisión evalúa únicamente ese equipo).
+        # Si la OT no es de lavadora, los campos netos copian los originales.
         _real_neto  = wo.get("duracion_real_neta_seg")
         _estim_neto = wo.get("duracion_estim_neta_seg")
         try:
@@ -1056,14 +1055,17 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     ot["numeral_motivo"] = _num_eval.apply(lambda t: t[1])
 
     # Agregar campos de tiempo condicionalmente (pueden faltar en caché viejo)
+    # Se usa .first() en lugar de .sum() porque los valores neta (de sync)
+    # son a nivel de OT y están replicados en cada fila de equipo; sumarlos
+    # multiplicaría el valor por la cantidad de subtareas.
     if "duration_sec" in df_kpi.columns:
-        _exec_g = df_kpi.groupby("folio")["duration_sec"].sum().rename("exec_sec_sum")
+        _exec_g = df_kpi.groupby("folio")["duration_sec"].first().rename("exec_sec_sum")
         ot = ot.merge(_exec_g, on="folio", how="left")
     else:
         ot["exec_sec_sum"] = 0
 
     if "estimated_sec" in df_kpi.columns:
-        _estim_g = df_kpi.groupby("folio")["estimated_sec"].sum().rename("estim_sec_sum")
+        _estim_g = df_kpi.groupby("folio")["estimated_sec"].first().rename("estim_sec_sum")
         ot = ot.merge(_estim_g, on="folio", how="left")
         ot["estim_sec_sum"] = ot["estim_sec_sum"].fillna(0)
         ot["tiempo_ok_estim"] = ot.apply(
