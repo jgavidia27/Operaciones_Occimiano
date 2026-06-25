@@ -218,16 +218,42 @@ def index():
             ptec_data[t] = {"equipo": eq, "buenas": 0, "total": 0}
         ptec_data[t]["buenas"] += int(r.get("buenas", 0))
         ptec_data[t]["total"] += int(r.get("total", 0))
+    # Agregar promedio equipo por senior (sumar todos los miembros)
+    _eq_agg = {}
+    for t, d in ptec_data.items():
+        eq = d["equipo"]
+        if eq not in _eq_agg:
+            _eq_agg[eq] = {"buenas": 0, "total": 0}
+        _eq_agg[eq]["buenas"] += int(d["buenas"])
+        _eq_agg[eq]["total"] += int(d["total"])
+
     for t, d in ptec_data.items():
         if not t or d["total"] == 0:
             continue
-        pct = round(d["buenas"] / d["total"] * 100, 1)
-        bp, bc = _bono_prec(pct)
-        prec_tecnicos.append({
-            "nombre": full_to_short.get(t, t),
-            "equipo": equipos_label.get(d["equipo"], d["equipo"]),
-            "pct": pct, "buenas": d["buenas"], "total": d["total"], "bono_clp": bc,
-        })
+        t_short = full_to_short.get(t, t)
+        _is_snr = t_short in seniors
+        if _is_snr:
+            # Senior → usar datos agregados del equipo
+            eq_key = d["equipo"]
+            eq_d = _eq_agg.get(eq_key, d)
+            b, tot = eq_d["buenas"], eq_d["total"]
+            pct = round(b / tot * 100, 1) if tot > 0 else 0
+            bp, bc = _bono_prec(pct)
+            prec_tecnicos.append({
+                "nombre": t_short,
+                "equipo": equipos_label.get(d["equipo"], d["equipo"]),
+                "pct": pct, "buenas": b, "total": tot, "bono_clp": bc,
+                "es_senior": True,
+            })
+        else:
+            pct = round(d["buenas"] / d["total"] * 100, 1)
+            bp, bc = _bono_prec(pct)
+            prec_tecnicos.append({
+                "nombre": t_short,
+                "equipo": equipos_label.get(d["equipo"], d["equipo"]),
+                "pct": pct, "buenas": d["buenas"], "total": d["total"], "bono_clp": bc,
+                "es_senior": False,
+            })
     prec_tecnicos.sort(key=lambda x: x["pct"], reverse=True)
 
     prec_data = {"pct": prec_pct, "buenas": prec_buenas, "total": prec_total,
@@ -588,7 +614,7 @@ HTML_TEMPLATE = r"""
   <div class="ranking">
     {% for t in prec.tecnicos %}
     <div class="rank-row">
-      <span class="rank-name">{{ t.nombre }} <span class="rank-eq">{{ t.equipo }}</span></span>
+      <span class="rank-name">{{ t.nombre }} <span class="rank-eq">{{ t.equipo }}</span>{% if t.es_senior %} <span style="background:#f59e0b;color:#000;border-radius:3px;padding:1px 5px;font-size:.6rem;font-weight:700;vertical-align:middle;">PROMEDIO EQUIPO</span>{% endif %}</span>
       <span class="rank-pct" style="color:{{ color_pct(t.pct) }}">{{ t.pct }}%</span>
       <span class="rank-clp">{{ t.buenas }}/{{ t.total }}</span>
     </div>
