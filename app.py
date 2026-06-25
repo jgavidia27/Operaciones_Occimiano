@@ -62,7 +62,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v20-wo-status-filter"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v21-mp-pm-fix"  # bump para invalidar disco al cambiar data.py
 
 
 def _filtro_ot_input(key: str, columna_ot: str = "OT") -> str:
@@ -6426,47 +6426,26 @@ elif _page == _NAV_PAGES[0]:
         # Clientes evaluados en reincidencias (mismos que numerador)
         _CLIENTES_SLA_RC = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
 
-        # ── Aplicar mismos filtros temporales al UNIVERSO de PMs ─────────────
-        # El numerador (fallas post-PM, _df_rc) se filtra por trimestre/mes/semana.
-        # El denominador (PMs totales) DEBE filtrarse por el mismo período para
-        # que la división sea coherente. Antes el denominador era todo 2026, lo
-        # que inflaba la exactitud (numerador chico / denominador grande).
-        _pm_universo = df_wo[
-            (df_wo["maint_type"] == "Preventiva") &
-            (df_wo["client"].isin(_CLIENTES_SLA_RC) if "client" in df_wo.columns else True)
-        ].copy()
-        # Fecha que cuenta para el PM = final_date (cuando se realizó)
-        if "final_date" in _pm_universo.columns:
-            _pm_universo["_fecha_pm"] = pd.to_datetime(
-                _pm_universo["final_date"], errors="coerce", utc=True
-            ).dt.tz_convert(None)
-            # Filtro trimestre
-            if _trim_rc != "Todos":
-                _pm_universo = _pm_universo[
-                    _pm_universo["_fecha_pm"].dt.month.isin(_TRIMESTRES_RC[_trim_rc])
+        # ── Denominador de tarjetas: reusar _df_pm_filt (ya filtrado por
+        #    excluidos, equipo, técnico, trimestre, mes) + filtro semana ──────
+        _pm_tarjetas = _df_pm_filt.copy()
+        if _sem_rc != "Todas" and len(_mes_rc) == 1:
+            _sem_rc_match2 = next((s for s in _sems_rc if s[0] == _sem_rc), None)
+            if _sem_rc_match2:
+                _pm_t_dates = (
+                    _pm_tarjetas["creation_date"].dt.tz_convert(None)
+                    if _pm_tarjetas["creation_date"].dt.tz is not None
+                    else _pm_tarjetas["creation_date"]
+                )
+                _pm_tarjetas = _pm_tarjetas[
+                    (_pm_t_dates.dt.date >= _sem_rc_match2[1]) &
+                    (_pm_t_dates.dt.date <= _sem_rc_match2[2])
                 ]
-            # Filtro mes (lista)
-            if _mes_rc:
-                _meses_int = {int(str(m).split("-")[1]) for m in _mes_rc if "-" in str(m)}
-                _años_int  = {int(str(m).split("-")[0]) for m in _mes_rc if "-" in str(m)}
-                _pm_universo = _pm_universo[
-                    _pm_universo["_fecha_pm"].dt.year.isin(_años_int) &
-                    _pm_universo["_fecha_pm"].dt.month.isin(_meses_int)
-                ]
-            # Filtro semana (solo si 1 mes seleccionado)
-            if _sem_rc != "Todas" and len(_mes_rc) == 1:
-                _sem_rc_match2 = next((s for s in _sems_rc if s[0] == _sem_rc), None)
-                if _sem_rc_match2:
-                    _pm_universo = _pm_universo[
-                        (_pm_universo["_fecha_pm"].dt.date >= _sem_rc_match2[1]) &
-                        (_pm_universo["_fecha_pm"].dt.date <= _sem_rc_match2[2])
-                    ]
 
         _cal_cols = st.columns(len(_eq_label_cal_iter))
         for _ci, (_gk, _gl) in enumerate(zip(_eq_label_cal_iter.keys(), _eq_label_cal_iter.values())):
             _senior_cal = GRUPOS_TERRENO.get(_gk, {}).get("senior", "")
-            # Denominador: PMs del MISMO período seleccionado, no de todo 2026.
-            _pm_equipo = _pm_universo[_pm_universo["equipo"] == _gk]
+            _pm_equipo = _pm_tarjetas[_pm_tarjetas["equipo"] == _gk]
             _n_pm = _pm_equipo["folio"].nunique() if "folio" in _pm_equipo.columns else len(_pm_equipo)
             _n_pm_sla = _n_pm  # ahora el denominador ya es solo clientes SLA
             # Fallas post-PM del período filtrado
@@ -9844,19 +9823,12 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
         _reinc_records = []
         if not _reinc_full.empty and "falla_tipo" in _reinc_full.columns:
             _reinc_exp = _reinc_full[~_reinc_full["falla_tipo"].isin(["especial"])].copy()
-            if "causa_clasif" in _reinc_exp.columns:
-                _reinc_exp["es_reinc_tec"] = (
-                    (_reinc_exp["falla_tipo"] != "especial") &
-                    (_reinc_exp["causa_clasif"] != "cliente")
-                )
-            else:
-                _reinc_exp["es_reinc_tec"] = True
             if "fecha_cm" in _reinc_exp.columns:
                 _reinc_exp["mes_num"] = pd.to_datetime(_reinc_exp["fecha_cm"], errors="coerce").dt.month
             if "tecnico_resp_short" in _reinc_exp.columns and "grupo_responsable" in _reinc_exp.columns:
-                _reinc_g = _reinc_exp[_reinc_exp["es_reinc_tec"]].groupby(
+                _reinc_g = _reinc_exp.groupby(
                     ["tecnico_resp_short", "grupo_responsable", "mes_num"]
-                ).agg(fallas=("folio_cm", "nunique") if "folio_cm" in _reinc_exp.columns else ("es_reinc_tec", "count")).reset_index()
+                ).agg(fallas=("folio_cm", "nunique") if "folio_cm" in _reinc_exp.columns else ("tecnico_resp_short", "count")).reset_index()
                 _reinc_records = _reinc_g.rename(columns={"tecnico_resp_short": "tecnico_short", "grupo_responsable": "equipo"}).to_dict(orient="records")
 
         # 4. PMs — para denominador de efectividad
