@@ -110,6 +110,11 @@ def wallpaper():
     return send_file(os.path.join(_APP_DIR, "wallpaper_light.jpg"), mimetype="image/jpeg")
 
 
+@app.route("/bg-mobile.png")
+def bg_mobile():
+    return send_file(os.path.join(_APP_DIR, "bg_mobile.png"), mimetype="image/png")
+
+
 @app.route("/manifest.json")
 def manifest():
     return {
@@ -564,7 +569,7 @@ HTML_TEMPLATE = r"""
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     background: var(--bg); color: var(--text);
     min-height: 100vh;
-    background-image: url('/wallpaper');
+    background-image: url('/bg-mobile.png');
     background-size: cover; background-position: center; background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
   }
