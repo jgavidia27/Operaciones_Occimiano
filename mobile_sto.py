@@ -110,6 +110,35 @@ def wallpaper():
     return send_file(os.path.join(_APP_DIR, "wallpaper_light.jpg"), mimetype="image/jpeg")
 
 
+@app.route("/manifest.json")
+def manifest():
+    return {
+        "name": "Indicadores Operacionales - Occim",
+        "short_name": "Occim STO",
+        "description": "Desempeño STO - versión mobile",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0a1628",
+        "theme_color": "#0d5e6b",
+        "orientation": "portrait",
+        "icons": [
+            {"src": "/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+        ],
+    }
+
+
+@app.route("/app-icon.svg")
+def app_icon():
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="80" fill="#0d5e6b"/>
+<text x="256" y="300" font-size="280" text-anchor="middle" dominant-baseline="central"
+  font-family="Arial,sans-serif" fill="white" font-weight="bold">STO</text>
+<text x="256" y="430" font-size="80" text-anchor="middle" fill="#14b8a6"
+  font-family="Arial,sans-serif">OCCIM</text>
+</svg>"""
+    return svg, 200, {"Content-Type": "image/svg+xml"}
+
+
 @app.route("/")
 def index():
   try:
@@ -484,6 +513,12 @@ HTML_TEMPLATE = r"""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Indicadores Operacionales - Occim 📲</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📲</text></svg>">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0d5e6b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Occim STO">
+<link rel="apple-touch-icon" href="/app-icon.svg">
 <style>
   :root {
     --bg: #0a1628; --card: rgba(15,22,42,.92); --border: rgba(51,65,85,.7);
