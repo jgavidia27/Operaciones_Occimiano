@@ -100,6 +100,29 @@ def get_pin(email: str) -> str | None:
     return rows[0]["pin"] if rows else None
 
 
+def get_pin_debug(email: str):
+    url, key = _sb_creds()
+    if not url:
+        return {"error": "DEBUG: SUPABASE_URL no configurada"}
+    if not key:
+        return {"error": "DEBUG: SUPABASE_KEY no configurada"}
+    try:
+        r = requests.get(
+            f"{url}/rest/v1/mobile_user_pins",
+            headers=_sb_headers(key),
+            params={"email": f"eq.{_norm_email(email)}", "select": "pin"},
+            timeout=10,
+        )
+    except Exception as ex:
+        return {"error": f"DEBUG: conexion fallida: {ex}"}
+    if r.status_code != 200:
+        return {"error": f"DEBUG: status={r.status_code} body={r.text[:200]}"}
+    rows = r.json()
+    if not rows:
+        return {"error": f"DEBUG: 0 filas para {_norm_email(email)}. URL={url[:30]}..."}
+    return rows[0]["pin"]
+
+
 def set_pin(email: str, pin: str) -> bool:
     url, key = _sb_creds()
     if not url or not key:
@@ -147,7 +170,9 @@ def verify_pin(email: str, pin: str) -> tuple[bool, str]:
     p = (pin or "").strip()
     if not is_authorized(e):
         return False, "Este correo no tiene acceso."
-    stored = get_pin(e)
+    stored = get_pin_debug(e)
+    if isinstance(stored, dict):
+        return False, stored["error"]
     if not stored:
         return False, "No tienes PIN asignado. Contacta a operaciones."
     if p != stored:
