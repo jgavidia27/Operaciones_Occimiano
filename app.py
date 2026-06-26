@@ -8551,8 +8551,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     # Motivo del veredicto de calidad (sin numeral / basura / exceso / etc.)
                     _motivo = str(row.get("numeral_motivo", "") or "")
                     if row.get("numeral_ok", False):
-                        v = str(row.get("numeral_valor", "") or "").strip()
-                        return f"✅ {v}" if v else "✅ Registrado"
+                        return "✅ Cumple"
                     # Dato MALO → mostrar la razón concreta (no solo "sin numeral")
                     return NUMERAL_MOTIVO_LABEL.get(_motivo, "❌ Dato inválido")
 
