@@ -1055,7 +1055,7 @@ function showTab(id) {
 LOGIN_TEMPLATE = r"""
 <!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Acceso · Indicadores Occimiano</title>
+<title>Acceso · Indicadores Operacionales</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
@@ -1082,7 +1082,8 @@ LOGIN_TEMPLATE = r"""
   .hint{margin-top:18px;text-align:center;font-size:.75rem;color:#64748b;line-height:1.5;}
 </style></head><body>
 <div class="card">
-  <h1>🔐 Indicadores Occimiano</h1>
+  <h1>🔐 Indicadores Operacionales</h1>
+  <p class="sub" style="font-size:1rem;color:#cbd5e1;margin-bottom:4px;">Iniciar sesión</p>
   <p class="sub">Ingresa tu correo corporativo para recibir un código de acceso.</p>
   <form method="post">
     <label for="email">Correo</label>
@@ -1100,7 +1101,7 @@ LOGIN_TEMPLATE = r"""
 VERIFY_TEMPLATE = r"""
 <!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Verificar código · Indicadores Occimiano</title>
+<title>Verificar código · Indicadores Operacionales</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✉️</text></svg>">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}

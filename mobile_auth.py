@@ -50,9 +50,12 @@ USERS = {
 
 # Admins ven todos los equipos y todos los técnicos.
 ADMINS = {
-    "operaciones@occimiano.cl",
+    # "operaciones@occimiano.cl",  # PRUEBA: temporalmente como Juan Gallardo
     "jgavidia@occimiano.cl",
 }
+
+# PRUEBA TEMPORAL: operaciones@ se comporta como Juan Gallardo
+USERS["operaciones@occimiano.cl"] = {"full": "Juan Antonio Gallardo Romero", "short": "Juan Gallardo", "team": "Juan Gallardo"}
 
 CODE_TTL_MINUTES = 10
 SESSION_TTL_DAYS = 30
