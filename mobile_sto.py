@@ -744,6 +744,7 @@ HTML_TEMPLATE = r"""
       <h1 style="margin:0;">Indicadores STO</h1>
     </div>
     <div style="display:flex;gap:6px;">
+      {% if user.is_admin %}<a href="/admin/pins" style="background:rgba(59,130,246,.2);color:#93c5fd;border:1px solid rgba(59,130,246,.4);border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Administrar PINs">⚙️ PINs</a>{% endif %}
       <a href="javascript:location.reload()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Refrescar datos">🔄</a>
       <a href="/logout" style="background:rgba(239,68,68,.2);color:#fca5a5;border:1px solid rgba(239,68,68,.4);border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Cerrar sesión">⏻ Salir</a>
     </div>
