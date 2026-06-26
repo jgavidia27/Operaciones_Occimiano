@@ -101,6 +101,9 @@ def fetch_subtareas_numeral(folio: str) -> list:
         kid = s.get("id_work_orders_tasks")
         if kid is None:
             continue
+        # Saltar subtareas que nunca se ejecutaron
+        if str(s.get("task_status", "")).upper() == "NO_STARTED":
+            continue
         idx[kid] = {
             "id_work_order_task": kid,
             "codigo_activo":      s.get("code"),

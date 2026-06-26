@@ -744,6 +744,12 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
 
     rows = []
     for wo in raw:
+        # Saltar subtareas que nunca se ejecutaron (NO_STARTED).
+        # No se puede evaluar calidad de algo que no se hizo.
+        _ts = (wo.get("task_status") or "").strip().upper()
+        if _ts == "NO_STARTED":
+            continue
+
         # Limpieza de nota (puede ser None o "None" string)
         raw_note = wo.get("note") or ""
         note = "" if str(raw_note).strip() in ("", "None", "none") else str(raw_note).strip()
