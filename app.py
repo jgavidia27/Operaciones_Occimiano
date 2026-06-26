@@ -1220,7 +1220,7 @@ st.markdown("""
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 _NAV_PAGES_BASE = [
-    "🥇  Desempeño STO",
+    "🥇  Indicadores STO",
     "✅  Cumplimiento SLA",
     "🛠️  Mantenciones Preventivas",
     "⛽  Estaciones de Servicio",
@@ -1552,7 +1552,7 @@ else:
 
 # ── Títulos por página ────────────────────────────────────────────────────────
 _PAGE_TITLE = {
-    _NAV_PAGES_BASE[0]: "Desempeño STO",
+    _NAV_PAGES_BASE[0]: "Indicadores STO",
     _NAV_PAGES_BASE[1]: "Cumplimiento SLA",
     _NAV_PAGES_BASE[2]: "Mantenciones Preventivas",
     _NAV_PAGES_BASE[3]: "Estaciones de Servicio",
