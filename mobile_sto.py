@@ -14,8 +14,9 @@ from datetime import datetime, date, timedelta
 from flask import Flask, request, render_template_string, send_file, redirect, url_for, session
 
 from mobile_auth import (
-    request_code, verify_code, logout as auth_logout,
-    current_user, requires_auth, get_user_info, SESSION_TTL_DAYS,
+    verify_pin, logout as auth_logout, current_user, requires_auth,
+    get_user_info, SESSION_TTL_DAYS, requires_admin,
+    USERS, ADMINS, get_all_pins, set_pin, generate_all_pins, get_pin,
 )
 
 app = Flask(__name__)
@@ -157,37 +158,47 @@ def login_page():
     msg_kind = "info"
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
-        ok, m = request_code(email)
+        pin = request.form.get("pin", "").strip()
+        ok, m = verify_pin(email, pin)
         if ok:
-            session["pending_email"] = email
-            return redirect(url_for("verify_page"))
-        msg = m
-        msg_kind = "error"
-    return render_template_string(LOGIN_TEMPLATE, msg=msg, msg_kind=msg_kind)
-
-
-@app.route("/verify", methods=["GET", "POST"])
-def verify_page():
-    email = session.get("pending_email", "")
-    if not email:
-        return redirect(url_for("login_page"))
-    msg = ""
-    msg_kind = "info"
-    if request.method == "POST":
-        code = request.form.get("code", "").strip()
-        ok, m = verify_code(email, code)
-        if ok:
-            session.pop("pending_email", None)
             return redirect(request.args.get("next") or url_for("index"))
         msg = m
         msg_kind = "error"
-    return render_template_string(VERIFY_TEMPLATE, email=email, msg=msg, msg_kind=msg_kind)
+    return render_template_string(LOGIN_TEMPLATE, msg=msg, msg_kind=msg_kind)
 
 
 @app.route("/logout")
 def logout_page():
     auth_logout()
     return redirect(url_for("login_page"))
+
+
+@app.route("/admin/pins", methods=["GET", "POST"])
+@requires_admin
+def admin_pins():
+    msg = ""
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "generate_all":
+            n = generate_all_pins()
+            msg = f"{n} PINs generados." if n else "Todos ya tienen PIN."
+        elif action == "set_pin":
+            email = request.form.get("email", "").strip().lower()
+            new_pin = request.form.get("new_pin", "").strip()
+            if len(new_pin) == 4 and new_pin.isdigit():
+                if set_pin(email, new_pin):
+                    msg = f"PIN actualizado para {email}."
+                else:
+                    msg = "Error guardando PIN."
+            else:
+                msg = "El PIN debe ser de 4 dígitos."
+    pins = get_all_pins()
+    all_users = []
+    for email, info in sorted(USERS.items(), key=lambda x: x[1]["team"]):
+        all_users.append({"email": email, "short": info["short"], "team": info["team"], "pin": pins.get(email, "—")})
+    for email in sorted(ADMINS):
+        all_users.append({"email": email, "short": "Admin", "team": "Admin", "pin": pins.get(email, "—")})
+    return render_template_string(ADMIN_PINS_TEMPLATE, users=all_users, msg=msg)
 
 
 @app.route("/")
@@ -1068,11 +1079,14 @@ LOGIN_TEMPLATE = r"""
     box-shadow:0 10px 40px rgba(0,0,0,.5);}
   h1{font-size:1.4rem;color:#fff;margin-bottom:6px;text-align:center;}
   .sub{color:#94a3b8;font-size:.85rem;text-align:center;margin-bottom:24px;line-height:1.4;}
+  .sub2{color:#cbd5e1;font-size:1rem;text-align:center;margin-bottom:4px;}
   label{display:block;color:#cbd5e1;font-size:.8rem;margin-bottom:8px;letter-spacing:.02em;text-transform:uppercase;}
-  input[type=email],input[type=text]{width:100%;padding:14px 12px;border-radius:10px;
+  input[type=email],input[type=password]{width:100%;padding:14px 12px;border-radius:10px;
     border:1px solid rgba(51,65,85,.8);background:rgba(15,22,42,.6);color:#e2e8f0;
     font-size:16px;outline:none;transition:border .15s;}
   input:focus{border-color:#14b8a6;}
+  .pin-input{text-align:center;letter-spacing:.3em;font-size:22px;font-family:monospace;}
+  .gap{margin-top:16px;}
   button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:10px;
     background:#0d5e6b;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:.15s;}
   button:hover{background:#14b8a6;}
@@ -1083,13 +1097,18 @@ LOGIN_TEMPLATE = r"""
 </style></head><body>
 <div class="card">
   <h1>🔐 Indicadores Operacionales</h1>
-  <p class="sub" style="font-size:1rem;color:#cbd5e1;margin-bottom:4px;">Iniciar sesión</p>
-  <p class="sub">Ingresa tu correo corporativo para recibir un código de acceso.</p>
+  <p class="sub2">Iniciar sesion</p>
+  <p class="sub">Ingresa tu correo corporativo y tu PIN de acceso.</p>
   <form method="post">
     <label for="email">Correo</label>
     <input type="email" id="email" name="email" required autofocus
       placeholder="tu_correo@occimiano.cl" autocomplete="email">
-    <button type="submit">Enviar código</button>
+    <div class="gap"></div>
+    <label for="pin">PIN</label>
+    <input type="password" id="pin" name="pin" required maxlength="4"
+      pattern="[0-9]{4}" inputmode="numeric" placeholder="****" autocomplete="current-password"
+      class="pin-input">
+    <button type="submit">Ingresar</button>
   </form>
   {% if msg %}<div class="msg {{ msg_kind }}">{{ msg }}</div>{% endif %}
   <p class="hint">Solo personal autorizado de Occimiano.<br>Si no tienes acceso, contacta a operaciones.</p>
@@ -1098,51 +1117,62 @@ LOGIN_TEMPLATE = r"""
 """
 
 
-VERIFY_TEMPLATE = r"""
+ADMIN_PINS_TEMPLATE = r"""
 <!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Verificar código · Indicadores Operacionales</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✉️</text></svg>">
+<title>Admin PINs · Indicadores Operacionales</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-    background:#0a1628 url('/bg-mobile.png') center/cover fixed;color:#e2e8f0;
-    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
-  body::before{content:'';position:fixed;inset:0;background:linear-gradient(180deg,rgba(10,22,40,.92),rgba(10,22,40,.85));}
-  .card{position:relative;z-index:1;background:rgba(15,22,42,.95);border:1px solid rgba(51,65,85,.7);
-    border-radius:16px;padding:32px 28px;max-width:380px;width:100%;
-    box-shadow:0 10px 40px rgba(0,0,0,.5);}
-  h1{font-size:1.4rem;color:#fff;margin-bottom:6px;text-align:center;}
-  .sub{color:#94a3b8;font-size:.85rem;text-align:center;margin-bottom:24px;line-height:1.4;}
-  .email-box{background:rgba(13,94,107,.2);border:1px solid rgba(20,184,166,.3);
-    border-radius:8px;padding:10px;text-align:center;color:#5eead4;font-size:.85rem;margin-bottom:18px;
-    word-break:break-all;}
-  label{display:block;color:#cbd5e1;font-size:.8rem;margin-bottom:8px;letter-spacing:.02em;text-transform:uppercase;}
-  input[type=text]{width:100%;padding:18px 12px;border-radius:10px;
-    border:1px solid rgba(51,65,85,.8);background:rgba(15,22,42,.6);color:#e2e8f0;
-    font-size:28px;text-align:center;letter-spacing:.4em;font-family:monospace;outline:none;}
-  input:focus{border-color:#14b8a6;}
-  button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:10px;
-    background:#0d5e6b;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;}
-  button:hover{background:#14b8a6;}
-  .msg{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:.85rem;}
-  .msg.error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#fca5a5;}
-  .msg.info{background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.4);color:#93c5fd;}
-  .back{display:block;text-align:center;margin-top:16px;color:#64748b;font-size:.8rem;text-decoration:none;}
-  .back:hover{color:#94a3b8;}
+    background:#0a1628;color:#e2e8f0;min-height:100vh;padding:20px;}
+  .wrap{max-width:700px;margin:0 auto;}
+  h1{font-size:1.3rem;color:#fff;margin-bottom:4px;}
+  .sub{color:#94a3b8;font-size:.85rem;margin-bottom:16px;}
+  .actions{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+  .btn{padding:10px 18px;border:0;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer;}
+  .btn-gen{background:#0d5e6b;color:#fff;} .btn-gen:hover{background:#14b8a6;}
+  .btn-back{background:rgba(51,65,85,.5);color:#cbd5e1;text-decoration:none;display:inline-block;} .btn-back:hover{background:rgba(51,65,85,.8);}
+  .msg{padding:10px 12px;border-radius:8px;font-size:.85rem;margin-bottom:14px;
+    background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.4);color:#93c5fd;}
+  table{width:100%;border-collapse:collapse;font-size:.85rem;}
+  th{text-align:left;color:#94a3b8;font-size:.75rem;text-transform:uppercase;letter-spacing:.03em;
+    padding:8px 10px;border-bottom:1px solid rgba(51,65,85,.5);}
+  td{padding:8px 10px;border-bottom:1px solid rgba(51,65,85,.3);}
+  .team{color:#14b8a6;font-size:.8rem;}
+  .pin-cell{font-family:monospace;font-size:1rem;color:#fbbf24;letter-spacing:.15em;}
+  .edit-form{display:flex;gap:6px;align-items:center;}
+  .edit-form input{width:70px;padding:6px 8px;border-radius:6px;border:1px solid rgba(51,65,85,.8);
+    background:rgba(15,22,42,.6);color:#e2e8f0;font-size:14px;text-align:center;
+    font-family:monospace;letter-spacing:.15em;}
+  .edit-form button{padding:6px 12px;border:0;border-radius:6px;background:#0d5e6b;color:#fff;
+    font-size:.8rem;cursor:pointer;} .edit-form button:hover{background:#14b8a6;}
 </style></head><body>
-<div class="card">
-  <h1>✉️ Código enviado</h1>
-  <p class="sub">Revisa tu correo e ingresa el código de 6 dígitos.</p>
-  <div class="email-box">{{ email }}</div>
-  <form method="post">
-    <label for="code">Código</label>
-    <input type="text" id="code" name="code" required autofocus maxlength="6"
-      pattern="[0-9]{6}" inputmode="numeric" placeholder="000000" autocomplete="one-time-code">
-    <button type="submit">Verificar</button>
-  </form>
-  {% if msg %}<div class="msg {{ msg_kind }}">{{ msg }}</div>{% endif %}
-  <a href="{{ url_for('login_page') }}" class="back">← Cambiar correo</a>
+<div class="wrap">
+  <h1>⚙️ Administrar PINs</h1>
+  <p class="sub">Asigna o cambia el PIN de cada tecnico. Comparte el PIN por WhatsApp.</p>
+  <div class="actions">
+    <form method="post" style="display:inline"><input type="hidden" name="action" value="generate_all">
+      <button type="submit" class="btn btn-gen">Generar PINs faltantes</button></form>
+    <a href="/" class="btn btn-back">Volver al dashboard</a>
+  </div>
+  {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+  <table>
+    <tr><th>Nombre</th><th>Equipo</th><th>PIN</th><th>Cambiar</th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.short }}<br><span style="color:#64748b;font-size:.75rem;">{{ u.email }}</span></td>
+      <td><span class="team">{{ u.team }}</span></td>
+      <td class="pin-cell">{{ u.pin }}</td>
+      <td><form method="post" class="edit-form">
+        <input type="hidden" name="action" value="set_pin">
+        <input type="hidden" name="email" value="{{ u.email }}">
+        <input type="text" name="new_pin" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" placeholder="0000">
+        <button type="submit">OK</button>
+      </form></td>
+    </tr>
+    {% endfor %}
+  </table>
 </div>
 </body></html>
 """

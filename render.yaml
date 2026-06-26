@@ -10,7 +10,5 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
-      - key: RESEND_API_KEY
-        sync: false
       - key: FLASK_SECRET_KEY
         generateValue: true
