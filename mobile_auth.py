@@ -62,7 +62,7 @@ SESSION_TTL_DAYS = 30
 MAX_ATTEMPTS = 5
 
 SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
+SMTP_PORT = 465
 SMTP_FROM_NAME = "Indicadores Occimiano"
 
 
@@ -178,8 +178,7 @@ def send_code_email(to_email: str, code: str) -> tuple[bool, str]:
     msg["To"] = to_email
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-            s.starttls()
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15) as s:
             s.login(smtp_user, smtp_pass)
             s.sendmail(smtp_user, [to_email], msg.as_string())
         return True, "ok"
