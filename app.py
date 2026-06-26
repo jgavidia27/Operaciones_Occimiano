@@ -4017,6 +4017,31 @@ elif _page == _NAV_PAGES[3]:
                     except Exception:
                         return "—"
 
+                # Pre-computar "N. Final anterior" por estación recorriendo
+                # TODAS las preventivas Shell (sin filtros) cronológicamente.
+                _df_prev_full = (
+                    df_wo_c[df_wo_c["maint_type"] == "Preventiva"]
+                    .sort_values("creation_date", ascending=True)
+                    .drop_duplicates(subset=["folio"], keep="first")
+                )
+                _prev_final_lav: dict = {}
+                _prev_final_asp: dict = {}
+                _last_by_eds: dict = {}
+                for _, _row in _df_prev_full.iterrows():
+                    _f = _row["folio"]
+                    _e = str(_row.get("eds_occim", ""))
+                    _prev_final_lav[_f] = _last_by_eds.get((_e, "lavadora"), "—")
+                    _prev_final_asp[_f] = _last_by_eds.get((_e, "aspiradora"), "—")
+                    _sub_f = df_num_sub_eds[df_num_sub_eds["id_ot"] == _f]
+                    _lav_f = _sub_f[_sub_f["tipo_activo"] == "lavadora"]
+                    _asp_f = _sub_f[_sub_f["tipo_activo"] == "aspiradora"]
+                    _lv = _rpval(_lav_f, "numeral_final", default=None)
+                    _av = _rpval(_asp_f, "numeral_final", default=None)
+                    if _lv is not None:
+                        _last_by_eds[(_e, "lavadora")] = _lv
+                    if _av is not None:
+                        _last_by_eds[(_e, "aspiradora")] = _av
+
                 _reg_rows = []
                 for _, _ot in _df_prev_all.head(100).iterrows():
                     _fol = _ot["folio"]
@@ -4039,9 +4064,9 @@ elif _page == _NAV_PAGES[3]:
                         ("Datos OT", "Hora inicio"):                   _rphora(_sub, "fecha_inicio_subtarea"),
                         ("Datos OT", "Hora término"):                  _rphora(_sub, "fecha_fin_subtarea"),
                         ("Datos OT", "Técnico"):                       _tec,
-                        ("Numeral lavadora", "Anterior"):              _rpval(_lav, "numeral_inicial"),
+                        ("Numeral lavadora", "Anterior"):              _prev_final_lav.get(_fol, "—") or "—",
                         ("Numeral lavadora", "Actual"):                _rpval(_lav, "numeral_final"),
-                        ("Numeral aspiradora", "Anterior"):            _rpval(_asp, "numeral_inicial"),
+                        ("Numeral aspiradora", "Anterior"):            _prev_final_asp.get(_fol, "—") or "—",
                         ("Numeral aspiradora", "Actual"):              _rpval(_asp, "numeral_final"),
                         ("Fichas mantención", "Lavado"):               _rpval(_lav, "fichas_periodo"),
                         ("Fichas mantención", "Aspirado"):             _rpval(_asp, "fichas_periodo"),
