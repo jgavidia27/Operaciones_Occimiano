@@ -3953,21 +3953,35 @@ elif _page == _NAV_PAGES[3]:
                         df_eds_c["eds_occim"].astype(str),
                         df_eds_c["nombre"],
                     ))
-                _eds_codes = sorted(
-                    _df_prev_all["eds_occim"].dropna().astype(str).unique().tolist()
-                )
-                _filter_opts = ["Todas las estaciones"] + [
-                    f"{c} — {_eds_name_map.get(c, '')}" for c in _eds_codes
-                ]
-                _sel_filter = st.selectbox(
-                    "Filtrar por estación",
-                    _filter_opts,
-                    key=f"shell_reg_filter_{_ck}",
-                )
+
+                _fc1, _fc2 = st.columns(2)
+                with _fc1:
+                    _eds_codes = sorted(
+                        _df_prev_all["eds_occim"].dropna().astype(str).unique().tolist()
+                    )
+                    _filter_opts = ["Todas las estaciones"] + [
+                        f"{c} — {_eds_name_map.get(c, '')}" for c in _eds_codes
+                    ]
+                    _sel_filter = st.selectbox(
+                        "Filtrar por estación",
+                        _filter_opts,
+                        key=f"shell_reg_filter_{_ck}",
+                    )
+                with _fc2:
+                    _buscar_ot = st.text_input(
+                        "Buscar por N° OT",
+                        placeholder="Ej: OS-38200",
+                        key=f"shell_reg_ot_{_ck}",
+                    ).strip().upper()
+
                 if _sel_filter != "Todas las estaciones":
                     _sel_code = _sel_filter.split(" — ")[0]
                     _df_prev_all = _df_prev_all[
                         _df_prev_all["eds_occim"].astype(str) == _sel_code
+                    ]
+                if _buscar_ot:
+                    _df_prev_all = _df_prev_all[
+                        _df_prev_all["folio"].str.upper().str.contains(_buscar_ot, na=False)
                     ]
 
                 def _rpval(s, col, default="—"):
