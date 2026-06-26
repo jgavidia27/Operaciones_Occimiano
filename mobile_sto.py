@@ -671,7 +671,7 @@ HTML_TEMPLATE = r"""
   <div style="display:flex;align-items:center;justify-content:space-between;">
     <div>
       <div style="font-size:.78rem;color:var(--muted);letter-spacing:.5px;margin-bottom:2px;">📲 Indicadores Operacionales - Occim</div>
-      <h1 style="margin:0;">Desempeño STO</h1>
+      <h1 style="margin:0;">Indicadores STO</h1>
     </div>
     <a href="javascript:location.reload()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.72rem;text-decoration:none;white-space:nowrap;display:flex;align-items:center;gap:4px;" title="Refrescar datos">🔄 Refresh</a>
   </div>
