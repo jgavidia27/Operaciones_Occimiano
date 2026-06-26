@@ -360,7 +360,7 @@ def clasificar_numeral(inicial, final) -> tuple:
 # devuelve un veredicto BINARIO + motivo, usado para puntuar el bono.
 # Criterio Occimiano: un técnico rara vez gasta >20 fichas probando una máquina.
 # Un valor basura (≥8 díg, ej. 99.999.999) o un salto imposible = dato malo.
-_NUMERAL_FICHAS_MAX = 20          # > esto dentro de una misma OT = sospechoso
+_NUMERAL_FICHAS_MAX = 25          # > esto dentro de una misma OT = sospechoso
 # (_VALOR_GARBAGE ya definido arriba = 10_000_000)
 
 # Motivos de numeral malo (para etiquetar y mostrar el comentario del técnico)
