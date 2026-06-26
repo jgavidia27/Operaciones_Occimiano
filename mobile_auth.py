@@ -12,10 +12,8 @@ Requisitos:
 """
 
 import os
-import smtplib
 import secrets
 from datetime import datetime, timedelta, timezone
-from email.mime.text import MIMEText
 from functools import wraps
 
 import requests
@@ -61,9 +59,8 @@ CODE_TTL_MINUTES = 10
 SESSION_TTL_DAYS = 30
 MAX_ATTEMPTS = 5
 
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 465
-SMTP_FROM_NAME = "Indicadores Occimiano"
+RESEND_API_URL = "https://api.resend.com/emails"
+EMAIL_FROM = "Indicadores Occimiano <onboarding@resend.dev>"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -155,13 +152,12 @@ def _update_code(email: str, fields: dict) -> bool:
     return r.status_code in (200, 204)
 
 
-# ── SMTP ─────────────────────────────────────────────────────────────────
+# ── Email via Resend (HTTP API) ─────────────────────────────────────────
 
 def send_code_email(to_email: str, code: str) -> tuple[bool, str]:
-    smtp_user = os.getenv("SMTP_USER", "")
-    smtp_pass = os.getenv("SMTP_PASS", "")
-    if not smtp_user or not smtp_pass:
-        return False, "SMTP no configurado (faltan SMTP_USER/SMTP_PASS)."
+    api_key = os.getenv("RESEND_API_KEY", "")
+    if not api_key:
+        return False, "Email no configurado (falta RESEND_API_KEY)."
 
     body_html = f"""<!DOCTYPE html><html><body style="font-family:-apple-system,sans-serif;background:#f4f4f5;padding:24px;color:#0f172a;">
 <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:32px 28px;border:1px solid #e2e8f0;">
@@ -172,18 +168,23 @@ def send_code_email(to_email: str, code: str) -> tuple[bool, str]:
 </div>
 </body></html>"""
 
-    msg = MIMEText(body_html, "html", "utf-8")
-    msg["Subject"] = f"Código de acceso: {code} — Indicadores Occimiano"
-    msg["From"] = f"{SMTP_FROM_NAME} <{smtp_user}>"
-    msg["To"] = to_email
-
     try:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-            s.login(smtp_user, smtp_pass)
-            s.sendmail(smtp_user, [to_email], msg.as_string())
-        return True, "ok"
+        r = requests.post(
+            RESEND_API_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from": EMAIL_FROM,
+                "to": [to_email],
+                "subject": f"Código de acceso: {code} — Indicadores Operacionales",
+                "html": body_html,
+            },
+            timeout=15,
+        )
+        if r.status_code in (200, 201):
+            return True, "ok"
+        return False, f"Error enviando email: {r.status_code} {r.text}"
     except Exception as e:
-        return False, f"Error SMTP: {e}"
+        return False, f"Error email: {e}"
 
 
 # ── API pública ──────────────────────────────────────────────────────────
