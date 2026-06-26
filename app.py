@@ -3954,8 +3954,14 @@ elif _page == _NAV_PAGES[3]:
                         df_eds_c["nombre"],
                     ))
 
-                _fc1, _fc2 = st.columns(2)
+                _fc1, _fc2, _fc3 = st.columns(3)
                 with _fc1:
+                    _buscar_eds = st.text_input(
+                        "Buscar por Código EDS",
+                        placeholder="Ej: SH_211",
+                        key=f"shell_reg_eds_{_ck}",
+                    ).strip().upper()
+                with _fc2:
                     _eds_codes = sorted(
                         _df_prev_all["eds_occim"].dropna().astype(str).unique().tolist()
                     )
@@ -3967,13 +3973,17 @@ elif _page == _NAV_PAGES[3]:
                         _filter_opts,
                         key=f"shell_reg_filter_{_ck}",
                     )
-                with _fc2:
+                with _fc3:
                     _buscar_ot = st.text_input(
                         "Buscar por N° OT",
                         placeholder="Ej: OS-38200",
                         key=f"shell_reg_ot_{_ck}",
                     ).strip().upper()
 
+                if _buscar_eds:
+                    _df_prev_all = _df_prev_all[
+                        _df_prev_all["eds_occim"].astype(str).str.upper().str.contains(_buscar_eds, na=False)
+                    ]
                 if _sel_filter != "Todas las estaciones":
                     _sel_code = _sel_filter.split(" — ")[0]
                     _df_prev_all = _df_prev_all[
