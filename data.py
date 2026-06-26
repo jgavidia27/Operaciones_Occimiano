@@ -271,7 +271,8 @@ def _parse_hierarchy(parent_description: str) -> tuple[str, str]:
 #     >100 anómalo, y final < inicial es imposible.
 # El valor con ≥8 dígitos se considera tecleo basura (ej. 99999999999999).
 
-_VALOR_GARBAGE     = 10_000_000   # ≥8 díg: un solo valor de numeral imposible (basura)
+_VALOR_GARBAGE     = 10_000_000   # ≥8 díg: un solo valor de numeral sospechoso
+_VALOR_SIEMPRE_BASURA = 1_000_000_000  # ≥1B: siempre basura (ningún contador real llega)
 _DIFF_INCONGRUENTE = 400_000      # diff dentro de OT > esto = registro imposible
 
 # Mapa categoría → severidad (para colorear / contar en paneles)
@@ -315,9 +316,20 @@ def clasificar_numeral(inicial, final) -> tuple:
     """
     vi, vf = _numeral_raw_int(inicial), _numeral_raw_int(final)
 
-    # Valor único basura (≥8 díg., ej. 99999999999999) → incongruente
-    if (vi is not None and vi >= _VALOR_GARBAGE) or (vf is not None and vf >= _VALOR_GARBAGE):
+    # Valor basura: >= 1B siempre; >= 10M solo si diff no es razonable
+    vi_huge = vi is not None and vi >= _VALOR_SIEMPRE_BASURA
+    vf_huge = vf is not None and vf >= _VALOR_SIEMPRE_BASURA
+    if vi_huge or vf_huge:
         return ("incongruente", "🟣 Valor inválido (basura)", None)
+    vi_big = vi is not None and vi >= _VALOR_GARBAGE
+    vf_big = vf is not None and vf >= _VALOR_GARBAGE
+    if vi_big or vf_big:
+        if vi_big and vf_big and vf is not None and vi is not None:
+            dif = vf - vi
+            if not (0 <= dif <= 20):
+                return ("incongruente", "🟣 Valor inválido (basura)", None)
+        else:
+            return ("incongruente", "🟣 Valor inválido (basura)", None)
 
     if vi is None or vf is None:
         return ("sin_dato", "—", None)
@@ -401,9 +413,21 @@ def eval_numeral_kpi(es_lavadora: bool, inicial, final,
 
     vi, vf = _numeral_raw_int(_ni), _numeral_raw_int(_nf)
 
-    # Basura: cualquier valor con ≥8 dígitos
-    if (vi is not None and vi >= _VALOR_GARBAGE) or (vf is not None and vf >= _VALOR_GARBAGE):
+    # Basura: >= 1B siempre; >= 10M solo si la diferencia no es razonable
+    # (equipos viejos tienen contadores legítimos de hasta ~300M).
+    vi_huge = vi is not None and vi >= _VALOR_SIEMPRE_BASURA
+    vf_huge = vf is not None and vf >= _VALOR_SIEMPRE_BASURA
+    if vi_huge or vf_huge:
         return False, "basura"
+    vi_big = vi is not None and vi >= _VALOR_GARBAGE
+    vf_big = vf is not None and vf >= _VALOR_GARBAGE
+    if vi_big or vf_big:
+        if vi_big and vf_big and vi is not None and vf is not None:
+            dif = vf - vi
+            if not (0 <= dif <= _NUMERAL_FICHAS_MAX):
+                return False, "basura"
+        else:
+            return False, "basura"
 
     # Con ambos valores se valida la diferencia dentro de la OT
     if vi is not None and vf is not None:
