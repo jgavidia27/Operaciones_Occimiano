@@ -277,7 +277,9 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
             "numerales_subtarea",
             "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
             "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
-            "numeral_ok,motivo&order=id_ot.desc",
+            "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
+            "tiempo_fichas_seg,fecha_inicio_subtarea,fecha_fin_subtarea"
+            "&order=id_ot.desc",
             limit=20_000,
         )
     except Exception:

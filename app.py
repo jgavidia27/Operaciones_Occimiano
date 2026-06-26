@@ -3377,6 +3377,9 @@ elif _page == _NAV_PAGES[3]:
         ~df_eds_activas["cliente"].str.strip().str.upper().isin(_CLIENTES_EXCLUIR)
     ].copy()
 
+    # Numerales por subtarea (para detalle preventivas Shell)
+    df_num_sub_eds = _sc("df_num_sub_eds_v2", _wo_eds_sig, load_numerales_subtarea_supabase)
+
     # Colores empresa ────────────────────────────────────────────────────────
     _CL_COLORS = {
         "COPEC":          {"tab":"🔴","pm":"#CC0000","cm":"#F4A7A9","accent":"#CC0000","label":"COPEC"},
@@ -3925,6 +3928,115 @@ elif _page == _NAV_PAGES[3]:
         _df_display = _df_display.sort_values(_sort_col, ascending=False, na_position="last")
         _df_display = _df_display.fillna("—")
         _show_df(_df_display, use_container_width=True, hide_index=True)
+
+        # ── Detalle Mantención Preventiva (solo Shell) ───────────────────
+        if company == "SHELL (Enex)":
+            st.markdown(
+                f'<div style="font-weight:700;font-size:0.95rem;margin:24px 0 8px 0;'
+                f'color:{_t["text"]};">'
+                f'🔧 Detalle Mantención Preventiva — Shell (Enex)</div>',
+                unsafe_allow_html=True,
+            )
+
+            _eds_prev_opts = (
+                df_eds_c[["eds_occim","nombre"]]
+                .dropna(subset=["eds_occim"])
+                .drop_duplicates()
+                .sort_values("nombre")
+            )
+            if _eds_prev_opts.empty:
+                st.info("No hay estaciones Shell disponibles.")
+            else:
+                _epm = dict(zip(
+                    _eds_prev_opts["eds_occim"].astype(str),
+                    _eds_prev_opts["nombre"],
+                ))
+                _sel_eds = st.selectbox(
+                    "Seleccionar estación",
+                    options=list(_epm.keys()),
+                    format_func=lambda k: f"{k} — {_epm[k]}",
+                    key="shell_prev_eds",
+                )
+
+                if _sel_eds:
+                    _df_prev = df_wo_c[
+                        (df_wo_c["eds_occim"].astype(str) == str(_sel_eds))
+                        & (df_wo_c["maint_type"] == "Preventiva")
+                    ].sort_values("creation_date", ascending=False)
+
+                    if _df_prev.empty:
+                        st.info(f"Sin mantenciones preventivas para {_sel_eds}.")
+                    else:
+                        _folios_2 = _df_prev["folio"].head(2).tolist()
+                        _df_sub = df_num_sub_eds[
+                            df_num_sub_eds["id_ot"].isin(_folios_2)
+                        ].copy()
+
+                        def _pval(s, col, default="—"):
+                            if s.empty or col not in s.columns:
+                                return default
+                            v = s.iloc[0][col]
+                            if v is None or (isinstance(v, float) and pd.isna(v)):
+                                return default
+                            sv = str(v).strip()
+                            return default if sv in ("", "None", "nan", "null") else sv
+
+                        def _phora(s, col):
+                            if s.empty or col not in s.columns:
+                                return "—"
+                            v = s.iloc[0][col]
+                            if v is None or (isinstance(v, float) and pd.isna(v)):
+                                return "—"
+                            try:
+                                ts = pd.Timestamp(v)
+                                if pd.isna(ts):
+                                    return "—"
+                                if ts.tz is not None:
+                                    ts = ts.tz_convert("America/Santiago")
+                                return ts.strftime("%H:%M")
+                            except Exception:
+                                return "—"
+
+                        _cols_data = {}
+                        for _vi, _fol in enumerate(_folios_2):
+                            _cn = "Última Visita" if _vi == 0 else "Penúltima Visita"
+                            _ot = _df_prev[_df_prev["folio"] == _fol].iloc[0]
+                            _sub_ot = _df_sub[_df_sub["id_ot"] == _fol]
+                            _lav = _sub_ot[_sub_ot["tipo_activo"] == "lavadora"]
+                            _asp = _sub_ot[_sub_ot["tipo_activo"] == "aspiradora"]
+
+                            _cd = _ot["creation_date"]
+                            _fecha = _cd.strftime("%d/%m/%Y") if pd.notna(_cd) else "—"
+                            _tec_raw = _ot["technician"] if "technician" in _ot.index else None
+                            _tec = str(_tec_raw).strip() if _tec_raw and str(_tec_raw).strip() not in ("", "nan", "None") else "—"
+                            _is_ult = (_vi == 0)
+
+                            _cols_data[_cn] = {
+                                "OT":                         _fol,
+                                "Fecha":                      _fecha,
+                                "Técnico":                    _tec,
+                                "── LAVADORA ──":             "",
+                                "Lav. Hora inicio":           _phora(_lav, "fecha_inicio_subtarea"),
+                                "Lav. Hora cierre":           _phora(_lav, "fecha_fin_subtarea"),
+                                "Lav. N. Inicial":            _pval(_lav, "numeral_inicial"),
+                                "Lav. N. Final":              _pval(_lav, "numeral_final"),
+                                "Lav. Fichas":                _pval(_lav, "fichas_periodo") if _is_ult else "—",
+                                "Bomba Dosificadora":         _pval(_lav, "bomba_dosificadora"),
+                                "Consumo Insumos (%)":        _pval(_lav, "consumo_insumos"),
+                                "Lav. Tiempo Fichas (seg)":   _pval(_lav, "tiempo_fichas_seg"),
+                                "── ASPIRADORA ──":           "",
+                                "Asp. Hora inicio":           _phora(_asp, "fecha_inicio_subtarea"),
+                                "Asp. Hora cierre":           _phora(_asp, "fecha_fin_subtarea"),
+                                "Asp. N. Inicial":            _pval(_asp, "numeral_inicial"),
+                                "Asp. N. Final":              _pval(_asp, "numeral_final"),
+                                "Asp. Fichas":                _pval(_asp, "fichas_periodo") if _is_ult else "—",
+                                "Asp. Tiempo Fichas (seg)":   _pval(_asp, "tiempo_fichas_seg"),
+                            }
+
+                        _df_detail = pd.DataFrame(_cols_data)
+                        _df_detail.index.name = "Campo"
+                        _df_detail = _df_detail.fillna("—")
+                        _show_df(_df_detail, use_container_width=True, hide_index=False)
 
     # ════════════════════════════════════════════════════════════════════════
     # PESTAÑA: HISTORIAL DE NUMERALES (global, agrupado por EDS, con buscador)

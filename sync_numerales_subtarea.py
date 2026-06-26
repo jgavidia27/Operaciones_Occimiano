@@ -113,6 +113,11 @@ def fetch_subtareas_numeral(folio: str) -> list:
             "numeral_inicial":    None,
             "numeral_final":      None,
             "form_tiene_numeral": False,
+            "bomba_dosificadora":     None,
+            "consumo_insumos":        None,
+            "tiempo_fichas_seg":      None,
+            "fecha_inicio_subtarea":  s.get("initial_date"),
+            "fecha_fin_subtarea":     s.get("final_date"),
         }
 
     # 2) Items del formulario (NUMERAL INICIAL/FINAL) — limit alto para no truncar
@@ -126,20 +131,27 @@ def fetch_subtareas_numeral(folio: str) -> list:
 
     for it in items:
         desc = (it.get("description") or "").upper()
-        if "NUMERAL" not in desc:
-            continue
-        kid = it.get("id_work_order_task")          # ← SINGULAR (la clave correcta)
+        kid = it.get("id_work_order_task")
         if kid is None or kid not in idx:
             continue
-        idx[kid]["form_tiene_numeral"] = True
-        t = it.get("id_task_form_item_type")
         val = (str(it.get("value")) if it.get("value") is not None else "").strip()
-        if not val or val.lower() in ("none", "null"):
-            continue
-        if t == 3 and idx[kid]["numeral_inicial"] is None:
-            idx[kid]["numeral_inicial"] = val
-        elif t == 5 and idx[kid]["numeral_final"] is None:
-            idx[kid]["numeral_final"] = val
+        val_empty = (not val or val.lower() in ("none", "null"))
+        if "NUMERAL" in desc:
+            idx[kid]["form_tiene_numeral"] = True
+            if val_empty:
+                continue
+            t = it.get("id_task_form_item_type")
+            if t == 3 and idx[kid]["numeral_inicial"] is None:
+                idx[kid]["numeral_inicial"] = val
+            elif t == 5 and idx[kid]["numeral_final"] is None:
+                idx[kid]["numeral_final"] = val
+        elif not val_empty:
+            if "BOMBA DOSIFICADORA" in desc:
+                idx[kid]["bomba_dosificadora"] = val
+            elif "CONSUMO DE INSUMOS" in desc:
+                idx[kid]["consumo_insumos"] = val
+            elif "TIEMPO FICHAS" in desc:
+                idx[kid]["tiempo_fichas_seg"] = val
 
     # 3) Filtrar: solo subtareas cuyo formulario tiene campos NUMERAL.
     #    Subtareas duplicadas del mismo equipo con plantilla sin numeral
@@ -182,6 +194,11 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "fichas_periodo":     fichas,
             "numeral_ok":         ok,
             "motivo":             motivo,
+            "bomba_dosificadora":    r.get("bomba_dosificadora"),
+            "consumo_insumos":       r.get("consumo_insumos"),
+            "tiempo_fichas_seg":     r.get("tiempo_fichas_seg"),
+            "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
+            "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
             "updated_at":         datetime.now(timezone.utc).isoformat(),
         })
     # Upsert por (id_ot, id_work_order_task) — declarada UNIQUE en la migración
