@@ -10,3 +10,9 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true

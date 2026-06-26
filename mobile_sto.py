@@ -8,12 +8,19 @@ Ejecutar local:   python mobile_sto.py
 Deploy Render:    gunicorn mobile_sto:app
 """
 
-import json, os, traceback
-from datetime import datetime, date
+import json, os, traceback, secrets
+from datetime import datetime, date, timedelta
 
-from flask import Flask, request, render_template_string, send_file
+from flask import Flask, request, render_template_string, send_file, redirect, url_for, session
+
+from mobile_auth import (
+    request_code, verify_code, logout as auth_logout,
+    current_user, requires_auth, get_user_info, SESSION_TTL_DAYS,
+)
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.permanent_session_lifetime = timedelta(days=SESSION_TTL_DAYS)
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _STO_DATA_PATH = os.path.join(_APP_DIR, "sto_data.json")
 
@@ -144,9 +151,50 @@ def app_icon():
     return svg, 200, {"Content-Type": "image/svg+xml"}
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    msg = ""
+    msg_kind = "info"
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        ok, m = request_code(email)
+        if ok:
+            session["pending_email"] = email
+            return redirect(url_for("verify_page"))
+        msg = m
+        msg_kind = "error"
+    return render_template_string(LOGIN_TEMPLATE, msg=msg, msg_kind=msg_kind)
+
+
+@app.route("/verify", methods=["GET", "POST"])
+def verify_page():
+    email = session.get("pending_email", "")
+    if not email:
+        return redirect(url_for("login_page"))
+    msg = ""
+    msg_kind = "info"
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        ok, m = verify_code(email, code)
+        if ok:
+            session.pop("pending_email", None)
+            return redirect(request.args.get("next") or url_for("index"))
+        msg = m
+        msg_kind = "error"
+    return render_template_string(VERIFY_TEMPLATE, email=email, msg=msg, msg_kind=msg_kind)
+
+
+@app.route("/logout")
+def logout_page():
+    auth_logout()
+    return redirect(url_for("login_page"))
+
+
 @app.route("/")
+@requires_auth
 def index():
   try:
+    user = current_user()
     data = _load_sto_data()
     if data is None:
         return render_template_string(ERROR_TEMPLATE,
@@ -159,6 +207,10 @@ def index():
     mes_sel = request.args.get("mes", "")
     tecnico_sel = request.args.get("tecnico", "")
     equipo_sel = request.args.get("equipo", "")
+
+    # ── Forzar filtros según permisos del usuario ──────────────────────
+    if not user["is_admin"]:
+        equipo_sel = user["team"]  # solo su equipo, no permitir cambiar
 
     trim = TRIMESTRES.get(trim_key, TRIMESTRES[_trim_default])
     meses_filtro = trim["meses"]
@@ -490,8 +542,15 @@ def index():
                     "cumpl":eq_c},
             })
 
+    # Para usuarios no-admin: limitar lista visible a su equipo y al bono_equipos
+    if not user["is_admin"]:
+        all_tecnicos = [t for t in all_tecnicos if t["equipo"] == equipos_label.get(user["team"], user["team"])]
+        bono_equipos = [b for b in bono_equipos if b.get("key") == user["team"]]
+        equipos_label = {user["team"]: equipos_label.get(user["team"], user["team"])}
+
     return render_template_string(
         HTML_TEMPLATE,
+        user=user,
         sla=sla_data, cal=cal_data, prec=prec_data,
         bono_total=bono_total, bono_equipos=bono_equipos,
         max_sla=MAX_SLA, max_cal=MAX_CAL, max_prec=MAX_PREC,
@@ -673,9 +732,15 @@ HTML_TEMPLATE = r"""
       <div style="font-size:.78rem;color:var(--muted);letter-spacing:.5px;margin-bottom:2px;">📲 Indicadores Operacionales - Occim</div>
       <h1 style="margin:0;">Indicadores STO</h1>
     </div>
-    <a href="javascript:location.reload()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.72rem;text-decoration:none;white-space:nowrap;display:flex;align-items:center;gap:4px;" title="Refrescar datos">🔄 Refresh</a>
+    <div style="display:flex;gap:6px;">
+      <a href="javascript:location.reload()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Refrescar datos">🔄</a>
+      <a href="/logout" style="background:rgba(239,68,68,.2);color:#fca5a5;border:1px solid rgba(239,68,68,.4);border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Cerrar sesión">⏻ Salir</a>
+    </div>
   </div>
-  <p class="subtitle">Occimiano Operaciones · {{ now.strftime('%d/%m/%Y %H:%M') }}</p>
+  <p class="subtitle">
+    {% if user.is_admin %}👤 Admin · {{ user.email }}{% else %}👤 {{ user.short }} · Equipo {{ user.team }}{% endif %}
+    · {{ now.strftime('%d/%m/%Y %H:%M') }}
+  </p>
 </div>
 <div class="data-source">Datos del dashboard · actualizado {{ updated_at[:16] | replace('T',' ') }}</div>
 
@@ -984,6 +1049,101 @@ function showTab(id) {
 </script>
 </body>
 </html>
+"""
+
+
+LOGIN_TEMPLATE = r"""
+<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<title>Acceso · Indicadores Occimiano</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:#0a1628 url('/bg-mobile.png') center/cover fixed;color:#e2e8f0;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  body::before{content:'';position:fixed;inset:0;background:linear-gradient(180deg,rgba(10,22,40,.92),rgba(10,22,40,.85));}
+  .card{position:relative;z-index:1;background:rgba(15,22,42,.95);border:1px solid rgba(51,65,85,.7);
+    border-radius:16px;padding:32px 28px;max-width:380px;width:100%;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);}
+  h1{font-size:1.4rem;color:#fff;margin-bottom:6px;text-align:center;}
+  .sub{color:#94a3b8;font-size:.85rem;text-align:center;margin-bottom:24px;line-height:1.4;}
+  label{display:block;color:#cbd5e1;font-size:.8rem;margin-bottom:8px;letter-spacing:.02em;text-transform:uppercase;}
+  input[type=email],input[type=text]{width:100%;padding:14px 12px;border-radius:10px;
+    border:1px solid rgba(51,65,85,.8);background:rgba(15,22,42,.6);color:#e2e8f0;
+    font-size:16px;outline:none;transition:border .15s;}
+  input:focus{border-color:#14b8a6;}
+  button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:10px;
+    background:#0d5e6b;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:.15s;}
+  button:hover{background:#14b8a6;}
+  .msg{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:.85rem;}
+  .msg.error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#fca5a5;}
+  .msg.info{background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.4);color:#93c5fd;}
+  .hint{margin-top:18px;text-align:center;font-size:.75rem;color:#64748b;line-height:1.5;}
+</style></head><body>
+<div class="card">
+  <h1>🔐 Indicadores Occimiano</h1>
+  <p class="sub">Ingresa tu correo corporativo para recibir un código de acceso.</p>
+  <form method="post">
+    <label for="email">Correo</label>
+    <input type="email" id="email" name="email" required autofocus
+      placeholder="tu_correo@occimiano.cl" autocomplete="email">
+    <button type="submit">Enviar código</button>
+  </form>
+  {% if msg %}<div class="msg {{ msg_kind }}">{{ msg }}</div>{% endif %}
+  <p class="hint">Solo personal autorizado de Occimiano.<br>Si no tienes acceso, contacta a operaciones.</p>
+</div>
+</body></html>
+"""
+
+
+VERIFY_TEMPLATE = r"""
+<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<title>Verificar código · Indicadores Occimiano</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✉️</text></svg>">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:#0a1628 url('/bg-mobile.png') center/cover fixed;color:#e2e8f0;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  body::before{content:'';position:fixed;inset:0;background:linear-gradient(180deg,rgba(10,22,40,.92),rgba(10,22,40,.85));}
+  .card{position:relative;z-index:1;background:rgba(15,22,42,.95);border:1px solid rgba(51,65,85,.7);
+    border-radius:16px;padding:32px 28px;max-width:380px;width:100%;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);}
+  h1{font-size:1.4rem;color:#fff;margin-bottom:6px;text-align:center;}
+  .sub{color:#94a3b8;font-size:.85rem;text-align:center;margin-bottom:24px;line-height:1.4;}
+  .email-box{background:rgba(13,94,107,.2);border:1px solid rgba(20,184,166,.3);
+    border-radius:8px;padding:10px;text-align:center;color:#5eead4;font-size:.85rem;margin-bottom:18px;
+    word-break:break-all;}
+  label{display:block;color:#cbd5e1;font-size:.8rem;margin-bottom:8px;letter-spacing:.02em;text-transform:uppercase;}
+  input[type=text]{width:100%;padding:18px 12px;border-radius:10px;
+    border:1px solid rgba(51,65,85,.8);background:rgba(15,22,42,.6);color:#e2e8f0;
+    font-size:28px;text-align:center;letter-spacing:.4em;font-family:monospace;outline:none;}
+  input:focus{border-color:#14b8a6;}
+  button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:10px;
+    background:#0d5e6b;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;}
+  button:hover{background:#14b8a6;}
+  .msg{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:.85rem;}
+  .msg.error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#fca5a5;}
+  .msg.info{background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.4);color:#93c5fd;}
+  .back{display:block;text-align:center;margin-top:16px;color:#64748b;font-size:.8rem;text-decoration:none;}
+  .back:hover{color:#94a3b8;}
+</style></head><body>
+<div class="card">
+  <h1>✉️ Código enviado</h1>
+  <p class="sub">Revisa tu correo e ingresa el código de 6 dígitos.</p>
+  <div class="email-box">{{ email }}</div>
+  <form method="post">
+    <label for="code">Código</label>
+    <input type="text" id="code" name="code" required autofocus maxlength="6"
+      pattern="[0-9]{6}" inputmode="numeric" placeholder="000000" autocomplete="one-time-code">
+    <button type="submit">Verificar</button>
+  </form>
+  {% if msg %}<div class="msg {{ msg_kind }}">{{ msg }}</div>{% endif %}
+  <a href="{{ url_for('login_page') }}" class="back">← Cambiar correo</a>
+</div>
+</body></html>
 """
 
 
