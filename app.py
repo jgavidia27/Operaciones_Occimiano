@@ -3938,9 +3938,11 @@ elif _page == _NAV_PAGES[3]:
                 unsafe_allow_html=True,
             )
 
-            _df_prev_all = df_wo_c[
-                df_wo_c["maint_type"] == "Preventiva"
-            ].sort_values("creation_date", ascending=False)
+            _df_prev_all = (
+                df_wo_c[df_wo_c["maint_type"] == "Preventiva"]
+                .sort_values("creation_date", ascending=False)
+                .drop_duplicates(subset=["folio"], keep="first")
+            )
 
             if _df_prev_all.empty:
                 st.info("Sin registros de mantención preventiva Shell.")
