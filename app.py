@@ -3938,8 +3938,12 @@ elif _page == _NAV_PAGES[3]:
                 unsafe_allow_html=True,
             )
 
+            _shell_min_date = pd.Timestamp("2026-06-01", tz="UTC")
             _df_prev_all = (
-                df_wo_c[df_wo_c["maint_type"] == "Preventiva"]
+                df_wo_c[
+                    (df_wo_c["maint_type"] == "Preventiva")
+                    & (df_wo_c["creation_date"] >= _shell_min_date)
+                ]
                 .sort_values("creation_date", ascending=False)
                 .drop_duplicates(subset=["folio"], keep="first")
             )
