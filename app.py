@@ -3380,6 +3380,34 @@ elif _page == _NAV_PAGES[3]:
     # Numerales por subtarea (para detalle preventivas Shell)
     df_num_sub_eds = _sc("df_num_sub_eds_v2", _wo_eds_sig, load_numerales_subtarea_supabase)
 
+    # ── Override per-asset: el numeral correcto vive en numerales_subtarea,
+    # NO en ordenes_trabajo (que es OT-level y se duplica al expandir activos).
+    # Si (folio, equipment_code) tiene fila en numerales_subtarea, sobrescribir.
+    if not df_num_sub_eds.empty and "equipment_code" in df_wo_eds_full.columns:
+        _ns_map = {
+            (str(r["id_ot"]), str(r["codigo_activo"])): (
+                r.get("numeral_inicial"),
+                r.get("numeral_final"),
+            )
+            for _, r in df_num_sub_eds.iterrows()
+            if pd.notna(r.get("id_ot")) and pd.notna(r.get("codigo_activo"))
+        }
+        def _override_ni(row):
+            k = (str(row.get("folio", "")), str(row.get("equipment_code", "")))
+            v = _ns_map.get(k)
+            return v[0] if v and v[0] is not None and str(v[0]).strip() not in ("", "nan", "None") else row.get("numeral_inicial")
+        def _override_nf(row):
+            k = (str(row.get("folio", "")), str(row.get("equipment_code", "")))
+            v = _ns_map.get(k)
+            return v[1] if v and v[1] is not None and str(v[1]).strip() not in ("", "nan", "None") else row.get("numeral_final")
+        df_wo_eds_full = df_wo_eds_full.copy()
+        df_wo_eds_full["numeral_inicial"] = df_wo_eds_full.apply(_override_ni, axis=1)
+        df_wo_eds_full["numeral_final"]   = df_wo_eds_full.apply(_override_nf, axis=1)
+        df_wo_cur = df_wo_eds_full[
+            df_wo_eds_full["client"].isin(_EDS_CLIENTS) &
+            (df_wo_eds_full["year"] == _cur_year)
+        ].copy()
+
     # Colores empresa ────────────────────────────────────────────────────────
     _CL_COLORS = {
         "COPEC":          {"tab":"🔴","pm":"#CC0000","cm":"#F4A7A9","accent":"#CC0000","label":"COPEC"},
