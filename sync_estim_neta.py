@@ -111,6 +111,7 @@ def _tipo_activo(nombre: str) -> str:
     if "ABLANDADOR" in n:                  return "ablandador"
     if "LAVAINT" in n or "LAVATAP" in n:   return "lavainterior"
     if "ASPIRA" in n:                      return "aspiradora"
+    if "FICHERO" in n:                     return "otro"
     if "LAVAD" in n:                       return "lavadora"
     return "otro"
 

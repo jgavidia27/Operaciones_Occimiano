@@ -50,6 +50,7 @@ def _tipo_activo(nombre: str) -> str:
     n = (nombre or "").upper()
     if "LAVAINT" in n or "LAVATAP" in n: return "lavainterior"
     if "ASPIRA"  in n:                   return "aspiradora"
+    if "FICHERO" in n:                   return "otro"
     if "LAVAD"   in n:                   return "lavadora"
     return "otro"
 
@@ -111,6 +112,7 @@ def fetch_subtareas_numeral(folio: str) -> list:
             "tipo_activo":        _tipo_activo(s.get("items_log_description") or ""),
             "numeral_inicial":    None,
             "numeral_final":      None,
+            "form_tiene_numeral": False,
         }
 
     # 2) Items del formulario (NUMERAL INICIAL/FINAL) — limit alto para no truncar
@@ -129,6 +131,7 @@ def fetch_subtareas_numeral(folio: str) -> list:
         kid = it.get("id_work_order_task")          # ← SINGULAR (la clave correcta)
         if kid is None or kid not in idx:
             continue
+        idx[kid]["form_tiene_numeral"] = True
         t = it.get("id_task_form_item_type")
         val = (str(it.get("value")) if it.get("value") is not None else "").strip()
         if not val or val.lower() in ("none", "null"):
@@ -138,14 +141,12 @@ def fetch_subtareas_numeral(folio: str) -> list:
         elif t == 5 and idx[kid]["numeral_final"] is None:
             idx[kid]["numeral_final"] = val
 
-    # 3) Filtrar: solo subtareas que efectivamente registraron numeral
-    #    O cuyo activo es lavadora/aspiradora/lavainterior (aunque el técnico
-    #    no haya llenado el campo — esa es la prueba de "no llenó").
+    # 3) Filtrar: solo subtareas cuyo formulario tiene campos NUMERAL.
+    #    Subtareas duplicadas del mismo equipo con plantilla sin numeral
+    #    quedan excluidas (no penalizan al técnico).
     out = []
     for kid, row in idx.items():
-        es_objetivo = row["tipo_activo"] in ("lavadora", "aspiradora", "lavainterior")
-        tiene_valor = bool(row["numeral_inicial"] or row["numeral_final"])
-        if es_objetivo or tiene_valor:
+        if row["form_tiene_numeral"]:
             out.append(row)
     return out
 
