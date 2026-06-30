@@ -238,6 +238,10 @@ def index():
     full_to_short = data.get("full_to_short", {})
     tech_name_map = data.get("tech_name_map", {})
     seniors = set(data.get("seniors", []))
+    for _eq_v in equipos_info.values():
+        _snr = _eq_v.get("senior", "")
+        if _snr:
+            seniors.add(_snr)
 
     equipos_label = {k: v.get("label", k) for k, v in equipos_info.items()}
 
@@ -554,20 +558,22 @@ def index():
                     "cumpl":eq_c},
             })
 
-    # Para usuarios no-admin: limitar vista a sus propios datos + promedio equipo
+    # Determinar si el usuario es senior de su equipo
+    _my_short = user.get("short", "")
+    _user_is_senior = _my_short in seniors
+
     if not user["is_admin"]:
-        _my_short = user.get("short", "")
         _my_team_label = equipos_label.get(user["team"], user["team"])
         all_tecnicos = [t for t in all_tecnicos if t["equipo"] == _my_team_label]
         bono_equipos = [b for b in bono_equipos if b.get("key") == user["team"]]
         equipos_label = {user["team"]: _my_team_label}
 
-        sla_data["tecnicos"] = [t for t in sla_data["tecnicos"] if t["nombre"] == _my_short]
-        cal_data["tecnicos"] = [t for t in cal_data["tecnicos"] if t["nombre"] == _my_short]
-        prec_data["tecnicos"] = [t for t in prec_data["tecnicos"] if t["nombre"] == _my_short]
-
-        for _beq in bono_equipos:
-            _beq["tecs"] = [t for t in _beq.get("tecs", []) if t["short"] == _my_short]
+        if not _user_is_senior:
+            sla_data["tecnicos"] = [t for t in sla_data["tecnicos"] if t["nombre"] == _my_short]
+            cal_data["tecnicos"] = [t for t in cal_data["tecnicos"] if t["nombre"] == _my_short]
+            prec_data["tecnicos"] = [t for t in prec_data["tecnicos"] if t["nombre"] == _my_short]
+            for _beq in bono_equipos:
+                _beq["tecs"] = [t for t in _beq.get("tecs", []) if t["short"] == _my_short]
 
     # Filtro de equipo para admins (bono_equipos)
     if user["is_admin"] and equipo_sel:
@@ -575,7 +581,7 @@ def index():
 
     return render_template_string(
         HTML_TEMPLATE,
-        user=user,
+        user=user, user_is_senior=_user_is_senior,
         sla=sla_data, cal=cal_data, prec=prec_data,
         bono_total=bono_total, bono_equipos=bono_equipos,
         max_sla=MAX_SLA, max_cal=MAX_CAL, max_prec=MAX_PREC,
@@ -839,7 +845,7 @@ HTML_TEMPLATE = r"""
   </div>
   {% endif %}
   {% if sla.tecnicos %}
-  <h2>{% if user.is_admin %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
+  <h2>{% if user.is_admin or user_is_senior %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
   <div class="ranking">
     {% for t in sla.tecnicos %}
     <div class="rank-row">
@@ -865,7 +871,7 @@ HTML_TEMPLATE = r"""
     </div>
   </div>
   {% if cal.tecnicos %}
-  <h2>{% if user.is_admin %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
+  <h2>{% if user.is_admin or user_is_senior %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
   <div class="ranking">
     {% for t in cal.tecnicos %}
     <div class="rank-row">
@@ -891,7 +897,7 @@ HTML_TEMPLATE = r"""
     </div>
   </div>
   {% if prec.tecnicos %}
-  <h2>{% if user.is_admin %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
+  <h2>{% if user.is_admin or user_is_senior %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
   <div class="ranking">
     {% for t in prec.tecnicos %}
     <div class="rank-row">
