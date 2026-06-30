@@ -92,9 +92,9 @@ def _post(tabla: str, data: dict) -> bool:
             "Prefer":        "resolution=merge-duplicates,return=minimal",
         },
         json=data,
-        timeout=10,
+        timeout=30,
     )
-    return r.status_code in (200, 201)
+    return r.status_code in (200, 201, 204)
 
 
 def _patch(tabla: str, filtro: str, data: dict) -> bool:
