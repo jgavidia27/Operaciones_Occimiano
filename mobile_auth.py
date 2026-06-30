@@ -48,6 +48,7 @@ ADMINS = {
     "dhevia@occimiano.cl",
     "jcaceres@occimiano.cl",
     "wsoto@occimiano.cl",
+    "mhevia@occimiano.cl",
 }
 
 SESSION_TTL_DAYS = 30
