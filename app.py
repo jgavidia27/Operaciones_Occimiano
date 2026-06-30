@@ -4394,7 +4394,7 @@ elif _page == _NAV_PAGES[4]:
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
     _util_sub_tab = st.radio(
         "",
-        ["📊 Utilización del tiempo", "📡 En Vivo", "📅 Planificación Turnos"],
+        ["📅 Planificación Turnos", "📡 En Vivo", "📊 Utilización del tiempo"],
         horizontal=True,
         label_visibility="collapsed",
         key="util_sub_tab",
@@ -4896,7 +4896,6 @@ elif _page == _NAV_PAGES[4]:
                 continue
             _equipo_turno = _zd.get("equipo", "")
             _turnos_list = _zd.get("turnos", [])
-            _obs = _zd.get("obs", "")
 
             st.markdown(
                 f'<div style="background:{_tcard};border:1px solid {_tborder};border-radius:10px;'
@@ -4905,7 +4904,6 @@ elif _page == _NAV_PAGES[4]:
                 f'<span style="font-weight:700;font-size:1.0rem;color:{_ttxt};">{_ZONE_LABEL_T.get(_zk,_zk)}</span>'
                 f'<span style="margin-left:12px;font-size:0.85rem;color:{_tmuted};">Equipo: </span>'
                 f'<span style="font-weight:700;font-size:0.9rem;color:{_taccent};">{_equipo_turno}</span>'
-                f'{" <span style=color:" + _tmuted + ";font-size:0.78rem;>(" + _obs + ")</span>" if _obs else ""}'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -4938,14 +4936,19 @@ elif _page == _NAV_PAGES[4]:
                 _tec = _tr.get("tecnico", "—")
                 _tnum = _tr.get("turno", _ti + 1)
                 _hrs = _tr.get("horarios", [])
+                _tec_obs = _tr.get("obs", "")
                 _row_bg = "transparent" if _ti % 2 == 0 else (_tborder + "22")
+                _obs_html = (
+                    f' <span style="font-size:0.7rem;font-weight:700;color:#ef4444;'
+                    f'margin-left:6px;">({_tec_obs})</span>' if _tec_obs else ""
+                )
                 _name_cell = (
                     f'<td style="padding:10px 12px;border-bottom:1px solid {_tborder};background:{_row_bg};">'
                     f'<div style="display:flex;align-items:center;gap:8px;">'
                     f'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;'
                     f'background:{_tc};flex-shrink:0;"></span>'
                     f'<div>'
-                    f'<div style="font-size:0.88rem;font-weight:700;color:{_ttxt};white-space:nowrap;">{_tec}</div>'
+                    f'<div style="font-size:0.88rem;font-weight:700;color:{_ttxt};white-space:nowrap;">{_tec}{_obs_html}</div>'
                     f'<div style="font-size:0.68rem;color:{_tc};font-weight:600;">Turno {_tnum}</div>'
                     f'</div></div></td>'
                 )

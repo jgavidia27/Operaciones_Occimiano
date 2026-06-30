@@ -235,19 +235,18 @@ def parse_sheet(ws, config):
                 v = ws.cell(data_row, c).value
                 horarios.append(str(v).strip() if v is not None else "")
 
+            tec_obs = ""
+            if has_obs:
+                obs_val = ws.cell(data_row, obs_col).value
+                if obs_val is not None and str(obs_val).strip():
+                    tec_obs = str(obs_val).strip()
+
             turnos.append({
                 "turno": turno_num,
                 "tecnico": tec_name,
                 "horarios": horarios,
+                "obs": tec_obs,
             })
-
-            # Check for obs in this row (centro only)
-            if has_obs:
-                obs_val = ws.cell(data_row, obs_col).value
-                if obs_val is not None and str(obs_val).strip():
-                    if obs_text:
-                        obs_text += "; "
-                    obs_text += str(obs_val).strip()
 
         row += num_techs
 
@@ -260,7 +259,6 @@ def parse_sheet(ws, config):
             "zone": zone,
             "equipo": equipo or "",
             "turnos": turnos,
-            "obs": obs_text,
         }
         weeks.append(week_record)
 
@@ -284,7 +282,6 @@ def group_weeks_by_date(all_zone_weeks):
         grouped[key]["zones"][w["zone"]] = {
             "equipo": w["equipo"],
             "turnos": w["turnos"],
-            "obs": w["obs"],
         }
 
     # Sort by start_date
