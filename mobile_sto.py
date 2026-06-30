@@ -218,6 +218,7 @@ def index():
     mes_sel = request.args.get("mes", "")
     tecnico_sel = request.args.get("tecnico", "")
     equipo_sel = request.args.get("equipo", "")
+    tab_sel = request.args.get("tab", "sla")
 
     # ── Forzar filtros según permisos del usuario ──────────────────────
     if not user["is_admin"]:
@@ -572,7 +573,7 @@ def index():
         bono_pool=BONO_TOTAL,
         trim_key=trim_key, trim_label=trim["label"], trimestres=TRIMESTRES,
         mes_sel=mes_sel, meses_filtro=meses_filtro,
-        tecnico_sel=tecnico_sel, equipo_sel=equipo_sel,
+        tecnico_sel=tecnico_sel, equipo_sel=equipo_sel, tab_sel=tab_sel,
         tecnicos=all_tecnicos, equipos=equipos_label,
         color_pct=_color_pct, nivel_color=_nivel_color, clp_fmt=_clp_fmt,
         updated_at=data.get("updated_at", "—"),
@@ -761,6 +762,7 @@ HTML_TEMPLATE = r"""
 <div class="data-source">Datos del dashboard · actualizado {{ updated_at[:16] | replace('T',' ') }}</div>
 
 <form class="filters" id="filterForm">
+  <input type="hidden" name="tab" id="tabInput" value="{{ tab_sel }}">
   <select name="trim" onchange="this.form.submit()">
     {% for k, v in trimestres.items() %}
     <option value="{{ k }}" {{ 'selected' if k == trim_key }}>{{ v.label }}</option>
@@ -1063,7 +1065,12 @@ function showTab(id) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + id).classList.add('active');
   event.target.classList.add('active');
+  document.getElementById('tabInput').value = id;
 }
+(function(){
+  var t = '{{ tab_sel }}';
+  if (t && document.getElementById('tab-' + t)) { showTab(t); }
+})();
 </script>
 </body>
 </html>
