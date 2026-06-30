@@ -9474,31 +9474,16 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
             )
 
         # ── Cargar datos de Precisión ─────────────────────────────────────────
-        def _build_ot_all_bono():
-            _raw = _cached_build_kpi_llenado(raw_wo)
-            if _raw.empty:
-                return pd.DataFrame()
-            _df = score_llenado_por_ot(_raw)
-            if not _df.empty:
-                if _folios_excluir and "folio" in _df.columns:
-                    _df = _df[~_df["folio"].isin(_folios_excluir)].copy()
-                _df["wo_status"] = _df["folio"].map(_ot_estados).fillna("")
-                _df["equipo"] = _df["tecnico"].apply(_get_equipo)
-                _df["_tech_norm"] = _df["tecnico"].fillna("").apply(
+        # Usar df_ot_all_scores_v4_direct (con aplicar_numerales_subtarea) para
+        # que los valores coincidan con la pestaña Precisión Fracttal.
+        _df_ot_bono = st.session_state.get(
+            "df_ot_all_scores_v4_direct", pd.DataFrame()
+        ).copy()
+        if not _df_ot_bono.empty:
+            if "_tech_norm" not in _df_ot_bono.columns:
+                _df_ot_bono["_tech_norm"] = _df_ot_bono["tecnico"].fillna("").apply(
                     lambda s: " ".join(_norm_n(s).split())
                 )
-                if "creation_date" in _df.columns:
-                    _cd = (
-                        _df["creation_date"].dt.tz_convert(None)
-                        if _df["creation_date"].dt.tz is not None
-                        else _df["creation_date"]
-                    )
-                    _df["mes"] = _cd.dt.to_period("M").astype(str)
-            return _df
-
-        # Clave DISTINTA a "df_ot_all_scores" (usada por tab Precisión) para evitar
-        # que el builder del KPI screen sobrescriba estos datos sin _tech_norm.
-        _df_ot_bono = _sc("df_ot_bono_scores_v2", _wo_sig, _build_ot_all_bono)
         if not _df_ot_bono.empty and "mes" in _df_ot_bono.columns:
             _df_ot_bono_filt = _df_ot_bono[
                 _df_ot_bono["mes"].astype(str).isin(_meses_bono_activos)
@@ -10176,7 +10161,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
         _reinc_full = st.session_state.get("df_reinc", pd.DataFrame())
         _reinc_records = []
         if not _reinc_full.empty and "falla_tipo" in _reinc_full.columns:
-            _reinc_exp = _reinc_full[~_reinc_full["falla_tipo"].isin(["especial"])].copy()
+            _reinc_exp = _reinc_full[_reinc_full["falla_tipo"] == "fao"].copy()
             if "fecha_cm" in _reinc_exp.columns:
                 _reinc_exp["mes_num"] = pd.to_datetime(_reinc_exp["fecha_cm"], errors="coerce").dt.month
             if "tecnico_resp_short" in _reinc_exp.columns and "grupo_responsable" in _reinc_exp.columns:
