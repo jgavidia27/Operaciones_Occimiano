@@ -201,8 +201,11 @@ def cambiar_pin():
 
 
 @app.route("/admin/pins", methods=["GET", "POST"])
-@requires_admin
+@requires_auth
 def admin_pins():
+    u = current_user()
+    if not u or u.get("email") != "jgavidia@occimiano.cl":
+        return redirect(url_for("index"))
     msg = ""
     if request.method == "POST":
         action = request.form.get("action", "")
