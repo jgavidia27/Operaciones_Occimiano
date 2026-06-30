@@ -554,11 +554,20 @@ def index():
                     "cumpl":eq_c},
             })
 
-    # Para usuarios no-admin: limitar lista visible a su equipo
+    # Para usuarios no-admin: limitar vista a sus propios datos + promedio equipo
     if not user["is_admin"]:
-        all_tecnicos = [t for t in all_tecnicos if t["equipo"] == equipos_label.get(user["team"], user["team"])]
+        _my_short = user.get("short", "")
+        _my_team_label = equipos_label.get(user["team"], user["team"])
+        all_tecnicos = [t for t in all_tecnicos if t["equipo"] == _my_team_label]
         bono_equipos = [b for b in bono_equipos if b.get("key") == user["team"]]
-        equipos_label = {user["team"]: equipos_label.get(user["team"], user["team"])}
+        equipos_label = {user["team"]: _my_team_label}
+
+        sla_data["tecnicos"] = [t for t in sla_data["tecnicos"] if t["nombre"] == _my_short]
+        cal_data["tecnicos"] = [t for t in cal_data["tecnicos"] if t["nombre"] == _my_short]
+        prec_data["tecnicos"] = [t for t in prec_data["tecnicos"] if t["nombre"] == _my_short]
+
+        for _beq in bono_equipos:
+            _beq["tecs"] = [t for t in _beq.get("tecs", []) if t["short"] == _my_short]
 
     # Filtro de equipo para admins (bono_equipos)
     if user["is_admin"] and equipo_sel:
@@ -830,13 +839,13 @@ HTML_TEMPLATE = r"""
   </div>
   {% endif %}
   {% if sla.tecnicos %}
-  <h2>Ranking técnicos</h2>
+  <h2>{% if user.is_admin %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
   <div class="ranking">
     {% for t in sla.tecnicos %}
     <div class="rank-row">
       <span class="rank-name">{{ t.nombre }} <span class="rank-eq">{{ t.equipo }}</span>{% if t.es_senior %} <span style="background:#f59e0b;color:#000;border-radius:3px;padding:1px 5px;font-size:.6rem;font-weight:700;vertical-align:middle;">PROMEDIO EQUIPO</span>{% endif %}</span>
       <span class="rank-pct" style="color:{{ color_pct(t.pct) }}">{{ t.pct }}%</span>
-      <span class="rank-clp">${{ '{:,.0f}'.format(t.bono_clp) }}</span>
+      <span class="rank-clp">{{ t.cumple }}/{{ t.total }}</span>
     </div>
     {% endfor %}
   </div>
@@ -856,7 +865,7 @@ HTML_TEMPLATE = r"""
     </div>
   </div>
   {% if cal.tecnicos %}
-  <h2>Ranking técnicos</h2>
+  <h2>{% if user.is_admin %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
   <div class="ranking">
     {% for t in cal.tecnicos %}
     <div class="rank-row">
@@ -882,7 +891,7 @@ HTML_TEMPLATE = r"""
     </div>
   </div>
   {% if prec.tecnicos %}
-  <h2>Ranking técnicos</h2>
+  <h2>{% if user.is_admin %}Ranking técnicos{% else %}Tu desempeño{% endif %}</h2>
   <div class="ranking">
     {% for t in prec.tecnicos %}
     <div class="rank-row">
