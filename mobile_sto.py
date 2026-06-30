@@ -173,6 +173,33 @@ def logout_page():
     return redirect(url_for("login_page"))
 
 
+@app.route("/cambiar-pin", methods=["GET", "POST"])
+@requires_auth
+def cambiar_pin():
+    user = current_user()
+    msg = ""
+    msg_kind = ""
+    if request.method == "POST":
+        pin_actual = request.form.get("pin_actual", "").strip()
+        pin_nuevo = request.form.get("pin_nuevo", "").strip()
+        pin_confirm = request.form.get("pin_confirm", "").strip()
+        stored = get_pin(user["email"])
+        if pin_actual != stored:
+            msg, msg_kind = "El PIN actual es incorrecto.", "error"
+        elif len(pin_nuevo) != 4 or not pin_nuevo.isdigit():
+            msg, msg_kind = "El nuevo PIN debe ser de 4 digitos.", "error"
+        elif pin_nuevo != pin_confirm:
+            msg, msg_kind = "Los PINs nuevos no coinciden.", "error"
+        elif pin_nuevo == pin_actual:
+            msg, msg_kind = "El nuevo PIN debe ser diferente al actual.", "error"
+        else:
+            if set_pin(user["email"], pin_nuevo):
+                msg, msg_kind = "PIN actualizado correctamente.", "success"
+            else:
+                msg, msg_kind = "Error al guardar. Intenta nuevamente.", "error"
+    return render_template_string(CAMBIAR_PIN_TEMPLATE, user=user, msg=msg, msg_kind=msg_kind)
+
+
 @app.route("/admin/pins", methods=["GET", "POST"])
 @requires_admin
 def admin_pins():
@@ -1064,7 +1091,10 @@ HTML_TEMPLATE = r"""
 
 <div class="footer">
   📲 Indicadores Operacionales - versión mobile 1.2<br>
-  Última sincronización: {{ updated_at[:16] | replace('T',' ') }}
+  Última sincronización: {{ updated_at[:16] | replace('T',' ') }}<br>
+  <a href="/cambiar-pin" style="color:#14b8a6;font-size:.75rem;text-decoration:none;">🔑 Cambiar PIN</a>
+  &nbsp;·&nbsp;
+  <a href="/logout" style="color:#94a3b8;font-size:.75rem;text-decoration:none;">Cerrar sesión</a>
 </div>
 
 </div>
@@ -1136,6 +1166,64 @@ LOGIN_TEMPLATE = r"""
   </form>
   {% if msg %}<div class="msg {{ msg_kind }}">{{ msg }}</div>{% endif %}
   <p class="hint">Solo personal autorizado de Occimiano.<br>Si no tienes acceso, contacta a operaciones.</p>
+</div>
+</body></html>
+"""
+
+
+CAMBIAR_PIN_TEMPLATE = r"""
+<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<title>Cambiar PIN</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔑</text></svg>">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:#0a1628 url('/bg-mobile.png') center/cover fixed;color:#e2e8f0;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  body::before{content:'';position:fixed;inset:0;background:linear-gradient(180deg,rgba(10,22,40,.92),rgba(10,22,40,.85));}
+  .card{position:relative;z-index:1;background:rgba(15,22,42,.95);border:1px solid rgba(51,65,85,.7);
+    border-radius:16px;padding:32px 28px;max-width:380px;width:100%;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);}
+  h1{font-size:1.3rem;color:#fff;margin-bottom:6px;text-align:center;}
+  .sub{color:#94a3b8;font-size:.85rem;text-align:center;margin-bottom:20px;line-height:1.4;}
+  .user-info{text-align:center;color:#14b8a6;font-size:.9rem;font-weight:600;margin-bottom:20px;}
+  label{display:block;color:#cbd5e1;font-size:.8rem;margin-bottom:8px;letter-spacing:.02em;text-transform:uppercase;}
+  input[type=password]{width:100%;padding:14px 12px;border-radius:10px;
+    border:1px solid rgba(51,65,85,.8);background:rgba(15,22,42,.6);color:#e2e8f0;
+    font-size:16px;outline:none;transition:border .15s;
+    text-align:center;letter-spacing:.3em;font-size:22px;font-family:monospace;}
+  input:focus{border-color:#14b8a6;}
+  .gap{margin-top:16px;}
+  button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:10px;
+    background:#0d5e6b;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:.15s;}
+  button:hover{background:#14b8a6;}
+  .msg{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:.85rem;}
+  .msg.error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#fca5a5;}
+  .msg.success{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);color:#86efac;}
+  .back{display:block;text-align:center;margin-top:18px;color:#64748b;font-size:.85rem;text-decoration:none;}
+  .back:hover{color:#94a3b8;}
+</style></head><body>
+<div class="card">
+  <h1>🔑 Cambiar PIN</h1>
+  <div class="user-info">{{ user.short }}</div>
+  <p class="sub">Ingresa tu PIN actual y elige uno nuevo de 4 digitos.</p>
+  <form method="post">
+    <label for="pin_actual">PIN actual</label>
+    <input type="password" id="pin_actual" name="pin_actual" required maxlength="4"
+      pattern="[0-9]{4}" inputmode="numeric" placeholder="****" autocomplete="current-password">
+    <div class="gap"></div>
+    <label for="pin_nuevo">Nuevo PIN</label>
+    <input type="password" id="pin_nuevo" name="pin_nuevo" required maxlength="4"
+      pattern="[0-9]{4}" inputmode="numeric" placeholder="****" autocomplete="new-password">
+    <div class="gap"></div>
+    <label for="pin_confirm">Confirmar nuevo PIN</label>
+    <input type="password" id="pin_confirm" name="pin_confirm" required maxlength="4"
+      pattern="[0-9]{4}" inputmode="numeric" placeholder="****" autocomplete="new-password">
+    <button type="submit">Cambiar PIN</button>
+  </form>
+  {% if msg %}<div class="msg {{ msg_kind }}">{{ msg }}</div>{% endif %}
+  <a href="/" class="back">← Volver al dashboard</a>
 </div>
 </body></html>
 """
