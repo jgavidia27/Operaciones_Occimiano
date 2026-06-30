@@ -9347,14 +9347,13 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
         # ── Cargar datos de MP (reincidencias) ────────────────────────────────
         _df_reinc_bono = st.session_state.get("df_reinc", pd.DataFrame()).copy()
         if not _df_reinc_bono.empty and "falla_tipo" in _df_reinc_bono.columns:
-            # Política FAO+FNAO: solo excluir Trabajos Especiales y causa=cliente
+            # Solo F.A.O (Falla Atribuible a Occimiano) cuenta para el bono
             _df_reinc_bono = _df_reinc_bono[
-                ~_df_reinc_bono["falla_tipo"].isin(["especial"])
+                _df_reinc_bono["falla_tipo"] == "fao"
             ].copy()
-        # Asegurar es_reincidencia_tecnico con política actual (igual que en tab Efectividad MP)
         if not _df_reinc_bono.empty and "falla_tipo" in _df_reinc_bono.columns and "causa_clasif" in _df_reinc_bono.columns:
             _df_reinc_bono["es_reincidencia_tecnico"] = (
-                (_df_reinc_bono["falla_tipo"] != "especial") &
+                (_df_reinc_bono["falla_tipo"] == "fao") &
                 (_df_reinc_bono["causa_clasif"] != "cliente")
             )
         # Filtro de período

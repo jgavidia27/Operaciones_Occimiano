@@ -285,7 +285,7 @@ def main():
                     "tecnico2": "tecnico_cm",
                 })
             if not df_reinc.empty and "falla_tipo" in df_reinc.columns:
-                _reinc_exp = df_reinc[~df_reinc["falla_tipo"].isin(["especial"])].copy()
+                _reinc_exp = df_reinc[df_reinc["falla_tipo"] == "fao"].copy()
                 if "fecha_cm" in _reinc_exp.columns:
                     _reinc_exp["mes_num"] = pd.to_datetime(
                         _reinc_exp["fecha_cm"], errors="coerce"
