@@ -922,6 +922,7 @@ HTML_TEMPLATE = r"""
   </div>
 
   {% for eq in bono_equipos %}
+  {% if not equipo_sel or eq.key == equipo_sel %}
   <div style="margin-top:14px;">
     <div style="font-size:.95rem;font-weight:700;color:var(--text);border-bottom:2px solid #01798A;padding-bottom:4px;margin-bottom:8px;">
       🌐 Equipo {{ eq.label }} <span style="font-size:.75rem;color:var(--muted);font-weight:400;">— Senior: {{ eq.senior }}</span>
@@ -1045,6 +1046,7 @@ HTML_TEMPLATE = r"""
       </table>
     </div>
   </div>
+  {% endif %}
   {% endfor %}
 </div>
 
