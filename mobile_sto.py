@@ -898,27 +898,22 @@ HTML_TEMPLATE = r"""
 <!-- TAB RESUMEN BONOS -->
 <div class="tab-content" id="tab-bono">
   <div class="kpi-card bono">
-    <div class="kpi-header"><span class="kpi-title">Resumen Bonos · {{ trim_label }}</span></div>
+    <div class="kpi-header"><span class="kpi-title">Cumplimiento Grupal · {{ trim_label }}</span></div>
     <div class="bono-grid">
       <div class="bono-item">
         <div class="label">SLA (40%)</div>
-        <div class="value" style="color:{{ color_pct(sla.pct) }}">${{ '{:,.0f}'.format(sla.bono_clp) }}</div>
-        <div style="font-size:.7rem;color:var(--muted)">{{ sla.pct }}% → {{ sla.bono_pct }}%</div>
+        <div class="value" style="color:{{ color_pct(sla.pct) }}">{{ sla.pct }}%</div>
+        <div style="font-size:.7rem;color:var(--muted)">Nivel bono → {{ sla.bono_pct }}%</div>
       </div>
       <div class="bono-item">
         <div class="label">Efectividad (30%)</div>
-        <div class="value" style="color:{{ color_pct(cal.exactitud) }}">${{ '{:,.0f}'.format(cal.bono_clp) }}</div>
-        <div style="font-size:.7rem;color:var(--muted)">{{ cal.exactitud }}% → {{ cal.bono_pct }}%</div>
+        <div class="value" style="color:{{ color_pct(cal.exactitud) }}">{{ cal.exactitud }}%</div>
+        <div style="font-size:.7rem;color:var(--muted)">Nivel bono → {{ cal.bono_pct }}%</div>
       </div>
       <div class="bono-item">
         <div class="label">Precisión (30%)</div>
-        <div class="value" style="color:{{ color_pct(prec.pct) }}">${{ '{:,.0f}'.format(prec.bono_clp) }}</div>
-        <div style="font-size:.7rem;color:var(--muted)">{{ prec.pct }}% → {{ prec.bono_pct }}%</div>
-      </div>
-      <div class="bono-item total">
-        <div class="label">Bono estimado total</div>
-        <div class="value">${{ '{:,.0f}'.format(bono_total) }}</div>
-        <div style="font-size:.7rem;color:var(--muted)">de ${{ '{:,.0f}'.format(bono_pool) }} pool/trim</div>
+        <div class="value" style="color:{{ color_pct(prec.pct) }}">{{ prec.pct }}%</div>
+        <div style="font-size:.7rem;color:var(--muted)">Nivel bono → {{ prec.bono_pct }}%</div>
       </div>
     </div>
   </div>
