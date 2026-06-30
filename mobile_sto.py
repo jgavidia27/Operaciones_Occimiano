@@ -553,11 +553,15 @@ def index():
                     "cumpl":eq_c},
             })
 
-    # Para usuarios no-admin: limitar lista visible a su equipo y al bono_equipos
+    # Para usuarios no-admin: limitar lista visible a su equipo
     if not user["is_admin"]:
         all_tecnicos = [t for t in all_tecnicos if t["equipo"] == equipos_label.get(user["team"], user["team"])]
         bono_equipos = [b for b in bono_equipos if b.get("key") == user["team"]]
         equipos_label = {user["team"]: equipos_label.get(user["team"], user["team"])}
+
+    # Filtro de equipo para admins (bono_equipos)
+    if user["is_admin"] and equipo_sel:
+        bono_equipos = [b for b in bono_equipos if b.get("key") == equipo_sel]
 
     return render_template_string(
         HTML_TEMPLATE,
