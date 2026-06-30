@@ -1,0 +1,1375 @@
+{
+  "generated_at": "2026-06-30T12:17:51.893757",
+  "weeks": [
+    {
+      "start_date": "2026-06-22",
+      "end_date": "2026-06-28",
+      "dates": [
+        "2026-06-22",
+        "2026-06-23",
+        "2026-06-24",
+        "2026-06-25",
+        "2026-06-26",
+        "2026-06-27",
+        "2026-06-28"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Juan Gallardo",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Javier Hein Pacheco",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Edison Carrasco Navarro",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "N/A",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-06-29",
+      "end_date": "2026-07-05",
+      "dates": [
+        "2026-06-29",
+        "2026-06-30",
+        "2026-07-01",
+        "2026-07-02",
+        "2026-07-03",
+        "2026-07-04",
+        "2026-07-05"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Luis Pinto",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Breyans Andres Toledo Quintana",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Juan Francisco Toro Jimenez",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Jorge Raúl Rodríguez Fuentes",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": "VACACIONES"
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-07-06",
+      "end_date": "2026-07-12",
+      "dates": [
+        "2026-07-06",
+        "2026-07-07",
+        "2026-07-08",
+        "2026-07-09",
+        "2026-07-10",
+        "2026-07-11",
+        "2026-07-12"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Victor Bahamonde",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Iván Ignacio Vergara Ferrari",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Martín Ignacio Flores Galaz",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "N/A",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-07-13",
+      "end_date": "2026-07-19",
+      "dates": [
+        "2026-07-13",
+        "2026-07-14",
+        "2026-07-15",
+        "2026-07-16",
+        "2026-07-17",
+        "2026-07-18",
+        "2026-07-19"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Juan Gallardo",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edison Carrasco Navarro",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Javier Hein Pacheco",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "N/A",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-07-20",
+      "end_date": "2026-07-26",
+      "dates": [
+        "2026-07-20",
+        "2026-07-21",
+        "2026-07-22",
+        "2026-07-23",
+        "2026-07-24",
+        "2026-07-25",
+        "2026-07-26"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Luis Pinto",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Juan Francisco Toro Jimenez",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Breyans Andres Toledo Quintana",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Jorge Raúl Rodríguez Fuentes",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-07-27",
+      "end_date": "2026-08-02",
+      "dates": [
+        "2026-07-27",
+        "2026-07-28",
+        "2026-07-29",
+        "2026-07-30",
+        "2026-07-31",
+        "2026-08-01",
+        "2026-08-02"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Victor Bahamonde",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Martín Ignacio Flores Galaz",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Iván Ignacio Vergara Ferrari",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "N/A",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-08-03",
+      "end_date": "2026-08-09",
+      "dates": [
+        "2026-08-03",
+        "2026-08-04",
+        "2026-08-05",
+        "2026-08-06",
+        "2026-08-07",
+        "2026-08-08",
+        "2026-08-09"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Juan Gallardo",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Javier Hein Pacheco",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Edison Carrasco Navarro",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "N/A",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-08-10",
+      "end_date": "2026-08-16",
+      "dates": [
+        "2026-08-10",
+        "2026-08-11",
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-15",
+        "2026-08-16"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Luis Pinto",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Jorge Raúl Rodríguez Fuentes",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Juan Francisco Toro Jimenez",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Breyans Andres Toledo Quintana",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-08-17",
+      "end_date": "2026-08-23",
+      "dates": [
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-22",
+        "2026-08-23"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Victor Bahamonde",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Iván Ignacio Vergara Ferrari",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Martín Ignacio Flores Galaz",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "N/A",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    },
+    {
+      "start_date": "2026-08-24",
+      "end_date": "2026-08-30",
+      "dates": [
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-29",
+        "2026-08-30"
+      ],
+      "zones": {
+        "centro": {
+          "equipo": "Juan Gallardo",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edison Carrasco Navarro",
+              "horarios": [
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "8:00 A 16:00",
+                "Libre",
+                "9:00 A 16:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Javier Hein Pacheco",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "8:00 A 15:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "N/A",
+              "horarios": [
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "12:00 A 20:00",
+                "13:00 A 20:00",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "norte": {
+          "equipo": "Carlos Avila (Norte)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Edson José Pérez Henríquez",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "09:00 A 14:00",
+                "09:00 A 14:00"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Erwin Maximiliano Rivera Talamilla",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 3,
+              "tecnico": "Carlos Alberto Avila Palacios",
+              "horarios": [
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "09:00 A 18:30",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        },
+        "sur": {
+          "equipo": "Carlos Avilar (SUR)",
+          "turnos": [
+            {
+              "turno": 1,
+              "tecnico": "Luis Joel Lopez Isla",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 14:00",
+                "13:00 A 18:00",
+                "Libre"
+              ]
+            },
+            {
+              "turno": 2,
+              "tecnico": "Gastón Eduardo Fuller Quilodrán",
+              "horarios": [
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "09:00 A 18:00",
+                "Libre",
+                "Libre"
+              ]
+            }
+          ],
+          "obs": ""
+        }
+      }
+    }
+  ]
+}

@@ -4394,7 +4394,7 @@ elif _page == _NAV_PAGES[4]:
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
     _util_sub_tab = st.radio(
         "",
-        ["📊 Utilización del tiempo", "📡 En Vivo"],
+        ["📊 Utilización del tiempo", "📡 En Vivo", "📅 Planificación Turnos"],
         horizontal=True,
         label_visibility="collapsed",
         key="util_sub_tab",
@@ -4823,6 +4823,155 @@ elif _page == _NAV_PAGES[4]:
                         },
                     )
 
+        st.stop()
+
+    # ── Sub-tab: Planificación Turnos STO ─────────────────────────────────────
+    if _util_sub_tab == "📅 Planificación Turnos":
+        import json as _json_turnos
+        from datetime import date as _date_turnos, timedelta as _td_turnos
+
+        st.title("📅 Planificación Turnos STO")
+
+        _turnos_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "turnos_data.json")
+        if not os.path.exists(_turnos_path):
+            st.warning("No se encontró el archivo de turnos (turnos_data.json).")
+            st.stop()
+
+        with open(_turnos_path, "r", encoding="utf-8") as _f_t:
+            _turnos_all = _json_turnos.load(_f_t)
+
+        _weeks = _turnos_all.get("weeks", [])
+        if not _weeks:
+            st.info("Sin datos de turnos disponibles.")
+            st.stop()
+
+        _hoy = _date_turnos.today()
+        _hoy_iso = _hoy.isoformat()
+        _DIA_LABEL = {0: "Lun", 1: "Mar", 2: "Mié", 3: "Jue", 4: "Vie", 5: "Sáb", 6: "Dom"}
+        _MES_LABEL = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
+                      7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
+        _ZONE_LABEL = {"centro": "Zona Centro (Santiago)", "norte": "Zona Norte", "sur": "Zona Sur"}
+        _ZONE_ICON  = {"centro": "🏙️", "norte": "🏔️", "sur": "🌲"}
+
+        _sem_idx_actual = None
+        for _si, _w in enumerate(_weeks):
+            if _hoy_iso in _w.get("dates", []):
+                _sem_idx_actual = _si
+                break
+        if _sem_idx_actual is None:
+            _sem_idx_actual = 0
+
+        _sem_labels = []
+        for _w in _weeks:
+            _ds = _w.get("dates", [])
+            if len(_ds) >= 7:
+                _d0 = _date_turnos.fromisoformat(_ds[0])
+                _d6 = _date_turnos.fromisoformat(_ds[6])
+                _lbl = f"{_d0.day} {_MES_LABEL[_d0.month]} – {_d6.day} {_MES_LABEL[_d6.month]}"
+                if any(d == _hoy_iso for d in _ds):
+                    _lbl = f"▶ {_lbl} (actual)"
+                _sem_labels.append(_lbl)
+            else:
+                _sem_labels.append(f"Semana {_si+1}")
+
+        _sel_sem = st.selectbox(
+            "Semana", _sem_labels, index=_sem_idx_actual, key="turno_semana"
+        )
+        _sel_idx = _sem_labels.index(_sel_sem)
+        _w_data = _weeks[_sel_idx]
+        _w_dates = _w_data.get("dates", [])
+        _w_zones = _w_data.get("zones", {})
+
+        _t = st.session_state.get("_theme_dict", {})
+        _card_bg = _t.get("card", "#1e293b")
+        _text_c = _t.get("text", "#e2e8f0")
+        _muted_c = _t.get("muted", "#94a3b8")
+        _accent = _t.get("accent", "#3b82f6")
+
+        _highlight_bg = "#1e3a5f" if _current_theme == "dark" else "#dbeafe"
+        _libre_bg = "#1c1c2e" if _current_theme == "dark" else "#f1f5f9"
+        _turno_colors = ["#0d9488", "#6366f1", "#d97706"]
+
+        for _zk in ["centro", "norte", "sur"]:
+            _zd = _w_zones.get(_zk)
+            if not _zd:
+                continue
+            _equipo_turno = _zd.get("equipo", "")
+            _turnos_list = _zd.get("turnos", [])
+            _obs = _zd.get("obs", "")
+
+            st.markdown(
+                f'<div style="background:{_card_bg};border-radius:10px;padding:16px 20px;margin:12px 0 8px 0;">'
+                f'<div style="display:flex;align-items:center;gap:10px;">'
+                f'<span style="font-size:1.5rem;">{_ZONE_ICON.get(_zk,"")}</span>'
+                f'<div>'
+                f'<div style="font-weight:700;font-size:1.05rem;color:{_text_c};">{_ZONE_LABEL.get(_zk,_zk)}</div>'
+                f'<div style="font-size:0.82rem;color:{_muted_c};">Equipo de turno: <b style="color:{_accent};">{_equipo_turno}</b>'
+                f'{" · " + _obs if _obs else ""}</div>'
+                f'</div></div></div>',
+                unsafe_allow_html=True,
+            )
+
+            _hdr_cells = ""
+            for _di, _dd in enumerate(_w_dates):
+                _dp = _date_turnos.fromisoformat(_dd)
+                _is_hoy = _dd == _hoy_iso
+                _bg = _highlight_bg if _is_hoy else "transparent"
+                _bord = f"border:2px solid {_accent};" if _is_hoy else ""
+                _fw = "800" if _is_hoy else "600"
+                _hdr_cells += (
+                    f'<th style="text-align:center;padding:6px 4px;background:{_bg};{_bord}'
+                    f'border-radius:6px;min-width:80px;">'
+                    f'<div style="font-size:0.7rem;color:{_muted_c};text-transform:uppercase;">{_DIA_LABEL[_di]}</div>'
+                    f'<div style="font-weight:{_fw};font-size:0.88rem;color:{_text_c};">{_dp.day} {_MES_LABEL[_dp.month]}</div>'
+                    f'{"<div style=font-size:0.6rem;color:" + _accent + ";font-weight:700;>HOY</div>" if _is_hoy else ""}'
+                    f'</th>'
+                )
+
+            _body_rows = ""
+            for _ti, _tr in enumerate(_turnos_list):
+                _tc = _turno_colors[_ti % 3]
+                _tec_name = _tr.get("tecnico", "—")
+                _horarios = _tr.get("horarios", [])
+                _cells = ""
+                for _di, _dd in enumerate(_w_dates):
+                    _h = _horarios[_di] if _di < len(_horarios) else ""
+                    _is_hoy = _dd == _hoy_iso
+                    _bg = _highlight_bg if _is_hoy else "transparent"
+                    _bord = f"border-left:2px solid {_accent};border-right:2px solid {_accent};" if _is_hoy else ""
+                    if _h.lower() == "libre":
+                        _cells += (
+                            f'<td style="text-align:center;padding:5px 3px;background:{_libre_bg};{_bord}'
+                            f'color:{_muted_c};font-size:0.72rem;font-style:italic;">Libre</td>'
+                        )
+                    else:
+                        _cells += (
+                            f'<td style="text-align:center;padding:5px 3px;background:{_bg};{_bord}'
+                            f'font-size:0.75rem;color:{_text_c};">{_h}</td>'
+                        )
+                _body_rows += (
+                    f'<tr>'
+                    f'<td style="padding:6px 10px;white-space:nowrap;">'
+                    f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+                    f'background:{_tc};margin-right:6px;"></span>'
+                    f'<span style="font-size:0.78rem;color:{_text_c};font-weight:600;">{_tec_name}</span>'
+                    f'<div style="font-size:0.62rem;color:{_muted_c};margin-left:14px;">Turno {_tr.get("turno",_ti+1)}</div>'
+                    f'</td>{_cells}</tr>'
+                )
+
+            st.markdown(
+                f'<div style="overflow-x:auto;margin-bottom:16px;">'
+                f'<table style="width:100%;border-collapse:collapse;background:{_card_bg};border-radius:8px;overflow:hidden;">'
+                f'<thead><tr><th style="text-align:left;padding:8px 10px;min-width:160px;'
+                f'font-size:0.75rem;color:{_muted_c};">Técnico</th>{_hdr_cells}</tr></thead>'
+                f'<tbody>{_body_rows}</tbody></table></div>',
+                unsafe_allow_html=True,
+            )
+
+        st.caption(
+            f"Datos cargados desde planilla de turnos. "
+            f"Generado: {_turnos_all.get('generated_at', '?')[:16].replace('T',' ')}"
+        )
         st.stop()
 
     # ── Carga lazy: solo se ejecuta al visitar esta página ────────────────────
