@@ -6071,9 +6071,12 @@ elif _page == _NAV_PAGES[0]:
                         unsafe_allow_html=True,
                     )
 
-                # ── Evolución mensual del cumplimiento SLA ────────────────────
+                # ── Evolución del cumplimiento SLA ────────────────────
                 st.divider()
-                st.markdown('<div class="section-header">📈 Evolución mensual — Cumplimiento SLA</div>',
+                _sla_ev_by_week = len(_mes_sla) == 1
+                _sla_ev_titulo = ("Evolución por semanas" if _sla_ev_by_week
+                                  else "Evolución por mes seleccionado")
+                st.markdown(f'<div class="section-header">📈 {_sla_ev_titulo} — Cumplimiento SLA</div>',
                             unsafe_allow_html=True)
 
                 _MN_SLA = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
@@ -6084,19 +6087,40 @@ elif _page == _NAV_PAGES[0]:
 
                 _sla_hist = _df_con_pri.copy()
                 if not _sla_hist.empty and "fecha_llamado" in _sla_hist.columns:
-                    _sla_hist["_mes"] = pd.to_datetime(
+                    _sla_hist["_fecha_dt"] = pd.to_datetime(
                         _sla_hist["fecha_llamado"], errors="coerce"
-                    ).dt.to_period("M").astype(str)
-                    _sla_trend = (
-                        _sla_hist.groupby("_mes")
-                        .agg(total=("cumple_sla","count"), cumple=("cumple_sla","sum"),
-                             horas_prom=("horas_resolucion","mean"))
-                        .reset_index().sort_values("_mes")
                     )
-                    _sla_trend["pct_sla"]   = (_sla_trend["cumple"] / _sla_trend["total"] * 100).round(1)
-                    _sla_trend["pct_nc"]    = (100 - _sla_trend["pct_sla"]).round(1)
-                    _sla_trend["horas_prom"] = _sla_trend["horas_prom"].round(1)
-                    _sla_trend["mes_lbl"]   = _sla_trend["_mes"].apply(_sla_m2l)
+
+                    if _sla_ev_by_week:
+                        _sla_sems = _semanas_del_mes(_mes_sla[0])
+                        _sla_rows = []
+                        for _slbl, _sstart, _send in _sla_sems:
+                            _sw = _sla_hist[
+                                (_sla_hist["_fecha_dt"].dt.date >= _sstart) &
+                                (_sla_hist["_fecha_dt"].dt.date <= _send)
+                            ]
+                            if _sw.empty:
+                                continue
+                            _sla_rows.append({
+                                "bucket_lbl": _slbl,
+                                "total": len(_sw),
+                                "cumple": int(_sw["cumple_sla"].sum()),
+                            })
+                        _sla_trend = pd.DataFrame(_sla_rows)
+                    else:
+                        _sla_hist["_mes"] = _sla_hist["_fecha_dt"].dt.to_period("M").astype(str)
+                        _sla_trend = (
+                            _sla_hist.groupby("_mes")
+                            .agg(total=("cumple_sla","count"), cumple=("cumple_sla","sum"))
+                            .reset_index().sort_values("_mes")
+                        )
+                        _sla_trend["bucket_lbl"] = _sla_trend["_mes"].apply(_sla_m2l)
+
+                    if not _sla_trend.empty:
+                        _sla_trend = _sla_trend[_sla_trend["total"] > 0].copy()
+                    if not _sla_trend.empty:
+                        _sla_trend["pct_sla"] = (_sla_trend["cumple"] / _sla_trend["total"] * 100).round(1)
+                        _sla_trend["pct_nc"]  = (100 - _sla_trend["pct_sla"]).round(1)
 
                     _sla_tot_all = int(_sla_trend["total"].sum())
                     _sla_ok_all  = int(_sla_trend["cumple"].sum())
@@ -6119,14 +6143,14 @@ elif _page == _NAV_PAGES[0]:
                             unsafe_allow_html=True
                         )
                     with _sc2:
-                        _sla_ev_sig = f"_fig_sla_ev_{_current_theme}_{_wo_sig}_{_equipo_sla}_{_tec_sla_sel}_{len(_df_con_pri)}"
+                        _sla_ev_sig = f"_fig_sla_ev_{_current_theme}_{_wo_sig}_{_equipo_sla}_{_tec_sla_sel}_{len(_df_con_pri)}_{'-'.join(str(m) for m in _mes_sla)}_{_sem_sla}"
                         if _sla_ev_sig not in st.session_state:
                             _fig_sla_ev = go.Figure()
                             _txt_ok_sla = _sla_trend.apply(lambda r:
                                 f"<b>{r['pct_sla']:.1f}%</b><br><span style='font-size:10px;'>"
                                 f"{int(r['cumple'])}/{int(r['total'])}</span>", axis=1).tolist()
                             _fig_sla_ev.add_trace(go.Bar(
-                                x=_sla_trend["mes_lbl"], y=_sla_trend["pct_sla"],
+                                x=_sla_trend["bucket_lbl"], y=_sla_trend["pct_sla"],
                                 name="Cumple SLA", marker_color="#22c55e", opacity=0.95,
                                 text=_txt_ok_sla, textposition="inside", insidetextanchor="middle",
                                 textfont=dict(size=14, color="#ffffff",
@@ -6135,7 +6159,7 @@ elif _page == _NAV_PAGES[0]:
                             _txt_nc_sla = _sla_trend["pct_nc"].apply(
                                 lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
                             _fig_sla_ev.add_trace(go.Bar(
-                                x=_sla_trend["mes_lbl"], y=_sla_trend["pct_nc"],
+                                x=_sla_trend["bucket_lbl"], y=_sla_trend["pct_nc"],
                                 name="No cumple SLA", marker_color="#ef4444", opacity=0.92,
                                 text=_txt_nc_sla, textposition="inside", insidetextanchor="middle",
                                 textfont=dict(size=12, color="#ffffff"),
@@ -6143,7 +6167,7 @@ elif _page == _NAV_PAGES[0]:
                             for _, _r in _sla_trend.iterrows():
                                 if _r["pct_nc"] < 10 and _r["pct_nc"] > 0:
                                     _fig_sla_ev.add_annotation(
-                                        x=_r["mes_lbl"], y=100, ax=0, ay=-35,
+                                        x=_r["bucket_lbl"], y=100, ax=0, ay=-35,
                                         xref="x", yref="y", axref="pixel", ayref="pixel",
                                         showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
                                         arrowcolor="#ef4444",
