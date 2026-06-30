@@ -6076,7 +6076,6 @@ elif _page == _NAV_PAGES[0]:
                 st.markdown('<div class="section-header">📈 Evolución mensual — Cumplimiento SLA</div>',
                             unsafe_allow_html=True)
 
-                # Helper local (mismo que _m2l de Precisión — definido aquí para evitar NameError)
                 _MN_SLA = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
                            7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
                 def _sla_m2l(ym):
@@ -6099,54 +6098,72 @@ elif _page == _NAV_PAGES[0]:
                     _sla_trend["horas_prom"] = _sla_trend["horas_prom"].round(1)
                     _sla_trend["mes_lbl"]   = _sla_trend["_mes"].apply(_sla_m2l)
 
-                    _sla_ev_sig = f"_fig_sla_ev_{_current_theme}_{_wo_sig}_{_equipo_sla}_{_tec_sla_sel}_{len(_df_con_pri)}"
-                    if _sla_ev_sig not in st.session_state:
-                        _fig_sla_ev = make_subplots(specs=[[{"secondary_y": True}]])
-                        _fig_sla_ev.add_trace(go.Bar(
-                            x=_sla_trend["mes_lbl"], y=_sla_trend["total"],
-                            name="Llamados cerrados", marker_color="#94a3b8", opacity=0.85,
-                            text=_sla_trend["total"], textposition="inside",
-                            textfont=dict(size=11, color="#ffffff"),
-                        ), secondary_y=False)
-                        _fig_sla_ev.add_trace(go.Scatter(
-                            x=_sla_trend["mes_lbl"], y=_sla_trend["pct_sla"],
-                            name="% Cumple SLA", mode="lines+markers",
-                            line=dict(color="#22c55e", width=3),
-                            marker=dict(size=10, color="#22c55e", line=dict(color="#fff", width=2)),
-                        ), secondary_y=True)
-                        for _, _r in _sla_trend.iterrows():
-                            _col_ann = "#22c55e" if _r["pct_sla"] >= 95 else ("#f59e0b" if _r["pct_sla"] >= 85 else "#ef4444")
-                            _fig_sla_ev.add_annotation(
-                                x=_r["mes_lbl"], y=_r["pct_sla"], yref="y2",
-                                text=f"<b>{_r['pct_sla']:.1f}%</b>  {int(_r['cumple'])}/{int(_r['total'])}",
-                                showarrow=False, yanchor="bottom", yshift=10,
-                                font=dict(size=11, color=_col_ann),
-                                bgcolor="rgba(255,255,255,0.88)",
-                                bordercolor=_col_ann, borderwidth=1.5, borderpad=4,
+                    _sla_tot_all = int(_sla_trend["total"].sum())
+                    _sla_ok_all  = int(_sla_trend["cumple"].sum())
+                    _sla_pct_all = round(_sla_ok_all / _sla_tot_all * 100, 1) if _sla_tot_all else 0.0
+
+                    _sc1, _sc2 = st.columns([1, 3])
+                    with _sc1:
+                        _sla_kpi_color = ("#22c55e" if _sla_pct_all >= 95 else
+                                         ("#f59e0b" if _sla_pct_all >= 75 else "#ef4444"))
+                        st.markdown(
+                            f'<div style="background:{_t["card"]};border:2px solid {_sla_kpi_color}33;'
+                            f'border-radius:10px;padding:20px;text-align:center;">'
+                            f'<div style="font-size:2.2rem;font-weight:800;color:{_sla_kpi_color};">'
+                            f'{_sla_pct_all:.1f}%</div>'
+                            f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
+                            f'{_sla_ok_all:,} / {_sla_tot_all:,} llamados</div>'
+                            f'<div style="font-size:0.8rem;color:{_t["muted"]};">cumplen SLA</div>'
+                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
+                            f'Meta: ≥95%</div></div>',
+                            unsafe_allow_html=True
+                        )
+                    with _sc2:
+                        _sla_ev_sig = f"_fig_sla_ev_{_current_theme}_{_wo_sig}_{_equipo_sla}_{_tec_sla_sel}_{len(_df_con_pri)}"
+                        if _sla_ev_sig not in st.session_state:
+                            _fig_sla_ev = go.Figure()
+                            _txt_ok_sla = _sla_trend.apply(lambda r:
+                                f"<b>{r['pct_sla']:.1f}%</b><br><span style='font-size:10px;'>"
+                                f"{int(r['cumple'])}/{int(r['total'])}</span>", axis=1).tolist()
+                            _fig_sla_ev.add_trace(go.Bar(
+                                x=_sla_trend["mes_lbl"], y=_sla_trend["pct_sla"],
+                                name="Cumple SLA", marker_color="#22c55e", opacity=0.95,
+                                text=_txt_ok_sla, textposition="inside", insidetextanchor="middle",
+                                textfont=dict(size=14, color="#ffffff",
+                                              family="Inter, system-ui, sans-serif"),
+                            ))
+                            _txt_nc_sla = _sla_trend["pct_nc"].apply(
+                                lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
+                            _fig_sla_ev.add_trace(go.Bar(
+                                x=_sla_trend["mes_lbl"], y=_sla_trend["pct_nc"],
+                                name="No cumple SLA", marker_color="#ef4444", opacity=0.92,
+                                text=_txt_nc_sla, textposition="inside", insidetextanchor="middle",
+                                textfont=dict(size=12, color="#ffffff"),
+                            ))
+                            for _, _r in _sla_trend.iterrows():
+                                if _r["pct_nc"] < 10 and _r["pct_nc"] > 0:
+                                    _fig_sla_ev.add_annotation(
+                                        x=_r["mes_lbl"], y=100, ax=0, ay=-35,
+                                        xref="x", yref="y", axref="pixel", ayref="pixel",
+                                        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+                                        arrowcolor="#ef4444",
+                                        text=f"<b style='color:#ef4444;'>{_r['pct_nc']:.1f}%</b>",
+                                        font=dict(size=11, color="#ef4444"),
+                                        bgcolor="rgba(255,255,255,0.95)",
+                                        bordercolor="#ef4444", borderwidth=1, borderpad=3,
+                                    )
+                            _fig_sla_ev.add_hline(y=95, line_dash="dash", line_color="#22c55e",
+                                                  annotation_text="Meta 95%",
+                                                  annotation_position="top left", line_width=1.5)
+                            _fig_sla_ev.update_layout(
+                                barmode="stack", height=320,
+                                margin=dict(t=40, b=30, l=10, r=20),
+                                yaxis=dict(range=[0, 115], ticksuffix="%", title="% llamados"),
+                                legend=dict(orientation="h", y=1.14, x=0), bargap=0.35,
                             )
-                        _fig_sla_ev.add_trace(go.Scatter(
-                            x=_sla_trend["mes_lbl"], y=_sla_trend["pct_nc"],
-                            name="% No cumple", mode="lines+markers",
-                            line=dict(color="#ef4444", width=2, dash="dot"),
-                            marker=dict(size=7, color="#ef4444"),
-                            visible="legendonly",
-                        ), secondary_y=True)
-                        _fig_sla_ev.add_hline(y=95, line_dash="dash", line_color="#22c55e",
-                                              annotation_text="Meta 95%",
-                                              annotation_position="top left", line_width=1.5,
-                                              secondary_y=True)
-                        _fig_sla_ev.update_layout(
-                            height=380, margin=dict(t=40, b=20),
-                            legend=dict(orientation="h", y=1.08, x=0), bargap=0.3,
-                        )
-                        _fig_sla_ev.update_yaxes(title_text="Llamados", secondary_y=False)
-                        _fig_sla_ev.update_yaxes(
-                            title_text="% Cumplimiento SLA", secondary_y=True,
-                            tickformat=".1f", ticksuffix="%", range=[0, 115]
-                        )
-                        _apply_plot_theme(_fig_sla_ev)
-                        st.session_state[_sla_ev_sig] = _fig_sla_ev
-                    st.plotly_chart(st.session_state[_sla_ev_sig], width="stretch")
+                            _apply_plot_theme(_fig_sla_ev)
+                            st.session_state[_sla_ev_sig] = _fig_sla_ev
+                        st.plotly_chart(st.session_state[_sla_ev_sig], width="stretch")
 
                 # ── Ranking de técnicos ───────────────────────────────────────
                 st.divider()
@@ -7022,7 +7039,6 @@ elif _page == _NAV_PAGES[0]:
                 _pm_title = "Exactitud preventivas — todos los equipos"
 
             if _pm_base:
-                # Calcular % y construir datos apilados
                 _stk_rows = []
                 for _r in _pm_base:
                     _tot  = _r["total"]
@@ -7032,67 +7048,82 @@ elif _page == _NAV_PAGES[0]:
                     _pct_o = round(100 - _pct_e, 2)
                     _stk_rows.append({
                         _pm_x_col: _r["_x"],
-                        "✅ Sin reincidencia": _ok,
-                        "⚠️ Correctivos ≤5d": _err,
+                        "_ok": _ok,
+                        "_err": _err,
                         "_pct_err": _pct_e,
                         "_pct_ok":  _pct_o,
                         "_total":   _tot,
                     })
                 _stk_df = pd.DataFrame(_stk_rows)
 
-                _melted = _stk_df.melt(
-                    id_vars=[_pm_x_col, "_pct_err", "_pct_ok", "_total"],
-                    value_vars=["✅ Sin reincidencia", "⚠️ Correctivos ≤5d"],
-                    var_name="Tipo", value_name="OTs",
-                )
+                _pm_tot_all = int(_stk_df["_total"].sum())
+                _pm_err_all = int(_stk_df["_err"].sum())
+                _pm_ok_all  = _pm_tot_all - _pm_err_all
+                _pm_pct_all = round(_pm_ok_all / _pm_tot_all * 100, 1) if _pm_tot_all else 0.0
 
-                _fig_pm_rc = px.bar(
-                    _melted, x=_pm_x_col, y="OTs", color="Tipo",
-                    barmode="stack",
-                    title=_pm_title,
-                    color_discrete_map={
-                        "✅ Sin reincidencia": "#22c55e",
-                        "⚠️ Correctivos ≤5d": "#ef4444",
-                    },
-                    labels={_pm_x_col: "", "OTs": "Órdenes de trabajo"},
-                    custom_data=["_pct_err", "_pct_ok", "_total"],
-                )
-                # Texto dentro de cada segmento: número absoluto
-                _fig_pm_rc.update_traces(
-                    texttemplate="%{y:,}",
-                    textposition="inside",
-                    insidetextanchor="middle",
-                )
-                # Anotaciones encima de cada barra con % error y % exactitud
-                for _, _row in _stk_df.iterrows():
-                    _xval    = _row[_pm_x_col]
-                    _pct_e   = _row["_pct_err"]
-                    _pct_o   = _row["_pct_ok"]
-                    _tot     = _row["_total"]
-                    _fig_pm_rc.add_annotation(
-                        x=_xval, y=_tot,
-                        text=f"<b style='color:#ef4444'>{_pct_e:.2f}% error</b>"
-                             f"  |  <b style='color:#22c55e'>{_pct_o:.2f}% exactitud</b>",
-                        showarrow=False,
-                        yanchor="bottom",
-                        yshift=6,
-                        font=dict(size=11),
+                _pc1, _pc2 = st.columns([1, 3])
+                with _pc1:
+                    _pm_kpi_color = ("#22c55e" if _pm_pct_all >= 95 else
+                                    ("#f59e0b" if _pm_pct_all >= 75 else "#ef4444"))
+                    st.markdown(
+                        f'<div style="background:{_t["card"]};border:2px solid {_pm_kpi_color}33;'
+                        f'border-radius:10px;padding:20px;text-align:center;">'
+                        f'<div style="font-size:2.2rem;font-weight:800;color:{_pm_kpi_color};">'
+                        f'{_pm_pct_all:.1f}%</div>'
+                        f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
+                        f'{_pm_ok_all:,} / {_pm_tot_all:,} PMs</div>'
+                        f'<div style="font-size:0.8rem;color:{_t["muted"]};">sin reincidencia ≤5d</div>'
+                        f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
+                        f'Meta: ≥90%</div></div>',
+                        unsafe_allow_html=True
                     )
-                _fig_pm_rc.update_layout(
-                    legend_title="", height=430,
-                    margin=dict(t=60, b=20),
-                    uniformtext_minsize=9, uniformtext_mode="hide",
-                )
-                _apply_plot_theme(_fig_pm_rc)
-                st.session_state[_cal_pm_k] = _fig_pm_rc
+                with _pc2:
+                    if _cal_pm_k not in st.session_state:
+                        _fig_pm_rc = go.Figure()
+                        _txt_ok_pm = _stk_df.apply(lambda r:
+                            f"<b>{r['_pct_ok']:.1f}%</b><br><span style='font-size:10px;'>"
+                            f"{int(r['_ok'])}/{int(r['_total'])}</span>", axis=1).tolist()
+                        _fig_pm_rc.add_trace(go.Bar(
+                            x=_stk_df[_pm_x_col], y=_stk_df["_pct_ok"],
+                            name="Sin reincidencia", marker_color="#22c55e", opacity=0.95,
+                            text=_txt_ok_pm, textposition="inside", insidetextanchor="middle",
+                            textfont=dict(size=14, color="#ffffff",
+                                          family="Inter, system-ui, sans-serif"),
+                        ))
+                        _txt_err_pm = _stk_df["_pct_err"].apply(
+                            lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
+                        _fig_pm_rc.add_trace(go.Bar(
+                            x=_stk_df[_pm_x_col], y=_stk_df["_pct_err"],
+                            name="Correctivos ≤5d", marker_color="#ef4444", opacity=0.92,
+                            text=_txt_err_pm, textposition="inside", insidetextanchor="middle",
+                            textfont=dict(size=12, color="#ffffff"),
+                        ))
+                        for _, _row in _stk_df.iterrows():
+                            if _row["_pct_err"] < 10 and _row["_pct_err"] > 0:
+                                _fig_pm_rc.add_annotation(
+                                    x=_row[_pm_x_col], y=100, ax=0, ay=-35,
+                                    xref="x", yref="y", axref="pixel", ayref="pixel",
+                                    showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+                                    arrowcolor="#ef4444",
+                                    text=f"<b style='color:#ef4444;'>{_row['_pct_err']:.1f}%</b>",
+                                    font=dict(size=11, color="#ef4444"),
+                                    bgcolor="rgba(255,255,255,0.95)",
+                                    bordercolor="#ef4444", borderwidth=1, borderpad=3,
+                                )
+                        _fig_pm_rc.update_layout(
+                            barmode="stack", height=320,
+                            margin=dict(t=40, b=30, l=10, r=20),
+                            title=_pm_title,
+                            yaxis=dict(range=[0, 115], ticksuffix="%", title="% preventivos"),
+                            legend=dict(orientation="h", y=1.14, x=0), bargap=0.35,
+                        )
+                        _apply_plot_theme(_fig_pm_rc)
+                        st.session_state[_cal_pm_k] = _fig_pm_rc
+                    else:
+                        _fig_pm_rc = st.session_state[_cal_pm_k]
+                    st.plotly_chart(_fig_pm_rc, width="stretch")
             else:
-                st.session_state[_cal_pm_k] = None
-
-        _fig_pm_show = st.session_state.get(_cal_pm_k)
-        if _fig_pm_show is not None:
-            st.plotly_chart(_fig_pm_show, width="stretch")
-        else:
-            st.info("Sin datos para el período y filtros seleccionados.")
+                st.info("Sin datos para el período y filtros seleccionados.")
 
         if not _df_rc.empty or _n_bruto > 0:
             st.divider()
