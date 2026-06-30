@@ -461,8 +461,11 @@ def main():
             CHUNK = 200
             for i in range(0, len(folios), CHUNK):
                 res = sync_numerales.fetch_numerales_batch(folios[i:i+CHUNK])
-                for folio, (ini, fin) in res.items():
-                    sync_numerales.patch_numeral(folio, ini, fin)
+                for folio, vals in res.items():
+                    ini, fin = vals[0], vals[1]
+                    com = vals[2] if len(vals) > 2 else None
+                    form_num = vals[3] if len(vals) > 3 else None
+                    sync_numerales.patch_numeral(folio, ini, fin, com, form_num)
                     if ini or fin: con += 1
                     else:          sin += 1
                 log(f"Numerales {min(i+CHUNK,len(folios)):>5}/{len(folios)} | "
