@@ -168,7 +168,8 @@ def build_plan_map() -> dict[int, str]:
 
 # ── Mapeo Fracttal → Supabase ──────────────────────────────────────────────
 
-# Mapeo de prioridad a P1-P4
+# Mapeo de prioridad a P1-P4 (SOLO fallback para Shell u otros clientes sin
+# fuente autoritativa. NUNCA usar para COPEC/Aramco — ver override abajo.)
 def _priority(raw: str) -> str:
     r = str(raw or "").upper().replace(" ", "_")
     if "VERY_HIGH" in r or "CRITIC" in r: return "P1"
@@ -176,6 +177,120 @@ def _priority(raw: str) -> str:
     if "MEDIUM" in r:                      return "P3"
     if "LOW" in r:                         return "P4"
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FUENTES AUTORITATIVAS DE PRIORIDAD (COPEC + Aramco)
+# ═══════════════════════════════════════════════════════════════════════════
+# Fracttal asigna prioridad de forma poco confiable. Cada cliente tiene su
+# propia fuente de verdad:
+#   COPEC:  nota_tarea contiene "Tiempo de respuesta: XX horas" (del email
+#           SLA que llega desde el cliente).
+#   Aramco: Cotalker (panel Metabase) tiene "SLA esperado" en horas para
+#           cada N° Cotalker; el N° Cotalker aparece al inicio de nota_tarea.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_METABASE_COTALKER_URL = (
+    "https://bi.cotalker.com/api/public/card"
+    "/56662edd-715d-4dbe-af9a-21891f4dbb97/query/json"
+)
+_PAT_SLA_COPEC   = re.compile(r"Tiempo\s+de\s+respuesta\s*:\s*(\d+)", re.IGNORECASE)
+_PAT_COTALKER_N  = re.compile(r"^(\d{5,8})(?:\s*-|\s*$)")
+
+# COPEC SLA (horas) → prioridad. Ambigüedad de 24h se resuelve por zona
+# (Santiago=P2, Regiones=P1). Aquí no tenemos la zona al momento del sync,
+# así que 24h → P1 por defecto y el consumo en dashboard sigue usando el
+# umbral correcto vía sla_umbrales_horas.
+_COPEC_SLA_TO_PRIO = {18: "P1", 24: "P1", 36: "P3", 48: "P2", 72: "P3", 96: "P4"}
+
+# Aramco / Cotalker: mapeo directo horas → prioridad.
+_ARAMCO_SLA_TO_PRIO = {24: "P1", 48: "P2", 72: "P3"}
+
+_COTALKER_SLA_INDEX: dict = {}  # {n_cotalker(int): sla_horas(int)}
+
+
+def build_cotalker_sla_index() -> None:
+    """
+    Descarga el panel Metabase de Cotalker y llena _COTALKER_SLA_INDEX.
+    Debe llamarse ANTES del sync principal. Si falla, se registra warning
+    y las OTs Aramco quedan sin corrección (mejor eso que datos incorrectos).
+    """
+    global _COTALKER_SLA_INDEX
+    log("Descargando panel Cotalker/Metabase (SLA Aramco)...", "PROG")
+    try:
+        r = requests.get(_METABASE_COTALKER_URL,
+                         headers={"Accept": "application/json"}, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        idx = {}
+        for row in data:
+            n   = row.get("N° Cotalker")
+            sla = row.get("SLA esperado")
+            if n and sla:
+                try:
+                    idx[int(n)] = int(float(sla))
+                except (ValueError, TypeError):
+                    pass
+        _COTALKER_SLA_INDEX = idx
+        log(f"Cotalker SLA index: {len(idx)} OTs con SLA", "OK")
+    except Exception as e:
+        log(f"No se pudo cargar Cotalker Metabase: {e}", "WARN")
+        log("Prioridades Aramco quedarán SIN CORRECCIÓN esta corrida", "WARN")
+        _COTALKER_SLA_INDEX = {}
+
+
+def _copec_prio_from_nota(nota_tarea: str) -> str | None:
+    """Parsea 'Tiempo de respuesta: XX horas' de nota_tarea COPEC → P1-P4."""
+    if not nota_tarea:
+        return None
+    m = _PAT_SLA_COPEC.search(nota_tarea)
+    if not m:
+        return None
+    try:
+        sla_h = int(m.group(1))
+    except ValueError:
+        return None
+    return _COPEC_SLA_TO_PRIO.get(sla_h)
+
+
+def _aramco_prio_from_nota(nota_tarea: str) -> str | None:
+    """
+    Extrae primer N° del nota_tarea (formato '155097 - 169357 - ee_s268 - ...'
+    o solo '155097') y consulta _COTALKER_SLA_INDEX. Retorna P1-P4 o None.
+    """
+    if not nota_tarea or not _COTALKER_SLA_INDEX:
+        return None
+    m = _PAT_COTALKER_N.match(str(nota_tarea).strip())
+    if not m:
+        return None
+    n_cot = int(m.group(1))
+    sla_h = _COTALKER_SLA_INDEX.get(n_cot)
+    if sla_h is None:
+        return None
+    return _ARAMCO_SLA_TO_PRIO.get(sla_h, "P4")
+
+
+def compute_prioridad_calc(client: str, nota: str, nota_tarea: str,
+                           fracttal_prio_desc: str) -> str | None:
+    """
+    Fuente de verdad de prioridad_calc según cliente:
+      - COPEC:  nota_tarea (email SLA). Fallback: Fracttal.
+      - Aramco: Cotalker Metabase por N°. Fallback: Fracttal.
+      - Otros: Fracttal (comportamiento anterior).
+    """
+    if client == "COPEC":
+        prio = _copec_prio_from_nota(nota_tarea) or _copec_prio_from_nota(nota)
+        if prio:
+            return prio
+        return _priority(fracttal_prio_desc)
+
+    if client == "ESMAX (Aramco)":
+        prio = _aramco_prio_from_nota(nota_tarea)
+        if prio:
+            return prio
+        return _priority(fracttal_prio_desc)
+
+    return _priority(fracttal_prio_desc)
 
 # Parsear cliente y estacion desde jerarquia
 def _parse_client(parent: str):
@@ -261,9 +376,17 @@ def map_record(wo: dict) -> dict | None:
         "responsable":        _str(wo.get("personnel_description"), 200),
 
         # Tipo y prioridad
+        # prioridad     = valor crudo de Fracttal (auditoría)
+        # prioridad_calc = FUENTE DE VERDAD para el dashboard:
+        #                  COPEC → nota_tarea (email SLA)
+        #                  Aramco → Cotalker Metabase (SLA esperado)
+        #                  Otros → Fracttal
         "tipo_tarea":         _str(wo.get("tasks_log_task_type_main"), 100),
         "prioridad":          _str(wo.get("priorities_description")),
-        "prioridad_calc":     _priority(wo.get("priorities_description")),
+        "prioridad_calc":     compute_prioridad_calc(
+                                  client, nota, nota_tarea,
+                                  wo.get("priorities_description")
+                              ),
 
         # Fechas
         "fecha_creacion":     wo.get("creation_date"),
@@ -402,6 +525,10 @@ def main():
 
     # Cargar mapa de planes ANTES del sync principal (para que map_record lo use)
     build_plan_map()
+
+    # Cargar índice SLA Cotalker (Aramco) ANTES del sync principal.
+    # Sin esto, prioridad_calc de Aramco cae al fallback (Fracttal, incorrecto).
+    build_cotalker_sla_index()
 
     buffer, pages, stopped = [], 0, False
 

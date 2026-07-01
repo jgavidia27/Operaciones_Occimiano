@@ -636,10 +636,11 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
     df["Año"] = df["fecha_llamado"].dt.year
     df["Mes"] = df["fecha_llamado"].dt.month
 
-    # ── Corrección de prioridad COPEC desde nota_tarea ────────────────────────
-    # Fracttal sobreescribe prioridad_calc con su propio campo (poco confiable).
-    # Aquí leemos nota_tarea para COPEC y recalculamos prioridad + umbral
-    # en tiempo de lectura, garantizando datos correctos en el dashboard.
+    # ── SAFETY NET: recorrección de prioridad COPEC desde nota_tarea ──────────
+    # sync_fracttal_supabase.py YA escribe prioridad_calc correcta desde
+    # nota_tarea. Esta corrección en tiempo de lectura es red de seguridad
+    # para OTs cuyo sync falló, quedaron desincronizadas, o son históricas
+    # anteriores al fix. Si el sync escribió bien, este bloque es idempotente.
     copec_idx = df.index[df["cliente"] == "COPEC"].tolist()
     if copec_idx:
         copec_ids = df.loc[copec_idx, "os_fracttal"].tolist()
@@ -673,11 +674,10 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
                         "CUMPLE" if float(horas) <= nuevo_umbral else "NO CUMPLE"
                     )
 
-    # ── Corrección de prioridad ARAMCO desde Cotalker/Metabase ───────────────
-    # Fracttal asigna prioridad propia (VERY_HIGH/HIGH/MEDIUM/LOW) que NO
-    # coincide con el SLA que Cotalker define (24h/48h/72h/100h).
-    # Aquí leemos el N° Cotalker desde nota_tarea, consultamos Metabase
-    # para obtener el SLA real, y recalculamos prioridad + umbral + cumplimiento.
+    # ── SAFETY NET: recorrección de prioridad ARAMCO desde Cotalker ──────────
+    # sync_fracttal_supabase.py YA consulta Cotalker Metabase al momento del
+    # sync y escribe prioridad_calc correcta. Esta corrección en tiempo de
+    # lectura es red de seguridad para OTs desincronizadas o históricas.
     aramco_idx = df.index[df["cliente"] == "Aramco (Esmax)"].tolist()
     if aramco_idx:
         cotalker_sla = _fetch_cotalker_sla_index()
