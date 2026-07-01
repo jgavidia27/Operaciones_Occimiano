@@ -1758,15 +1758,15 @@ if _page == _NAV_PAGES[1]:
                            "Jul","Ago","Sep","Oct","Nov","Dic"]
             _sem_lbl    = (f"{_sem_ini.day}–{_sem_fin_d.day} "
                            f"{_meses_abr[_sem_ini.month-1]}")
-            _fl_sem     = df_llamados["fecha_llamado"]
+            _fl_sem     = df_ll["fecha_llamado"]
             if _fl_sem.dt.tz is not None:
                 _fl_sem = _fl_sem.dt.tz_convert(None)
             _mask_sem   = (
                 (_fl_sem.dt.date >= _sem_ini) &
                 (_fl_sem.dt.date <= _sem_fin_d) &
-                (df_llamados["cumplimiento"].isin(["CUMPLE","NO CUMPLE"]))
+                (df_ll["cumplimiento"].isin(["CUMPLE","NO CUMPLE"]))
             )
-            _df_sem     = df_llamados[_mask_sem]
+            _df_sem     = df_ll[_mask_sem]
             _sem_total  = len(_df_sem)
             _sem_cumple = (_df_sem["cumplimiento"] == "CUMPLE").sum()
             _sem_pct    = round(_sem_cumple / _sem_total * 100, 1) if _sem_total else 0.0
@@ -1779,7 +1779,7 @@ if _page == _NAV_PAGES[1]:
 
             st.divider()
             st.markdown('<div class="section-header">Distribución por prioridad y cliente</div>', unsafe_allow_html=True)
-            _ll_sig_c = f"{len(df_llamados)}_{sel_trim_c}_{sel_mes_c}_{sel_cl_c}_{sel_pr_c}_{sel_cu_c}"
+            _ll_sig_c = f"{len(df_ll)}_{sel_trim_c}_{sel_mes_c}_{sel_cl_c}_{sel_pr_c}_{sel_cu_c}_{sel_zona_c}"
             gc1, gc2, gc3 = st.columns([2, 1.1, 2.7])
 
             with gc1:
