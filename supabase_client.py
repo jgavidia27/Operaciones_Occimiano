@@ -497,6 +497,53 @@ _COPEC_UMBRALES: dict[str, tuple[int, int]] = {
     "P4": (96, 96),
 }
 
+# ── Aramco / Cotalker: SLA desde Metabase ────────────────────────────────────
+_METABASE_COTALKER_URL = (
+    "https://bi.cotalker.com/api/public/card"
+    "/56662edd-715d-4dbe-af9a-21891f4dbb97/query/json"
+)
+_PAT_COTALKER_N = re.compile(r"^(\d{5,8})(?:\s*-|\s*$)")
+_ARAMCO_SLA_TO_PRIO = {24: "P1", 48: "P2", 72: "P3"}
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_cotalker_sla_index() -> dict:
+    """
+    Descarga el panel Metabase de Cotalker y retorna {n_cotalker(int): sla_horas(int)}.
+    Cache 1h para no sobrecargar Metabase en cada recarga del dashboard.
+    """
+    try:
+        r = requests.get(_METABASE_COTALKER_URL,
+                         headers={"Accept": "application/json"}, timeout=60)
+        r.raise_for_status()
+        idx = {}
+        for row in r.json():
+            n = row.get("N° Cotalker")
+            sla = row.get("SLA esperado")
+            if n and sla:
+                try:
+                    idx[int(n)] = int(float(sla))
+                except (ValueError, TypeError):
+                    pass
+        return idx
+    except Exception:
+        return {}
+
+def _aramco_prio_from_nota(nota_tarea: str, cotalker_idx: dict) -> "tuple[str, int] | None":
+    """
+    Extrae N° Cotalker de nota_tarea, busca SLA en el índice Metabase,
+    retorna (prioridad, umbral_horas) o None.
+    Aramco SLA: 24h→P1, 48h→P2, 72h→P3, otro→P4 (umbral = mismo valor).
+    """
+    m = _PAT_COTALKER_N.match(str(nota_tarea or "").strip())
+    if not m:
+        return None
+    n_cot = int(m.group(1))
+    sla_h = cotalker_idx.get(n_cot)
+    if sla_h is None:
+        return None
+    prio = _ARAMCO_SLA_TO_PRIO.get(sla_h, "P4")
+    return prio, sla_h
+
 def _copec_prio_from_nota(nota: str, zona: str) -> "tuple[str, int] | None":
     """
     Deriva (prioridad, umbral_horas) para un OT COPEC leyendo nota_tarea.
@@ -620,6 +667,48 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
                 nueva_prio, nuevo_umbral = result
                 df.at[idx, "prioridad"]       = nueva_prio
                 df.at[idx, "tiempo_resp_esp"] = nuevo_umbral
+                horas = df.at[idx, "horas_resolucion"]
+                if pd.notna(horas) and horas is not None:
+                    df.at[idx, "cumplimiento"] = (
+                        "CUMPLE" if float(horas) <= nuevo_umbral else "NO CUMPLE"
+                    )
+
+    # ── Corrección de prioridad ARAMCO desde Cotalker/Metabase ───────────────
+    # Fracttal asigna prioridad propia (VERY_HIGH/HIGH/MEDIUM/LOW) que NO
+    # coincide con el SLA que Cotalker define (24h/48h/72h/100h).
+    # Aquí leemos el N° Cotalker desde nota_tarea, consultamos Metabase
+    # para obtener el SLA real, y recalculamos prioridad + umbral + cumplimiento.
+    aramco_idx = df.index[df["cliente"] == "Aramco (Esmax)"].tolist()
+    if aramco_idx:
+        cotalker_sla = _fetch_cotalker_sla_index()
+        if cotalker_sla:
+            aramco_ids = df.loc[aramco_idx, "os_fracttal"].tolist()
+            notas_a: dict[str, str] = {}
+            for i in range(0, len(aramco_ids), 200):
+                chunk = aramco_ids[i : i + 200]
+                nota_rows = _query(
+                    "ordenes_trabajo",
+                    f"select=id_ot,nota_tarea&id_ot=in.({','.join(chunk)})",
+                    limit=len(chunk) + 1,
+                )
+                for r in nota_rows:
+                    if r.get("nota_tarea"):
+                        notas_a[r["id_ot"]] = r["nota_tarea"]
+
+            for idx in aramco_idx:
+                ot = df.at[idx, "os_fracttal"]
+                nota = notas_a.get(ot, "")
+                result = _aramco_prio_from_nota(nota, cotalker_sla)
+                if result:
+                    nueva_prio, nuevo_umbral = result
+                    df.at[idx, "prioridad"]       = nueva_prio
+                    df.at[idx, "tiempo_resp_esp"] = nuevo_umbral
+                    # Recalcular cumplimiento con el umbral correcto
+                    horas = df.at[idx, "horas_resolucion"]
+                    if pd.notna(horas) and horas is not None:
+                        df.at[idx, "cumplimiento"] = (
+                            "CUMPLE" if float(horas) <= nuevo_umbral else "NO CUMPLE"
+                        )
 
     return df
 
