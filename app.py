@@ -2984,7 +2984,7 @@ if _page == _NAV_PAGES[1]:
         # ══════════════════════════════════════════════════════════════════════
         with _tab_uptime_sla:
             st.markdown(
-                '<div class="section-header">⏱️  Uptime por llamados de emergencia</div>',
+                '<div class="section-header">⏱️  Uptime General (correctivas + preventivas)</div>',
                 unsafe_allow_html=True,
             )
 
@@ -3142,11 +3142,11 @@ if _page == _NAV_PAGES[1]:
                     unsafe_allow_html=True,
                 )
                 st.caption(
-                    "**Fórmula**: Uptime % = 1 − (Σ horas detenidas) ÷ (N EDS × horas del período) · "
-                    "**Tiempo detenido** = desde `fecha_llamado` hasta el **primer cierre real** del trabajo "
-                    "(mínimo entre `fecha_atención` del SLA y `fecha_finalización` de Fracttal — el que ocurra "
-                    "primero refleja cuándo la máquina volvió a operar). "
-                    "⚠️ Por defecto cuenta **solo P1** (máquina detenida); P2/P3/P4 son fallas con máquina operativa."
+                    "**Fórmula Uptime General**: 1 − (Σ horas detenidas por CORRECTIVAS + Σ horas detenidas por PREVENTIVAS) ÷ (N EDS × horas del período) · "
+                    "**Correctivas**: paro = desde `fecha_llamado` hasta el primer cierre real (mínimo entre `fecha_atención` y `fecha_finalización`). "
+                    "Solo cuentan según el filtro de prioridad (default: P1 = máquina detenida). "
+                    "**Preventivas**: paro = `tiempo_paro_real_seg` de OTs con `¿Paro de equipo? = SÍ` y `fecha_finalizacion` dentro del período. "
+                    "El % refleja el tiempo REAL en que la flota estuvo operativa considerando AMBOS mundos."
                 )
 
                 # ── Clasificación regional por eds_nombre / comuna ────
@@ -3195,97 +3195,215 @@ if _page == _NAV_PAGES[1]:
                 if _up_sla_eds != "Todas":
                     _df_up = _df_up[_df_up["eds_nombre"] == _up_sla_eds]
 
-                # ── Cálculo principal ──────────────────────────────────
-                _paro_total_seg = _df_up["_paro_seg"].sum()
+                # ── Cálculo principal: paro por CORRECTIVAS ────────────
+                _paro_corr_seg = _df_up["_paro_seg"].sum()
                 _eds_unicas = _df_up["eds_occim"].dropna().astype(str).str.strip()
                 _eds_unicas = set(_eds_unicas[_eds_unicas != ""].unique())
                 _n_eds_up = max(len(_eds_unicas), 1)
                 _total_seg_up = _seg_equipo_up * _n_eds_up
+
+                # ── Cálculo del paro por PREVENTIVAS (UPTIME GENERAL) ──
+                # El uptime real de una máquina incluye TAMBIÉN el tiempo
+                # detenido por mantenciones planificadas (MP). Aquí sumamos
+                # las MP que:
+                #   - tienen paro_equipo = True
+                #   - fueron finalizadas dentro del período evaluado
+                #   - cumplen los filtros de cliente / región / EDS
+                # Usamos tiempo_paro_real_seg (con fallback a estim).
+                _paro_prev_seg = 0.0
+                _prev_ots_con_paro = 0
+                _df_prev_up = pd.DataFrame()  # placeholder para ranking/tabla
+                try:
+                    with st.spinner("Cargando preventivas para uptime general…"):
+                        _raw_prev_up = load_preventivas_supabase()
+                    if _raw_prev_up:
+                        _df_prev_up = pd.DataFrame(_raw_prev_up)
+                        # Normalizar fechas y flags
+                        _df_prev_up["fecha_finalizacion"] = pd.to_datetime(
+                            _df_prev_up.get("fecha_finalizacion"),
+                            errors="coerce", utc=True)
+                        if _df_prev_up["fecha_finalizacion"].dt.tz is not None:
+                            _df_prev_up["fecha_finalizacion"] = \
+                                _df_prev_up["fecha_finalizacion"].dt.tz_convert(None)
+                        _df_prev_up["paro_equipo"] = _df_prev_up.get("paro_equipo", False)
+                        _df_prev_up["tiempo_paro_real_seg"] = pd.to_numeric(
+                            _df_prev_up.get("tiempo_paro_real_seg"), errors="coerce").fillna(0)
+                        _df_prev_up["tiempo_paro_estim_seg"] = pd.to_numeric(
+                            _df_prev_up.get("tiempo_paro_estim_seg"), errors="coerce").fillna(0)
+
+                        # Filtro 1: dentro del período evaluado (por fecha_finalizacion)
+                        _mask_periodo = (
+                            (_df_prev_up["fecha_finalizacion"] >= _rango_inicio_up) &
+                            (_df_prev_up["fecha_finalizacion"] <= _rango_fin_up + pd.Timedelta(days=1))
+                        )
+                        _df_prev_up = _df_prev_up[_mask_periodo & (_df_prev_up["paro_equipo"] == True)].copy()
+
+                        # Filtro 2: cliente (normalizando ESMAX vs "ESMAX (Aramco)" vs "Aramco (Esmax)")
+                        def _norm_cli(s):
+                            s = str(s or "").upper()
+                            if "COPEC" in s: return "COPEC"
+                            if "ESMAX" in s or "ARAMCO" in s: return "ARAMCO"
+                            if "SHELL" in s or "ENEX" in s: return "SHELL"
+                            return s
+                        if _up_sla_cli != "Todos":
+                            _df_prev_up = _df_prev_up[
+                                _df_prev_up["cliente"].apply(_norm_cli) == _norm_cli(_up_sla_cli)
+                            ]
+
+                        # Filtro 3: EDS (por codigo_eds que es el estándar)
+                        if _up_sla_eds != "Todas" and not _df_prev_up.empty:
+                            # Buscar codigo_eds correspondiente al eds_nombre elegido en correctivas
+                            _cod_eds_sel = (
+                                df_llamados[df_llamados["eds_nombre"] == _up_sla_eds]
+                                ["eds_occim"].dropna().unique().tolist()
+                            )
+                            if _cod_eds_sel:
+                                _df_prev_up = _df_prev_up[
+                                    _df_prev_up["codigo_eds"].isin(_cod_eds_sel)
+                                ]
+
+                        # Filtro 4: región (por estacion/ubicacion, misma lógica del uptime MP)
+                        if _up_sla_reg != "Todas" and not _df_prev_up.empty:
+                            _src_reg_prev = (
+                                _df_prev_up["estacion"].fillna(_df_prev_up.get("ubicacion",""))
+                                .fillna("").astype(str)
+                            )
+                            _df_prev_up = _df_prev_up[
+                                _src_reg_prev.apply(_region_ll) == _up_sla_reg
+                            ]
+
+                        # Suma de paro: real con fallback a estim
+                        if not _df_prev_up.empty:
+                            _pr = _df_prev_up["tiempo_paro_real_seg"]
+                            _pe = _df_prev_up["tiempo_paro_estim_seg"]
+                            _df_prev_up["_paro_calc_seg"] = _pr.where(_pr > 0, _pe).clip(lower=0)
+                            _paro_prev_seg = float(_df_prev_up["_paro_calc_seg"].sum())
+                            _prev_ots_con_paro = int(len(_df_prev_up))
+                except Exception as _e:
+                    st.warning(f"Preventivas no disponibles para el uptime: {_e}")
+
+                # ── TOTAL GENERAL = correctivas + preventivas ──────────
+                _paro_total_seg = _paro_corr_seg + _paro_prev_seg
 
                 # ── KPIs ───────────────────────────────────────────────
                 _k1s, _k2s, _k3s, _k4s, _k5s = st.columns(5)
                 _prio_lbl = {"Solo P1 (máquina detenida)": "P1", "P1 + P2": "P1+P2", "Todas": "Todas"}[_up_prio]
                 _k1s.metric("Llamados contados", f"{len(_df_up):,}",
                             delta=f"prioridad: {_prio_lbl}")
-                _k2s.metric("Tiempo total detenido",
-                            f"{int(_paro_total_seg // 3600):,}h "
-                            f"{int((_paro_total_seg % 3600) // 60):02d}m")
-                _k3s.metric("EDS evaluadas", f"{_n_eds_up:,}",
-                            delta="únicas en filtro")
-                _k4s.metric("Días evaluados", f"{_rango_dias_up:,}",
-                            delta=f"del rango {_rango_inicio_up.strftime('%d/%m')}–{_rango_fin_up.strftime('%d/%m')}")
+                _k2s.metric("Tiempo detenido (Correctivas)",
+                            f"{int(_paro_corr_seg // 3600):,}h "
+                            f"{int((_paro_corr_seg % 3600) // 60):02d}m",
+                            help="Suma del tiempo entre fecha_llamado y primer cierre real, "
+                                 "sobre los llamados que pasan el filtro de prioridad.")
+                _k3s.metric("Tiempo detenido (Preventivas)",
+                            f"{int(_paro_prev_seg // 3600):,}h "
+                            f"{int((_paro_prev_seg % 3600) // 60):02d}m",
+                            delta=f"{_prev_ots_con_paro} MPs c/paro",
+                            help="Suma de tiempo_paro_real_seg de las MP con "
+                                 "'¿Paro de equipo? = SÍ' finalizadas dentro del período "
+                                 "y que cumplen los filtros de cliente/región/EDS.")
+                _k4s.metric("EDS evaluadas", f"{_n_eds_up:,}",
+                            delta=f"{_rango_dias_up} días")
                 _upt_pct = max(0.0, round(
                     (1 - _paro_total_seg / _total_seg_up) * 100, 3))
-                _k5s.metric("Uptime global", f"{_upt_pct}%",
-                            help=f"({_n_eds_up:,} EDS × {_rango_dias_up} días × 24h)"
-                                 f" − {int(_paro_total_seg//3600):,}h detenidas")
+                _k5s.metric("Uptime General", f"{_upt_pct}%",
+                            help=f"Denominador: {_n_eds_up:,} EDS × {_rango_dias_up} días × 24h · "
+                                 f"Numerador: {int(_paro_corr_seg//3600):,}h correctivas "
+                                 f"+ {int(_paro_prev_seg//3600):,}h preventivas "
+                                 f"= {int(_paro_total_seg//3600):,}h detenidas totales.")
 
                 st.divider()
 
-                # ── Ranking: 5 EDS con mayor paro ──────────────────────
+                # ── Ranking: 5 EDS con mayor paro (correctivas + preventivas) ──
                 st.markdown(
                     '<div class="section-header">'
-                    '🏆  Ranking · 5 estaciones con mayor tiempo detenido'
+                    '🏆  Ranking · 5 estaciones con mayor tiempo detenido (general)'
                     '</div>',
                     unsafe_allow_html=True,
                 )
                 if _df_up.empty or _paro_total_seg == 0:
                     st.info("Sin tiempo detenido en el filtro.")
                 else:
-                    _rk = (_df_up.groupby(
+                    # Paro por EDS: correctivas
+                    _rk_corr = (_df_up.groupby(
                         ["eds_nombre", "eds_occim"], dropna=False, as_index=False
                     ).agg(
                         Llamados=("os_fracttal", "count"),
-                        Tiempo_paro_seg=("_paro_seg", "sum"),
+                        Paro_corr_seg=("_paro_seg", "sum"),
                     ))
+                    # Paro por EDS: preventivas (sumar al mismo eds_occim)
+                    if not _df_prev_up.empty:
+                        _rk_prev = (_df_prev_up.groupby(
+                            "codigo_eds", dropna=False, as_index=False
+                        ).agg(
+                            MPs_con_paro=("id_ot", "count"),
+                            Paro_prev_seg=("_paro_calc_seg", "sum"),
+                        )).rename(columns={"codigo_eds": "eds_occim"})
+                    else:
+                        _rk_prev = pd.DataFrame(columns=["eds_occim","MPs_con_paro","Paro_prev_seg"])
+                    _rk = _rk_corr.merge(_rk_prev, on="eds_occim", how="outer")
+                    _rk["Llamados"]      = _rk["Llamados"].fillna(0).astype(int)
+                    _rk["MPs_con_paro"]  = _rk["MPs_con_paro"].fillna(0).astype(int)
+                    _rk["Paro_corr_seg"] = _rk["Paro_corr_seg"].fillna(0)
+                    _rk["Paro_prev_seg"] = _rk["Paro_prev_seg"].fillna(0)
+                    _rk["Tiempo_paro_seg"] = _rk["Paro_corr_seg"] + _rk["Paro_prev_seg"]
                     _rk["Tiempo detenido (h:mm)"] = _rk["Tiempo_paro_seg"].apply(
                         lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m"
                         if s else "—")
                     _rk["Tiempo detenido (h)"] = (_rk["Tiempo_paro_seg"] / 3600).round(1)
+                    _rk["Correctivas (h)"] = (_rk["Paro_corr_seg"] / 3600).round(1)
+                    _rk["Preventivas (h)"] = (_rk["Paro_prev_seg"] / 3600).round(1)
                     _rk = _rk.sort_values("Tiempo_paro_seg", ascending=False).head(5)
                     _rk["#"] = ["🥇","🥈","🥉","4️⃣","5️⃣"][:len(_rk)]
 
                     _rk_show = _rk[[
-                        "#", "eds_nombre", "eds_occim", "Llamados",
+                        "#", "eds_nombre", "eds_occim", "Llamados", "MPs_con_paro",
+                        "Correctivas (h)", "Preventivas (h)",
                         "Tiempo detenido (h:mm)", "Tiempo detenido (h)"
                     ]].rename(columns={
-                        "eds_nombre":   "Estación",
-                        "eds_occim":    "Cód. EDS",
+                        "eds_nombre":    "Estación",
+                        "eds_occim":     "Cód. EDS",
+                        "MPs_con_paro":  "MPs c/paro",
                     })
                     _show_df(_rk_show.reset_index(drop=True), hide_index=True,
                         use_container_width=True,
                         column_config={
                             "#":                       st.column_config.TextColumn(width=50),
-                            "Estación":                st.column_config.TextColumn(width=260),
-                            "Cód. EDS":                st.column_config.TextColumn(width=100),
-                            "Llamados":                st.column_config.NumberColumn(format="%d", width=100),
-                            "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=150),
+                            "Estación":                st.column_config.TextColumn(width=220),
+                            "Cód. EDS":                st.column_config.TextColumn(width=90),
+                            "Llamados":                st.column_config.NumberColumn(format="%d", width=80),
+                            "MPs c/paro":              st.column_config.NumberColumn(format="%d", width=80,
+                                help="Mantenciones preventivas con paro de equipo"),
+                            "Correctivas (h)":         st.column_config.NumberColumn(format="%.1f", width=100),
+                            "Preventivas (h)":         st.column_config.NumberColumn(format="%.1f", width=100),
+                            "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=130),
                             "Tiempo detenido (h)":     st.column_config.ProgressColumn(
                                 format="%.1f h", min_value=0,
                                 max_value=float(_rk["Tiempo detenido (h)"].max()) if not _rk.empty else 1,
-                                width=200),
+                                width=180),
                         })
 
                 st.divider()
 
-                # ── Uptime por EDS ─────────────────────────────────────
+                # ── Uptime por EDS (general) ───────────────────────────
                 st.markdown(
-                    '<div class="section-header">🏭  Uptime por EDS</div>',
+                    '<div class="section-header">🏭  Uptime por EDS (general)</div>',
                     unsafe_allow_html=True,
                 )
                 st.caption(
                     "Cada fila es una EDS. **Uptime %** = % del tiempo del período "
-                    "en que la EDS NO tuvo emergencias activas. 100% = nunca tuvo llamados."
+                    "en que la EDS NO tuvo emergencias activas ni mantenciones preventivas con paro. "
+                    "Suma correctivas + preventivas."
                 )
                 if _df_up.empty or _paro_total_seg == 0:
                     st.info("Sin tiempo detenido en el filtro.")
                 else:
-                    _gpe = (_df_up.groupby(
+                    _gpe_corr = (_df_up.groupby(
                         ["eds_occim", "eds_nombre", "cliente"],
                         dropna=False, as_index=False,
                     ).agg(
                         Llamados=("os_fracttal", "count"),
-                        Tiempo_paro_seg=("_paro_seg", "sum"),
+                        Paro_corr_seg=("_paro_seg", "sum"),
                         Equipos_codigos=("codigo_activo",
                             lambda s: ", ".join(sorted({c for x in s if pd.notna(x) and str(x)
                                                         for c in str(x).split(",") if c.strip()}))),
@@ -3294,12 +3412,30 @@ if _page == _NAV_PAGES[1]:
                                                         for n in str(x).split(" · ") if n.strip()}))),
                         _ultimo_llamado=("fecha_llamado", "max"),
                     ))
+                    # Preventivas agregadas por EDS
+                    if not _df_prev_up.empty:
+                        _gpe_prev = (_df_prev_up.groupby(
+                            "codigo_eds", dropna=False, as_index=False
+                        ).agg(
+                            MPs=("id_ot", "count"),
+                            Paro_prev_seg=("_paro_calc_seg", "sum"),
+                        )).rename(columns={"codigo_eds": "eds_occim"})
+                    else:
+                        _gpe_prev = pd.DataFrame(columns=["eds_occim","MPs","Paro_prev_seg"])
+                    _gpe = _gpe_corr.merge(_gpe_prev, on="eds_occim", how="outer")
+                    _gpe["Llamados"]      = _gpe["Llamados"].fillna(0).astype(int)
+                    _gpe["MPs"]           = _gpe["MPs"].fillna(0).astype(int)
+                    _gpe["Paro_corr_seg"] = _gpe["Paro_corr_seg"].fillna(0)
+                    _gpe["Paro_prev_seg"] = _gpe["Paro_prev_seg"].fillna(0)
+                    _gpe["Tiempo_paro_seg"] = _gpe["Paro_corr_seg"] + _gpe["Paro_prev_seg"]
                     _gpe["Última emergencia"] = pd.to_datetime(
                         _gpe["_ultimo_llamado"], errors="coerce"
                     ).dt.strftime("%d/%m/%Y").fillna("—")
                     _gpe["Tiempo detenido (h:mm)"] = _gpe["Tiempo_paro_seg"].apply(
                         lambda s: f"{int(s // 3600):,}h {int((s % 3600) // 60):02d}m"
                         if s else "—")
+                    _gpe["Correctivas (h)"] = (_gpe["Paro_corr_seg"] / 3600).round(1)
+                    _gpe["Preventivas (h)"] = (_gpe["Paro_prev_seg"] / 3600).round(1)
                     _gpe["Uptime %"] = (
                         (1 - _gpe["Tiempo_paro_seg"] / _seg_equipo_up).clip(lower=0) * 100
                     ).round(3)
@@ -3307,30 +3443,36 @@ if _page == _NAV_PAGES[1]:
 
                     _gpe_show = _gpe[[
                         "eds_occim","eds_nombre","cliente","Equipos_codigos","Equipos_nombres",
-                        "Llamados","Tiempo detenido (h:mm)",
-                        "Última emergencia","Uptime %"
+                        "Llamados","MPs","Correctivas (h)","Preventivas (h)",
+                        "Tiempo detenido (h:mm)","Última emergencia","Uptime %"
                     ]].rename(columns={
                         "eds_occim":       "Cód. EDS",
                         "eds_nombre":      "Estación",
                         "cliente":         "Cliente",
                         "Equipos_codigos": "Equipo(s)",
                         "Equipos_nombres": "Tipo equipo",
+                        "MPs":             "MPs c/paro",
                     })
                     _show_df(_gpe_show.reset_index(drop=True), hide_index=True,
                              use_container_width=True,
                              column_config={
                                  "Cód. EDS":                st.column_config.TextColumn(width=90),
-                                 "Estación":                st.column_config.TextColumn(width=220),
-                                 "Cliente":                 st.column_config.TextColumn(width=120),
-                                 "Equipo(s)":               st.column_config.TextColumn(width=140),
-                                 "Tipo equipo":             st.column_config.TextColumn(width=220),
+                                 "Estación":                st.column_config.TextColumn(width=200),
+                                 "Cliente":                 st.column_config.TextColumn(width=110),
+                                 "Equipo(s)":               st.column_config.TextColumn(width=120),
+                                 "Tipo equipo":             st.column_config.TextColumn(width=180),
                                  "Llamados":                st.column_config.NumberColumn(
-                                     format="%d", width=80),
-                                 "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=140,
-                                     help="fecha_finalización_técnico − fecha_llamado · NO cierre administrativo"),
-                                 "Última emergencia":       st.column_config.TextColumn(width=110),
+                                     format="%d", width=70),
+                                 "MPs c/paro":              st.column_config.NumberColumn(
+                                     format="%d", width=70,
+                                     help="MPs preventivas con paro de equipo"),
+                                 "Correctivas (h)":         st.column_config.NumberColumn(format="%.1f", width=95),
+                                 "Preventivas (h)":         st.column_config.NumberColumn(format="%.1f", width=95),
+                                 "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=125,
+                                     help="Correctivas + Preventivas"),
+                                 "Última emergencia":       st.column_config.TextColumn(width=105),
                                  "Uptime %":                st.column_config.NumberColumn(
-                                     format="%.3f%%", width=100),
+                                     format="%.3f%%", width=95),
                              })
                     st.caption(
                         f"Top 30 EDS ordenadas por tiempo total detenido · "
