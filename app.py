@@ -1672,8 +1672,23 @@ if _page == _NAV_PAGES[1]:
         # SUB-PESTAÑA: CLIENTES
         # ══════════════════════════════════════════════════════════════════════
         with _tab_cli:
+            # ── Clasificación de macrozona (Norte / Santiago / Sur) ────────────
+            _NORTE_CIUDADES = {"IQUIQUE","ARICA","ANTOFAGASTA","CALAMA","COPIAPO","COPIAPÓ",
+                               "OVALLE","LA SERENA","COQUIMBO","VALLENAR","ILLAPEL","HUASCO",
+                               "ALTO HOSPICIO","TOCOPILLA","MEJILLONES"}
+            _SUR_CIUDADES   = {"CONCEPCION","CONCEPCIÓN","OSORNO","TEMUCO","VALDIVIA",
+                               "PUERTO MONTT","CHILLAN","CHILLÁN","LOS ANGELES","LOS ÁNGELES",
+                               "LINARES","TALCA","CURICO","CURICÓ","RANCAGUA","FRUTILLAR",
+                               "VICTORIA","RENGO","SAN FERNANDO","PUERTO VARAS","ANCUD",
+                               "CASTRO","COIHAIQUE","LA UNION","LA UNIÓN"}
+            def _macrozona_ll(eds_nombre, comuna):
+                s = (str(eds_nombre or "") + " " + str(comuna or "")).upper()
+                if any(c in s for c in _NORTE_CIUDADES): return "Norte"
+                if any(c in s for c in _SUR_CIUDADES):   return "Sur"
+                return "Centro (Santiago)"
+
             # ── Filtros ───────────────────────────────────────────────────────
-            cf1, cf2, cf3, cf4, cf5 = st.columns([1.6, 1.4, 1.6, 1.4, 1.6])
+            cf1, cf2, cf3, cf4, cf5, cf6 = st.columns([1.4, 1.2, 1.4, 1.2, 1.4, 1.4])
             with cf1:
                 sel_trim_c = st.selectbox("Período", _trim_opts, key="cl_trim")
             with cf2:
@@ -1693,6 +1708,8 @@ if _page == _NAV_PAGES[1]:
                 sel_pr_c = st.selectbox("Prioridad", _pr_opts_c, key="cl_pr")
             with cf5:
                 sel_cu_c = st.selectbox("Cumplimiento SLA", ["Todos","CUMPLE","NO CUMPLE"], key="cl_cu")
+            with cf6:
+                sel_zona_c = st.selectbox("Zona", ["Todas","Centro (Santiago)","Norte","Sur"], key="cl_zona")
 
             # ── Aplicar filtros ───────────────────────────────────────────────
             df_ll = df_llamados.copy()
@@ -1701,6 +1718,13 @@ if _page == _NAV_PAGES[1]:
                 _fl2 = _fl2.dt.tz_convert(None)
             df_ll["_mes"]   = _fl2.dt.to_period("M").astype(str)
             df_ll["_month"] = _fl2.dt.month.astype("Int64")
+            df_ll["_macrozona"] = [
+                _macrozona_ll(e, c)
+                for e, c in zip(
+                    df_ll.get("eds_nombre", pd.Series("", index=df_ll.index)).fillna(""),
+                    df_ll.get("comuna", pd.Series("", index=df_ll.index)).fillna(""),
+                )
+            ]
             if sel_trim_c != "Todos":
                 df_ll = df_ll[df_ll["_month"].isin(_TRIMESTRES_DEF[sel_trim_c])]
             if sel_mes_c:
@@ -1709,6 +1733,7 @@ if _page == _NAV_PAGES[1]:
             if sel_cl_c != "Todos":  df_ll = df_ll[df_ll["cliente"] == sel_cl_c]
             if sel_pr_c != "Todas":  df_ll = df_ll[df_ll["prioridad"].str.upper() == sel_pr_c.upper()]
             if sel_cu_c != "Todos":  df_ll = df_ll[df_ll["cumplimiento"] == sel_cu_c]
+            if sel_zona_c != "Todas": df_ll = df_ll[df_ll["_macrozona"] == sel_zona_c]
 
             # ── KPIs ──────────────────────────────────────────────────────────
             _mes_lbl_tit = f" — {', '.join(sel_mes_c)}" if sel_mes_c else ""
