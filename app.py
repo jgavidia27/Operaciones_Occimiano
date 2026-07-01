@@ -10904,17 +10904,76 @@ elif _page == _NAV_PAGES[2]:
     _ppct   = round(_pfin / _ptot * 100, 1) if _ptot > 0 else 0.0
 
     # ── % Cumplimiento en tiempo y forma ──────────────────────────────────
-    # Criterio Occimiano: fecha_finalizacion debe ser ≤ fecha_programada (mismo
-    # día o antes). Si la OT se ejecutó el día siguiente o después, NO cumple
-    # — aunque después se justifique con la estación.
+    # Criterio Occimiano (v2 — con banda de anticipación):
+    #   CUMPLE si la MP se ejecuta dentro de una ventana razonable respecto
+    #   a la fecha programada, considerando el intervalo del plan.
     #
-    # Granularidad: el sync ya deduplica por id_ot, por lo que cada fila aquí
-    # es UNA OT completa. La fecha_finalizacion es la de la OT global, no de
-    # una sub-tarea individual.
+    #   Límite tarde:   fecha_finalización ≤ fecha_programada (mismo día o antes)
+    #   Límite temprano: ejecución NO puede adelantarse más del 50% del
+    #                    intervalo del plan. Ejemplo: MP mensual (30 días)
+    #                    programada al día 30 y ejecutada el día 14 → adelanto
+    #                    de 16 días = 53% del intervalo → INCUMPLE por anticipación
+    #                    excesiva (la próxima quedará ~45 días después y genera reclamos).
+    #
+    # El intervalo se infiere del nombre del plan (plan_tareas):
+    #   MENSUAL=30, BIMESTRAL=60, TRIMESTRAL=90, SEMESTRAL=180, ANUAL=365, etc.
+    #   Si no se puede inferir, default = 30 días (mensual).
     #
     # Universo evaluado:
     #   • Solo OTs cuya fecha_programada ya pasó (las futuras no son atraso).
     #   • Anuladas ya excluidas vía _dfp_op arriba.
+    # Inferir el intervalo de programación de forma EMPÍRICA desde el histórico:
+    # para cada (codigo_activo, plan_tareas) miramos la mediana de días entre
+    # fechas programadas consecutivas y hacemos snap a los valores estándar.
+    # Esto es más robusto que parsear el nombre del plan (los planes Occimiano
+    # se llaman "PLAN MTTO MSELF..." sin decir frecuencia).
+    #
+    # Fallback: si un (activo, plan) tiene solo una MP, usamos default = 30 días.
+    _INTERVALOS_ESTANDAR = [7, 15, 30, 60, 90, 120, 180, 365, 730]
+    _INTERVALO_DEFAULT   = 30
+
+    def _snap_intervalo(dias: float) -> int:
+        """Redondea el intervalo empírico al valor estándar más cercano en escala log."""
+        if pd.isna(dias) or dias <= 0:
+            return _INTERVALO_DEFAULT
+        import math
+        return min(_INTERVALOS_ESTANDAR,
+                   key=lambda v: abs(math.log(v) - math.log(dias)))
+
+    def _build_intervalos_por_activo_plan(df_full: pd.DataFrame) -> dict:
+        """
+        Retorna {(codigo_activo, plan_tareas): intervalo_dias} basado en la
+        mediana de días entre fechas programadas consecutivas del mismo par.
+        """
+        if df_full.empty or "fecha_programada" not in df_full.columns:
+            return {}
+        _dfi = df_full[["codigo_activo","plan_tareas","fecha_programada"]].dropna(
+            subset=["fecha_programada","codigo_activo"]
+        ).copy()
+        _dfi["plan_tareas"] = _dfi["plan_tareas"].fillna("(sin plan)")
+        _dfi["_fp"] = pd.to_datetime(_dfi["fecha_programada"], errors="coerce", utc=True)
+        _dfi = _dfi.dropna(subset=["_fp"]).sort_values(["codigo_activo","plan_tareas","_fp"])
+        result: dict = {}
+        for (act, plan), grp in _dfi.groupby(["codigo_activo","plan_tareas"], sort=False):
+            fechas = grp["_fp"].tolist()
+            if len(fechas) < 2:
+                continue
+            diffs = [(fechas[i+1] - fechas[i]).days for i in range(len(fechas)-1)
+                     if (fechas[i+1] - fechas[i]).days > 0]
+            if not diffs:
+                continue
+            med = sorted(diffs)[len(diffs)//2]  # mediana
+            result[(act, plan)] = _snap_intervalo(med)
+        return result
+
+    # Construir el índice de intervalos usando TODAS las MPs (no solo las que
+    # ya pasaron), para tener más datos históricos.
+    _intv_idx = _build_intervalos_por_activo_plan(_dfp_op)
+
+    def _lookup_intervalo(row) -> int:
+        key = (row.get("codigo_activo"), str(row.get("plan_tareas") or "(sin plan)"))
+        return _intv_idx.get(key, _INTERVALO_DEFAULT)
+
     _hoy_norm = pd.Timestamp.today().normalize()
     _df_cumpl = _dfp_op[_dfp_op["fecha_programada"].notna()].copy()
     _excluidas_n = _anuladas_n
@@ -10936,15 +10995,47 @@ elif _page == _NAV_PAGES[2]:
             _df_cumpl["_ff_n"].fillna(_hoy_norm) - _df_cumpl["_fp_n"]
         ).dt.days
 
-        # Cumplimiento DIARIO (estricto: mismo día o antes)
-        _df_cumpl["cumple"] = (
-            _df_cumpl["_ff_n"].notna() & (_df_cumpl["dias_atraso"] <= 0)
+        # Intervalo de programación (días) inferido EMPÍRICAMENTE desde el
+        # histórico de MPs del mismo (codigo_activo, plan_tareas).
+        _df_cumpl["_intervalo_dias"] = _df_cumpl.apply(_lookup_intervalo, axis=1)
+
+        # Anticipación: días entre ejecución y fecha programada (positivo = adelantada).
+        # Solo se calcula para MPs finalizadas.
+        _df_cumpl["dias_antelacion"] = (
+            _df_cumpl["_fp_n"] - _df_cumpl["_ff_n"]
+        ).dt.days
+        _df_cumpl["pct_antelacion"] = (
+            _df_cumpl["dias_antelacion"] / _df_cumpl["_intervalo_dias"] * 100
+        ).round(1)
+        # "Muy anticipada" = adelantada más del 50% del intervalo del plan.
+        _df_cumpl["_muy_anticipada"] = (
+            _df_cumpl["_ff_n"].notna() &
+            (_df_cumpl["pct_antelacion"] > 50)
         )
 
-        # Cumplimiento FLEXIBLE (≤ 5 días desde fecha programada)
-        # Cumple si la OT se finalizó como máximo 5 días después de la
-        # fecha programada.  Si aún no tiene fecha_finalización y hoy
-        # está dentro de los 5 días → se considera en plazo.
+        # Cumplimiento CRUDO (nuevo): no tarde AND no muy anticipada
+        _df_cumpl["cumple"] = (
+            _df_cumpl["_ff_n"].notna() &
+            (_df_cumpl["dias_atraso"] <= 0) &
+            (~_df_cumpl["_muy_anticipada"])
+        )
+
+        # Motivo del incumplimiento (para diagnóstico)
+        def _motivo_incumpl(r):
+            if bool(r.get("cumple", False)):
+                return ""
+            if pd.isna(r.get("_ff_n")):
+                return f"⏳ Pendiente ({int(r['dias_atraso'])}d de atraso sin ejecutar)"
+            if r["dias_atraso"] > 0:
+                return f"⚠️ Ejecutada {int(r['dias_atraso'])} día(s) tarde"
+            if bool(r.get("_muy_anticipada", False)):
+                return (f"🔵 Anticipación excesiva: hecha {int(r['dias_antelacion'])}d "
+                        f"antes ({r['pct_antelacion']:.0f}% del intervalo de "
+                        f"{int(r['_intervalo_dias'])}d)")
+            return ""
+        _df_cumpl["_motivo"] = _df_cumpl.apply(_motivo_incumpl, axis=1)
+
+        # Cumplimiento FLEXIBLE (≤ 5 días desde fecha programada, sin techo de anticipación)
         _df_cumpl["cumple_sem"] = (
             _df_cumpl["_ff_n"].notna() & (_df_cumpl["dias_atraso"] <= 5)
         ) | (
@@ -10958,11 +11049,15 @@ elif _page == _NAV_PAGES[2]:
         _atras_avg = round(_df_cumpl.loc[~_df_cumpl["cumple"], "dias_atraso"].mean(), 1) \
             if (~_df_cumpl["cumple"]).any() else 0.0
 
+        # KPI de anticipación excesiva
+        _antic_n   = int(_df_cumpl["_muy_anticipada"].sum())
+        _antic_pct = round(_antic_n / _cump_tot * 100, 1) if _cump_tot > 0 else 0.0
+
         _cump_sem_n  = int(_df_cumpl["cumple_sem"].sum())
         _cump_sem_pct= round(_cump_sem_n / _cump_tot * 100, 1) if _cump_tot > 0 else 0.0
     else:
-        _cump_n = _cump_tot = _cump_sem_n = 0
-        _cump_pct = _cump_sem_pct = 0.0
+        _cump_n = _cump_tot = _cump_sem_n = _antic_n = 0
+        _cump_pct = _cump_sem_pct = _antic_pct = 0.0
         _atras_avg = 0.0
 
     pk1,pk2,pk3,pk4,pk5 = st.columns(5)
@@ -11009,11 +11104,41 @@ elif _page == _NAV_PAGES[2]:
                           paper_bgcolor="rgba(0,0,0,0)")
         return fig
 
-    _gc1, _gc2 = st.columns(2)
+    # Gauge dedicado para anticipación indebida (color invertido: menos es mejor)
+    def _antic_color_of(pct: float) -> str:
+        # Anticipación: <5% bien, 5-15% revisar, >15% crítico
+        return "#10b981" if pct <= 5 else "#f59e0b" if pct <= 15 else "#ef4444"
+
+    def _build_antic_gauge(value: float, title_main: str, subtitle: str) -> "_go.Figure":
+        color = _antic_color_of(value)
+        fig = _go.Figure(_go.Indicator(
+            mode="gauge+number",
+            value=value,
+            number={"suffix": " %", "font": {"size": 32}},
+            title={"text": f"<b>{title_main}</b><br>"
+                           f"<span style='font-size:0.72rem;color:#94a3b8'>{subtitle}</span>",
+                   "font": {"size": 13}},
+            gauge={
+                "axis":    {"range": [0, 50], "tickwidth": 1, "tickfont": {"size": 10}},
+                "bar":     {"color": color, "thickness": 0.32},
+                "bgcolor": "rgba(0,0,0,0)",
+                "borderwidth": 0,
+                "steps": [
+                    {"range": [0,   5], "color": "rgba(16,185,129,0.18)"},
+                    {"range": [5,  15], "color": "rgba(245,158,11,0.18)"},
+                    {"range": [15, 50], "color": "rgba(239,68,68,0.18)"},
+                ],
+            },
+        ))
+        fig.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10),
+                          paper_bgcolor="rgba(0,0,0,0)")
+        return fig
+
+    _gc1, _gc2, _gc3 = st.columns(3)
     with _gc1:
         st.plotly_chart(
             _build_gauge(_cump_pct, "% Cumplimiento — Criterio Crudo",
-                         "fecha_finalización ≤ fecha_programada · por OT"),
+                         "en ventana (no tarde y no >50% adelantada)"),
             use_container_width=True, key="prev_gauge_diario",
         )
     with _gc2:
@@ -11022,10 +11147,17 @@ elif _page == _NAV_PAGES[2]:
                          "ejecutada ≤ 5 días desde fecha programada · por OT"),
             use_container_width=True, key="prev_gauge_semanal",
         )
+    with _gc3:
+        st.plotly_chart(
+            _build_antic_gauge(_antic_pct, "% Anticipación indebida",
+                               "ejecutadas >50% antes del intervalo del plan"),
+            use_container_width=True, key="prev_gauge_antic",
+        )
 
-    # Panel de detalle unificado debajo de ambos velocímetros
+    # Panel de detalle unificado debajo de los velocímetros
     _gauge_color   = _gauge_color_of(_cump_pct)
     _gauge_color_s = _gauge_color_of(_cump_sem_pct)
+    _gauge_color_a = _antic_color_of(_antic_pct)
     st.markdown(
         f"""<div style="padding:14px 18px;background:rgba(148,163,184,0.08);
              border-radius:10px;border-left:3px solid {_gauge_color};margin-top:-12px;">
@@ -11034,21 +11166,28 @@ elif _page == _NAV_PAGES[2]:
             Detalle del cumplimiento</div>
           <table style="width:100%;border-collapse:collapse;font-size:0.92rem;">
             <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Criterio Crudo</td>
+              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Criterio Crudo (no tarde y no muy anticipada)</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color};font-size:1.05rem;">{_cump_n:,} / {_cump_tot:,}</b>
-                <span style="color:var(--text-color, #475569);font-size:0.82rem;"> OTs a tiempo · {_cump_pct}%</span>
+                <span style="color:var(--text-color, #475569);font-size:0.82rem;"> OTs OK · {_cump_pct}%</span>
               </td>
             </tr>
             <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Criterio Flexible (≤ 5 días)</td>
+              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Criterio Flexible (≤ 5 días desde F.Prog.)</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color_s};font-size:1.05rem;">{_cump_sem_n:,} / {_cump_tot:,}</b>
                 <span style="color:var(--text-color, #475569);font-size:0.82rem;"> OTs en plazo · {_cump_sem_pct}%</span>
               </td>
             </tr>
+            <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
+              <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Anticipación indebida (&gt;50% del intervalo)</td>
+              <td style="padding:6px 0;text-align:right;">
+                <b style="color:{_gauge_color_a};font-size:1.05rem;">{_antic_n:,} / {_cump_tot:,}</b>
+                <span style="color:var(--text-color, #475569);font-size:0.82rem;"> OTs muy antes · {_antic_pct}%</span>
+              </td>
+            </tr>
             <tr>
-              <td style="padding:6px 0;font-size:0.84rem;color:var(--text-color, #475569);">Promedio de atraso (crudo)</td>
+              <td style="padding:6px 0;font-size:0.84rem;color:var(--text-color, #475569);">Promedio de atraso (solo las tarde)</td>
               <td style="padding:6px 0;text-align:right;color:#ef4444;font-weight:600;">
                 {_atras_avg} días
               </td>
@@ -11058,14 +11197,83 @@ elif _page == _NAV_PAGES[2]:
                       padding-top:8px;border-top:1px solid rgba(148,163,184,0.18);">
             Solo OTs cuya fecha programada ya pasó.
             Se excluyeron <b>{_excluidas_n:,}</b> OTs anuladas (Cancelado / Error de ingreso).
-            <b style="margin-left:8px;">Escala:</b>
+            <b style="margin-left:8px;">Escala Cumplimiento:</b>
             <span style="color:#10b981">≥ 90% bien</span> ·
             <span style="color:#f59e0b">75–90% revisar</span> ·
             <span style="color:#ef4444">&lt; 75% crítico</span>
+            <b style="margin-left:12px;">Anticipación:</b>
+            <span style="color:#10b981">≤ 5% bien</span> ·
+            <span style="color:#f59e0b">5–15% revisar</span> ·
+            <span style="color:#ef4444">&gt; 15% crítico</span>
           </div>
         </div>""",
         unsafe_allow_html=True,
     )
+
+    # ── Gráfico: % anticipación indebida por tipo de plan/programación ─────
+    # Muestra si el problema de "hacer MPs demasiado antes" es sistémico
+    # o solo afecta a ciertos tipos de programación (mensual / trimestral / etc.).
+    if _cump_tot > 0:
+        _df_a = _df_cumpl.copy()
+        _MAP_INTV_LBL = {
+            7:   "Semanal (7d)",     15:  "Quincenal (15d)",
+            30:  "Mensual (30d)",    60:  "Bimestral (60d)",
+            90:  "Trimestral (90d)", 120: "Cuatrimestral (120d)",
+            180: "Semestral (180d)", 365: "Anual (365d)",
+            730: "Bianual (730d)",
+        }
+        _df_a["_intv_lbl"] = _df_a["_intervalo_dias"].map(_MAP_INTV_LBL).fillna(
+            _df_a["_intervalo_dias"].astype(str) + "d"
+        )
+        _agg_a = (_df_a.groupby(["_intervalo_dias","_intv_lbl"], as_index=False)
+                       .agg(total=("cumple","size"),
+                            antic=("_muy_anticipada","sum"),
+                            tarde=("dias_atraso", lambda s: int((s > 0).sum())),
+                            ok=("cumple","sum"))
+                       .sort_values("_intervalo_dias"))
+        _agg_a["pct_antic"] = (_agg_a["antic"] / _agg_a["total"] * 100).round(1)
+        _agg_a["pct_tarde"] = (_agg_a["tarde"] / _agg_a["total"] * 100).round(1)
+        _agg_a["pct_ok"]    = (_agg_a["ok"]    / _agg_a["total"] * 100).round(1)
+
+        _fig_antic = _go.Figure()
+        _fig_antic.add_trace(_go.Bar(
+            name="✅ En ventana", x=_agg_a["_intv_lbl"], y=_agg_a["pct_ok"],
+            marker_color="#10b981",
+            text=[f"{p:.1f}%<br>{int(n)} OTs" for p, n in zip(_agg_a["pct_ok"], _agg_a["ok"])],
+            textposition="inside", textfont=dict(color="white", size=11),
+            hovertemplate="%{x}<br>En ventana: %{y:.1f}%<extra></extra>",
+        ))
+        _fig_antic.add_trace(_go.Bar(
+            name="⚠️ Tarde", x=_agg_a["_intv_lbl"], y=_agg_a["pct_tarde"],
+            marker_color="#f59e0b",
+            text=[f"{p:.1f}%<br>{int(n)}" if p > 0 else "" for p, n in zip(_agg_a["pct_tarde"], _agg_a["tarde"])],
+            textposition="inside", textfont=dict(color="white", size=11),
+            hovertemplate="%{x}<br>Tarde: %{y:.1f}%<extra></extra>",
+        ))
+        _fig_antic.add_trace(_go.Bar(
+            name="🔵 Muy anticipada (>50%)", x=_agg_a["_intv_lbl"], y=_agg_a["pct_antic"],
+            marker_color="#3b82f6",
+            text=[f"{p:.1f}%<br>{int(n)}" if p > 0 else "" for p, n in zip(_agg_a["pct_antic"], _agg_a["antic"])],
+            textposition="inside", textfont=dict(color="white", size=11),
+            hovertemplate="%{x}<br>Muy anticipada: %{y:.1f}%<extra></extra>",
+        ))
+        _fig_antic.update_layout(
+            barmode="stack",
+            title=dict(text="<b>Distribución por tipo de programación</b><br>"
+                            "<span style='font-size:0.75rem;color:#94a3b8;font-weight:400'>"
+                            "Del 100% de MPs de cada frecuencia, cuánto se hizo en ventana / tarde / muy anticipada</span>",
+                       font=dict(size=13)),
+            height=380,
+            margin=dict(l=10, r=10, t=70, b=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+            yaxis=dict(title="% MPs", ticksuffix="%", range=[0, 100],
+                       gridcolor="rgba(148,163,184,0.2)"),
+            xaxis=dict(title=""),
+            bargap=0.35,
+        )
+        st.plotly_chart(_fig_antic, use_container_width=True, key="prev_bar_antic_por_plan")
 
     # ── Desglose: tabla de OTs que NO cumplieron ─────────────────────────
     _df_incumpl = _df_cumpl[~_df_cumpl["cumple"]].copy() if _cump_tot > 0 else pd.DataFrame()
@@ -11076,36 +11284,33 @@ elif _page == _NAV_PAGES[2]:
         if _df_incumpl.empty:
             st.success("✅ Todas las OTs evaluadas cumplieron el plazo. Sin incumplimientos.")
         else:
-            # Construir tabla explicativa
-            _df_incumpl = _df_incumpl.sort_values("dias_atraso", ascending=False)
+            # Ordenar: primero las tarde (por atraso desc), luego las muy anticipadas
+            _df_incumpl["_orden_prio"] = _df_incumpl["dias_atraso"].where(
+                _df_incumpl["dias_atraso"] > 0, other=-_df_incumpl["dias_antelacion"].abs()
+            )
+            _df_incumpl = _df_incumpl.sort_values("_orden_prio", ascending=False)
+
             _det = pd.DataFrame({
-                "OT":             _df_incumpl["id_ot"].values,
-                "Estación":       _df_incumpl.get("estacion", _df_incumpl.get("ubicacion", "")).fillna("—").values,
-                "Cód. EDS":       _df_incumpl.get("codigo_eds", _df_incumpl.get("clasificacion_2", "")).fillna("—").values,
-                "Plan":           _df_incumpl.get("plan_tareas", pd.Series([""] * len(_df_incumpl))).fillna("—").values,
-                "Equipo":         _df_incumpl["codigo_activo"].fillna("—").values,
-                "F. Programada":  _df_incumpl["_fp_n"].dt.strftime("%d/%m/%Y").values,
-                "F. Ejecución":   _df_incumpl["_ff_n"].dt.strftime("%d/%m/%Y").fillna("—").values,
-                "Días atraso":    _df_incumpl["dias_atraso"].astype(int).values,
+                "OT":              _df_incumpl["id_ot"].values,
+                "Estación":        _df_incumpl.get("estacion", _df_incumpl.get("ubicacion", "")).fillna("—").values,
+                "Cód. EDS":        _df_incumpl.get("codigo_eds", _df_incumpl.get("clasificacion_2", "")).fillna("—").values,
+                "Plan":            _df_incumpl.get("plan_tareas", pd.Series([""] * len(_df_incumpl))).fillna("—").values,
+                "Intervalo (d)":   _df_incumpl["_intervalo_dias"].astype(int).values,
+                "Equipo":          _df_incumpl["codigo_activo"].fillna("—").values,
+                "F. Programada":   _df_incumpl["_fp_n"].dt.strftime("%d/%m/%Y").values,
+                "F. Ejecución":    _df_incumpl["_ff_n"].dt.strftime("%d/%m/%Y").fillna("—").values,
+                "Días atraso":     _df_incumpl["dias_atraso"].astype(int).values,
+                "Días antes":      _df_incumpl["dias_antelacion"].fillna(0).astype(int).values,
+                "% Antelación":    _df_incumpl["pct_antelacion"].fillna(0).values,
+                "Motivo":          _df_incumpl["_motivo"].values,
                 "¿Cumple semanal?": _df_incumpl["cumple_sem"].map({True: "✅ Sí", False: "❌ No"}).values,
-                "Estado":         _df_incumpl["estado_tarea"].fillna("—").values,
-                "Responsable":    _df_incumpl["responsable"].fillna("—").values,
+                "Estado":          _df_incumpl["estado_tarea"].fillna("—").values,
+                "Responsable":     _df_incumpl["responsable"].fillna("—").values,
             })
 
-            # Columna resumen explicativa
-            def _resumen_row(r):
-                if r["F. Ejecución"] == "—" or pd.isna(r["F. Ejecución"]):
-                    return f"⏳ Pendiente — atraso de {r['Días atraso']} días sin ejecutar"
-                d = int(r["Días atraso"])
-                if r["¿Cumple semanal?"] == "✅ Sí":
-                    return f"🟡 Ejecutada {d} día{'s' if d != 1 else ''} después · misma semana"
-                return f"⚠️ Ejecutada {d} día{'s' if d != 1 else ''} después · semana(s) posterior(es)"
-            _det["Resumen"] = _det.apply(_resumen_row, axis=1)
-
-            # Reordenar columnas para mejor lectura
-            _det = _det[["OT", "Estación", "Cód. EDS", "Plan", "Equipo",
-                         "F. Programada", "F. Ejecución", "Días atraso",
-                         "¿Cumple semanal?", "Resumen", "Estado", "Responsable"]]
+            _det = _det[["OT", "Estación", "Cód. EDS", "Plan", "Intervalo (d)", "Equipo",
+                         "F. Programada", "F. Ejecución", "Días atraso", "Días antes",
+                         "% Antelación", "Motivo", "¿Cumple semanal?", "Estado", "Responsable"]]
 
             _show_df(
                 _det.reset_index(drop=True),
@@ -11113,27 +11318,35 @@ elif _page == _NAV_PAGES[2]:
                 use_container_width=True,
                 column_config={
                     "OT":               st.column_config.TextColumn(width=85),
-                    "Estación":         st.column_config.TextColumn(width=200),
-                    "Cód. EDS":         st.column_config.TextColumn(width=90),
-                    "Plan":             st.column_config.TextColumn(width=200),
-                    "Equipo":           st.column_config.TextColumn(width=90),
-                    "F. Programada":    st.column_config.TextColumn(width=100),
-                    "F. Ejecución":     st.column_config.TextColumn(width=100),
-                    "Días atraso":      st.column_config.NumberColumn(format="%d d", width=95),
-                    "¿Cumple semanal?": st.column_config.TextColumn(width=130),
-                    "Resumen":          st.column_config.TextColumn(width=340),
-                    "Estado":           st.column_config.TextColumn(width=110),
-                    "Responsable":      st.column_config.TextColumn(width=160),
+                    "Estación":         st.column_config.TextColumn(width=180),
+                    "Cód. EDS":         st.column_config.TextColumn(width=85),
+                    "Plan":             st.column_config.TextColumn(width=180),
+                    "Intervalo (d)":    st.column_config.NumberColumn(format="%d", width=85,
+                        help="Intervalo del plan de mantención (días entre ejecuciones consecutivas)"),
+                    "Equipo":           st.column_config.TextColumn(width=85),
+                    "F. Programada":    st.column_config.TextColumn(width=95),
+                    "F. Ejecución":     st.column_config.TextColumn(width=95),
+                    "Días atraso":      st.column_config.NumberColumn(format="%d", width=80),
+                    "Días antes":       st.column_config.NumberColumn(format="%d", width=80,
+                        help="Días de anticipación respecto a la fecha programada (positivo = adelantada)"),
+                    "% Antelación":     st.column_config.NumberColumn(format="%.1f%%", width=95,
+                        help="Anticipación como % del intervalo del plan. >50% = anticipación excesiva."),
+                    "Motivo":           st.column_config.TextColumn(width=300),
+                    "¿Cumple semanal?": st.column_config.TextColumn(width=110),
+                    "Estado":           st.column_config.TextColumn(width=100),
+                    "Responsable":      st.column_config.TextColumn(width=150),
                 },
             )
             # Métricas del desglose
             _sin_ejec   = (_det["F. Ejecución"] == "—").sum()
-            _ejec_tarde = (_det["F. Ejecución"] != "—").sum()
+            _ejec_tarde = ((_det["F. Ejecución"] != "—") & (_det["Días atraso"] > 0)).sum()
+            _ejec_antic = ((_det["F. Ejecución"] != "—") & (_det["% Antelación"] > 50)).sum()
             _ok_semana  = (_det["¿Cumple semanal?"] == "✅ Sí").sum()
             st.caption(
-                f"Ordenadas por días de atraso descendente · "
-                f"{_sin_ejec:,} sin ejecutar · {_ejec_tarde:,} ejecutadas fuera de plazo diario · "
-                f"de esas, **{_ok_semana:,} sí cumplieron en la misma semana** (rescate por flexibilidad semanal)."
+                f"Ordenadas por severidad · "
+                f"{_sin_ejec:,} sin ejecutar · {_ejec_tarde:,} ejecutadas tarde · "
+                f"**{_ejec_antic:,} muy anticipadas (>50% del intervalo)** · "
+                f"de las tarde, {_ok_semana:,} rescatadas por el criterio semanal (≤5 días)."
             )
 
     st.divider()
