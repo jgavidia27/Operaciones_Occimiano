@@ -131,8 +131,8 @@ def manifest():
         "description": "Desempeño STO - versión mobile",
         "start_url": "/",
         "display": "standalone",
-        "background_color": "#0b1929",
-        "theme_color": "#2A6B9B",
+        "background_color": "#151B23",
+        "theme_color": "#00897B",
         "orientation": "portrait",
         "icons": [
             {"src": "/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
@@ -144,12 +144,12 @@ def manifest():
 def app_icon():
     svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-<stop offset="0%" stop-color="#1A3654"/><stop offset="100%" stop-color="#4A9BBF"/>
+<stop offset="0%" stop-color="#004D40"/><stop offset="100%" stop-color="#26C6DA"/>
 </linearGradient></defs>
 <rect width="512" height="512" rx="80" fill="url(#g)"/>
 <text x="256" y="300" font-size="280" text-anchor="middle" dominant-baseline="central"
   font-family="Arial,sans-serif" fill="white" font-weight="bold">STO</text>
-<text x="256" y="430" font-size="80" text-anchor="middle" fill="#5BB5D4"
+<text x="256" y="430" font-size="80" text-anchor="middle" fill="#4DD0E1"
   font-family="Arial,sans-serif">OCCIM</text>
 </svg>"""
     return svg, 200, {"Content-Type": "image/svg+xml"}
@@ -632,7 +632,7 @@ def index():
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Error</title>
-    <style>body{{font-family:monospace;background:#0b1929;color:#e2e8f0;padding:16px}}
+    <style>body{{font-family:monospace;background:#151B23;color:#e2e8f0;padding:16px}}
     pre{{white-space:pre-wrap;word-break:break-all;font-size:12px;background:#1e293b;
     padding:12px;border-radius:8px;overflow-x:auto}}
     a{{color:#3b82f6}}</style></head><body>
@@ -647,12 +647,12 @@ ERROR_TEMPLATE = r"""
 <title>Indicadores Operacionales - Occim 📲</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📲</text></svg>">
 <style>
-  body { font-family: -apple-system, sans-serif; background: #0b1929; color: #e2e8f0;
+  body { font-family: -apple-system, sans-serif; background: #151B23; color: #e2e8f0;
     display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
   .msg { text-align: center; max-width: 360px; }
   .msg h2 { color: #f59e0b; margin-bottom: 12px; }
-  .msg p { color: #8faac4; font-size: .9rem; line-height: 1.5; }
-  .msg a { color: #3B7AAE; }
+  .msg p { color: #9CA3B0; font-size: .9rem; line-height: 1.5; }
+  .msg a { color: #4DD0E1; }
 </style></head><body>
 <div class="msg">
   <h2>Datos no disponibles</h2>
@@ -674,18 +674,18 @@ HTML_TEMPLATE = r"""
 <title>Indicadores Operacionales - Occim 📲</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📲</text></svg>">
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#2A6B9B">
+<meta name="theme-color" content="#00897B">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Occim STO">
 <link rel="apple-touch-icon" href="/app-icon.svg">
 <style>
   :root {
-    --bg: #0b1929; --card: rgba(11,25,41,.92); --border: rgba(50,70,100,.65);
-    --text: #e2e8f0; --muted: #8faac4;
+    --bg: #151B23; --card: rgba(22,28,36,.90); --border: rgba(65,75,90,.50);
+    --text: #e2e8f0; --muted: #9CA3B0;
     --green: #22c55e; --yellow: #f59e0b; --red: #ef4444;
-    --blue: #3B7AAE; --teal: #5BB5D4;
-    --accent: #2A6B9B;
+    --blue: #26C6DA; --teal: #4DD0E1;
+    --accent: #00897B;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -698,7 +698,7 @@ HTML_TEMPLATE = r"""
   }
   body::before {
     content: ''; position: fixed; inset: 0; z-index: 0;
-    background: linear-gradient(180deg, rgba(11,25,41,.88) 0%, rgba(11,25,41,.82) 50%, rgba(11,25,41,.90) 100%);
+    background: linear-gradient(180deg, rgba(21,27,35,.88) 0%, rgba(21,27,35,.80) 50%, rgba(21,27,35,.90) 100%);
     pointer-events: none;
   }
   .app-container {
@@ -768,7 +768,7 @@ HTML_TEMPLATE = r"""
     white-space: nowrap; cursor: pointer; flex-shrink: 0;
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
-  .tab-btn.active { background: linear-gradient(135deg, #1E5680, var(--blue)); color: #fff; border-color: transparent; }
+  .tab-btn.active { background: linear-gradient(135deg, #005F56, #26C6DA); color: #fff; border-color: transparent; }
   .tab-content { display: none; }
   .tab-content.active { display: block; }
   .eq-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -969,13 +969,13 @@ HTML_TEMPLATE = r"""
   {% for eq in bono_equipos %}
   {% if not equipo_sel or eq.key == equipo_sel %}
   <div style="margin-top:14px;">
-    <div style="font-size:.95rem;font-weight:700;color:var(--text);border-bottom:2px solid #1E5680;padding-bottom:4px;margin-bottom:8px;">
+    <div style="font-size:.95rem;font-weight:700;color:var(--text);border-bottom:2px solid #005F56;padding-bottom:4px;margin-bottom:8px;">
       🌐 Equipo {{ eq.label }} <span style="font-size:.75rem;color:var(--muted);font-weight:400;">— Senior: {{ eq.senior }}</span>
     </div>
     <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <table style="width:100%;border-collapse:collapse;font-size:.75rem;color:var(--text);min-width:420px;">
         <thead>
-          <tr style="background:#1E5680;color:#fff;">
+          <tr style="background:#005F56;color:#fff;">
             <th style="padding:6px 8px;text-align:left;border-radius:6px 0 0 0;">KPI</th>
             {% for t in eq.tecs %}
             <th style="padding:6px 8px;text-align:center;white-space:nowrap;">{{ t.short }}</th>
@@ -1098,9 +1098,9 @@ HTML_TEMPLATE = r"""
 <div class="footer">
   📲 Indicadores Operacionales - versión mobile 1.2<br>
   Última sincronización: {{ updated_at[:16] | replace('T',' ') }}<br>
-  <a href="/cambiar-pin" style="color:#5BB5D4;font-size:.75rem;text-decoration:none;">🔑 Cambiar PIN</a>
+  <a href="/cambiar-pin" style="color:#4DD0E1;font-size:.75rem;text-decoration:none;">🔑 Cambiar PIN</a>
   &nbsp;·&nbsp;
-  <a href="/logout" style="color:#8faac4;font-size:.75rem;text-decoration:none;">Cerrar sesión</a>
+  <a href="/logout" style="color:#9CA3B0;font-size:.75rem;text-decoration:none;">Cerrar sesión</a>
 </div>
 
 </div>
@@ -1131,25 +1131,25 @@ LOGIN_TEMPLATE = r"""
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-    background:#0b1929 url('/bg-mobile.png') center/cover fixed;color:#e2e8f0;
+    background:#151B23 url('/bg-mobile.png') center/cover fixed;color:#e2e8f0;
     min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
-  body::before{content:'';position:fixed;inset:0;background:linear-gradient(180deg,rgba(11,25,41,.92),rgba(11,25,41,.85));}
-  .card{position:relative;z-index:1;background:rgba(11,25,41,.95);border:1px solid rgba(50,70,100,.65);
+  body::before{content:'';position:fixed;inset:0;background:linear-gradient(180deg,rgba(21,27,35,.92),rgba(21,27,35,.85));}
+  .card{position:relative;z-index:1;background:rgba(22,28,36,.95);border:1px solid rgba(65,75,90,.50);
     border-radius:16px;padding:32px 28px;max-width:380px;width:100%;
     box-shadow:0 10px 40px rgba(0,0,0,.5);}
   h1{font-size:1.4rem;color:#fff;margin-bottom:6px;text-align:center;}
-  .sub{color:#8faac4;font-size:.85rem;text-align:center;margin-bottom:24px;line-height:1.4;}
+  .sub{color:#9CA3B0;font-size:.85rem;text-align:center;margin-bottom:24px;line-height:1.4;}
   .sub2{color:#cbd5e1;font-size:1rem;text-align:center;margin-bottom:4px;}
   label{display:block;color:#cbd5e1;font-size:.8rem;margin-bottom:8px;letter-spacing:.02em;text-transform:uppercase;}
   input[type=email],input[type=password]{width:100%;padding:14px 12px;border-radius:10px;
-    border:1px solid rgba(50,70,100,.7);background:rgba(11,25,41,.6);color:#e2e8f0;
+    border:1px solid rgba(65,75,90,.6);background:rgba(22,28,36,.6);color:#e2e8f0;
     font-size:16px;outline:none;transition:border .15s;}
-  input:focus{border-color:#5BB5D4;}
+  input:focus{border-color:#4DD0E1;}
   .pin-input{text-align:center;letter-spacing:.3em;font-size:22px;font-family:monospace;}
   .gap{margin-top:16px;}
   button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:10px;
-    background:#2A6B9B;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:.15s;}
-  button:hover{background:#5BB5D4;}
+    background:#00897B;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:.15s;}
+  button:hover{background:#4DD0E1;}
   .msg{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:.85rem;}
   .msg.error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#fca5a5;}
   .msg.info{background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.4);color:#93c5fd;}
@@ -1185,30 +1185,30 @@ CAMBIAR_PIN_TEMPLATE = r"""
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-    background:#0b1929 url('/bg-mobile.png') center/cover fixed;color:#e2e8f0;
+    background:#151B23 url('/bg-mobile.png') center/cover fixed;color:#e2e8f0;
     min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
-  body::before{content:'';position:fixed;inset:0;background:linear-gradient(180deg,rgba(11,25,41,.92),rgba(11,25,41,.85));}
-  .card{position:relative;z-index:1;background:rgba(11,25,41,.95);border:1px solid rgba(50,70,100,.65);
+  body::before{content:'';position:fixed;inset:0;background:linear-gradient(180deg,rgba(21,27,35,.92),rgba(21,27,35,.85));}
+  .card{position:relative;z-index:1;background:rgba(22,28,36,.95);border:1px solid rgba(65,75,90,.50);
     border-radius:16px;padding:32px 28px;max-width:380px;width:100%;
     box-shadow:0 10px 40px rgba(0,0,0,.5);}
   h1{font-size:1.3rem;color:#fff;margin-bottom:6px;text-align:center;}
-  .sub{color:#8faac4;font-size:.85rem;text-align:center;margin-bottom:20px;line-height:1.4;}
-  .user-info{text-align:center;color:#5BB5D4;font-size:.9rem;font-weight:600;margin-bottom:20px;}
+  .sub{color:#9CA3B0;font-size:.85rem;text-align:center;margin-bottom:20px;line-height:1.4;}
+  .user-info{text-align:center;color:#4DD0E1;font-size:.9rem;font-weight:600;margin-bottom:20px;}
   label{display:block;color:#cbd5e1;font-size:.8rem;margin-bottom:8px;letter-spacing:.02em;text-transform:uppercase;}
   input[type=password]{width:100%;padding:14px 12px;border-radius:10px;
-    border:1px solid rgba(50,70,100,.7);background:rgba(11,25,41,.6);color:#e2e8f0;
+    border:1px solid rgba(65,75,90,.6);background:rgba(22,28,36,.6);color:#e2e8f0;
     font-size:16px;outline:none;transition:border .15s;
     text-align:center;letter-spacing:.3em;font-size:22px;font-family:monospace;}
-  input:focus{border-color:#5BB5D4;}
+  input:focus{border-color:#4DD0E1;}
   .gap{margin-top:16px;}
   button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:10px;
-    background:#2A6B9B;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:.15s;}
-  button:hover{background:#5BB5D4;}
+    background:#00897B;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:.15s;}
+  button:hover{background:#4DD0E1;}
   .msg{margin-top:14px;padding:10px 12px;border-radius:8px;font-size:.85rem;}
   .msg.error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#fca5a5;}
   .msg.success{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);color:#86efac;}
   .back{display:block;text-align:center;margin-top:18px;color:#64748b;font-size:.85rem;text-decoration:none;}
-  .back:hover{color:#8faac4;}
+  .back:hover{color:#9CA3B0;}
 </style></head><body>
 <div class="card">
   <h1>🔑 Cambiar PIN</h1>
@@ -1243,28 +1243,28 @@ ADMIN_PINS_TEMPLATE = r"""
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-    background:#0b1929;color:#e2e8f0;min-height:100vh;padding:20px;}
+    background:#151B23;color:#e2e8f0;min-height:100vh;padding:20px;}
   .wrap{max-width:700px;margin:0 auto;}
   h1{font-size:1.3rem;color:#fff;margin-bottom:4px;}
-  .sub{color:#8faac4;font-size:.85rem;margin-bottom:16px;}
+  .sub{color:#9CA3B0;font-size:.85rem;margin-bottom:16px;}
   .actions{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
   .btn{padding:10px 18px;border:0;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer;}
-  .btn-gen{background:#2A6B9B;color:#fff;} .btn-gen:hover{background:#5BB5D4;}
-  .btn-back{background:rgba(50,70,100,.5);color:#cbd5e1;text-decoration:none;display:inline-block;} .btn-back:hover{background:rgba(50,70,100,.8);}
+  .btn-gen{background:#00897B;color:#fff;} .btn-gen:hover{background:#4DD0E1;}
+  .btn-back{background:rgba(65,75,90,.5);color:#cbd5e1;text-decoration:none;display:inline-block;} .btn-back:hover{background:rgba(65,75,90,.8);}
   .msg{padding:10px 12px;border-radius:8px;font-size:.85rem;margin-bottom:14px;
-    background:rgba(42,107,155,.15);border:1px solid rgba(42,107,155,.4);color:#93c5fd;}
+    background:rgba(0,137,123,.15);border:1px solid rgba(0,137,123,.4);color:#80CBC4;}
   table{width:100%;border-collapse:collapse;font-size:.85rem;}
-  th{text-align:left;color:#8faac4;font-size:.75rem;text-transform:uppercase;letter-spacing:.03em;
-    padding:8px 10px;border-bottom:1px solid rgba(50,70,100,.5);}
-  td{padding:8px 10px;border-bottom:1px solid rgba(50,70,100,.3);}
-  .team{color:#5BB5D4;font-size:.8rem;}
+  th{text-align:left;color:#9CA3B0;font-size:.75rem;text-transform:uppercase;letter-spacing:.03em;
+    padding:8px 10px;border-bottom:1px solid rgba(65,75,90,.5);}
+  td{padding:8px 10px;border-bottom:1px solid rgba(65,75,90,.3);}
+  .team{color:#4DD0E1;font-size:.8rem;}
   .pin-cell{font-family:monospace;font-size:1rem;color:#fbbf24;letter-spacing:.15em;}
   .edit-form{display:flex;gap:6px;align-items:center;}
-  .edit-form input{width:70px;padding:6px 8px;border-radius:6px;border:1px solid rgba(50,70,100,.7);
-    background:rgba(11,25,41,.6);color:#e2e8f0;font-size:14px;text-align:center;
+  .edit-form input{width:70px;padding:6px 8px;border-radius:6px;border:1px solid rgba(65,75,90,.6);
+    background:rgba(22,28,36,.6);color:#e2e8f0;font-size:14px;text-align:center;
     font-family:monospace;letter-spacing:.15em;}
-  .edit-form button{padding:6px 12px;border:0;border-radius:6px;background:#2A6B9B;color:#fff;
-    font-size:.8rem;cursor:pointer;} .edit-form button:hover{background:#5BB5D4;}
+  .edit-form button{padding:6px 12px;border:0;border-radius:6px;background:#00897B;color:#fff;
+    font-size:.8rem;cursor:pointer;} .edit-form button:hover{background:#4DD0E1;}
 </style></head><body>
 <div class="wrap">
   <h1>⚙️ Administrar PINs</h1>
