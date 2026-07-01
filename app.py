@@ -4085,44 +4085,136 @@ elif _page == _NAV_PAGES[3]:
                             })
 
         # ── Tabla de detalle EDS ─────────────────────────────────────────────
+        # Título con contexto del período seleccionado (para dejar claro qué
+        # rango temporal cubre la tabla — antes el usuario no sabía si estaba
+        # viendo el año completo o el mes filtrado).
+        _rango_lbl = (
+            ", ".join([f"{_MES_ES[int(m.split('-')[1])]} {m.split('-')[0]}"
+                       for m in _meses_activos])
+            if _mes_sel else f"año {_cur_year} completo"
+        )
         st.markdown(
             f'<div style="font-weight:700;font-size:0.95rem;margin:18px 0 8px 0;'
-            f'color:{_t["text"]};">📋 Listado de estaciones — {_col["label"]}</div>',
+            f'color:{_t["text"]};">📋 Listado de estaciones — {_col["label"]}  '
+            f'<span style="color:{_t["muted"]};font-weight:400;font-size:0.85rem;">'
+            f'· período: {_rango_lbl}</span></div>',
             unsafe_allow_html=True,
         )
-        # Construir tabla: EDS master + KPIs desde llamados
+
+        # ── Construir tabla desde EDS master + df_ll_f (correctivas filtradas)
+        #    + df_pm_f (preventivas filtradas). Ambos ya vienen filtrados por
+        #    el multiselect de mes, así que la tabla ahora sí reacciona.
         _df_tbl = df_eds_c.copy()
-        if not df_llamados.empty:
-            _kpis_eds = kpis_por_eds(df_llamados)
-            if not _kpis_eds.empty and "eds_occim" in _kpis_eds.columns:
-                _df_tbl = _df_tbl.merge(_kpis_eds[["eds_occim","total_llamados","p1","ultimo_llamado","ultimo_tecnico"]],
-                                         on="eds_occim", how="left")
-        # Columnas a mostrar (las que existan)
+
+        # Agregado de CORRECTIVAS por EDS (desde df_ll_f, ya filtrado por mes)
+        if not df_ll_f.empty and "eds_occim" in df_ll_f.columns:
+            _agg_corr = (df_ll_f.groupby("eds_occim", dropna=True).agg(
+                correctivas=("n_llamado", "count"),
+                p1=("prioridad", lambda x: (x.astype(str).str.upper() == "P1").sum()),
+                ultima_correctiva=("fecha_llamado", "max"),
+                ultimo_tecnico=("tecnico", lambda x: x.dropna().iloc[-1]
+                                if len(x.dropna()) > 0 else None),
+            ).reset_index())
+        else:
+            _agg_corr = pd.DataFrame(columns=[
+                "eds_occim","correctivas","p1","ultima_correctiva","ultimo_tecnico"])
+
+        # Agregado de PREVENTIVAS por EDS (desde df_pm_f, ya filtrado por mes)
+        if not df_pm_f.empty and "eds_occim" in df_pm_f.columns:
+            _agg_prev = (df_pm_f.groupby("eds_occim", dropna=True).agg(
+                preventivas=("folio", "nunique"),
+                ultima_preventiva=("creation_date", "max"),
+            ).reset_index())
+        else:
+            _agg_prev = pd.DataFrame(columns=["eds_occim","preventivas","ultima_preventiva"])
+
+        _df_tbl = _df_tbl.merge(_agg_corr, on="eds_occim", how="left") \
+                          .merge(_agg_prev, on="eds_occim", how="left")
+
+        # Rellenar contadores en 0 (EDS sin actividad en el período)
+        for _c in ("correctivas","preventivas","p1"):
+            if _c in _df_tbl.columns:
+                _df_tbl[_c] = _df_tbl[_c].fillna(0).astype(int)
+
+        # ORDEN TOTAL = correctivas + preventivas
+        _df_tbl["ordenes_atendidas"] = _df_tbl["correctivas"] + _df_tbl["preventivas"]
+
+        # Última atención con tipo: comparar ultima_correctiva vs ultima_preventiva
+        # y quedarnos con la más reciente + etiqueta.
+        _uc = pd.to_datetime(_df_tbl.get("ultima_correctiva"), errors="coerce", utc=True)
+        _up = pd.to_datetime(_df_tbl.get("ultima_preventiva"), errors="coerce", utc=True)
+        if hasattr(_uc, "dt") and _uc.dt.tz is not None:
+            _uc = _uc.dt.tz_convert(None)
+        if hasattr(_up, "dt") and _up.dt.tz is not None:
+            _up = _up.dt.tz_convert(None)
+
+        def _fmt_ult(uc, up):
+            if pd.isna(uc) and pd.isna(up):
+                return "—"
+            if pd.isna(up) or (pd.notna(uc) and uc >= up):
+                return f"{uc.strftime('%d/%m/%Y')} · Correctiva"
+            return f"{up.strftime('%d/%m/%Y')} · Preventiva"
+        _df_tbl["Última atención"] = [_fmt_ult(u, v) for u, v in zip(_uc, _up)]
+
+        # Ratio "prev/corr" en formato compacto por 10 órdenes (redondeado)
+        def _fmt_ratio(corr, prev):
+            total = int(corr) + int(prev)
+            if total == 0:
+                return "—"
+            p_share = round(int(prev) * 10 / total)
+            c_share = 10 - p_share
+            return f"{p_share}P / {c_share}C"
+        _df_tbl["Ratio (P/C x10)"] = [_fmt_ratio(c, p)
+            for c, p in zip(_df_tbl["correctivas"], _df_tbl["preventivas"])]
+
+        # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío)
         _col_map = {
-            "eds_occim":       "Cód. Occim",
-            "_cod_occim_frac": "Cód. Fracttal",
-            "_loc_code":       "LOC Fracttal",
-            "nombre":          "Nombre / Dirección",
-            "direccion":       "Dirección",
-            "comuna":          "Comuna",
-            "zona_occim":      "Zona",
-            "region":          "Región",
-            "total_llamados":  "Llamados",
-            "p1":              "P1",
-            "ultimo_llamado":  "Último Llamado",
-            "ultimo_tecnico":  "Último Técnico",
+            "eds_occim":         "Cód. Occim",
+            "_loc_code":         "LOC Fracttal",
+            "nombre":            "Nombre / Dirección",
+            "direccion":         "Dirección",
+            "comuna":            "Comuna",
+            "zona_occim":        "Zona",
+            "region":            "Región",
+            "ordenes_atendidas": "Órdenes atendidas",
+            "correctivas":       "Correctivas",
+            "preventivas":       "Preventivas",
+            "p1":                "P1",
+            "Última atención":   "Última atención",
+            "Ratio (P/C x10)":   "Ratio (P/C x10)",
+            "ultimo_tecnico":    "Último Técnico",
         }
         _cols_show = [c for c in _col_map if c in _df_tbl.columns]
         _df_display = _df_tbl[_cols_show].rename(columns=_col_map).copy()
-        if "Último Llamado" in _df_display.columns:
-            _df_display["Último Llamado"] = pd.to_datetime(
-                _df_display["Último Llamado"], errors="coerce"
-            ).dt.strftime("%d/%m/%Y").fillna("—")
-        # Ordenar antes del fillna para evitar mezcla float/str
-        _sort_col = "Llamados" if "Llamados" in _df_display.columns else _df_display.columns[0]
+
+        # Ordenar por Órdenes atendidas desc (donde más pasa antes)
+        _sort_col = ("Órdenes atendidas" if "Órdenes atendidas" in _df_display.columns
+                     else _df_display.columns[0])
         _df_display = _df_display.sort_values(_sort_col, ascending=False, na_position="last")
         _df_display = _df_display.fillna("—")
-        _show_df(_df_display, use_container_width=True, hide_index=True)
+        _show_df(_df_display, use_container_width=True, hide_index=True,
+            column_config={
+                "Cód. Occim":        st.column_config.TextColumn(width=90),
+                "LOC Fracttal":      st.column_config.TextColumn(width=95),
+                "Nombre / Dirección":st.column_config.TextColumn(width=220),
+                "Dirección":         st.column_config.TextColumn(width=200),
+                "Comuna":            st.column_config.TextColumn(width=110),
+                "Zona":              st.column_config.TextColumn(width=70),
+                "Región":            st.column_config.TextColumn(width=70),
+                "Órdenes atendidas": st.column_config.NumberColumn(format="%d", width=90,
+                    help="Correctivas + Preventivas realizadas en el período seleccionado"),
+                "Correctivas":       st.column_config.NumberColumn(format="%d", width=90,
+                    help="Llamados correctivos (emergencia) atendidos en el período"),
+                "Preventivas":       st.column_config.NumberColumn(format="%d", width=90,
+                    help="Mantenciones preventivas realizadas en el período"),
+                "P1":                st.column_config.NumberColumn(format="%d", width=60,
+                    help="Correctivas de prioridad P1 (máquina detenida)"),
+                "Última atención":   st.column_config.TextColumn(width=170,
+                    help="Fecha de la última atención (correctiva o preventiva) + tipo"),
+                "Ratio (P/C x10)":   st.column_config.TextColumn(width=110,
+                    help="De cada 10 órdenes: cuántas fueron Preventivas / Correctivas"),
+                "Último Técnico":    st.column_config.TextColumn(width=160),
+            })
 
         # ── Registros relevantes de equipos y consumos (Shell) ──────────
         if company == "SHELL (Enex)":
