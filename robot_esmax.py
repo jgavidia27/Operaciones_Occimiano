@@ -172,57 +172,128 @@ _SB_HEADERS = {
 }
 
 
-def find_fracttal_ot(eds_code, equipment, fecha_str, window_days=3):
+def find_fracttal_ot(n_cotalker, eds_code, equipment, fecha_str, window_days=7):
     """
-    Busca OT Correctiva en Supabase por:
-      - codigo_eds  exacto
-      - nombre_activo  contiene las primeras palabras del equipo (ILIKE)
-      - fecha_creacion  ± window_days días
-    Retorna la fila o None.
-    """
-    try:
-        fecha  = datetime.strptime(fecha_str[:10], "%Y-%m-%d")
-    except ValueError:
-        fecha  = datetime.utcnow()
+    Busca OT Correctiva en Supabase MATCHEANDO POR N° COTALKER en nota_tarea.
 
+    El N° Cotalker aparece SIEMPRE al inicio de nota_tarea (formato
+    '149542 - 167751 - ee_s058 - EDS: MELIPILLA - ...'), por lo que
+    es un identificador único y confiable. Antes se usaba matching
+    laxo por EDS+equipo+fecha, que dio ~22% de asignaciones erróneas
+    (documentado en fix_aramco_priorities.py). Ahora usamos nota_tarea
+    como primary key implícita.
+
+    Retorna la fila o None. Los args eds_code/equipment/fecha_str
+    quedan como fallback en caso de no encontrar por nota_tarea.
+    """
+    # 1) Matching primario: nota_tarea empieza con el N° Cotalker
+    params = "&".join([
+        "select=id_ot,nombre_activo,fecha_creacion,prioridad_calc,nota_tarea",
+        f"nota_tarea=like.{n_cotalker}*",
+        "tipo_tarea=eq.CORRECTIVA",
+        "cliente=eq.ESMAX (Aramco)",
+        "limit=5",
+    ])
+    url = f"{SUPABASE_URL}/rest/v1/ordenes_trabajo?{params}"
+    r = requests.get(url, headers=_SB_HEADERS, timeout=10)
+    rows = r.json() if r.ok else []
+    if isinstance(rows, list) and rows:
+        # Confirmar que efectivamente empieza con el N° (no que lo contenga)
+        for row in rows:
+            nota = str(row.get("nota_tarea") or "").strip()
+            m = re.match(r"^(\d{5,8})(?:\s*-|\s*$)", nota)
+            if m and int(m.group(1)) == n_cotalker:
+                return row
+
+    # 2) Fallback matching laxo (por si nota_tarea aún no está poblada)
+    try:
+        fecha = datetime.strptime(fecha_str[:10], "%Y-%m-%d")
+    except ValueError:
+        fecha = datetime.utcnow()
     f_min = (fecha - timedelta(days=window_days)).strftime("%Y-%m-%dT00:00:00")
     f_max = (fecha + timedelta(days=window_days)).strftime("%Y-%m-%dT23:59:59")
-
-    # Primer token del nombre del equipo (ej. "Hidrolavadora")
     equip_kw = equipment.split()[0] if equipment else equipment
-
     params = "&".join([
-        f"select=id_ot,nombre_activo,fecha_creacion,prioridad_calc",
+        "select=id_ot,nombre_activo,fecha_creacion,prioridad_calc,nota_tarea",
         f"codigo_eds=eq.{eds_code}",
-        f"tipo_tarea=eq.CORRECTIVA",
+        "tipo_tarea=eq.CORRECTIVA",
+        "cliente=eq.ESMAX (Aramco)",
         f"fecha_creacion=gte.{f_min}",
         f"fecha_creacion=lte.{f_max}",
         f"nombre_activo=ilike.%25{equip_kw}%25",
         "order=fecha_creacion.desc",
-        "limit=5",
+        "limit=1",
     ])
-    url = f"{SUPABASE_URL}/rest/v1/ordenes_trabajo?{params}"
-    r   = requests.get(url, headers=_SB_HEADERS, timeout=10)
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/ordenes_trabajo?{params}",
+                     headers=_SB_HEADERS, timeout=10)
     rows = r.json() if r.ok else []
-
     if isinstance(rows, list) and rows:
-        return rows[0]   # más reciente primero
+        print(f"    [FALLBACK] Match por EDS+equipo+fecha (nota_tarea vacía). Verificar manualmente.")
+        return rows[0]
     return None
 
 
+# ARQUITECTURA IMPORTANTE (fn_proteger_prioridad_robot):
+#   ordenes_trabajo tiene un trigger BEFORE UPDATE que fuerza
+#   prioridad_calc = llamados_correctivos.prioridad para esa OT.
+#   Actualizar ordenes_trabajo.prioridad_calc directo NO funciona
+#   (el trigger lo pisa). La fuente de verdad es llamados_correctivos.
+#
+#   El robot escribe en llamados_correctivos, y hace un touch a
+#   ordenes_trabajo para que el trigger propague prioridad_calc.
+
+_SLA_UMBRAL = {"P1": 24, "P2": 48, "P3": 72, "P4": 100}   # Aramco: mismo umbral santiago/regiones
+
+
 def update_prioridad_calc(id_ot, prioridad, n_cotalker=None):
-    """PATCH prioridad_calc (y opcionalmente n_cotalker) en Supabase."""
-    url = f"{SUPABASE_URL}/rest/v1/ordenes_trabajo?id_ot=eq.{id_ot}"
-    payload = {"prioridad_calc": prioridad}
-    if n_cotalker is not None:
-        payload["n_cotalker"] = int(n_cotalker)
+    """
+    Escribe prioridad en llamados_correctivos (fuente de verdad),
+    luego toca ordenes_trabajo para que el trigger propague a prioridad_calc.
+    Si no existe en llamados_correctivos, hace INSERT.
+    """
+    from datetime import timezone
+    umbral = _SLA_UMBRAL.get(prioridad, 100)
+    n_aviso = str(n_cotalker) if n_cotalker else None
+
+    # 1) UPSERT en llamados_correctivos (fuente de verdad)
+    payload = {
+        "os_fracttal":   id_ot,
+        "cliente":       "ESMAX (Aramco)",
+        "prioridad":     prioridad,
+        "umbral_horas":  umbral,
+        "fuente":        "robot_esmax",
+    }
+    if n_aviso:
+        payload["n_aviso"] = n_aviso
+
+    # Intentar PATCH primero (más común: OT ya existe)
     r = requests.patch(
-        url,
+        f"{SUPABASE_URL}/rest/v1/llamados_correctivos?os_fracttal=eq.{id_ot}",
         headers={**_SB_HEADERS, "Prefer": "return=minimal"},
-        json=payload,
+        json={"prioridad": prioridad, "umbral_horas": umbral,
+              "n_aviso": n_aviso, "fuente": "robot_esmax"},
         timeout=10,
     )
-    return r.status_code in (200, 204)
+    # Si Content-Range = 0-0/0 no había fila. Insertar.
+    if r.headers.get("Content-Range", "").endswith("/0"):
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/llamados_correctivos",
+            headers={**_SB_HEADERS,
+                     "Prefer": "return=minimal,resolution=merge-duplicates"},
+            json=payload, timeout=10,
+        )
+    if r.status_code not in (200, 201, 204):
+        return False
+
+    # 2) Touch ordenes_trabajo para que el trigger propague prioridad_calc
+    r2 = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/ordenes_trabajo?id_ot=eq.{id_ot}",
+        headers={**_SB_HEADERS, "Prefer": "return=minimal"},
+        json={"updated_at": datetime.now(timezone.utc).isoformat(),
+              "n_cotalker": int(n_cotalker) if n_cotalker else None},
+        timeout=10,
+    )
+    return r2.status_code in (200, 204)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -321,8 +392,8 @@ def main():
 
         print(f"    SLA={sla}h  →  Prioridad={prioridad}  Fecha={fecha_ot}")
 
-        # Buscar OT Fracttal en Supabase
-        fracttal = find_fracttal_ot(eds_code, equipment, fecha_ot)
+        # Buscar OT Fracttal en Supabase (matching primario por N° Cotalker en nota_tarea)
+        fracttal = find_fracttal_ot(n_cotalker, eds_code, equipment, fecha_ot)
         if fracttal is None:
             print(f"    [!] Sin match en Supabase (EDS={eds_code}, equipo={equipment}, fecha±3d)")
             stats["sin_match_sb"] += 1

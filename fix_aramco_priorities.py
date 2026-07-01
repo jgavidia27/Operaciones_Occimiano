@@ -1,27 +1,33 @@
 """
-fix_aramco_priorities.py
-========================
-Corrige prioridad_calc y n_cotalker en Supabase para OTs de ESMAX/Aramco.
+fix_aramco_priorities.py  v3
+============================
+Corrige prioridad de OTs Aramco/Esmax en Supabase.
 
-Problema detectado:
-  - robot_esmax.py asignó N° Cotalker a OTs incorrectas (matching laxo por
-    EDS + fecha sin validar). ~22% de las OTs Aramco tienen n_cotalker desplazado.
-  - Eso arrastró también prioridad_calc incorrecta (P1/P2/P3 mal asignadas).
+ARQUITECTURA IMPORTANTE:
+  En Supabase hay un trigger `fn_proteger_prioridad_robot` sobre
+  ordenes_trabajo que en cada UPDATE sobreescribe prioridad_calc con
+  el valor de llamados_correctivos.prioridad (si existe).
 
-Fuente de verdad:
-  - El N° Cotalker REAL de cada OT está al inicio de nota_tarea:
-    "151022 - 169357 - ee_s268 - EDS: ANTOFAGASTA/COANIQUEM - ..."
-                                      ↑ primer número = N° Cotalker real
-  - Con ese N° consultamos Metabase para obtener el SLA esperado real.
-  - SLA -> prioridad: {24: P1, 48: P2, 72: P3, otros: P4}
+  ⇒ La FUENTE DE VERDAD es `llamados_correctivos.prioridad`.
+  ⇒ Actualizar ordenes_trabajo.prioridad_calc directamente NO funciona
+    (el trigger lo pisa). Este script actualiza llamados_correctivos.
+
+Fuente Aramco: Cotalker Metabase.
+  - N° Cotalker REAL = primer número al inicio de nota_tarea de la OT.
+  - SLA -> prioridad: {24: P1, 48: P2, 72: P3, otros: P4}.
+  - También corrige umbral_horas y n_aviso.
 
 Uso:
     python fix_aramco_priorities.py            # dry-run (no actualiza)
     python fix_aramco_priorities.py --apply    # actualiza Supabase
 """
 
-import os, re, sys, json, time, requests
+import re
+import sys
+import time
 from datetime import datetime
+
+import requests
 
 SUPABASE_URL = "https://puefgkyjghwwgdfxbrex.supabase.co"
 SUPABASE_KEY = (
@@ -35,7 +41,7 @@ METABASE_URL = (
 )
 
 SLA_MAP = {24: "P1", 48: "P2", 72: "P3"}
-_PAT_COT = re.compile(r"^(\d{5,8})\s*-")
+_PAT_COT = re.compile(r"^(\d{5,8})(?:\s*-|\s*$)")
 
 _H = {
     "apikey":        SUPABASE_KEY,
@@ -45,25 +51,33 @@ _H = {
 }
 
 
-def fetch_metabase():
+def fetch_metabase() -> dict:
+    """Retorna {N° Cotalker(int): SLA esperado(int horas)}."""
     print("-> Descargando panel Metabase Cotalker...")
     r = requests.get(METABASE_URL, headers={"Accept": "application/json"}, timeout=60)
     r.raise_for_status()
     data = r.json()
-    idx = {int(row["N° Cotalker"]): row for row in data if row.get("N° Cotalker")}
-    print(f"  {len(idx)} OTs en Metabase ({sum(1 for r in data if r.get('SLA esperado'))} con SLA)")
+    idx = {}
+    for row in data:
+        n   = row.get("N° Cotalker")
+        sla = row.get("SLA esperado")
+        if n and sla:
+            try:
+                idx[int(n)] = int(float(sla))
+            except (ValueError, TypeError):
+                pass
+    print(f"  {len(idx)} OTs en Metabase con SLA")
     return idx
 
 
-def sla_to_prio(sla):
-    if sla is None: return None
-    try: h = int(float(sla))
-    except: return None
-    return SLA_MAP.get(h, "P4")
+def sla_to_prio(sla: int) -> str:
+    """Aramco: 24->P1, 48->P2, 72->P3, otros->P4."""
+    return SLA_MAP.get(sla, "P4")
 
 
-def fetch_aramco_ots():
-    print("-> Descargando OTs Aramco desde Supabase...")
+def fetch_aramco_ots() -> list:
+    """OTs Aramco correctivas con nota_tarea desde ordenes_trabajo (para leer N° real)."""
+    print("-> Descargando OTs Aramco desde ordenes_trabajo...")
     all_rows = []
     offset = 0
     while True:
@@ -72,24 +86,58 @@ def fetch_aramco_ots():
             f"?cliente=eq.ESMAX (Aramco)"
             f"&tipo_tarea=eq.CORRECTIVA"
             f"&nota_tarea=not.is.null"
-            f"&select=id_ot,n_cotalker,prioridad_calc,nota_tarea,fecha_creacion"
+            f"&select=id_ot,nota_tarea,prioridad_calc"
             f"&order=fecha_creacion.desc"
             f"&limit=1000&offset={offset}",
             headers=_H, timeout=30,
         )
         rows = r.json()
         all_rows.extend(rows)
-        if len(rows) < 1000: break
+        if len(rows) < 1000:
+            break
         offset += 1000
     print(f"  {len(all_rows)} OTs Aramco correctivas con nota_tarea")
     return all_rows
 
 
-def patch(id_ot, n_cot, prio):
+def fetch_llamados_map() -> dict:
+    """
+    Retorna {os_fracttal: {prioridad, n_aviso, umbral_horas}} de llamados_correctivos.
+    NOTA: dos queries separadas por cliente porque PostgREST rompe con
+    `cliente=in.(ESMAX,ESMAX (Aramco))` por los paréntesis internos.
+    """
+    print("-> Descargando llamados_correctivos Aramco...")
+    all_rows = []
+    for cliente in ("ESMAX", "ESMAX (Aramco)"):
+        offset = 0
+        while True:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/llamados_correctivos"
+                f"?cliente=eq.{cliente}"
+                f"&select=os_fracttal,prioridad,n_aviso,umbral_horas"
+                f"&limit=1000&offset={offset}",
+                headers=_H, timeout=30,
+            )
+            rows = r.json()
+            all_rows.extend(rows)
+            if len(rows) < 1000:
+                break
+            offset += 1000
+    idx = {r["os_fracttal"]: r for r in all_rows if r.get("os_fracttal")}
+    print(f"  {len(idx)} entradas en llamados_correctivos")
+    return idx
+
+
+def patch_llamado(os_fracttal: str, prio: str, n_aviso: int, umbral: int) -> bool:
+    """PATCH en llamados_correctivos (fuente de verdad para el trigger)."""
     r = requests.patch(
-        f"{SUPABASE_URL}/rest/v1/ordenes_trabajo?id_ot=eq.{id_ot}",
+        f"{SUPABASE_URL}/rest/v1/llamados_correctivos?os_fracttal=eq.{os_fracttal}",
         headers={**_H, "Prefer": "return=minimal"},
-        json={"n_cotalker": int(n_cot), "prioridad_calc": prio},
+        json={
+            "prioridad":    prio,
+            "n_aviso":      str(n_aviso),
+            "umbral_horas": umbral,
+        },
         timeout=15,
     )
     return r.status_code in (200, 204)
@@ -98,83 +146,89 @@ def patch(id_ot, n_cot, prio):
 def main():
     apply = "--apply" in sys.argv
 
-    print("="*70)
-    print(f"  FIX ARAMCO PRIORITIES  —  {'APPLY' if apply else 'DRY-RUN'}")
+    print("=" * 70)
+    print(f"  FIX ARAMCO PRIORITIES v3 (via llamados_correctivos)")
+    print(f"  Modo: {'APPLY' if apply else 'DRY-RUN'}")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("="*70)
+    print("=" * 70)
 
     cotalker = fetch_metabase()
-    rows = fetch_aramco_ots()
+    ots      = fetch_aramco_ots()
+    llamados = fetch_llamados_map()
 
     stats = {
-        "total":           len(rows),
-        "sin_pattern":     0,
-        "no_en_metabase":  0,
-        "sin_sla":         0,
-        "ya_correcta":     0,
-        "actualizable":    0,
-        "actualizada":     0,
-        "errores":         0,
+        "total_ots":           len(ots),
+        "sin_pattern":         0,
+        "no_en_metabase":      0,
+        "no_en_llamados":      0,
+        "ya_correcta":         0,
+        "actualizable":        0,
+        "actualizada":         0,
+        "errores":             0,
     }
-    cambios_prio_calc = {"P1->P1": 0, "P1->P2": 0, "P1->P3": 0, "P1->P4": 0,
-                         "P2->P1": 0, "P2->P2": 0, "P2->P3": 0, "P2->P4": 0,
-                         "P3->P1": 0, "P3->P2": 0, "P3->P3": 0, "P3->P4": 0,
-                         "P4->P1": 0, "P4->P2": 0, "P4->P3": 0, "P4->P4": 0,
-                         "None->*":  0}
+    cambios = {}
+
     print()
-    for r in rows:
+    for r in ots:
         ot = r["id_ot"]
-        m = _PAT_COT.match(str(r.get("nota_tarea","") or "").strip())
+        m  = _PAT_COT.match(str(r.get("nota_tarea", "") or "").strip())
         if not m:
             stats["sin_pattern"] += 1
             continue
         n_real = int(m.group(1))
-        info = cotalker.get(n_real)
-        if not info:
+        sla_h  = cotalker.get(n_real)
+        if sla_h is None:
             stats["no_en_metabase"] += 1
             continue
-        sla = info.get("SLA esperado")
-        prio_real = sla_to_prio(sla)
-        if prio_real is None:
-            stats["sin_sla"] += 1
-            continue
-        prio_actual = r.get("prioridad_calc")
-        n_actual    = r.get("n_cotalker")
+        prio_real = sla_to_prio(sla_h)
 
-        if n_actual == n_real and prio_actual == prio_real:
+        # Buscar en llamados_correctivos (fuente de verdad del trigger)
+        llam = llamados.get(ot)
+        if llam is None:
+            # No está en llamados_correctivos → el sync no dispara el trigger,
+            # ordenes_trabajo.prioridad_calc queda con el valor del sync (correcto).
+            # No hay nada que corregir aquí.
+            stats["no_en_llamados"] += 1
+            continue
+
+        prio_actual   = llam.get("prioridad")
+        n_aviso_actual= llam.get("n_aviso")
+        umbral_actual = llam.get("umbral_horas")
+
+        if (prio_actual == prio_real
+            and str(n_aviso_actual) == str(n_real)
+            and umbral_actual == sla_h):
             stats["ya_correcta"] += 1
             continue
 
-        # Necesita actualización
         stats["actualizable"] += 1
         key = f"{prio_actual or 'None'}->{prio_real}"
-        if prio_actual is None:
-            cambios_prio_calc["None->*"] += 1
-        else:
-            cambios_prio_calc[key] = cambios_prio_calc.get(key, 0) + 1
+        cambios[key] = cambios.get(key, 0) + 1
 
         if apply:
-            if patch(ot, n_real, prio_real):
+            if patch_llamado(ot, prio_real, n_real, sla_h):
                 stats["actualizada"] += 1
-                print(f"  [OK] {ot}: cotalker {n_actual}->{n_real}, prio {prio_actual}->{prio_real} (SLA={sla}h)")
+                print(f"  [OK]  {ot}: prio {prio_actual}->{prio_real} | "
+                      f"n_aviso {n_aviso_actual}->{n_real} | umbral {umbral_actual}->{sla_h}h")
             else:
                 stats["errores"] += 1
                 print(f"  [ERR] {ot}")
-            time.sleep(0.05)
+            time.sleep(0.03)
         else:
-            print(f"  [DRY] {ot}: cotalker {n_actual}->{n_real}, prio {prio_actual}->{prio_real} (SLA={sla}h)")
+            print(f"  [DRY] {ot}: prio {prio_actual}->{prio_real} | "
+                  f"n_aviso {n_aviso_actual}->{n_real} | umbral {umbral_actual}->{sla_h}h")
 
     print()
-    print("="*70)
+    print("=" * 70)
     print("  RESUMEN")
-    print("="*70)
+    print("=" * 70)
     for k, v in stats.items():
         print(f"  {k:20s}: {v}")
     print()
     print("  Cambios de prioridad:")
-    for k, v in sorted(cambios_prio_calc.items()):
-        if v > 0:
-            print(f"    {k:10s}: {v}")
+    for k, v in sorted(cambios.items(), key=lambda x: -x[1]):
+        print(f"    {k:12s}: {v}")
+
     if not apply and stats["actualizable"] > 0:
         print()
         print(f"  >>> Ejecutar con --apply para actualizar {stats['actualizable']} OTs <<<")
