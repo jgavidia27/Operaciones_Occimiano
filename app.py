@@ -8755,7 +8755,14 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 # Si el técnico no llenó tasks_duration (=0) pero el OT estuvo abierto
                 # N minutos, ese tiempo cuenta. Consistente con _score_tiempo en data.py.
                 _df_te["_effective_sec"] = _df_te[["duration_sec","elapsed_sec"]].fillna(0).max(axis=1)
-                _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75
+                # CUMPLE si el tiempo efectivo está entre 75% y 125% del estimado.
+                # <75%  = déficit (posible quick-tick / trabajo incompleto)
+                # >125% = exceso (posible sobretiempo injustificado, holgazanería
+                #                 o error de registro). Ambos extremos son "no cumple".
+                _df_te["_te_ok"] = (
+                    (_df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75) &
+                    (_df_te["_effective_sec"] <= _df_te["estimated_sec"] * 1.25)
+                )
                 # Una OT con múltiples equipos genera filas duplicadas con los
                 # mismos tiempos neta; mantener solo una fila por OT.
                 _df_te = _df_te.drop_duplicates(subset="folio", keep="first")
@@ -8778,7 +8785,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 tc1, tc2 = st.columns([1, 3])
                 with tc1:
                     _kpi_card(_te_pct, _te_ok, _te_tot,
-                              "preventivos con tiempo OK (≥75%)", meta_pct=75.0)
+                              "preventivos con tiempo OK (75%–125%)", meta_pct=75.0)
                 with tc2:
                     if not _g_te.empty:
                         _te_sig = (f"_fig_te_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
@@ -8811,21 +8818,30 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
 
                 _det_te = _df_te_p.copy()
                 _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.75).round(0)
+                _det_te["_maximo_sec"] = (_det_te["estimated_sec"] * 1.25).round(0)
                 _det_te["_pct_ej"]     = (_det_te["_effective_sec"] / _det_te["estimated_sec"] * 100).round(1)
+                _det_te["_es_exceso"]  = _det_te["_effective_sec"] > _det_te["_maximo_sec"]
                 _det_te_cd = pd.to_datetime(_det_te["creation_date"], errors="coerce")
                 _det_te_cd = _det_te_cd.dt.tz_convert(None) if _det_te_cd.dt.tz is not None else _det_te_cd
                 _det_te["creation_date"] = _det_te_cd.dt.strftime("%d/%m/%Y")
 
                 _det_te_disp = _det_te[[c for c in
                     ["folio","eds_occim","tecnico","creation_date","maint_type",
-                     "estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"]
+                     "estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
+                     "_pct_ej","_te_ok","_es_exceso"]
                     if c in _det_te.columns]].copy()
                 _det_te_disp["T. Estimado"]   = _det_te_disp["estimated_sec"].apply(_fmt_seg)
                 _det_te_disp["Mín. 75%"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
+                _det_te_disp["Máx. 125%"]      = _det_te_disp["_maximo_sec"].apply(_fmt_seg)
                 _det_te_disp["T. Ejecución"]   = _det_te_disp["_effective_sec"].apply(_fmt_seg)
                 _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
-                _det_te_disp["Estado"]         = _det_te_disp["_te_ok"].apply(
-                    lambda v: "✅ Cumple" if v else "❌ No cumple")
+                def _estado_lbl(r):
+                    if bool(r.get("_te_ok", False)):
+                        return "✅ Cumple"
+                    if bool(r.get("_es_exceso", False)):
+                        return "⚠️ Exceso (>125%)"
+                    return "❌ No cumple"
+                _det_te_disp["Estado"] = _det_te_disp.apply(_estado_lbl, axis=1)
 
                 # Diagnóstico de no cumplimiento del tiempo. Solo se llena cuando
                 # _te_ok == False; cuando cumple queda vacío.
@@ -8840,12 +8856,23 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     estim = int(r.get("estimated_sec") or 0)
                     real  = int(r.get("_effective_sec") or 0)
                     minimo = int(r.get("_minimo_sec") or 0)
+                    maximo = int(r.get("_maximo_sec") or 0)
                     pct = float(r.get("_pct_ej") or 0.0)
-                    deficit = minimo - real
                     estim_h = _fmt_hm(estim)
                     real_h  = _fmt_hm(real)
                     min_h   = _fmt_hm(minimo)
-                    # Casos por gravedad
+                    max_h   = _fmt_hm(maximo)
+                    # ── EXCESO (>125% del estimado) ─────────────────────────
+                    if bool(r.get("_es_exceso", False)):
+                        exceso = real - maximo
+                        if pct > 200:
+                            return (f"Exceso extremo: registró {real_h} cuando el estimado era {estim_h} "
+                                    f"(tope máximo {max_h}). Duplicó o más el tiempo permitido; "
+                                    f"revisar si fue error de registro o sobretiempo real.")
+                        return (f"Sobretiempo: {real_h} ejecutado supera el tope de {max_h} "
+                                f"(125% de {estim_h}). Excedió por {_fmt_hm(exceso)}.")
+                    # ── DÉFICIT (<75% del estimado) ─────────────────────────
+                    deficit = minimo - real
                     if real == 0:
                         return (f"Sin registro de tiempo: el técnico no documentó duración alguna. "
                                 f"Estimado {estim_h}, mínimo aceptable {min_h}.")
@@ -8868,7 +8895,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 if "eds_occim" in _det_te_disp.columns:
                     _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
                 _det_te_disp = _det_te_disp.drop(
-                    columns=["estimated_sec","_minimo_sec","_effective_sec","_pct_ej","_te_ok"],
+                    columns=["estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
+                             "_pct_ej","_te_ok","_es_exceso"],
                     errors="ignore"
                 ).rename(columns={
                     "folio":"OT","eds_occim":"EDS",
@@ -8876,7 +8904,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 }).sort_values("Fecha", ascending=False)
                 # Orden: OT - EDS - Técnico - resto, Diagnóstico al final
                 _orden_te = ["OT","EDS","Técnico","Fecha","Tipo",
-                             "T. Estimado","Mín. 75%","T. Ejecución","% Ejecutado","Estado",
+                             "T. Estimado","Mín. 75%","Máx. 125%","T. Ejecución","% Ejecutado","Estado",
                              "Diagnóstico de no cumplimiento"]
                 _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
@@ -8898,31 +8926,36 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 help="Duración programada en Fracttal (HH:MM)"),
                             "Mín. 75%":    st.column_config.TextColumn(width=90,
                                 help="Tiempo mínimo aceptable = 75% del estimado"),
+                            "Máx. 125%":   st.column_config.TextColumn(width=90,
+                                help="Tope máximo aceptable = 125% del estimado. Superarlo cuenta como Exceso."),
                             "T. Ejecución":st.column_config.TextColumn(width=110,
                                 help="Tiempo efectivo = max(tiempo tareas, tiempo real por fechas)"),
                             "% Ejecutado": st.column_config.ProgressColumn(
-                                label="% Ejecutado", min_value=0, max_value=150, format="%.1f%%",
-                                help="T.Efectivo / T.Estimado × 100. Verde si ≥75%"),
-                            "Estado":      st.column_config.TextColumn(width=110),
+                                label="% Ejecutado", min_value=0, max_value=250, format="%.1f%%",
+                                help="T.Efectivo / T.Estimado × 100. Cumple si está entre 75% y 125%."),
+                            "Estado":      st.column_config.TextColumn(width=130),
                             "Diagnóstico de no cumplimiento": st.column_config.TextColumn(width=380,
-                                help="Razón concreta por la que el tiempo no cumple: tiempo absurdo, sin registro, déficit vs mínimo aceptable. Vacío cuando cumple."),
+                                help="Razón concreta por la que el tiempo no cumple: exceso, absurdo, sin registro, déficit vs mínimo. Vacío cuando cumple."),
                         })
 
-                # ── Subsección: OTs con tiempo injustificado (<20% del estimado) ────────
+                # ── Subsección: OTs con tiempo fuera de rango (déficit o exceso) ────
                 st.markdown("---")
-                st.markdown("**⚠️ OTs con tiempo de ejecución injustificado (< 20% del estimado)**")
+                st.markdown("**⚠️ OTs con tiempo de ejecución fuera de rango (< 20% ó > 125% del estimado)**")
                 st.caption(
                     "Barras apiladas por equipo (o por técnico si filtras). "
-                    "**Verde** = cumplen ≥75% del estimado · "
-                    "**Amarillo** = no cumplen (20–75%) · "
-                    "**Rojo** = injustificado, ejecución < 20% del estimado"
+                    "**Verde** = cumplen (75%–125%) · "
+                    "**Amarillo** = déficit no razonable (20–75%) · "
+                    "**Rojo** = déficit injustificado (< 20%) · "
+                    "**Morado** = exceso injustificado (> 125%)"
                 )
 
-                # Marcar los 3 segmentos sobre el total de preventivos con estimado
-                _df_te_p["_absurdo"]   = (~_df_te_p["_te_ok"]) & (
-                    _df_te_p["_effective_sec"] < _df_te_p["estimated_sec"] * 0.20
+                # Marcar los 4 segmentos sobre el total de preventivos con estimado
+                _df_te_p["_exceso"]    = _df_te_p["_effective_sec"] > _df_te_p["estimated_sec"] * 1.25
+                _df_te_p["_absurdo"]   = (
+                    (~_df_te_p["_te_ok"]) & (~_df_te_p["_exceso"]) &
+                    (_df_te_p["_effective_sec"] < _df_te_p["estimated_sec"] * 0.20)
                 )
-                _df_te_p["_just_fail"] = (~_df_te_p["_te_ok"]) & (~_df_te_p["_absurdo"])
+                _df_te_p["_just_fail"] = (~_df_te_p["_te_ok"]) & (~_df_te_p["_absurdo"]) & (~_df_te_p["_exceso"])
 
                 # Determinar agrupación según filtros
                 if tec_kpi_sel != "Todos":
@@ -8938,6 +8971,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         ok=("_te_ok",     "sum"),
                         just_fail=("_just_fail", "sum"),
                         absurdo=("_absurdo",  "sum"),
+                        exceso=("_exceso",   "sum"),
                         total=("_te_ok",  "count"),
                     )
                     .reset_index()
@@ -8945,6 +8979,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _te_grp["pct_ok"]      = (_te_grp["ok"]        / _te_grp["total"] * 100).round(1)
                 _te_grp["pct_just"]    = (_te_grp["just_fail"]  / _te_grp["total"] * 100).round(1)
                 _te_grp["pct_absurdo"] = (_te_grp["absurdo"]    / _te_grp["total"] * 100).round(1)
+                _te_grp["pct_exceso"]  = (_te_grp["exceso"]     / _te_grp["total"] * 100).round(1)
 
                 if _grp_col == "equipo":
                     _grp_order = {k: i for i, k in enumerate(GRUPOS_TERRENO)}
@@ -8953,7 +8988,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _te_grp = _te_grp.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
                 else:
                     _te_grp["_label"] = _te_grp["tecnico"]
-                    _te_grp = _te_grp.sort_values("absurdo", ascending=False).reset_index(drop=True)
+                    _te_grp["_problemas"] = _te_grp["absurdo"] + _te_grp["exceso"]
+                    _te_grp = _te_grp.sort_values("_problemas", ascending=False).drop(columns=["_problemas"]).reset_index(drop=True)
 
                 _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}"
                 if _abs_sig not in st.session_state:
@@ -8964,7 +9000,8 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         _n_ok_d  = int(_te_grp["ok"].sum())
                         _n_jd    = int(_te_grp["just_fail"].sum())
                         _n_abd   = int(_te_grp["absurdo"].sum())
-                        _n_no_cumple = _n_jd + _n_abd
+                        _n_ex_d  = int(_te_grp["exceso"].sum())
+                        _n_no_cumple = _n_jd + _n_abd + _n_ex_d
                         _n_total_d   = _n_ok_d + _n_no_cumple
 
                         _fig_abs = make_subplots(
@@ -8975,9 +9012,9 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 "Desglose no cumplen",
                             ],
                         )
-                        # Dona 1: cumple vs no cumple
+                        # Dona 1: cumple vs no cumple (incluye exceso en amarillo)
                         _fig_abs.add_trace(go.Pie(
-                            labels=["Cumplen ≥75%", "No cumplen"],
+                            labels=["Cumplen (75%–125%)", "No cumplen"],
                             values=[_n_ok_d, _n_no_cumple],
                             hole=0.52,
                             marker=dict(colors=["#22c55e", "#f59e0b"],
@@ -8988,12 +9025,13 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             direction="clockwise",
                             sort=False,
                         ), row=1, col=1)
-                        # Dona 2: de los que no cumplen → razonable vs injustificado
+                        # Dona 2: de los que no cumplen → 3 categorías (déficit 20-75%,
+                        # injustificado <20%, exceso >125%)
                         _fig_abs.add_trace(go.Pie(
-                            labels=["No cumplen", "Injustificado (<20%)"],
-                            values=[_n_jd, _n_abd],
+                            labels=["Déficit (20–75%)", "Injustificado (<20%)", "Exceso (>125%)"],
+                            values=[_n_jd, _n_abd, _n_ex_d],
                             hole=0.52,
-                            marker=dict(colors=["#f59e0b", "#ef4444"],
+                            marker=dict(colors=["#f59e0b", "#ef4444", "#8b5cf6"],
                                         line=dict(color="#ffffff", width=2)),
                             textinfo="percent+value",
                             texttemplate="%{percent:.1%}<br>%{value:,} OTs",
@@ -9021,7 +9059,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         _x_lbl = _te_grp["_label"].tolist()
                         _fig_abs = go.Figure()
                         _fig_abs.add_trace(go.Bar(
-                            name="Cumplen ≥75%",
+                            name="Cumplen (75%–125%)",
                             x=_x_lbl,
                             y=_te_grp["ok"].tolist(),
                             marker_color="#22c55e",
@@ -9031,7 +9069,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             textfont=dict(size=11, color="#ffffff"),
                         ))
                         _fig_abs.add_trace(go.Bar(
-                            name="No cumplen",
+                            name="Déficit (20–75%)",
                             x=_x_lbl,
                             y=_te_grp["just_fail"].tolist(),
                             marker_color="#f59e0b",
@@ -9047,6 +9085,16 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             marker_color="#ef4444",
                             text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
                                   for v, p in zip(_te_grp["absurdo"], _te_grp["pct_absurdo"])],
+                            textposition="inside",
+                            textfont=dict(size=11, color="#ffffff"),
+                        ))
+                        _fig_abs.add_trace(go.Bar(
+                            name="Exceso (>125%)",
+                            x=_x_lbl,
+                            y=_te_grp["exceso"].tolist(),
+                            marker_color="#8b5cf6",
+                            text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                                  for v, p in zip(_te_grp["exceso"], _te_grp["pct_exceso"])],
                             textposition="inside",
                             textfont=dict(size=11, color="#ffffff"),
                         ))
@@ -9113,6 +9161,55 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             })
                 else:
                     st.success("✅ No hay preventivos con tiempo inferior al 20% del estimado en este período.")
+
+                # ── Tabla detalle de OTs con EXCESO (> 125% del estimado) ────
+                _df_ex_only = _df_te_p[_df_te_p["_exceso"]].copy()
+                _n_exceso   = len(_df_ex_only)
+                if not _df_ex_only.empty:
+                    _df_ex_only["_pct_ej_ex"] = (
+                        _df_ex_only["_effective_sec"] / _df_ex_only["estimated_sec"] * 100
+                    ).round(1)
+                    _det_ex = _df_ex_only.copy()
+                    _det_ex_cd = pd.to_datetime(_det_ex["creation_date"], errors="coerce")
+                    _det_ex_cd = _det_ex_cd.dt.tz_convert(None) if _det_ex_cd.dt.tz is not None else _det_ex_cd
+                    _det_ex["creation_date"] = _det_ex_cd.dt.strftime("%d/%m/%Y")
+                    _det_ex["T. Estimado"]  = _det_ex["estimated_sec"].apply(_fmt_seg)
+                    _det_ex["T. Máximo"]    = (_det_ex["estimated_sec"] * 1.25).apply(_fmt_seg)
+                    _det_ex["T. Ejecución"] = _det_ex["_effective_sec"].apply(_fmt_seg)
+                    _det_ex["% Ejecutado"]  = _det_ex["_pct_ej_ex"]
+                    if "eds_occim" in _det_ex.columns:
+                        _det_ex["eds_occim"] = _det_ex["eds_occim"].fillna("").replace("", "—")
+                    _det_ex_disp = _det_ex[[c for c in
+                        ["folio","eds_occim","tecnico","creation_date","maint_type",
+                         "T. Estimado","T. Máximo","T. Ejecución","% Ejecutado"]
+                        if c in _det_ex.columns]].rename(columns={
+                            "folio":"OT","eds_occim":"EDS","tecnico":"Técnico",
+                            "creation_date":"Fecha","maint_type":"Tipo",
+                        }).sort_values("% Ejecutado", ascending=False)
+
+                    with st.expander(
+                        f"🟣 Detalle OTs con exceso de tiempo — >125% ({_n_exceso:,} OTs)", expanded=False
+                    ):
+                        _filtro_ex = _filtro_ot_input("kpi_filtro_ot_exceso")
+                        _det_ex_disp = _aplicar_filtro_ot(_det_ex_disp, _filtro_ex, col="OT")
+                        if _filtro_ex:
+                            st.caption(f"Mostrando **{len(_det_ex_disp):,}** de {_n_exceso:,} OTs (filtro: `{_filtro_ex}`).")
+                        _pct_max = max(200, int(_det_ex_disp["% Ejecutado"].max()) + 20) if not _det_ex_disp.empty else 250
+                        _show_df(_det_ex_disp, hide_index=True, width="stretch",
+                            column_config={
+                                "OT":          st.column_config.TextColumn(width=110),
+                                "EDS":         st.column_config.TextColumn(width=85),
+                                "Técnico":     st.column_config.TextColumn(width=190),
+                                "Fecha":       st.column_config.TextColumn(width=100),
+                                "Tipo":        st.column_config.TextColumn(width=200),
+                                "T. Estimado": st.column_config.TextColumn(width=100),
+                                "T. Máximo":   st.column_config.TextColumn(width=100,
+                                    help="Tope aceptable = 125% del estimado."),
+                                "T. Ejecución":st.column_config.TextColumn(width=110),
+                                "% Ejecutado": st.column_config.ProgressColumn(
+                                    min_value=125, max_value=_pct_max, format="%.1f%%",
+                                    help="Todos en esta tabla superan el 125% del estimado."),
+                            })
 
             else:
                 st.info("Sin datos de duración estimada disponibles para el filtro actual.")
