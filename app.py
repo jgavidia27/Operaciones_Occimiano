@@ -6828,12 +6828,29 @@ elif _page == _NAV_PAGES[0]:
                     lambda x: "✅ Sí" if x is True else ("❌ No" if x is False else "—")
                 )
 
+                # e) Barras Uso SLA / Exceso (mismo esquema que 'Cumplimiento SLA por OT')
+                #    Uso = min(horas/umbral, 100%), Exceso = max(horas/umbral - 100%, 0)
+                if "tiempo_resp_esp" in _df_sla_disp.columns and "horas_resolucion" in _df_sla_disp.columns:
+                    def _pct_row(r):
+                        h = r.get("horas_resolucion"); u = r.get("tiempo_resp_esp")
+                        if pd.notna(h) and pd.notna(u) and float(u) > 0:
+                            return round(float(h) / float(u) * 100, 1)
+                        return None
+                    _df_sla_disp["_pct"] = _df_sla_disp.apply(_pct_row, axis=1)
+                    _df_sla_disp["_uso"] = _df_sla_disp["_pct"].apply(
+                        lambda v: round(min(v, 100.0), 1) if pd.notna(v) else None)
+                    _df_sla_disp["_exc"] = _df_sla_disp["_pct"].apply(
+                        lambda v: round(max(v - 100.0, 0.0), 1) if pd.notna(v) else None)
+                else:
+                    _df_sla_disp["_uso"] = None
+                    _df_sla_disp["_exc"] = None
+
                 _cols_final = [c for c in [
                     "os_fracttal", "eds_occim",
                     "equipo_label", "tecnico", "cliente", "eds_nombre",
                     "_fecha_exacta", "_hora_inicio", "_hora_cierre",
                     "prioridad", "zona_norm",
-                    "horas_resolucion", "cumple_sla",
+                    "horas_resolucion", "_uso", "_exc", "cumple_sla",
                     "_observacion",
                 ] if c in _df_sla_disp.columns]
 
@@ -6851,6 +6868,8 @@ elif _page == _NAV_PAGES[0]:
                     "prioridad":       "Prioridad",
                     "zona_norm":       "Zona",
                     "horas_resolucion":"Horas resolución",
+                    "_uso":            "Uso SLA",
+                    "_exc":            "Exceso",
                     "cumple_sla":      "Cumple SLA",
                     "_observacion":    "Observación técnico",
                 }, inplace=True)
@@ -6866,6 +6885,16 @@ elif _page == _NAV_PAGES[0]:
                         "Hora inicio SLA":     st.column_config.TextColumn(width=110),
                         "Hora cierre OT":      st.column_config.TextColumn(width=105),
                         "Horas resolución":    st.column_config.NumberColumn(format="%.1f h"),
+                        "Uso SLA":             st.column_config.ProgressColumn(
+                            label="Uso SLA (0–100%)",
+                            min_value=0, max_value=100, format="%.1f%%",
+                            help="Porcentaje del umbral SLA consumido (tope 100%). "
+                                 "Si excede, el sobretiempo va en la columna 'Exceso'."),
+                        "Exceso":              st.column_config.ProgressColumn(
+                            label="Exceso (>100%)",
+                            min_value=0, max_value=100, format="%.1f%%",
+                            help="Cuánto se pasó del umbral. 0/vacía = cumplió; "
+                                 "llena = excedió >100% del umbral."),
                         "Observación técnico": st.column_config.TextColumn(width=380,
                             help="Resumen del texto libre del técnico en Fracttal: falla encontrada, trabajo realizado y observaciones del formulario de la OT."),
                         "Estación":            st.column_config.TextColumn(width=200),
