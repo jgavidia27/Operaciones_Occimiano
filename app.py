@@ -1394,8 +1394,8 @@ with st.sidebar:
         # _wo_sig = str(len(raw_wo)) = "20000" siempre, por lo que sin esta limpieza
         # el caché nunca se invalida y no muestra los meses nuevos.
         for _k in ["_base_sig", "_df_llamados", "_df_tp", "_station_name_map",
-                   "eds_fracttal_items", "df_llamados_supa",
-                   "_sc_sig_df_llamados_supa"]:
+                   "eds_fracttal_items", "df_llamados_supa", "df_llamados_supa_v3",
+                   "_sc_sig_df_llamados_supa", "_sc_sig_df_llamados_supa_v3"]:
             st.session_state.pop(_k, None)
         # Limpiar caches _sc (df_kpi_raw, df_ot_all_scores, df_wo_base, etc.)
         # También eds_enrich y eds_fracttal_items para que Listado de EDS se recalcule
@@ -1521,10 +1521,13 @@ if _page in _PAGES_NEED_LLAMADOS:
     with _sidebar_load_slot.container():
         _base_prog = st.progress(75, text="📂 Llamados…")
     # ── Llamados SLA: Supabase (v_llamados_sla) ──────────────────────────────
+    # Bump 'supa_v2' → 'supa_v3_exc' fuerza invalidacion del session_state cache
+    # para que todas las sesiones abiertas recarguen y reflejen las excepciones
+    # SLA agregadas en runtime (OS-37080 etc.).
     if _USE_SUPABASE:
         _ll_refresh = pd.Timestamp.now().floor("30min").strftime("%Y%m%d%H%M")
         df_llamados = _sc(
-            "df_llamados_supa", f"supa_v2_{_ll_refresh}",
+            "df_llamados_supa_v3", f"supa_v3_exc_{_ll_refresh}",
             lambda: load_all_llamados_supabase("2026-01-01")
         )
     else:
