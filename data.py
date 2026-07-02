@@ -365,20 +365,22 @@ _NUMERAL_FICHAS_MAX = 25          # > esto dentro de una misma OT = sospechoso
 
 # Motivos de numeral malo (para etiquetar y mostrar el comentario del técnico)
 NUMERAL_MOTIVO_LABEL = {
-    "ok":             "✅ Numeral válido",
-    "no_aplica":      "🔵 No aplica",
-    "no_aplica_mc":   "🔵 No aplica (correctiva sin campo)",
-    "sin_numeral":    "❌ Sin numeral",
-    "basura":         "🟣 Valor basura (≥8 díg.)",
-    "negativo":       "🔴 Final < Inicial",
-    "salto_magnitud": "🟣 Salto de magnitud (cero de más)",
-    "exceso_fichas":  "🔴 Exceso de fichas (>20 en una OT)",
+    "ok":               "✅ Numeral válido",
+    "no_aplica":        "🔵 No aplica",
+    "no_aplica_mc":     "🔵 No aplica (correctiva sin campo)",
+    "no_aplica_remota": "🔵 No aplica (atención remota)",
+    "sin_numeral":      "❌ Sin numeral",
+    "basura":           "🟣 Valor basura (≥8 díg.)",
+    "negativo":         "🔴 Final < Inicial",
+    "salto_magnitud":   "🟣 Salto de magnitud (cero de más)",
+    "exceso_fichas":    "🔴 Exceso de fichas (>20 en una OT)",
 }
 
 
 def eval_numeral_kpi(es_lavadora: bool, inicial, final,
                      es_correctiva: bool = False,
-                     form_tiene_numeral=None) -> tuple:
+                     form_tiene_numeral=None,
+                     es_remota: bool = False) -> tuple:
     """
     Veredicto BINARIO de calidad del numeral para el KPI Precisión.
     Returns (numeral_ok: bool, motivo: str).
@@ -393,6 +395,8 @@ def eval_numeral_kpi(es_lavadora: bool, inicial, final,
 
     Sin valor registrado:
       • Preventiva                       → sin_numeral (el form MP siempre lo pide)
+      • Correctiva atendida REMOTA       → no_aplica_remota (físicamente imposible
+                                            leer el numeral sin estar en la EDS)
       • Correctiva con campo en el form  → sin_numeral (lo dejó vacío = descuido)
       • Correctiva sin campo / desconocido → no_aplica_mc (justificable, no penaliza)
     """
@@ -406,6 +410,10 @@ def eval_numeral_kpi(es_lavadora: bool, inicial, final,
     if not _ni and not _nf:
         if not es_correctiva:
             return False, "sin_numeral"          # MP: el formulario siempre lo pide
+        # Correctiva atendida de forma REMOTA: el técnico no fue a la EDS, no
+        # tiene forma física de leer el numeral. No debe penalizar.
+        if es_remota:
+            return True, "no_aplica_remota"
         # Correctiva: solo penaliza si el formulario tenía el campo numeral
         if form_tiene_numeral is True:
             return False, "sin_numeral"
@@ -907,15 +915,6 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         else:
             _fichas_periodo = None   # negativo, reseteo de contador o dato corrupto
 
-        # CALIDAD del numeral (no solo presencia): un 99.999.999 o un salto de
-        # >20 fichas dentro de la OT ahora cuenta como dato MALO (numeral_ok=False).
-        # Aplica a MC y MP; en MC sin valor, solo penaliza si el form tenía el campo.
-        _form_num = wo.get("form_tiene_numeral")
-        numeral_ok, numeral_motivo = eval_numeral_kpi(
-            _es_lavadora, _num_inicial, _num_final,
-            es_correctiva=es_correctiva, form_tiene_numeral=_form_num,
-        )
-
         # ── Método de detección de falla ──────────────────────────────────────
         # Campo detection_method_description de Fracttal (Análisis de Fallas).
         # Valores válidos: "1.- ATENDIDO PRESENCIAL", "2.- ATENDIDO VÍA REMOTA",
@@ -926,6 +925,18 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         deteccion_ok = (
             not es_correctiva                                   # PM → siempre OK
             or (bool(raw_deteccion) and "SIN CLASIFICAR" not in raw_deteccion)
+        )
+        _es_remota = "REMOTA" in raw_deteccion or "REMOTO" in raw_deteccion
+
+        # CALIDAD del numeral (no solo presencia): un 99.999.999 o un salto de
+        # >20 fichas dentro de la OT ahora cuenta como dato MALO (numeral_ok=False).
+        # Aplica a MC y MP; en MC sin valor, solo penaliza si el form tenía el campo.
+        # Si la MC fue REMOTA, el numeral no aplica (no hay forma de leerlo).
+        _form_num = wo.get("form_tiene_numeral")
+        numeral_ok, numeral_motivo = eval_numeral_kpi(
+            _es_lavadora, _num_inicial, _num_final,
+            es_correctiva=es_correctiva, form_tiene_numeral=_form_num,
+            es_remota=_es_remota,
         )
 
         rows.append({
@@ -1073,11 +1084,15 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     # (inicial/final = primer no-vacío). Garantiza que el veredicto coincida con
     # lo que se muestra en la tabla, y aplica la regla de calidad aunque el caché
     # venga de antes del cambio (donde numeral_ok era solo presencia).
+    def _es_remota_row(r) -> bool:
+        det = str(r.get("deteccion_raw", "") or "").upper()
+        return "REMOTA" in det or "REMOTO" in det
     _num_eval = ot.apply(
         lambda r: eval_numeral_kpi(
             r.get("es_lavadora", True), r.get("numeral_inicial", ""), r.get("numeral_final", ""),
             es_correctiva=r.get("es_correctiva", False),
             form_tiene_numeral=r.get("form_tiene_numeral"),
+            es_remota=_es_remota_row(r),
         ),
         axis=1,
     )
