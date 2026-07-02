@@ -668,11 +668,18 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
                 nueva_prio, nuevo_umbral = result
                 df.at[idx, "prioridad"]       = nueva_prio
                 df.at[idx, "tiempo_resp_esp"] = nuevo_umbral
-                horas = df.at[idx, "horas_resolucion"]
-                if pd.notna(horas) and horas is not None:
-                    df.at[idx, "cumplimiento"] = (
-                        "CUMPLE" if float(horas) <= nuevo_umbral else "NO CUMPLE"
-                    )
+                # IMPORTANTE: NO recalcular cumplimiento si la OT tiene excepción
+                # SLA registrada. La vista v_llamados_sla ya devolvió "CUMPLE" por
+                # la excepción — si recalculamos aquí con horas<=umbral, pisamos
+                # esa decisión y la OT vuelve a "NO CUMPLE" incorrectamente.
+                exc_mot = df.at[idx, "excepcion_motivo"] if "excepcion_motivo" in df.columns else None
+                tiene_exc = pd.notna(exc_mot) and str(exc_mot).strip() != ""
+                if not tiene_exc:
+                    horas = df.at[idx, "horas_resolucion"]
+                    if pd.notna(horas) and horas is not None:
+                        df.at[idx, "cumplimiento"] = (
+                            "CUMPLE" if float(horas) <= nuevo_umbral else "NO CUMPLE"
+                        )
 
     # ── SAFETY NET: recorrección de prioridad ARAMCO desde Cotalker ──────────
     # sync_fracttal_supabase.py YA consulta Cotalker Metabase al momento del
@@ -703,12 +710,20 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
                     nueva_prio, nuevo_umbral = result
                     df.at[idx, "prioridad"]       = nueva_prio
                     df.at[idx, "tiempo_resp_esp"] = nuevo_umbral
-                    # Recalcular cumplimiento con el umbral correcto
-                    horas = df.at[idx, "horas_resolucion"]
-                    if pd.notna(horas) and horas is not None:
-                        df.at[idx, "cumplimiento"] = (
-                            "CUMPLE" if float(horas) <= nuevo_umbral else "NO CUMPLE"
-                        )
+                    # IMPORTANTE: NO recalcular cumplimiento si la OT tiene excepción
+                    # SLA. La vista v_llamados_sla marca como CUMPLE por la
+                    # excepción — recalcular con horas<=umbral rompería esa lógica
+                    # y las OTs excepcionadas volverían a NO CUMPLE (bug reportado
+                    # con OS-37080: 52h > 24h umbral, pero validada por operaciones
+                    # como caso ajeno a Occimiano).
+                    exc_mot = df.at[idx, "excepcion_motivo"] if "excepcion_motivo" in df.columns else None
+                    tiene_exc = pd.notna(exc_mot) and str(exc_mot).strip() != ""
+                    if not tiene_exc:
+                        horas = df.at[idx, "horas_resolucion"]
+                        if pd.notna(horas) and horas is not None:
+                            df.at[idx, "cumplimiento"] = (
+                                "CUMPLE" if float(horas) <= nuevo_umbral else "NO CUMPLE"
+                            )
 
     return df
 
