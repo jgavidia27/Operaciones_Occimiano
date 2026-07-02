@@ -9846,21 +9846,30 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     else:
                         drill_disp["_estado_ot"] = "—"
 
-                    # Selección ordenada — Tipo Equipo va justo antes de Numeral
-                    # para leer causalmente por qué aplica o no.
+                    # Selección ordenada — Fecha primero (más reciente arriba),
+                    # luego Cumple, y Tipo Equipo justo antes de Numeral para
+                    # leer causalmente por qué aplica o no.
                     drill_disp = drill_disp[[
-                        "_cumple", "_x4", "folio", "_eds", "tecnico", "station",
+                        "_fecha", "_cumple", "_x4", "folio", "_eds", "tecnico", "station",
                         "_tipo", "_modalidad", "_estado_ot", "score_total",
                         "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
-                        "_obs", "_fecha",
+                        "_obs",
                     ]].copy()
 
                     drill_disp.columns = [
-                        "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación",
+                        "Fecha", "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación",
                         "Tipo", "Modalidad", "Estado", "Score",
                         "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
-                        "💬 Observación", "Fecha",
+                        "💬 Observación",
                     ]
+
+                    # Orden por Fecha desc: más recientes arriba (parseando dd/mm/yyyy)
+                    _fecha_ord = pd.to_datetime(drill_disp["Fecha"],
+                                                format="%d/%m/%Y", errors="coerce")
+                    drill_disp = drill_disp.assign(_ord=_fecha_ord) \
+                                           .sort_values("_ord", ascending=False,
+                                                        na_position="last") \
+                                           .drop(columns="_ord")
 
                     # Alertas rápidas
                     _qt_criticas  = int((_s < 1).sum())
