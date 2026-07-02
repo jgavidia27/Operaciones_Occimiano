@@ -2513,7 +2513,6 @@ if _page == _NAV_PAGES[1]:
                     columns={"os_fracttal":"OS Fracttal",
                              "fecha_llamado":"Fecha llamado",
                              "fecha_atencion":"Fecha atención",
-                             "wo_cierre_ot":"Cierre completo OT",
                              "eds_occim":"Cód. EDS",
                              "eds_nombre":"EDS","cliente":"Cliente","tecnico":"Técnico",
                              "prioridad":"Prioridad","ciudad":"Ciudad","zona_ot":"Zona",
