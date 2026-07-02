@@ -1666,7 +1666,7 @@ if _page == _NAV_PAGES[1]:
                     .get(str(zona_key), None))
 
         # ── Sub-pestañas ──────────────────────────────────────────────────────
-        _tab_cli, _tab_tec, _tab_uptime_sla = st.tabs(["👤  Clientes", "🔧  Servicio Técnico", "⏱️  Uptime"])
+        _tab_cli, _tab_tec, _tab_uptime_sla = st.tabs(["👤  Clientes", "🔧  Servicio Técnico", "⏱️  Uptime General"])
 
         # ══════════════════════════════════════════════════════════════════════
         # SUB-PESTAÑA: CLIENTES
