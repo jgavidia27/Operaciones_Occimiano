@@ -1207,7 +1207,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
 
     def _causa_label(row) -> str:
         if not row["es_correctiva"]:
-            return "✅ PM (no aplica)"
+            return "✅ Preventiva (no aplica)"
         c = row["causa_clasif"]
         if c == "tecnico":   return "✅ Causa: Técnico"
         if c == "cliente":   return "✅ Causa: Cliente"

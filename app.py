@@ -9765,7 +9765,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         raw = str(r.get("causa_raiz_raw","") or "").strip()
                         ok  = _c[r.name] >= 25
                         if not es_corr:
-                            return "✅ PM (no aplica)"
+                            return "✅ Preventiva (no aplica)"
                         if ok:
                             return f"✅ {raw[:38]}" if raw else "✅ Registrada"
                         # Descuido atribuible: no clasificó pero SÍ describió la falla
