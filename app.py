@@ -2487,24 +2487,26 @@ if _page == _NAV_PAGES[1]:
                 _df_sla_ot["_exc_pct"] = _df_sla_ot["pct_sla_ot"].apply(
                     lambda v: round(max(float(v) - 100.0, 0.0), 1) if pd.notna(v) else None)
 
+                # Orden solicitado por operaciones:
+                # OS Fracttal | N° Aviso | Fecha llamado | Fecha atención | Cód. EDS |
+                # EDS | Cliente | Técnico | Prioridad | Ciudad | Zona |
+                # Tiempo resolución | Umbral SLA | Uso SLA | Exceso | Estado SLA |
+                # Reporte de falla | Motivo excepción
+                # (Se quitó 'Cierre completo OT' por pedido explícito.)
                 _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
-                                            "wo_cierre_ot","eds_occim","eds_nombre","cliente","tecnico",
+                                            "eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_ot"] if c in _df_sla_ot.columns]
                 _extra = ["tiempo_res","umbral_lbl","_uso_pct","_exc_pct","estado_sla"]
-                # Añadir motivo de excepción si hay al menos una OT con excepción
+                # Reporte de falla ANTES de Motivo excepción (orden pedido)
+                if "reporte" in _df_sla_ot.columns:
+                    _extra.append("reporte")
                 _hay_exc = ("excepcion_motivo" in _df_sla_ot.columns and
                             _df_sla_ot["excepcion_motivo"].notna().any())
                 if _hay_exc:
                     _extra.append("excepcion_motivo")
-                if "reporte" in _df_sla_ot.columns:
-                    _extra.append("reporte")
                 _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + _extra].copy()
                 if _hay_exc:
                     _df_sla_ot_disp["excepcion_motivo"] = _df_sla_ot_disp["excepcion_motivo"].fillna("")
-                if "wo_cierre_ot" in _df_sla_ot_disp.columns:
-                    _df_sla_ot_disp["wo_cierre_ot"] = pd.to_datetime(
-                        _df_sla_ot_disp["wo_cierre_ot"], errors="coerce"
-                    ).dt.strftime("%d/%m/%Y %H:%M").fillna("—")
                 _df_sla_ot_disp["fecha_llamado"]  = pd.to_datetime(_df_sla_ot_disp["fecha_llamado"],  errors="coerce").dt.strftime("%d/%m/%Y")
                 _df_sla_ot_disp["fecha_atencion"] = pd.to_datetime(_df_sla_ot_disp["fecha_atencion"], errors="coerce").dt.strftime("%d/%m/%Y")
                 _df_sla_ot_disp = _df_sla_ot_disp.sort_values("fecha_llamado", ascending=False).rename(
@@ -2538,8 +2540,6 @@ if _page == _NAV_PAGES[1]:
                             help="N° de referencia del cliente: 'No. Aviso' para COPEC / N° Cotalker para ESMAX-Aramco. Vacío = sin referencia registrada."),
                         "Fecha llamado":        st.column_config.TextColumn(width=110),
                         "Fecha atención":       st.column_config.TextColumn(width=110),
-                        "Cierre completo OT":   st.column_config.TextColumn(width=140,
-                            help="Fecha en que la OT cambió a estado Finalizada (cierre administrativo). Solo informativo — no afecta el cálculo SLA."),
                         "Cód. EDS":          st.column_config.TextColumn(width=100),
                         "EDS":               st.column_config.TextColumn(width=210),
                         "Cliente":           st.column_config.TextColumn(width=90),
