@@ -1137,6 +1137,28 @@ st.markdown("""
         left: 0;
     }
 
+    /* ── Multiselect / Selectbox — items del dropdown más nítidos ──────────
+       Por defecto Streamlit renderiza las opciones no-hover con un color
+       secundario grisáceo que se ve "borroso". Forzamos color pleno y
+       antialiasing para mayor legibilidad. */
+    [data-testid="stMultiSelect"] li[role="option"],
+    [data-testid="stMultiSelect"] li[role="option"] *,
+    [data-baseweb="popover"] li[role="option"],
+    [data-baseweb="popover"] li[role="option"] *,
+    [data-baseweb="menu"] li[role="option"],
+    [data-baseweb="menu"] li[role="option"] * {
+        color: #1f2937 !important;
+        opacity: 1 !important;
+        -webkit-font-smoothing: antialiased !important;
+        -moz-osx-font-smoothing: grayscale !important;
+        text-rendering: optimizeLegibility !important;
+    }
+    /* Hover un poco más marcado */
+    [data-baseweb="popover"] li[role="option"]:hover,
+    [data-baseweb="menu"] li[role="option"]:hover {
+        background: rgba(1,121,138,0.10) !important;
+    }
+
     /* Ocultar el iframe del toggle JS — solo sirve para ejecutar el script */
     [data-testid="stCustomComponentV1"],
     [data-testid="stCustomComponentV1"] iframe {
