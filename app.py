@@ -2474,10 +2474,23 @@ if _page == _NAV_PAGES[1]:
                     except Exception:
                         pass
 
+                # Barra dividida: '% Uso SLA' se muestra como DOS columnas paralelas:
+                #   - "Uso SLA" (barra hasta 100%): tiempo consumido dentro del umbral.
+                #     Si la OT excede, esta barra queda LLENA (100%) — señal de tope.
+                #   - "Exceso" (barra 0-100%): sobretiempo. VACÍA si cumple; si excedió,
+                #     muestra cuánto se pasó (en % del umbral).
+                #
+                # Lectura visual: "barra Uso llena + barra Exceso llena" = OT muy pasada.
+                # "barra Uso parcial + Exceso vacía" = OT que cumplió.
+                _df_sla_ot["_uso_pct"] = _df_sla_ot["pct_sla_ot"].apply(
+                    lambda v: round(min(float(v), 100.0), 1) if pd.notna(v) else None)
+                _df_sla_ot["_exc_pct"] = _df_sla_ot["pct_sla_ot"].apply(
+                    lambda v: round(max(float(v) - 100.0, 0.0), 1) if pd.notna(v) else None)
+
                 _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
                                             "wo_cierre_ot","eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_ot"] if c in _df_sla_ot.columns]
-                _extra = ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla"]
+                _extra = ["tiempo_res","umbral_lbl","_uso_pct","_exc_pct","estado_sla"]
                 # Añadir motivo de excepción si hay al menos una OT con excepción
                 _hay_exc = ("excepcion_motivo" in _df_sla_ot.columns and
                             _df_sla_ot["excepcion_motivo"].notna().any())
@@ -2503,7 +2516,8 @@ if _page == _NAV_PAGES[1]:
                              "eds_nombre":"EDS","cliente":"Cliente","tecnico":"Técnico",
                              "prioridad":"Prioridad","ciudad":"Ciudad","zona_ot":"Zona",
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
-                             "pct_sla_ot":"% Uso SLA","estado_sla":"Estado SLA",
+                             "_uso_pct":"Uso SLA","_exc_pct":"Exceso",
+                             "estado_sla":"Estado SLA",
                              "excepcion_motivo":"Motivo excepción",
                              "n_cotalker":"N° Aviso","reporte":"Reporte de falla"})
                 _buscar_ot = st.text_input(
@@ -2535,9 +2549,18 @@ if _page == _NAV_PAGES[1]:
                         "Zona":              st.column_config.TextColumn(width=85),
                         "Tiempo resolución": st.column_config.TextColumn(width=120),
                         "Umbral SLA":        st.column_config.TextColumn(width=85),
-                        "% Uso SLA":         st.column_config.ProgressColumn(
-                            label="% Uso SLA", min_value=0, max_value=200, format="%.1f%%",
-                            help=">100% = excedió el umbral SLA"),
+                        "Uso SLA":           st.column_config.ProgressColumn(
+                            label="Uso SLA (0–100%)",
+                            min_value=0, max_value=100, format="%.1f%%",
+                            help="Porcentaje del umbral SLA consumido, tope 100%. "
+                                 "Barra completa = tiempo agotado. Si la OT excede el "
+                                 "umbral, el excedente se muestra en la columna 'Exceso'."),
+                        "Exceso":            st.column_config.ProgressColumn(
+                            label="Exceso (>100%)",
+                            min_value=0, max_value=100, format="%.1f%%",
+                            help="Cuánto se excedió el umbral SLA (0 si cumple). "
+                                 "Ej. si tiempo real = 125% del umbral, aquí ves 25%. "
+                                 "Tope visual 100%; en el tooltip está el valor real."),
                         "Estado SLA":        st.column_config.TextColumn(width=110,
                             help="✅ Cumple = dentro del umbral SLA · ❌ No cumple = excedió el umbral · ℹ️ Excepción = excedió el umbral pero está validado por operaciones como caso ajeno a Occimiano (cuenta como cumple en los %)"),
                         "Motivo excepción":  st.column_config.TextColumn(
