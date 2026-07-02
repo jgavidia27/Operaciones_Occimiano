@@ -1499,10 +1499,8 @@ if _page in _PAGES_NEED_LLAMADOS:
     with _sidebar_load_slot.container():
         _base_prog = st.progress(75, text="📂 Llamados…")
     # ── Llamados SLA: Supabase (v_llamados_sla) ──────────────────────────────
-    # TTL de 5 min: cualquier cambio en sla_excepciones u otras columnas de
-    # v_llamados_sla se refleja en máximo 5 minutos (antes era 30 min).
     if _USE_SUPABASE:
-        _ll_refresh = pd.Timestamp.now().floor("5min").strftime("%Y%m%d%H%M")
+        _ll_refresh = pd.Timestamp.now().floor("30min").strftime("%Y%m%d%H%M")
         df_llamados = _sc(
             "df_llamados_supa", f"supa_v2_{_ll_refresh}",
             lambda: load_all_llamados_supabase("2026-01-01")
