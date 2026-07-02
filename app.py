@@ -9564,14 +9564,27 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         (1 - _tec_base["n_errores"] / _tec_base["ots_evaluadas"].clip(lower=1)) * 100
                     ).round(1)
 
-                # Formato X/Y (Z%) por dimensión
+                # Formato X/Y (Z%) por dimensión — tolerante a NaN
                 def _fmt_dim(ok, total, pct):
-                    return f"{int(ok)}/{int(total)} ({pct:.1f}%)"
+                    try:
+                        ok_i    = int(ok)    if pd.notna(ok)    else 0
+                        total_i = int(total) if pd.notna(total) else 0
+                        pct_f   = float(pct) if pd.notna(pct)   else 0.0
+                        return f"{ok_i}/{total_i} ({pct_f:.1f}%)"
+                    except (ValueError, TypeError):
+                        return "—"
 
-                _tec_base["col_tiempo"]    = _tec_base.apply(lambda r: _fmt_dim(r["tiempo_ok_count"],    r["ots_evaluadas"], r["pct_tiempo_ok"]),    axis=1)
-                _tec_base["col_causa"]     = _tec_base.apply(lambda r: _fmt_dim(r["causa_ok_count"],     r["ots_evaluadas"], r["pct_causa_ok"]),     axis=1)
-                _tec_base["col_numeral"]   = _tec_base.apply(lambda r: _fmt_dim(r["numeral_ok_count"],   r["ots_evaluadas"], r["pct_numeral_ok"]),   axis=1)
-                _tec_base["col_deteccion"] = _tec_base.apply(lambda r: _fmt_dim(r["deteccion_ok_count"], r["ots_evaluadas"], r["pct_deteccion_ok"]), axis=1)
+                # Si _tec_base quedó vacío (p.ej. técnico seleccionado no está
+                # en TECNICOS_OCCIMIANO_FULL) creamos columnas vacías manualmente
+                # para no romper el layout con apply sobre DataFrame vacío.
+                if _tec_base.empty:
+                    for _c in ("col_tiempo", "col_causa", "col_numeral", "col_deteccion"):
+                        _tec_base[_c] = pd.Series(dtype="object")
+                else:
+                    _tec_base["col_tiempo"]    = _tec_base.apply(lambda r: _fmt_dim(r["tiempo_ok_count"],    r["ots_evaluadas"], r["pct_tiempo_ok"]),    axis=1)
+                    _tec_base["col_causa"]     = _tec_base.apply(lambda r: _fmt_dim(r["causa_ok_count"],     r["ots_evaluadas"], r["pct_causa_ok"]),     axis=1)
+                    _tec_base["col_numeral"]   = _tec_base.apply(lambda r: _fmt_dim(r["numeral_ok_count"],   r["ots_evaluadas"], r["pct_numeral_ok"]),   axis=1)
+                    _tec_base["col_deteccion"] = _tec_base.apply(lambda r: _fmt_dim(r["deteccion_ok_count"], r["ots_evaluadas"], r["pct_deteccion_ok"]), axis=1)
 
                 st.markdown('<div class="section-header">📋 Resumen por técnico</div>',
                             unsafe_allow_html=True)
