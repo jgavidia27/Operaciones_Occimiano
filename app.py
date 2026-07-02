@@ -7899,7 +7899,7 @@ elif _page == _NAV_PAGES[0]:
                 )
             return _df
         try:
-            df_kpi_raw = _sc("df_kpi_raw_v2", _wo_sig, _build_kpi_raw_cached)
+            df_kpi_raw = _sc("df_kpi_raw_v3_equipo", _wo_sig, _build_kpi_raw_cached)
         except Exception as _e_prec:
             st.error(f"⚠️ Error al cargar datos de KPI de llenado: {_e_prec}")
             st.exception(_e_prec)
@@ -7970,7 +7970,7 @@ elif _page == _NAV_PAGES[0]:
                     _df["creation_date"].dt.tz_convert(None).dt.date
                 )
             return _df
-        df_ot_all = _sc("df_ot_all_scores_v4_direct", _wo_sig, _build_ot_all)
+        df_ot_all = _sc("df_ot_all_scores_v5_equipo", _wo_sig, _build_ot_all)
 
         _meses_prec_nums = {int(str(m).split("-")[1]) for m in meses_disp if "-" in str(m)}
         _TRIMESTRES_PREC = {
