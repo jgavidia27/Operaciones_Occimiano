@@ -9734,6 +9734,25 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     # Columna 3: Tipo (title case)
                     drill_disp["_tipo"] = drill_disp["maint_type"].fillna("").str.title()
 
+                    # Columna 3b: Modalidad de atención (informativa, no KPI).
+                    # Simplificamos '1.- ATENDIDO PRESENCIAL' → 'Presencial',
+                    # '2.- ATENDIDO VÍA REMOTA' → 'Remoto', etc.
+                    _MOD_MAP = {
+                        "1.- ATENDIDO PRESENCIAL": "🚗 Presencial",
+                        "2.- ATENDIDO VÍA REMOTA": "📞 Remoto",
+                        "2.- ATENDIDO VIA REMOTA": "📞 Remoto",
+                        "3.- ATENDIDO CON SU MP":  "🔧 Con MP",
+                        "4.- LLAMADO DUPLICADO":   "⚠️ Duplicado",
+                        "SIN CLASIFICAR":          "❔ Sin clasificar",
+                        "":                        "—",
+                    }
+                    _mod_src = (drill_disp["deteccion_raw"]
+                                if "deteccion_raw" in drill_disp.columns
+                                else pd.Series("", index=drill_disp.index))
+                    drill_disp["_modalidad"] = _mod_src.fillna("").apply(
+                        lambda v: _MOD_MAP.get(str(v).strip().upper(), str(v).strip().title() or "—")
+                    )
+
                     # Columna 4: ⏱ Tiempo — valor en minutos + ✅/❌
                     _em = drill_disp["elapsed_min"] if "elapsed_min" in drill_disp.columns else pd.Series(0.0, index=drill_disp.index)
                     drill_disp["_col_tiempo"] = drill_disp.apply(
@@ -9795,16 +9814,16 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     else:
                         drill_disp["_estado_ot"] = "—"
 
-                    # Selección ordenada y limpia — sin Modalidad (ya no entra al KPI)
+                    # Selección ordenada — Modalidad va junto a Tipo (informativa)
                     drill_disp = drill_disp[[
-                        "_cumple", "_x4", "folio", "_eds", "tecnico", "station", "_tipo",
+                        "_cumple", "_x4", "folio", "_eds", "tecnico", "station", "_tipo", "_modalidad",
                         "_estado_ot", "score_total",
                         "_col_tiempo", "_col_causa", "_col_numeral",
                         "_obs", "_fecha",
                     ]].copy()
 
                     drill_disp.columns = [
-                        "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación", "Tipo",
+                        "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación", "Tipo", "Modalidad",
                         "Estado", "Score",
                         "⏱ Tiempo", "🔍 Causa raíz", "🔢 Numeral",
                         "💬 Observación", "Fecha",
@@ -9845,7 +9864,11 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 help="Código EDS Occimiano."),
                             "Técnico":          st.column_config.TextColumn(width=180),
                             "Estación":         st.column_config.TextColumn(width=200),
-                            "Tipo":             st.column_config.TextColumn(width=130),
+                            "Tipo":             st.column_config.TextColumn(width=110),
+                            "Modalidad":        st.column_config.TextColumn(width=140,
+                                help="Método de detección de falla en Fracttal (informativo, no incide en el KPI). "
+                                     "Presencial = técnico fue a la EDS · Remoto = resuelto vía telefónica/remota · "
+                                     "Con MP = aprovechó una mantención preventiva."),
                             "Estado":           st.column_config.TextColumn(width=110,
                                 help="Estado de la OT en Fracttal."),
                             "Score":            st.column_config.ProgressColumn(
