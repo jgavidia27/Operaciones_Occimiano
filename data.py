@@ -1040,7 +1040,12 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         _agg["deteccion_raw"] = ("deteccion_raw", "first")
     # Campos de numeral (pueden faltar en caches pre-migración)
     if "es_lavadora" in df_kpi.columns:
-        _agg["es_lavadora"]   = ("es_lavadora",   "first")
+        # any() = True si CUALQUIER subtarea es de lavadora/aspiradora.
+        # (antes era 'first', pero una OT con 4 equipos donde solo uno es
+        # lavadora puede tomar first=False del ablandador y marcar
+        # 'no aplica', mientras que numeral_ok=any() reporta el numeral
+        # faltante de la lavadora → contradicción visual en la tabla).
+        _agg["es_lavadora"]   = ("es_lavadora",   "any")
     if "numeral_valor" in df_kpi.columns:
         # Tomar el primer valor no-vacío entre las tareas de la OT
         _agg["numeral_valor"] = ("numeral_valor", lambda x: next((v for v in x if v), ""))
