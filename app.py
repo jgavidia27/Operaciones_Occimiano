@@ -2336,14 +2336,21 @@ if _page == _NAV_PAGES[1]:
                     round(h / u * 100, 1) if (u is not None and pd.notna(u) and u > 0 and pd.notna(h)) else None
                     for h, u in zip(_df_sla_ot["horas_res"], _df_sla_ot["umbral_h"])
                 ]
-                # estado_sla: usar cumplimiento del Excel como fuente de verdad
-                # (evita discrepancias entre la marca del Excel y el cálculo de horas)
+                # estado_sla: usar cumplimiento del view como fuente de verdad.
+                # Si la OT tiene excepcion_motivo (registrada en sla_excepciones),
+                # se muestra 'ℹ️ Excepción' en lugar de '✅ Cumple' — pero cuenta
+                # como cumple igual en los %.
+                def _estado_sla_row(row):
+                    cumpl = str(row.get("cumplimiento") or "").upper()
+                    exc   = row.get("excepcion_motivo")
+                    tiene_exc = pd.notna(exc) and str(exc).strip() != ""
+                    if cumpl == "CUMPLE":
+                        return "ℹ️ Excepción" if tiene_exc else "✅ Cumple"
+                    if cumpl == "NO CUMPLE":
+                        return "❌ No cumple"
+                    return "⚪ Sin datos"
                 if "cumplimiento" in _df_sla_ot.columns:
-                    _df_sla_ot["estado_sla"] = _df_sla_ot["cumplimiento"].apply(
-                        lambda v: "✅ Cumple" if str(v).upper() == "CUMPLE"
-                                 else ("❌ No cumple" if str(v).upper() == "NO CUMPLE"
-                                       else "⚪ Sin datos")
-                    )
+                    _df_sla_ot["estado_sla"] = _df_sla_ot.apply(_estado_sla_row, axis=1)
                 else:
                     _df_sla_ot["estado_sla"] = [
                         ("✅ Cumple" if (u is not None and pd.notna(u)) and h <= u else
@@ -2449,9 +2456,16 @@ if _page == _NAV_PAGES[1]:
                                             "wo_cierre_ot","eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_ot"] if c in _df_sla_ot.columns]
                 _extra = ["tiempo_res","umbral_lbl","pct_sla_ot","estado_sla"]
+                # Añadir motivo de excepción si hay al menos una OT con excepción
+                _hay_exc = ("excepcion_motivo" in _df_sla_ot.columns and
+                            _df_sla_ot["excepcion_motivo"].notna().any())
+                if _hay_exc:
+                    _extra.append("excepcion_motivo")
                 if "reporte" in _df_sla_ot.columns:
                     _extra.append("reporte")
                 _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + _extra].copy()
+                if _hay_exc:
+                    _df_sla_ot_disp["excepcion_motivo"] = _df_sla_ot_disp["excepcion_motivo"].fillna("")
                 if "wo_cierre_ot" in _df_sla_ot_disp.columns:
                     _df_sla_ot_disp["wo_cierre_ot"] = pd.to_datetime(
                         _df_sla_ot_disp["wo_cierre_ot"], errors="coerce"
@@ -2468,6 +2482,7 @@ if _page == _NAV_PAGES[1]:
                              "prioridad":"Prioridad","ciudad":"Ciudad","zona_ot":"Zona",
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
                              "pct_sla_ot":"% Uso SLA","estado_sla":"Estado SLA",
+                             "excepcion_motivo":"Motivo excepción",
                              "n_cotalker":"N° Aviso","reporte":"Reporte de falla"})
                 _buscar_ot = st.text_input(
                     "Buscar OT", placeholder="Ej: OS-33894",
@@ -2501,7 +2516,12 @@ if _page == _NAV_PAGES[1]:
                         "% Uso SLA":         st.column_config.ProgressColumn(
                             label="% Uso SLA", min_value=0, max_value=200, format="%.1f%%",
                             help=">100% = excedió el umbral SLA"),
-                        "Estado SLA":        st.column_config.TextColumn(width=110),
+                        "Estado SLA":        st.column_config.TextColumn(width=110,
+                            help="✅ Cumple = dentro del umbral SLA · ❌ No cumple = excedió el umbral · ℹ️ Excepción = excedió el umbral pero está validado por operaciones como caso ajeno a Occimiano (cuenta como cumple en los %)"),
+                        "Motivo excepción":  st.column_config.TextColumn(
+                            width=300,
+                            help="Razón por la que la OT fue marcada como Excepción (registrada en sla_excepciones por operaciones).",
+                        ),
                         "Reporte de falla":  st.column_config.TextColumn(
                             width=320,
                             help="Descripción del problema reportado por el cliente (extraído de nota_tarea Fracttal / 'Detalles del incidente' de Cotalker)",

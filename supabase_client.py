@@ -590,7 +590,7 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
         f"select=os_fracttal,n_llamado,cliente,eds_occim,eds_nombre,comuna,region,"
         f"fecha_llamado,hora_llamado,fecha_atencion,hora_fin,tecnico,tecnico_corto,"
         f"equipo,equipo_senior,prioridad,zona,tiempo_resp_horas,tiempo_resp_esp,"
-        f"cumplimiento,estado_atencion,facturacion,fecha_creacion"
+        f"cumplimiento,excepcion_motivo,estado_atencion,facturacion,fecha_creacion"
         f"&fecha_llamado=gte.{desde}",
         limit=10_000
     )

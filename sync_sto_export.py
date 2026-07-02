@@ -52,8 +52,13 @@ _ESTADOS_NO_PUNTUAN = {
     "DUPLICADO", "Duplicidad", "DE PRUEBA",
     "FUE REPETIDA EN OTRA OS", "PLAN INCOMPLETO",
 }
-_SLA_EXC_OS = {"OS-37055", "OS-37448", "OS-37547"}
 _SLA_EXC_NUM = {"140785", "143926", "145331"}
+# _SLA_EXC_OS se carga dinámicamente en runtime desde Supabase
+# (tabla sla_excepciones). Antes era hardcoded; ahora operaciones
+# puede dar de alta nuevas excepciones sin tocar código.
+# La vista v_llamados_sla ya marca estas OTs como CUMPLE via JOIN,
+# pero mantenemos este set como capa de defensa.
+_SLA_EXC_OS: set = set()
 _EQUIPO_LABEL = {k: k for k in GRUPOS_TERRENO}
 _EQUIPO_LABEL["Carlos Avila Norte"] = "Carlos Avila (Norte)"
 _EQUIPO_LABEL["Carlos Avila Sur"] = "Carlos Avila (Sur)"
@@ -156,6 +161,17 @@ def _bono_prec(pct):
 def main():
     t0 = time.time()
     log("Inicio sync STO export")
+
+    # ── 0. Cargar excepciones SLA desde Supabase ────────────────────────────
+    global _SLA_EXC_OS
+    try:
+        _rows_exc = _query("sla_excepciones", "select=os_fracttal", limit=5000)
+        _SLA_EXC_OS = {str(r.get("os_fracttal") or "").strip().upper()
+                       for r in _rows_exc if r.get("os_fracttal")}
+        log(f"  Excepciones SLA cargadas: {len(_SLA_EXC_OS)}", "OK")
+    except Exception as _e_exc:
+        log(f"No se pudieron cargar excepciones SLA: {_e_exc}", "WARN")
+        _SLA_EXC_OS = set()
 
     # ── 1. Cargar datos desde Supabase ──────────────────────────────────────
     log("Cargando work orders...")
