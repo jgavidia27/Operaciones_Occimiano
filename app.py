@@ -2556,11 +2556,19 @@ if _page == _NAV_PAGES[1]:
         # SUB-PESTAÑA: SERVICIO TÉCNICO
         # ══════════════════════════════════════════════════════════════════════
         with _tab_tec:
-            # ── Filtros fila 1: Empresa / Período / Mes / Prioridad / Cumplimiento ──
-            ef1, ef2, ef3, ef4, ef5 = st.columns([1.2, 1.2, 1.8, 1.2, 1.5])
+            # ── Filtros fila 1: Empresa / Cliente / Período / Mes / Prioridad / Cumplimiento ──
+            ef1, ef_cli, ef2, ef3, ef4, ef5 = st.columns([1.1, 1.3, 1.1, 1.6, 1.0, 1.3])
             with ef1:
                 sel_emp_t = st.selectbox("Empresa", ["Occimiano", "Elecons", "AUTEC"],
                                          key="tec_emp")
+            with ef_cli:
+                # Cliente: permite cruzar Empresa (quién ejecuta) × Cliente (para quién),
+                # ej. ¿cómo se desempeña AUTEC atendiendo Aramco?
+                _CLI_PREF_T = ["COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"]
+                _cli_present_t = set(df_llamados["cliente"].dropna().unique())
+                _cli_opts_t = ["Todos"] + [c for c in _CLI_PREF_T if c in _cli_present_t] + \
+                    sorted([c for c in _cli_present_t if c not in _CLI_PREF_T])
+                sel_cli_t = st.selectbox("Cliente", _cli_opts_t, key="tec_cli")
             with ef2:
                 sel_trim_t = st.selectbox("Período", _trim_opts, key="tec_trim")
             with ef3:
@@ -2616,6 +2624,17 @@ if _page == _NAV_PAGES[1]:
             if sel_tec_t != "Todos": df_lt = df_lt[df_lt["tecnico"] == sel_tec_t]
             if sel_pr_t  != "Todas": df_lt = df_lt[df_lt["prioridad"].str.upper() == sel_pr_t.upper()]
             if sel_cu_t  != "Todos": df_lt = df_lt[df_lt["cumplimiento"] == sel_cu_t]
+            # Filtro Cliente (normalizado para que Aramco/ESMAX en cualquier variante
+            # matchee — ej. 'Aramco (Esmax)' vs 'ESMAX (Aramco)').
+            if sel_cli_t != "Todos":
+                def _norm_cli_t(s):
+                    s = str(s or "").upper()
+                    if "COPEC" in s: return "COPEC"
+                    if "ARAMCO" in s or "ESMAX" in s: return "ARAMCO"
+                    if "SHELL" in s or "ENEX" in s: return "SHELL"
+                    return s.strip()
+                _sel_key = _norm_cli_t(sel_cli_t)
+                df_lt = df_lt[df_lt["cliente"].apply(_norm_cli_t) == _sel_key]
 
             # ── KPIs ──────────────────────────────────────────────────────────
             _cumple_t   = (df_lt["cumplimiento"] == "CUMPLE").sum()
@@ -2640,7 +2659,7 @@ if _page == _NAV_PAGES[1]:
             tk5.metric("Técnicos activos", str(_tec_activos_cnt))
 
             st.divider()
-            _ll_sig_t = f"{len(df_llamados)}_{sel_emp_t}_{sel_trim_t}_{sel_mes_t}_{sel_eq_t}_{sel_tec_t}_{sel_pr_t}_{sel_cu_t}"
+            _ll_sig_t = f"{len(df_llamados)}_{sel_emp_t}_{sel_cli_t}_{sel_trim_t}_{sel_mes_t}_{sel_eq_t}_{sel_tec_t}_{sel_pr_t}_{sel_cu_t}"
 
             # ── SECCIÓN: Cumplimiento SLA ─────────────────────────────────────
             st.markdown('<div class="section-header">📊  Cumplimiento SLA</div>', unsafe_allow_html=True)
