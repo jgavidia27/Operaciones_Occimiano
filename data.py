@@ -972,6 +972,7 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "numeral_motivo":    numeral_motivo,
             "form_tiene_numeral": wo.get("form_tiene_numeral"),
             "es_lavadora":       _es_lavadora,
+            "equipo_nombre":     _equipo_nombre,   # UPPERCASE, para mostrar tipo
             "numeral_valor":     _numeral_valor,
             "numeral_inicial":   _num_inicial,
             "numeral_final":     _num_final,
@@ -1060,6 +1061,12 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         _agg["form_tiene_numeral"] = ("form_tiene_numeral", lambda x: bool(any(bool(v) for v in x)))
     if "equipment_code" in df_kpi.columns:
         _agg["equipment_code"] = ("equipment_code", "first")
+    if "equipo_nombre" in df_kpi.columns:
+        # Concatenar nombres únicos de todos los equipos de la OT (para
+        # detectar en el dashboard cuando una OT toca varios tipos: p.ej.
+        # LAVADORA + ABLANDADOR + BOMBA).
+        _agg["equipo_nombre"] = ("equipo_nombre",
+            lambda x: " · ".join(sorted({str(v).strip() for v in x if v})))
     if "eds_occim" in df_kpi.columns:
         _agg["eds_occim"] = ("eds_occim", "first")
     if "fichas_periodo" in df_kpi.columns:

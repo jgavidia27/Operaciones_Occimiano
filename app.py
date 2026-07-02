@@ -62,7 +62,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v22-numeral-any-remota"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v23-equipo-nombre"  # bump para invalidar disco al cambiar data.py
 
 
 def _filtro_ot_input(key: str, columna_ot: str = "OT") -> str:
@@ -9734,6 +9734,38 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     # Columna 3: Tipo (title case)
                     drill_disp["_tipo"] = drill_disp["maint_type"].fillna("").str.title()
 
+                    # Columna 3a: Tipo(s) de equipo del OT — icono + label.
+                    # Sirve para leer de un vistazo por qué el numeral aplica o no
+                    # (lavadora sí aplica; ablandador/bomba no; OT mixta muestra
+                    # todos los tipos separados por '+').
+                    _EQUIPO_TIPOS = [
+                        (r"HIDROLAVAD", "💦 Hidrolavadora"),
+                        (r"LAVAINT",    "🧼 Lavainteriores"),
+                        (r"LAVAD",      "🚿 Lavadora"),
+                        (r"ASPIRA",     "🧹 Aspiradora"),
+                        (r"ABLAND",     "💧 Ablandador"),
+                        (r"HIDROPACK",  "🛢️ Hidropack"),
+                        (r"BOMBA",      "⚙️ Bomba"),
+                        (r"TERMO",      "🔥 Termo"),
+                        (r"COMPRESOR",  "🌬️ Compresor"),
+                        (r"TWISTER",    "🌀 Twister"),
+                        (r"SKID",       "🛠️ Skid"),
+                    ]
+                    import re as _re_tipo
+                    def _fmt_tipo_equipo(nom: str) -> str:
+                        s = str(nom or "").upper()
+                        if not s or s == "—":
+                            return "—"
+                        tipos = []
+                        for pat, lbl in _EQUIPO_TIPOS:
+                            if _re_tipo.search(pat, s) and lbl not in tipos:
+                                tipos.append(lbl)
+                        return " + ".join(tipos) if tipos else "🔧 Otro"
+                    _eq_src = (drill_disp["equipo_nombre"]
+                               if "equipo_nombre" in drill_disp.columns
+                               else pd.Series("", index=drill_disp.index))
+                    drill_disp["_tipo_equipo"] = _eq_src.fillna("").apply(_fmt_tipo_equipo)
+
                     # Columna 3b: Modalidad de atención (informativa, no KPI).
                     # Simplificamos '1.- ATENDIDO PRESENCIAL' → 'Presencial',
                     # '2.- ATENDIDO VÍA REMOTA' → 'Remoto', etc.
@@ -9814,18 +9846,19 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     else:
                         drill_disp["_estado_ot"] = "—"
 
-                    # Selección ordenada — Modalidad va junto a Tipo (informativa)
+                    # Selección ordenada — Tipo Equipo va justo antes de Numeral
+                    # para leer causalmente por qué aplica o no.
                     drill_disp = drill_disp[[
-                        "_cumple", "_x4", "folio", "_eds", "tecnico", "station", "_tipo", "_modalidad",
-                        "_estado_ot", "score_total",
-                        "_col_tiempo", "_col_causa", "_col_numeral",
+                        "_cumple", "_x4", "folio", "_eds", "tecnico", "station",
+                        "_tipo", "_modalidad", "_estado_ot", "score_total",
+                        "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
                         "_obs", "_fecha",
                     ]].copy()
 
                     drill_disp.columns = [
-                        "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación", "Tipo", "Modalidad",
-                        "Estado", "Score",
-                        "⏱ Tiempo", "🔍 Causa raíz", "🔢 Numeral",
+                        "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación",
+                        "Tipo", "Modalidad", "Estado", "Score",
+                        "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
                         "💬 Observación", "Fecha",
                     ]
 
@@ -9877,6 +9910,10 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 help="Minutos con Fracttal abierto. ✅ cumple ≥75% del estimado neto · MC no aplica (auto-25)."),
                             "🔍 Causa raíz":    st.column_config.TextColumn(width=240,
                                 help="Causa registrada por el técnico. Solo se evalúa en MC; MP siempre da 25 auto."),
+                            "🔧 Equipo":        st.column_config.TextColumn(width=170,
+                                help="Tipo(s) de equipo del OT. El numeral SOLO aplica a Lavadora, Aspiradora, "
+                                     "Lavainteriores e Hidrolavadora. Ablandador/Bomba/Termo/etc. → 'No aplica'. "
+                                     "OTs con varios tipos se muestran separados por '+'."),
                             "🔢 Numeral":       st.column_config.TextColumn(width=160,
                                 help="Calidad del numeral en lavadora/aspiradora (MC+MP). Motivo del dato malo si no cumple."),
                             "💬 Observación":   st.column_config.TextColumn(width=260,
