@@ -8225,6 +8225,75 @@ elif _page == _NAV_PAGES[0]:
                     "Promedio equipo · base bono senior",
                     _df_equipo_full, _t)
             else:
+                # ── Banner GLOBAL (todos los equipos combinados) ───────────
+                # Solo se muestra en la vista "Todos los equipos". Aparece
+                # arriba en un banner distintivo (borde grueso + label GLOBAL)
+                # para diferenciarlo visualmente de las tarjetas por equipo.
+                if len(_EQUIPO_LABEL_PREC) > 1 and not df_tec_scores.empty:
+                    _g_llen = int(df_tec_scores["ots_evaluadas"].sum())
+                    _g_err  = int(df_tec_scores["n_errores"].sum())
+                    _g_ok   = _g_llen - _g_err
+                    _g_pct  = (_g_ok / _g_llen * 100) if _g_llen > 0 else 0.0
+                    _g_et = int(df_tec_scores["err_tiempo"].sum())    if "err_tiempo"    in df_tec_scores.columns else 0
+                    _g_ec = int(df_tec_scores["err_causa"].sum())     if "err_causa"     in df_tec_scores.columns else 0
+                    _g_en = int(df_tec_scores["err_numeral"].sum())   if "err_numeral"   in df_tec_scores.columns else 0
+                    _g_ed = int(df_tec_scores["err_deteccion"].sum()) if "err_deteccion" in df_tec_scores.columns else 0
+                    _g_etd = _g_et + _g_ec + _g_en
+                    _g_bp, _g_bl, _g_bc, _g_bclp = _bono_prec(_g_pct)
+                    _g_bw = min(100, max(0, _g_pct))
+                    _g_ntec = int(len(df_tec_scores))
+                    _g_bsum = int(df_tec_scores["bono_semanal"].sum()) if "bono_semanal" in df_tec_scores.columns else 0
+                    _g_cbon = int(df_tec_scores["umbral_bono"].sum())  if "umbral_bono"  in df_tec_scores.columns else 0
+
+                    # Etiqueta de contexto del filtro activo
+                    _g_ctx_bits = []
+                    if _meses_prec_str:
+                        _g_ctx_bits.append(f"{len(_meses_prec_str)} mes(es)")
+                    if _sem_prec and _sem_prec != "Todas":
+                        _g_ctx_bits.append(_sem_prec)
+                    if _trim_prec and _trim_prec != "Todos":
+                        _g_ctx_bits.append(_trim_prec)
+                    _g_ctx = " · ".join(_g_ctx_bits) if _g_ctx_bits else "todo el período"
+
+                    st.markdown(
+                        f'<div style="background:linear-gradient(90deg, {_t["card"]} 0%, {_g_bc}11 100%);'
+                        f'border:2px solid {_g_bc};border-left:6px solid {_g_bc};'
+                        f'border-radius:8px;padding:12px 18px;margin-bottom:12px;'
+                        f'display:flex;align-items:center;gap:20px;flex-wrap:wrap;">'
+                        # Bloque 1: Label GLOBAL + %
+                        f'<div style="flex:0 0 auto;text-align:left;">'
+                        f'<div style="font-size:0.65rem;font-weight:800;letter-spacing:0.12em;'
+                        f'text-transform:uppercase;color:{_g_bc};margin-bottom:2px;">🌐 GLOBAL</div>'
+                        f'<div style="font-size:0.70rem;color:{_t["muted"]};line-height:1.1;">'
+                        f'Todos los equipos<br>{_g_ntec} téc. · {_g_ctx}</div>'
+                        f'</div>'
+                        # Bloque 2: % Cumplimiento grande
+                        f'<div style="flex:0 0 auto;text-align:center;border-left:1px solid {_t["muted"]}22;padding-left:20px;">'
+                        f'<div style="font-size:2.2rem;font-weight:800;line-height:1;color:{_g_bc};">{_g_pct:.1f}%</div>'
+                        f'<div style="font-size:0.62rem;font-weight:600;letter-spacing:0.05em;'
+                        f'text-transform:uppercase;color:{_t["muted"]};">cumplimiento global</div>'
+                        f'</div>'
+                        # Bloque 3: Barra de progreso
+                        f'<div style="flex:1 1 180px;min-width:150px;">'
+                        f'<div style="background:{_t["prog_bg"]};border-radius:4px;height:10px;margin-bottom:4px;">'
+                        f'<div style="background:{_g_bc};width:{_g_bw:.0f}%;height:10px;border-radius:4px;"></div></div>'
+                        f'<div style="font-size:0.70rem;color:{_t["muted"]};">'
+                        f'<b style="color:{_t["text"]};">{_g_llen:,}</b> llenadas · '
+                        f'<b style="color:#ef4444;">{_g_err:,}</b> c/error · '
+                        f'<b style="color:#22c55e;">{_g_ok:,}</b> correctas</div>'
+                        f'</div>'
+                        # Bloque 4: Desglose errores + bonos
+                        f'<div style="flex:0 0 auto;text-align:right;border-left:1px solid {_t["muted"]}22;padding-left:20px;">'
+                        f'<div style="background:{_g_bc};color:#fff;border-radius:4px;'
+                        f'padding:3px 12px;font-size:0.78rem;font-weight:700;display:inline-block;margin-bottom:5px;">{_g_bl}</div>'
+                        f'<div style="font-size:0.65rem;color:{_t["muted"]};line-height:1.4;">'
+                        f'Err.: {_g_etd} (⏱{_g_et} 🔍{_g_ec} 🔢{_g_en} 🎯{_g_ed})<br>'
+                        f'<b>{_g_cbon}/{_g_ntec}</b> con bono · <b>${_g_bsum:,.0f}</b>/sem</div>'
+                        f'</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
                 # Flujo normal: 1 tarjeta por equipo
                 _prec_eq_cols = st.columns(len(_EQUIPO_LABEL_PREC))
                 for _pi, (_pgk, _pgl) in enumerate(
