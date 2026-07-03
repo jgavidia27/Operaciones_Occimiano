@@ -5760,6 +5760,7 @@ elif _page == _NAV_PAGES[4]:
                 "mp":   ("🟢 MP fuera de Santiago", "#16a34a", "#dcfce7"),
                 "vac":  ("🔻 Vacaciones / libre",   "#dc2626", "#fee2e2"),
                 "fer":  ("🟠 Feriado",              "#f59e0b", "#fef3c7"),
+                "finde":("🟡 Fin de semana",        "#fbbf24", "#fefce8"),
                 "ofi":  ("📚 Oficina",              "#64748b", "#f1f5f9"),
                 "ins":  ("🔵 Instalación/Proyecto", "#2563eb", "#dbeafe"),
                 "tur":  ("👔 Turno",                "#0ea5e9", "#e0f2fe"),
@@ -5767,14 +5768,66 @@ elif _page == _NAV_PAGES[4]:
                 "cap":  ("🟣 Capacitación",         "#a855f7", "#f3e8ff"),
                 "libre":("· Sin asignar",           "#cbd5e1", "#ffffff"),
             }
+
+            # ── Cargar turnos de fin de semana desde turnos_data.json ──────
+            # Marca quién está de turno cada sábado/domingo (índices 5 y 6 de
+            # los horarios; 'Libre' = no trabaja). Se usa para diferenciar
+            # 'fin de semana libre' de 'de turno el finde'.
+            @st.cache_data(ttl=1800, show_spinner=False)
+            def _turnos_finde_idx():
+                import json as _js_t
+                _idx = {}   # {fecha_iso: set(nombres_norm de quienes trabajan)}
+                try:
+                    _pt = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "turnos_data.json")
+                    with open(_pt, "r", encoding="utf-8") as _f:
+                        _tdata = _js_t.load(_f)
+                except Exception:
+                    return {}
+                for _wk in _tdata.get("weeks", []):
+                    _dts = _wk.get("dates", [])
+                    for _zk, _zv in _wk.get("zones", {}).items():
+                        for _tn in _zv.get("turnos", []):
+                            _nom = str(_tn.get("tecnico") or "")
+                            if not _nom or _nom.upper() == "N/A":
+                                continue
+                            _hrs = _tn.get("horarios", [])
+                            # solo sábado (5) y domingo (6)
+                            for _di in (5, 6):
+                                if _di < len(_dts) and _di < len(_hrs):
+                                    _h = str(_hrs[_di] or "").strip().upper()
+                                    if _h and _h != "LIBRE":
+                                        _idx.setdefault(_dts[_di], set()).add(_norm_nom(_nom))
+                return _idx
+            _TURNOS_FS = _turnos_finde_idx()
+
+            def _en_turno_finde(fecha_d, tec):
+                """True si el técnico está de turno ese sábado/domingo según
+                el cronograma de turnos (match por tokens del nombre)."""
+                _nombres = _TURNOS_FS.get(fecha_d.isoformat())
+                if not _nombres:
+                    return False
+                _tks = set(_norm_nom(tec).split())
+                for _full in _nombres:
+                    if _tks and _tks.issubset(set(_full.split())):
+                        return True
+                return False
+
             def _tipo_sto(fecha_d, tec, txt):
                 _clr = str(_colores_sto.get((fecha_d, tec), "") or "").upper()
                 s = str(txt or "").upper()
-                if _clr == "#FF0000" or "VACACION" in s or "LIBRE" in s: return "vac"
+                _es_finde = fecha_d.weekday() >= 5
+                # Vacaciones explícitas (color rojo o texto) — gana siempre
+                if _clr == "#FF0000" or "VACACION" in s:                 return "vac"
+                # Fin de semana: distinguir turno vs libre (no es feriado)
+                if _es_finde:
+                    if _en_turno_finde(fecha_d, tec):                    return "tur"
+                    return "finde"
+                # Feriado real (entre semana, color naranja o texto)
                 if _clr == "#FFC000" or "FERIADO" in s:                  return "fer"
+                if "LIBRE" in s:                                         return "vac"
                 if _clr == "#00FF00":                                    return "mp"
                 if not s.strip():                                        return "libre"
-                # 'REEMPLAZO WSOTO' (reemplazo de Walter Soto) = labor de oficina
                 if "OFICINA" in s or "REEMPLAZO" in s or "WSOTO" in s:   return "ofi"
                 if "INSTAL" in s or "PROYECTO" in s or "AUDITOR" in s:   return "ins"
                 if "CAPACITA" in s:                                      return "cap"
@@ -5813,7 +5866,7 @@ elif _page == _NAV_PAGES[4]:
                         if _tp == "libre":  # no mostrar sin-asignar
                             continue
                         _grupos.setdefault(_tp, []).append((_tec, _txt))
-                    _orden = ["mp","asig","ins","tur","ofi","cap","vac","fer"]
+                    _orden = ["mp","asig","ins","tur","ofi","cap","vac","fer","finde"]
                     _cols_html = ""
                     for _o in [o for o in _orden if o in _grupos]:
                         _lbl, _ci, _bg = _TIPOS_STO[_o]
