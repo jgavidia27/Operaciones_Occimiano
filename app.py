@@ -6559,6 +6559,9 @@ elif _page == _NAV_PAGES[4]:
         _thoy_bg = "#1e3a5f" if _is_dark else "#dbeafe"
         _tlibre  = "#2d2d3f" if _is_dark else "#f1f5f9"
         _tborder = "#334155" if _is_dark else "#e2e8f0"
+        # Fin de semana: fondo ámbar suave para resaltar sábado/domingo
+        _tfinde_bg = "#3a3320" if _is_dark else "#fef3c7"
+        _tfinde_hd = "#4a3f22" if _is_dark else "#fde68a"
         _turno_c = ["#10b981", "#818cf8", "#f59e0b"]
 
         for _zk in ["centro", "norte", "sur"]:
@@ -6587,12 +6590,14 @@ elif _page == _NAV_PAGES[4]:
             for _di, _dd in enumerate(_w_dates):
                 _dp = _date_turnos.fromisoformat(_dd)
                 _is_hoy = _dd == _hoy_iso
-                _bg = _thoy_bg if _is_hoy else "transparent"
+                _is_fs  = _dp.weekday() >= 5   # sábado / domingo
+                _bg = _thoy_bg if _is_hoy else (_tfinde_hd if _is_fs else "transparent")
                 _brd = f"border-left:2px solid {_taccent};border-right:2px solid {_taccent};border-top:2px solid {_taccent};" if _is_hoy else ""
+                _dia_col = "#b45309" if (_is_fs and not _is_hoy and not _is_dark) else _tmuted
                 _hdr_html += (
                     f'<th style="text-align:center;padding:8px 2px;min-width:90px;'
                     f'background:{_bg};{_brd}border-bottom:2px solid {_tborder};">'
-                    f'<div style="font-size:0.65rem;color:{_tmuted};font-weight:700;letter-spacing:0.05em;">'
+                    f'<div style="font-size:0.65rem;color:{_dia_col};font-weight:800;letter-spacing:0.05em;">'
                     f'{_DIA_NOMBRE[_di]}</div>'
                     f'<div style="font-size:0.95rem;font-weight:700;color:{_ttxt};">{_dp.day}</div>'
                     f'<div style="font-size:0.65rem;color:{_tmuted};">{_MES_LABEL_T[_dp.month]}</div>'
@@ -6627,19 +6632,24 @@ elif _page == _NAV_PAGES[4]:
                 for _di, _dd in enumerate(_w_dates):
                     _h = _hrs[_di] if _di < len(_hrs) else ""
                     _is_hoy = _dd == _hoy_iso
-                    _cbg = _thoy_bg if _is_hoy else _row_bg
+                    _is_fs  = _date_turnos.fromisoformat(_dd).weekday() >= 5
+                    # Prioridad de fondo: HOY > fin de semana > fila normal
+                    _cbg = _thoy_bg if _is_hoy else (_tfinde_bg if _is_fs else _row_bg)
                     _brd = f"border-left:2px solid {_taccent};border-right:2px solid {_taccent};" if _is_hoy else ""
                     if _h.lower() == "libre":
                         _data_cells += (
-                            f'<td style="text-align:center;padding:8px 4px;background:{_tlibre};'
+                            f'<td style="text-align:center;padding:8px 4px;background:{_cbg};'
                             f'{_brd}border-bottom:1px solid {_tborder};">'
                             f'<span style="color:{_tmuted};font-size:0.75rem;font-style:italic;">Libre</span></td>'
                         )
                     else:
+                        # De turno en fin de semana: resaltar el horario en ámbar oscuro
+                        _htxt = "#b45309" if (_is_fs and not _is_hoy and not _is_dark) else _ttxt
+                        _hwt  = "700" if _is_fs else "500"
                         _data_cells += (
                             f'<td style="text-align:center;padding:8px 4px;background:{_cbg};'
                             f'{_brd}border-bottom:1px solid {_tborder};">'
-                            f'<span style="color:{_ttxt};font-size:0.8rem;font-weight:500;">{_h}</span></td>'
+                            f'<span style="color:{_htxt};font-size:0.8rem;font-weight:{_hwt};">{_h}</span></td>'
                         )
                 _rows_html += f'<tr>{_name_cell}{_data_cells}</tr>'
 
