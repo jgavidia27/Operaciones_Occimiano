@@ -3632,6 +3632,17 @@ if _page == _NAV_PAGES[1]:
                 if "OCAMPO" in su: return "Jaime Ocampo (Elecons)"
                 return s
 
+            # Excluir técnicos "no aplica" (personas que no son técnicos
+            # operativos, dueños o similares). Se preserva 'Jaime Ocampo'
+            # porque lo tratamos como Elecons (contratista externo).
+            def _es_no_aplica_ranking(tec_norm):
+                s = str(tec_norm or "").upper()
+                for excluido in ("WALTER SOTO", "ANA GUZMAN", "JUAN VALLE",
+                                 "WALTER MAURICIO", "ANA MARIA GUZMAN",
+                                 "JUAN PABLO VALLE"):
+                    if excluido in s: return True
+                return False
+
             _rk_data = []
             if not _venc_cerradas.empty:
                 _venc_cerradas = _venc_cerradas.assign(
@@ -3659,6 +3670,7 @@ if _page == _NAV_PAGES[1]:
                 _rk["abiertas"] = _rk["abiertas"].fillna(0).astype(int)
                 _rk["total"]    = _rk["cerradas"] + _rk["abiertas"]
                 _rk = _rk[_rk["_tec"].astype(str).str.strip() != ""]
+                _rk = _rk[~_rk["_tec"].apply(_es_no_aplica_ranking)]
                 _rk = _rk.sort_values("total", ascending=False)
 
                 def _empresa(tec):
@@ -3672,28 +3684,164 @@ if _page == _NAV_PAGES[1]:
                     "_tec":     "Técnico",
                     "cerradas": "Vencidas cerradas",
                     "abiertas": "Vencidas abiertas ahora",
-                    "total":    "Total SLA vencidos",
-                })[["Técnico","Empresa","Vencidas cerradas",
-                    "Vencidas abiertas ahora","Total SLA vencidos"]]
+                })[["Técnico","Empresa","Vencidas cerradas","Vencidas abiertas ahora"]]
 
-                _max_v = int(_rk_show["Total SLA vencidos"].max() or 1)
                 _show_df(_rk_show.reset_index(drop=True), hide_index=True,
                     width="stretch",
                     column_config={
-                        "Técnico":                st.column_config.TextColumn(width=220),
-                        "Empresa":                st.column_config.TextColumn(width=110),
+                        "Técnico":                st.column_config.TextColumn(width=240),
+                        "Empresa":                st.column_config.TextColumn(width=120),
                         "Vencidas cerradas":      st.column_config.NumberColumn(
-                            format="%d", width=140,
-                            help="OTs ya cerradas que NO cumplieron SLA (historico 2026)."),
+                            format="%d", width=160,
+                            help="OTs ya cerradas que NO cumplieron SLA."),
                         "Vencidas abiertas ahora":st.column_config.NumberColumn(
-                            format="%d", width=170,
+                            format="%d", width=200,
                             help="OTs actualmente abiertas y ya vencidas (del filtro actual)."),
-                        "Total SLA vencidos":     st.column_config.ProgressColumn(
-                            format="%d", min_value=0, max_value=_max_v, width=180,
-                            help="Suma total. Escala relativa al peor del ranking."),
                     })
                 _n_show = min(20, len(_rk))
-                st.caption(f"Top {_n_show} de {len(_rk)} técnicos con al menos 1 SLA vencido.")
+                st.caption(f"Top {_n_show} de {len(_rk)} responsables con al menos 1 SLA vencido.")
+
+                # ── Gráfico de barras: TOP responsables con más vencimientos ──
+                import plotly.graph_objects as _pgo_v
+                _bar_df = _rk.head(10).copy()
+                if not _bar_df.empty:
+                    _color_map = {"🔵 AUTEC": "#3b82f6",
+                                  "🟣 Elecons": "#a855f7",
+                                  "🟢 Occimiano": "#22c55e"}
+                    _colors = [_color_map.get(_empresa(t), "#94a3b8")
+                               for t in _bar_df["_tec"]]
+                    _fig_v = _pgo_v.Figure(_pgo_v.Bar(
+                        x=_bar_df["total"], y=_bar_df["_tec"],
+                        orientation="h",
+                        marker_color=_colors,
+                        text=_bar_df["total"], textposition="outside",
+                        hovertemplate="<b>%{y}</b><br>SLA vencidos: %{x}<extra></extra>",
+                    ))
+                    _ctx_titulo = sel_cli_live if sel_cli_live != "Todos" else "Todos los clientes"
+                    _ctx_mes    = sel_mes_live if sel_mes_live != "Todos" else "todo 2026"
+                    _fig_v.update_layout(
+                        title=dict(
+                            text=f"<b>Top 10 · Mayores responsables de vencimientos</b>"
+                                 f"<br><span style='font-size:0.72rem;color:#94a3b8;font-weight:400'>"
+                                 f"{_ctx_titulo} · {_ctx_mes}</span>",
+                            font=dict(size=13)),
+                        height=max(220, 32 * len(_bar_df) + 90),
+                        margin=dict(l=10, r=40, t=70, b=10),
+                        yaxis=dict(autorange="reversed", title=""),
+                        xaxis=dict(title="OTs con SLA vencido", tickformat="d"),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        showlegend=False,
+                    )
+                    st.plotly_chart(_fig_v, use_container_width=True,
+                                    key=f"bar_venc_{sel_cli_live}_{sel_mes_live}")
+
+            st.divider()
+
+            # ══════════════════════════════════════════════════════════════════
+            # RANKING: Técnicos MÁS EFICIENTES (OTs CUMPLIDAS en tiempo)
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown(
+                '<div class="section-header">'
+                '⭐  Ranking · Técnicos más eficientes (SLA cumplidos)'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "OTs correctivas **CERRADAS EN TIEMPO** por técnico. "
+                "Complementa el ranking de vencimientos — permite ver quién sostiene "
+                "el desempeño operativo. Respeta filtros de Cliente y Mes."
+            )
+
+            _cumpl_hist = pd.DataFrame()
+            if not df_llamados.empty and "cumplimiento" in df_llamados.columns:
+                _cumpl_hist = df_llamados[
+                    (df_llamados["cumplimiento"] == "CUMPLE") &
+                    (df_llamados["tecnico"].notna())
+                ].copy()
+                if sel_cli_live != "Todos":
+                    _cumpl_hist = _cumpl_hist[
+                        _cumpl_hist["cliente"].apply(_norm_cli_live) == _sel_norm
+                    ]
+                if sel_mes_live != "Todos":
+                    _mes_num_e = {v: k for k, v in _MES_ES_LIVE.items()}.get(
+                        sel_mes_live.split(" ")[0])
+                    if _mes_num_e:
+                        _fl_e = pd.to_datetime(_cumpl_hist["fecha_llamado"],
+                                               errors="coerce", utc=True)
+                        _cumpl_hist = _cumpl_hist[
+                            (_fl_e.dt.year == _year) &
+                            (_fl_e.dt.month == _mes_num_e)
+                        ]
+
+            if _cumpl_hist.empty:
+                st.info("No hay OTs cumplidas en el filtro seleccionado.")
+            else:
+                _cumpl_hist = _cumpl_hist.assign(
+                    _tec_norm=_cumpl_hist["tecnico"].apply(_norm_tec))
+                _ef = _cumpl_hist.groupby("_tec_norm").agg(
+                    cumplen=("os_fracttal", "count"),
+                ).reset_index().rename(columns={"_tec_norm": "_tec"})
+                _ef = _ef[_ef["_tec"].astype(str).str.strip() != ""]
+                _ef = _ef[~_ef["_tec"].apply(_es_no_aplica_ranking)]
+
+                # Enriquecer con vencidas cerradas del mismo scope
+                # para poder mostrar total atendidas y % efectividad
+                _venc_scope = pd.DataFrame()
+                if not df_llamados.empty:
+                    _venc_scope = df_llamados[
+                        (df_llamados["cumplimiento"] == "NO CUMPLE") &
+                        (df_llamados["tecnico"].notna())
+                    ].copy()
+                    if sel_cli_live != "Todos":
+                        _venc_scope = _venc_scope[
+                            _venc_scope["cliente"].apply(_norm_cli_live) == _sel_norm
+                        ]
+                    if sel_mes_live != "Todos" and _mes_num_e:
+                        _fl_s = pd.to_datetime(_venc_scope["fecha_llamado"],
+                                               errors="coerce", utc=True)
+                        _venc_scope = _venc_scope[
+                            (_fl_s.dt.year == _year) &
+                            (_fl_s.dt.month == _mes_num_e)
+                        ]
+                    _venc_scope = _venc_scope.assign(
+                        _tec_norm=_venc_scope["tecnico"].apply(_norm_tec))
+                    _venc_ct = _venc_scope.groupby("_tec_norm").agg(
+                        vencen=("os_fracttal", "count"),
+                    ).reset_index().rename(columns={"_tec_norm": "_tec"})
+                    _ef = _ef.merge(_venc_ct, on="_tec", how="left")
+                if "vencen" not in _ef.columns:
+                    _ef["vencen"] = 0
+                _ef["vencen"] = _ef["vencen"].fillna(0).astype(int)
+                _ef["total"]  = _ef["cumplen"] + _ef["vencen"]
+                _ef["_pct"]   = (_ef["cumplen"] / _ef["total"].clip(lower=1) * 100).round(1)
+                _ef = _ef.sort_values(["cumplen","_pct"], ascending=[False, False])
+
+                _ef["Empresa"] = _ef["_tec"].apply(_empresa)
+                _ef_show = _ef.head(20).rename(columns={
+                    "_tec":    "Técnico",
+                    "cumplen": "SLA cumplidos",
+                    "vencen":  "SLA vencidos",
+                    "total":   "Total atendidos",
+                    "_pct":    "% Efectividad",
+                })[["Técnico","Empresa","SLA cumplidos","SLA vencidos",
+                    "Total atendidos","% Efectividad"]]
+
+                _show_df(_ef_show.reset_index(drop=True), hide_index=True,
+                    width="stretch",
+                    column_config={
+                        "Técnico":         st.column_config.TextColumn(width=240),
+                        "Empresa":         st.column_config.TextColumn(width=120),
+                        "SLA cumplidos":   st.column_config.NumberColumn(format="%d", width=130,
+                            help="OTs cerradas dentro del umbral SLA (incluye excepciones)."),
+                        "SLA vencidos":    st.column_config.NumberColumn(format="%d", width=120),
+                        "Total atendidos": st.column_config.NumberColumn(format="%d", width=130),
+                        "% Efectividad":   st.column_config.ProgressColumn(
+                            format="%.1f%%", min_value=0, max_value=100, width=160,
+                            help="Cumplidos / Total. 100% = ningún vencimiento."),
+                    })
+                _n_ef = min(20, len(_ef))
+                st.caption(f"Top {_n_ef} de {len(_ef)} técnicos con al menos 1 SLA cumplido, ordenado por volumen.")
 
             st.divider()
             st.caption(
