@@ -12667,12 +12667,26 @@ elif _page == _NAV_PAGES[2]:
         # ── Filtros ─────────────────────────────────────────────────────
         _MESES_PR = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
                      "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
+        _MESES_PR_TIT = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+                         "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
+        _MIN_YR_PR = 2026   # solo interesa 2026 en adelante
         _yr_pr = _date_pr.today().year
         _mes_actual_pr = _date_pr.today().month
-        _hojas_disp_pr = [f"{_MESES_PR[m-1]} {_yr_pr}"
-                          for m in range(_mes_actual_pr, 0, -1)] + \
-                         [f"{_MESES_PR[m-1]} {_yr_pr-1}"
-                          for m in range(12, 0, -1)]
+        # Meses del año actual hasta el actual + todos los meses de años anteriores >= 2026
+        _hojas_disp_pr = []
+        if _yr_pr >= _MIN_YR_PR:
+            _hojas_disp_pr += [f"{_MESES_PR_TIT[m-1]} {_yr_pr % 100:02d}"
+                               for m in range(_mes_actual_pr, 0, -1)]
+        for _y in range(_yr_pr - 1, _MIN_YR_PR - 1, -1):
+            _hojas_disp_pr += [f"{_MESES_PR_TIT[m-1]} {_y % 100:02d}"
+                               for m in range(12, 0, -1)]
+
+        # Mapa etiqueta visible -> hoja original del Excel ('JULIO 2026')
+        _lbl2hoja_pr = {}
+        for _y in range(_MIN_YR_PR, _yr_pr + 1):
+            for _m in range(1, 13):
+                _lbl2hoja_pr[f"{_MESES_PR_TIT[_m-1]} {_y % 100:02d}"] = \
+                    f"{_MESES_PR[_m-1]} {_y}"
 
         _fp1, _fp2, _fp3, _fp4 = st.columns([1.8, 1.5, 1.5, 1])
         with _fp1:
@@ -12683,8 +12697,10 @@ elif _page == _NAV_PAGES[2]:
                 _load_programacion_mp.clear()
                 st.rerun()
 
+        # La hoja original del Excel sigue en formato 'JULIO 2026' (mayúsc, año completo)
+        _mes_pr_hoja = _lbl2hoja_pr.get(_mes_pr, _mes_pr)
         with st.spinner(f"Leyendo programación de {_mes_pr}…"):
-            _df_pr = _load_programacion_mp(_mes_pr)
+            _df_pr = _load_programacion_mp(_mes_pr_hoja)
 
         if _df_pr.empty:
             st.info(
@@ -12700,8 +12716,8 @@ elif _page == _NAV_PAGES[2]:
             # ── Cruce con Fracttal (Supabase) para validar ejecución real ──
             # El Excel no siempre se actualiza; Fracttal es la fuente de verdad.
             # Indexamos preventivas del mes por codigo_eds -> mejor OT.
-            _mes_num_pr0 = _MESES_PR.index(_mes_pr.split()[0]) + 1
-            _yr_pr0 = int(_mes_pr.split()[1])
+            _mes_num_pr0 = _MESES_PR.index(_mes_pr_hoja.split()[0]) + 1
+            _yr_pr0 = int(_mes_pr_hoja.split()[1])
 
             @st.cache_data(ttl=900, show_spinner=False)
             def _fracttal_mp_idx(mes_num, anio):
@@ -13008,8 +13024,8 @@ elif _page == _NAV_PAGES[2]:
             # ═══════════ CALENDARIO MES ═══════════
             elif _vista_pr == "🔥 Calendario mes":
                 import calendar as _cal_pr
-                _mes_num_pr = _MESES_PR.index(_mes_pr.split()[0]) + 1
-                _yr_pr_c = int(_mes_pr.split()[1])
+                _mes_num_pr = _MESES_PR.index(_mes_pr_hoja.split()[0]) + 1
+                _yr_pr_c = int(_mes_pr_hoja.split()[1])
                 _cal = _cal_pr.Calendar(firstweekday=0)  # lunes
                 _semanas_cal = _cal.monthdayscalendar(_yr_pr_c, _mes_num_pr)
                 # Índice: día -> {estados}
@@ -13137,7 +13153,7 @@ elif _page == _NAV_PAGES[2]:
 
             st.caption(
                 f"Mostrando **{len(_df_pr_disp):,}** de {_n_tot:,} EDS · "
-                f"Fuente: `2026 UTILIZACIÓN DE TIEMPO.xlsx` hoja **{_mes_pr}** sección POR REALIZAR · cache 5 min."
+                f"Fuente: `2026 UTILIZACIÓN DE TIEMPO.xlsx` hoja **{_mes_pr_hoja}** sección POR REALIZAR · cache 5 min."
             )
 
     # ══════════════════════════════════════════════════════════════════════
