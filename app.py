@@ -5650,7 +5650,16 @@ elif _page == _NAV_PAGES[4]:
                 # Selector de semana ISO
                 _df_vista["_iso_wk"] = pd.to_datetime(_df_vista["_fecha"]).dt.isocalendar().week
                 _semanas = sorted(_df_vista["_iso_wk"].unique().tolist())
-                _sem_lbl = [f"Semana {w}" for w in _semanas]
+                # Rango de fechas por semana (min-max de la semana en la hoja)
+                _rango_sem = {}
+                for _w in _semanas:
+                    _sub = _df_vista[_df_vista["_iso_wk"] == _w]["_fecha"]
+                    _mn = pd.to_datetime(_sub.min())
+                    _mx = pd.to_datetime(_sub.max())
+                    _rango_sem[_w] = (
+                        f"Semana {_w} ({_mn.strftime('%d/%m')} – {_mx.strftime('%d/%m')})"
+                    )
+                _sem_lbl = [_rango_sem[w] for w in _semanas]
                 _sem_pick = st.selectbox("Semana", _sem_lbl, key="sto_sem_pick")
                 _sem_n = int(_sem_pick.split()[1])
                 _df_vista = _df_vista[_df_vista["_iso_wk"] == _sem_n].drop(columns="_iso_wk")
