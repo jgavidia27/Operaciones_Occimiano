@@ -1691,7 +1691,9 @@ if _page == _NAV_PAGES[1]:
                     .get(str(zona_key), None))
 
         # ── Sub-pestañas ──────────────────────────────────────────────────────
-        _tab_cli, _tab_tec, _tab_uptime_sla = st.tabs(["👤  Clientes", "🔧  Servicio Técnico", "⏱️  Uptime General"])
+        _tab_cli, _tab_tec, _tab_en_curso, _tab_uptime_sla = st.tabs(
+            ["👤  Clientes", "🔧  Servicio Técnico", "⏳  SLA en curso", "⏱️  Uptime General"]
+        )
 
         # ══════════════════════════════════════════════════════════════════════
         # SUB-PESTAÑA: CLIENTES
@@ -3062,6 +3064,341 @@ if _page == _NAV_PAGES[1]:
                     "Cumplimiento":     st.column_config.TextColumn(width=90),
                     "OS Fracttal":      st.column_config.TextColumn(width=105),
                 })
+
+        # ══════════════════════════════════════════════════════════════════════
+        # SUB-PESTAÑA: SLA EN CURSO  (radar de correctivas activas)
+        # Muestra las correctivas ABIERTAS (fecha_finalizacion IS NULL) con su
+        # cronómetro hasta el vencimiento del SLA. Distingue:
+        #   - Sin iniciar (fecha_inicio IS NULL) = nadie ha visto la OT
+        #   - En curso (fecha_inicio IS NOT NULL) = técnico ya trabajando
+        # Colores por urgencia:
+        #   verde >50% del umbral restante · amarillo 25-50% · rojo <25% o vencido
+        # ══════════════════════════════════════════════════════════════════════
+        with _tab_en_curso:
+            st.markdown(
+                '<div class="section-header">⏳  SLA en curso — correctivas activas</div>',
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "Monitor en tiempo real de correctivas NO cerradas. Cada OT tiene su "
+                "cronómetro descontando desde `fecha_llamado + umbral SLA`. "
+                "**🟢 verde** = >50% del umbral restante · **🟡 amarillo** = 25–50% · "
+                "**🔴 rojo** = <25% o vencido · **⚫ negro** = sin iniciar (nadie la ha tomado)."
+            )
+
+            # ── Botón de actualización manual + timestamp ──────────────────
+            _c_refresh, _c_ts = st.columns([1, 4])
+            with _c_refresh:
+                if st.button("🔄 Actualizar", key="sla_curso_refresh",
+                             use_container_width=True):
+                    st.rerun()
+            _hoy_now = pd.Timestamp.now()
+            with _c_ts:
+                st.markdown(
+                    f'<div style="padding:8px 0;color:{_t["muted"]};font-size:0.82rem;">'
+                    f'Última actualización: <b>{_hoy_now.strftime("%d/%m/%Y %H:%M:%S")}</b> · '
+                    f'usa el botón para refrescar cronómetros y detectar OTs recién asignadas.'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # ── Traer correctivas ABIERTAS desde ordenes_trabajo ─────────
+            # (df_llamados solo tiene lo cerrado; necesitamos las abiertas con
+            # sus fechas de inicio para calcular estado)
+            try:
+                from supabase_client import _query as _sc_query
+                _rows_ab = _sc_query(
+                    "ordenes_trabajo",
+                    "select=id_ot,cliente,estacion,codigo_eds,responsable,"
+                    "prioridad_calc,fecha_creacion,fecha_incidente,fecha_inicio,"
+                    "fecha_finalizacion,estado,nombre_activo,nota_tarea"
+                    "&tipo_tarea=ilike.*CORRECTIV*"
+                    "&fecha_finalizacion=is.null"
+                    "&estado=not.in.(Canceladas,Cancelada,Cancelado)"
+                    "&fecha_creacion=gte.2026-01-01",
+                    limit=2000,
+                )
+            except Exception as _e_ab:
+                st.error(f"No se pudo cargar correctivas abiertas: {_e_ab}")
+                _rows_ab = []
+
+            if not _rows_ab:
+                st.success("✅ ¡Excelente! No hay correctivas abiertas en este momento.")
+            else:
+                _df_ab = pd.DataFrame(_rows_ab)
+
+                # ── Enrich: umbral SLA desde sla_umbrales_horas ─────────
+                # cliente + prioridad_calc + zona_sla (default Regiones)
+                _sla_map = load_sla_umbrales_supabase()   # {cliente:{prio:{zona:h}}}
+
+                # Determinar zona SLA por EDS (Santiago vs Regiones)
+                _eds_zonas = {}
+                try:
+                    _eds_rows = _sc_query("estaciones_servicio",
+                        "select=eds_occim,zona_sla", limit=2000)
+                    _eds_zonas = {r.get("eds_occim"): (r.get("zona_sla") or "Regiones")
+                                  for r in _eds_rows}
+                except Exception:
+                    pass
+
+                def _umbral_horas(row):
+                    cli = str(row.get("cliente") or "")
+                    prio = str(row.get("prioridad_calc") or "").upper()
+                    zona = _eds_zonas.get(row.get("codigo_eds"), "Regiones")
+                    try:
+                        return _sla_map.get(cli, {}).get(prio, {}).get(zona)
+                    except Exception:
+                        return None
+                _df_ab["_umbral_h"] = _df_ab.apply(_umbral_horas, axis=1)
+
+                # T0 = fecha_incidente si existe, sino fecha_creacion
+                def _t0(row):
+                    for c in ("fecha_incidente","fecha_creacion"):
+                        v = row.get(c)
+                        if v:
+                            ts = pd.to_datetime(v, errors="coerce", utc=True)
+                            if pd.notna(ts):
+                                return ts.tz_convert("America/Santiago").tz_localize(None)
+                    return pd.NaT
+                _df_ab["_t0"]       = _df_ab.apply(_t0, axis=1)
+                _df_ab["_deadline"] = _df_ab.apply(
+                    lambda r: r["_t0"] + pd.Timedelta(hours=r["_umbral_h"])
+                    if pd.notna(r["_t0"]) and pd.notna(r["_umbral_h"]) else pd.NaT,
+                    axis=1,
+                )
+                _df_ab["_restante_min"] = _df_ab["_deadline"].apply(
+                    lambda dl: (dl - _hoy_now).total_seconds() / 60
+                    if pd.notna(dl) else None
+                )
+                _df_ab["_pct_restante"] = _df_ab.apply(
+                    lambda r: (r["_restante_min"] / (r["_umbral_h"] * 60) * 100)
+                    if pd.notna(r["_restante_min"]) and pd.notna(r["_umbral_h"]) and r["_umbral_h"] > 0
+                    else None,
+                    axis=1,
+                )
+                # Estado
+                def _estado_ot(row):
+                    if pd.isna(row.get("fecha_inicio")):
+                        return "sin_iniciar"
+                    return "en_curso"
+                _df_ab["_estado_ot"] = _df_ab.apply(_estado_ot, axis=1)
+                _df_ab["_vencida"]   = _df_ab["_restante_min"].apply(
+                    lambda m: bool(pd.notna(m) and m < 0))
+
+                # Color por urgencia
+                def _color_urg(pct, vencida):
+                    if vencida: return "🔴"
+                    if pd.isna(pct): return "⚪"
+                    if pct <= 25:  return "🔴"
+                    if pct <= 50:  return "🟡"
+                    return "🟢"
+                _df_ab["_semaf"] = _df_ab.apply(
+                    lambda r: _color_urg(r["_pct_restante"], r["_vencida"]), axis=1)
+
+                # Formatear cronómetro humano
+                def _fmt_crono(min_):
+                    if pd.isna(min_):
+                        return "—"
+                    m = int(abs(min_))
+                    dias = m // (60*24)
+                    horas = (m % (60*24)) // 60
+                    mins = m % 60
+                    partes = []
+                    if dias:  partes.append(f"{dias}d")
+                    if horas: partes.append(f"{horas}h")
+                    if mins:  partes.append(f"{mins}m")
+                    s = " ".join(partes) or "0m"
+                    return f"-{s}" if min_ < 0 else s
+                _df_ab["_crono"] = _df_ab["_restante_min"].apply(_fmt_crono)
+
+                # Extraer descripción del cliente desde nota_tarea
+                _pat_det_ar = re.compile(
+                    r"Detalles del incidente:\s*(.+?)(?:\n\n|$)", re.IGNORECASE | re.DOTALL)
+                _pat_desc_copec = re.compile(
+                    r"Descripci[oó]n:\s*(.+?)(?:\n\n|$)", re.IGNORECASE | re.DOTALL)
+                def _extraer_req(nota):
+                    txt = str(nota or "")
+                    for pat in (_pat_det_ar, _pat_desc_copec):
+                        m = pat.search(txt)
+                        if m:
+                            return m.group(1).strip()[:120]
+                    # Fallback: última parte separada por " - "
+                    parts = [p.strip() for p in txt.split(" - ") if p.strip()]
+                    if len(parts) >= 5:
+                        return parts[-1][:120]
+                    return "—"
+                _df_ab["_req"] = _df_ab["nota_tarea"].apply(_extraer_req)
+
+                # Tipo de equipo desde nombre_activo
+                _EQUIPO_TIPOS_LIVE = [
+                    (r"HIDROLAVAD", "💦 Hidrolavadora"),
+                    (r"LAVAINT",    "🧼 Lavainteriores"),
+                    (r"LAVAD",      "🚿 Lavadora"),
+                    (r"ASPIRA",     "🧹 Aspiradora"),
+                    (r"ABLAND",     "💧 Ablandador"),
+                    (r"HIDROPACK",  "🛢️ Hidropack"),
+                    (r"BOMBA",      "⚙️ Bomba"),
+                    (r"TERMO",      "🔥 Termo"),
+                    (r"COMPRESOR",  "🌬️ Compresor"),
+                ]
+                def _tipo_eq(nom):
+                    s = str(nom or "").upper()
+                    if not s: return "🔧 Otro"
+                    tipos = [lbl for pat, lbl in _EQUIPO_TIPOS_LIVE if re.search(pat, s)]
+                    return " + ".join(tipos) if tipos else "🔧 Otro"
+                _df_ab["_tipo_eq"] = _df_ab["nombre_activo"].apply(_tipo_eq)
+
+                # Formatear T0 y umbral legible
+                _df_ab["_t0_lbl"] = _df_ab["_t0"].apply(
+                    lambda t: t.strftime("%d/%m/%Y %H:%M") if pd.notna(t) else "—")
+                _df_ab["_umbral_lbl"] = _df_ab["_umbral_h"].apply(
+                    lambda h: f"{int(h)}h" if pd.notna(h) else "—")
+                _df_ab["_estado_lbl"] = _df_ab["_estado_ot"].map({
+                    "sin_iniciar": "⚫ Sin iniciar",
+                    "en_curso":    "🟢 En curso",
+                })
+
+                # ── KPIs superiores ────────────────────────────────────
+                _tot = len(_df_ab)
+                _venc = int(_df_ab["_vencida"].sum())
+                _sin_ini = int((_df_ab["_estado_ot"] == "sin_iniciar").sum())
+                _rojas = int((_df_ab["_semaf"] == "🔴").sum())
+                _criticas = _df_ab[(_df_ab["_semaf"] == "🔴") &
+                                   (_df_ab["_estado_ot"] == "sin_iniciar")]
+                _n_criticas = len(_criticas)
+
+                _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+                _k1.metric("Correctivas abiertas", f"{_tot:,}")
+                _k2.metric("Sin iniciar", f"{_sin_ini:,}",
+                           delta="nadie las ha tomado", delta_color="off")
+                _k3.metric("En zona roja", f"{_rojas:,}",
+                           delta="<25% umbral o vencidas", delta_color="inverse")
+                _k4.metric("Ya vencidas", f"{_venc:,}",
+                           delta="excedieron el SLA", delta_color="inverse")
+                _k5.metric("🚨 Críticas olvidadas", f"{_n_criticas:,}",
+                           delta="rojas + sin iniciar", delta_color="inverse")
+
+                st.divider()
+
+                # ── 🚨 OTs CRÍTICAS OLVIDADAS ──────────────────────────
+                # Rojas + sin iniciar = a punto de vencer o vencidas y nadie las tomó
+                if _n_criticas > 0:
+                    st.markdown(
+                        f'<div style="background:rgba(239,68,68,0.10);'
+                        f'border-left:5px solid #ef4444;border-radius:8px;'
+                        f'padding:12px 16px;margin-bottom:14px;">'
+                        f'<div style="font-size:1.05rem;font-weight:800;color:#ef4444;'
+                        f'margin-bottom:4px;">🚨 CRÍTICAS OLVIDADAS ({_n_criticas})</div>'
+                        f'<div style="font-size:0.85rem;color:{_t["text"]};">'
+                        f'OTs a punto de vencer o ya vencidas donde NINGÚN técnico ha '
+                        f'iniciado labores. Requieren asignación urgente.</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _crit_show = _criticas.sort_values("_restante_min", ascending=True)[[
+                        "_semaf","id_ot","cliente","prioridad_calc","_tipo_eq",
+                        "estacion","_t0_lbl","_umbral_lbl","_crono","_req","responsable",
+                    ]].rename(columns={
+                        "_semaf":"🚦", "id_ot":"OT", "cliente":"Cliente",
+                        "prioridad_calc":"Prio", "_tipo_eq":"Equipo",
+                        "estacion":"Estación", "_t0_lbl":"Llamado (T0)",
+                        "_umbral_lbl":"Umbral", "_crono":"⏳ Restante",
+                        "_req":"Requerimiento", "responsable":"Asignado a",
+                    })
+                    _show_df(_crit_show, hide_index=True, width="stretch",
+                        column_config={
+                            "🚦":            st.column_config.TextColumn(width=45),
+                            "OT":            st.column_config.TextColumn(width=95),
+                            "Cliente":       st.column_config.TextColumn(width=110),
+                            "Prio":          st.column_config.TextColumn(width=55),
+                            "Equipo":        st.column_config.TextColumn(width=140),
+                            "Estación":      st.column_config.TextColumn(width=180),
+                            "Llamado (T0)":  st.column_config.TextColumn(width=125),
+                            "Umbral":        st.column_config.TextColumn(width=60),
+                            "⏳ Restante":   st.column_config.TextColumn(width=105,
+                                help="Tiempo hasta vencer el SLA. Negativo = ya vencido."),
+                            "Requerimiento": st.column_config.TextColumn(width=280),
+                            "Asignado a":    st.column_config.TextColumn(width=160,
+                                help="Aparece pero NADIE ha iniciado la OT en Fracttal."),
+                        })
+                    st.divider()
+                else:
+                    st.success(
+                        "✅ Sin críticas olvidadas: todas las OTs a punto de vencer "
+                        "tienen al menos un técnico trabajando en ellas."
+                    )
+                    st.divider()
+
+                # ── Secciones por prioridad ────────────────────────────
+                def _render_bloque(titulo, df_blk, color_hdr):
+                    if df_blk.empty:
+                        st.caption(f"— Sin correctivas activas en {titulo} —")
+                        return
+                    n_sin_ini = int((df_blk["_estado_ot"] == "sin_iniciar").sum())
+                    n_rojas = int((df_blk["_semaf"] == "🔴").sum())
+                    st.markdown(
+                        f'<div style="background:{color_hdr}18;border-left:4px solid {color_hdr};'
+                        f'border-radius:6px;padding:8px 14px;margin:8px 0;">'
+                        f'<b style="color:{color_hdr};font-size:1.02rem;">{titulo}</b>'
+                        f'<span style="color:{_t["muted"]};font-size:0.82rem;margin-left:12px;">'
+                        f'{len(df_blk)} OTs · {n_sin_ini} sin iniciar · {n_rojas} en rojo'
+                        f'</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                    _blk = df_blk.sort_values("_restante_min", ascending=True)[[
+                        "_semaf","id_ot","_estado_lbl","cliente","prioridad_calc","_tipo_eq",
+                        "estacion","_t0_lbl","_umbral_lbl","_pct_restante","_crono",
+                        "_req","responsable",
+                    ]].rename(columns={
+                        "_semaf":"🚦","id_ot":"OT","_estado_lbl":"Estado",
+                        "cliente":"Cliente","prioridad_calc":"Prio","_tipo_eq":"Equipo",
+                        "estacion":"Estación","_t0_lbl":"Llamado (T0)","_umbral_lbl":"Umbral",
+                        "_pct_restante":"% restante","_crono":"⏳ Restante",
+                        "_req":"Requerimiento","responsable":"Asignado a",
+                    })
+                    _blk["% restante"] = _blk["% restante"].apply(
+                        lambda v: max(0, min(round(v, 1), 100)) if pd.notna(v) else 0)
+                    _show_df(_blk, hide_index=True, width="stretch",
+                        column_config={
+                            "🚦":            st.column_config.TextColumn(width=45),
+                            "OT":            st.column_config.TextColumn(width=95),
+                            "Estado":        st.column_config.TextColumn(width=110),
+                            "Cliente":       st.column_config.TextColumn(width=110),
+                            "Prio":          st.column_config.TextColumn(width=55),
+                            "Equipo":        st.column_config.TextColumn(width=140),
+                            "Estación":      st.column_config.TextColumn(width=170),
+                            "Llamado (T0)":  st.column_config.TextColumn(width=125),
+                            "Umbral":        st.column_config.TextColumn(width=60),
+                            "% restante":    st.column_config.ProgressColumn(
+                                min_value=0, max_value=100, format="%.0f%%",
+                                help="% del umbral SLA aún disponible. 0% = vencido."),
+                            "⏳ Restante":   st.column_config.TextColumn(width=100,
+                                help="Tiempo hasta vencer. Negativo = ya vencido."),
+                            "Requerimiento": st.column_config.TextColumn(width=260),
+                            "Asignado a":    st.column_config.TextColumn(width=150),
+                        })
+
+                # P1
+                _p1 = _df_ab[_df_ab["prioridad_calc"].str.upper() == "P1"]
+                _render_bloque(f"🔴 P1 · Máquina detenida (más críticas)",
+                               _p1, "#ef4444")
+                # P2
+                _p2 = _df_ab[_df_ab["prioridad_calc"].str.upper() == "P2"]
+                _render_bloque(f"🟡 P2 · Falla operativa importante",
+                               _p2, "#f59e0b")
+                # P3 + P4
+                _p34 = _df_ab[_df_ab["prioridad_calc"].str.upper().isin(["P3","P4"])]
+                _render_bloque(f"🟢 P3 + P4 · Prioridad menor",
+                               _p34, "#22c55e")
+
+                st.divider()
+                st.caption(
+                    "**Fuentes**: `ordenes_trabajo` con `tipo_tarea=CORRECTIVA` y sin "
+                    "`fecha_finalizacion` · Umbral SLA desde `sla_umbrales_horas` por "
+                    "(cliente, prioridad, zona) · T0 = `fecha_incidente` (o `fecha_creacion` "
+                    "como fallback) · Estado 'en curso' = existe `fecha_inicio` (técnico "
+                    "abrió Fracttal para trabajar). Se excluyen Canceladas."
+                )
 
         # ══════════════════════════════════════════════════════════════════════
         # SUB-PESTAÑA: UPTIME (llamados de emergencia / correctivas)
