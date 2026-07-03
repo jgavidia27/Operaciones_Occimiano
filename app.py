@@ -3465,6 +3465,122 @@ if _page == _NAV_PAGES[1]:
                 st.divider()
 
                 # ══════════════════════════════════════════════════════════════
+                # HISTÓRICO DEL MES (solo si hay filtro de mes)
+                # Muestra las correctivas CERRADAS del mes con su cumplimiento
+                # (CUMPLE / NO CUMPLE / Excepción). Complementa la vista de
+                # OTs abiertas para dar contexto operativo del periodo.
+                # ══════════════════════════════════════════════════════════════
+                if sel_mes_live != "Todos":
+                    st.markdown(
+                        f'<div class="section-header">'
+                        f'📚  Histórico correctivas — {sel_mes_live}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _mes_num_h = {v: k for k, v in _MES_ES_LIVE.items()}.get(
+                        sel_mes_live.split(" ")[0])
+                    if _mes_num_h and not df_llamados.empty:
+                        _hist = df_llamados.copy()
+                        _fl_h = pd.to_datetime(_hist["fecha_llamado"],
+                                               errors="coerce", utc=True)
+                        _hist = _hist[
+                            (_fl_h.dt.year == _year) &
+                            (_fl_h.dt.month == _mes_num_h)
+                        ]
+                        if sel_cli_live != "Todos":
+                            _hist = _hist[
+                                _hist["cliente"].apply(_norm_cli_live) == _sel_norm
+                            ]
+                        _hist = _hist[_hist["fecha_atencion"].notna()]
+
+                        if _hist.empty:
+                            st.info(
+                                f"No hay correctivas cerradas registradas para "
+                                f"**{sel_mes_live}** con el filtro actual."
+                            )
+                        else:
+                            _hist["_tiene_exc"] = (
+                                _hist["excepcion_motivo"].notna()
+                                & (_hist["excepcion_motivo"].astype(str).str.strip() != "")
+                            ) if "excepcion_motivo" in _hist.columns else False
+
+                            _cumple_n   = int((_hist["cumplimiento"] == "CUMPLE").sum())
+                            _nocumple_n = int((_hist["cumplimiento"] == "NO CUMPLE").sum())
+                            _exc_n      = int(_hist["_tiene_exc"].sum())
+                            _tot_h      = _cumple_n + _nocumple_n
+                            _pct_ok     = round(_cumple_n / _tot_h * 100, 1) if _tot_h else 0
+
+                            _hk1,_hk2,_hk3,_hk4,_hk5 = st.columns(5)
+                            _hk1.metric("Total atendidas", f"{_tot_h:,}")
+                            _hk2.metric("✅ Cumplen SLA", f"{_cumple_n:,}",
+                                        delta=f"{_pct_ok}%")
+                            _hk3.metric("❌ No cumplen SLA", f"{_nocumple_n:,}",
+                                        delta=f"{100-_pct_ok:.1f}%",
+                                        delta_color="inverse")
+                            _hk4.metric("ℹ️ Con excepción", f"{_exc_n:,}",
+                                        delta="ya cuentan como cumple",
+                                        delta_color="off")
+                            _hk5.metric("Cumplimiento", f"{_pct_ok}%")
+
+                            # Tabla resumen de OTs cerradas del mes
+                            _hist_disp = _hist.copy()
+                            def _estado_h(row):
+                                cumpl = str(row.get("cumplimiento","")).upper()
+                                if bool(row.get("_tiene_exc")): return "ℹ️ Excepción"
+                                if cumpl == "CUMPLE":    return "✅ Cumple"
+                                if cumpl == "NO CUMPLE": return "❌ No cumple"
+                                return "⚪ Sin datos"
+                            _hist_disp["_estado"] = _hist_disp.apply(_estado_h, axis=1)
+                            _hist_disp["_fecha"] = pd.to_datetime(
+                                _hist_disp["fecha_llamado"], errors="coerce"
+                            ).dt.strftime("%d/%m/%Y")
+                            _hist_disp["_atencion"] = pd.to_datetime(
+                                _hist_disp["fecha_atencion"], errors="coerce"
+                            ).dt.strftime("%d/%m/%Y")
+
+                            _hist_cols = [c for c in [
+                                "os_fracttal","_fecha","_atencion","cliente","eds_nombre",
+                                "tecnico","prioridad","horas_resolucion","tiempo_resp_esp",
+                                "_estado",
+                            ] if c in _hist_disp.columns]
+                            _hist_show = _hist_disp[_hist_cols].rename(columns={
+                                "os_fracttal":"OS Fracttal",
+                                "_fecha":"Fecha llamado",
+                                "_atencion":"Fecha atención",
+                                "cliente":"Cliente","eds_nombre":"EDS",
+                                "tecnico":"Técnico","prioridad":"Prio",
+                                "horas_resolucion":"Horas",
+                                "tiempo_resp_esp":"Umbral (h)",
+                                "_estado":"Estado SLA",
+                            })
+                            # Orden: NO CUMPLE primero (para ver problemas de un vistazo)
+                            _orden_estado = {"❌ No cumple":0, "ℹ️ Excepción":1,
+                                             "✅ Cumple":2, "⚪ Sin datos":3}
+                            _hist_show = _hist_show.assign(
+                                _ord=_hist_show["Estado SLA"].map(_orden_estado).fillna(9)
+                            ).sort_values(["_ord","Fecha llamado"], ascending=[True,False]) \
+                             .drop(columns="_ord")
+
+                            _show_df(_hist_show.reset_index(drop=True),
+                                hide_index=True, width="stretch",
+                                column_config={
+                                    "OS Fracttal":    st.column_config.TextColumn(width=105),
+                                    "Fecha llamado":  st.column_config.TextColumn(width=105),
+                                    "Fecha atención": st.column_config.TextColumn(width=110),
+                                    "Cliente":        st.column_config.TextColumn(width=110),
+                                    "EDS":            st.column_config.TextColumn(width=220),
+                                    "Técnico":        st.column_config.TextColumn(width=170),
+                                    "Prio":           st.column_config.TextColumn(width=55),
+                                    "Horas":          st.column_config.NumberColumn(
+                                        format="%.1f h", width=80),
+                                    "Umbral (h)":     st.column_config.NumberColumn(
+                                        format="%d h", width=80),
+                                    "Estado SLA":     st.column_config.TextColumn(width=130,
+                                        help="Ordenadas: No cumple → Excepción → Cumple."),
+                                })
+                    st.divider()
+
+                # ══════════════════════════════════════════════════════════════
                 # RANKING: Técnicos que MÁS dejan vencer SLA
                 # Combina: (1) OTs cerradas con cumplimiento=NO CUMPLE
                 #          (2) OTs abiertas ya vencidas del filtro actual
