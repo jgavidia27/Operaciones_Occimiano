@@ -12705,15 +12705,16 @@ elif _page == _NAV_PAGES[2]:
 
             @st.cache_data(ttl=900, show_spinner=False)
             def _fracttal_mp_idx(mes_num, anio):
-                """{codigo_eds: {id_ot, responsable, fin, estado}} de las
-                preventivas de Fracttal cuya creación cae en el mes ±10 días."""
+                """{codigo_eds: {id_ot, responsable, fin, estado, estacion, fcrea}}
+                de las preventivas de Fracttal cuya creación cae en el mes."""
                 from supabase_client import _query as _sq
                 _d0 = f"{anio}-{mes_num:02d}-01"
                 _mn2, _yr2 = (mes_num + 1, anio) if mes_num < 12 else (1, anio + 1)
                 _d1 = f"{_yr2}-{_mn2:02d}-05"
                 try:
                     _rows = _sq("ordenes_trabajo",
-                        "select=id_ot,codigo_eds,estado,fecha_finalizacion,responsable,nombre_activo"
+                        "select=id_ot,codigo_eds,estado,fecha_finalizacion,fecha_creacion,"
+                        "responsable,estacion,nombre_activo"
                         "&tipo_tarea=ilike.*PREVENTIV*"
                         f"&fecha_creacion=gte.{_d0}&fecha_creacion=lt.{_d1}",
                         limit=5000)
@@ -12737,7 +12738,9 @@ elif _page == _NAV_PAGES[2]:
                             "id_ot": r.get("id_ot"),
                             "responsable": r.get("responsable") or "",
                             "fin": _fin,
+                            "fcrea": r.get("fecha_creacion"),
                             "estado": r.get("estado") or "",
+                            "estacion": r.get("estacion") or r.get("nombre_activo") or "",
                         }
                 return _idx
             _FR_IDX = _fracttal_mp_idx(_mes_num_pr0, _yr_pr0)
@@ -12770,6 +12773,55 @@ elif _page == _NAV_PAGES[2]:
                 _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fin")),
                 errors="coerce")
 
+            # ── Reconciliación bidireccional (Excel ↔ Fracttal) ──
+            # El Excel es una GUÍA; Fracttal (Supabase) refleja lo que
+            # realmente se programó/ejecutó. Cruzamos ambas fuentes:
+            #   • en ambas          -> ✔ Coincide
+            #   • solo en Excel     -> 📄 Solo Excel (no aparece en Fracttal)
+            #   • solo en Fracttal  -> 🆕 Solo Fracttal (MP no registrada en Excel)
+            _df_pr["Origen"] = _df_pr["Cód. EDS"].apply(
+                lambda c: "✔ Coincide" if _match_fr(c) else "📄 Solo Excel")
+
+            # EDS que Fracttal tiene con MP del mes pero NO están en el Excel
+            _eds_excel = set(_df_pr["Cód. EDS"].str.strip().str.upper())
+            _huerf = [(_ce, _v) for _ce, _v in _FR_IDX.items()
+                      if _ce not in _eds_excel]
+            if _huerf:
+                _rows_fr = []
+                for _ce, _v in _huerf:
+                    _fin = _v.get("fin")
+                    _fcr = _v.get("fcrea")
+                    _fprog = _fin or _fcr        # fecha de referencia
+                    _rows_fr.append({
+                        "F. Real":      _fin,
+                        "F. Programada": _fprog,
+                        "Cód. EDS":     _ce,
+                        "N°":           "",
+                        "Dirección":    _v.get("estacion") or "(sin dirección)",
+                        "Semana":       "",
+                        "Última mant.": None,
+                        "Día":          "",
+                        "Provincia":    "",
+                        "Comuna":       "",
+                        "Tipo MP":      "",
+                        "_freal_dt":    pd.to_datetime(_fin, errors="coerce"),
+                        "_fprog_dt":    pd.to_datetime(_fprog, errors="coerce"),
+                        "Estado":       "✅ Realizada" if _fin else "🕓 Pendiente",
+                        "_ot_fr":       _v.get("id_ot") or "",
+                        "_resp_fr":     _v.get("responsable") or "",
+                        "_finfr_dt":    pd.to_datetime(_fin, errors="coerce"),
+                        "Origen":       "🆕 Solo Fracttal",
+                    })
+                _df_fr_extra = pd.DataFrame(_rows_fr)
+                # Alinear columnas y concatenar
+                for _c in _df_pr.columns:
+                    if _c not in _df_fr_extra.columns:
+                        _df_fr_extra[_c] = None
+                _df_pr = pd.concat(
+                    [_df_pr, _df_fr_extra[_df_pr.columns]], ignore_index=True)
+
+            _n_huerf = len(_huerf)
+
             # Filtros estado + semana
             with _fp2:
                 _est_opts = ["Todas","🕓 Pendiente","⚠️ Vencida","✅ Realizada"]
@@ -12784,6 +12836,18 @@ elif _page == _NAV_PAGES[2]:
                 _df_pr_disp = _df_pr_disp[_df_pr_disp["Estado"] == _est_sel]
             if _sem_sel != "Todas":
                 _df_pr_disp = _df_pr_disp[_df_pr_disp["Semana"] == _sem_sel]
+
+            # Filtro por origen (validación cruzada de fuentes)
+            _org_col1, _org_col2 = st.columns([1.4, 2.6])
+            with _org_col1:
+                _org_sel = st.selectbox(
+                    "Fuente / Validación",
+                    ["Todas", "✔ Coincide", "📄 Solo Excel", "🆕 Solo Fracttal"],
+                    key="pr_origen_sel",
+                    help="Cruce Excel ↔ Fracttal. 'Solo Fracttal' = MP ejecutada/"
+                         "programada en Fracttal que no está registrada en el Excel.")
+            if _org_sel != "Todas":
+                _df_pr_disp = _df_pr_disp[_df_pr_disp["Origen"] == _org_sel]
 
             # Buscar EDS
             _buscar_pr = st.text_input("Buscar EDS o dirección",
@@ -12801,13 +12865,25 @@ elif _page == _NAV_PAGES[2]:
             _n_pend = int((_df_pr["Estado"] == "🕓 Pendiente").sum())
             _n_venc = int((_df_pr["Estado"] == "⚠️ Vencida").sum())
             _n_real = int((_df_pr["Estado"] == "✅ Realizada").sum())
-            _pk1,_pk2,_pk3,_pk4 = st.columns(4)
-            _pk1.metric("Total programadas", f"{_n_tot:,}")
+            _pk1,_pk2,_pk3,_pk4,_pk5 = st.columns(5)
+            _pk1.metric("Total (Excel + Fracttal)", f"{_n_tot:,}")
             _pk2.metric("✅ Realizadas", f"{_n_real:,}",
                         delta=f"{round(_n_real/_n_tot*100,1) if _n_tot else 0}%")
             _pk3.metric("🕓 Pendientes", f"{_n_pend:,}")
             _pk4.metric("⚠️ Vencidas", f"{_n_venc:,}",
                         delta="prog. pasó, sin ejecutar", delta_color="inverse")
+            _pk5.metric("🆕 Solo Fracttal", f"{_n_huerf:,}",
+                        delta="no está en el Excel", delta_color="inverse",
+                        help="MPs que Fracttal registró este mes pero que no "
+                             "figuran en la programación del Excel. Revisar para "
+                             "mantener el Excel al día.")
+
+            if _n_huerf:
+                st.info(
+                    f"🔎 **{_n_huerf} MP** están en Fracttal pero **no en el Excel** "
+                    "de programación (posible registro olvidado). Aparecen marcadas "
+                    "como **🆕 Solo Fracttal** — filtra por 'Fuente / Validación' "
+                    "para revisarlas.")
 
             st.divider()
 
@@ -12843,12 +12919,18 @@ elif _page == _NAV_PAGES[2]:
                     _ot_html = (f'<div style="font-size:.68rem;color:#0369a1;margin-top:2px;'
                                 f'font-weight:600">🔧 {_ot}'
                                 + (f' · {_resp_corto}' if _resp else '') + '</div>')
+                # Badge cuando la MP no está en el Excel (solo Fracttal)
+                _org_badge = ""
+                if row.get("Origen") == "🆕 Solo Fracttal":
+                    _org_badge = ('<span style="background:#fef3c7;color:#92400e;'
+                                  'font-size:.6rem;font-weight:700;padding:1px 5px;'
+                                  'border-radius:4px;margin-left:4px">🆕 no en Excel</span>')
                 return (f'<div style="background:#fff;border:1px solid #e2e8f0;'
                         f'border-left:3px solid {_c};border-radius:8px;padding:7px 10px;'
                         f'margin-bottom:7px;">'
                         f'<div style="font-weight:700;font-size:.82rem;color:#1e293b">'
                         f'{row["Cód. EDS"]} <span style="color:#94a3b8;font-weight:500">'
-                        f'N°{row["N°"]}</span></div>'
+                        f'N°{row["N°"]}</span>{_org_badge}</div>'
                         f'<div style="font-size:.74rem;color:#475569;margin-top:1px">'
                         f'{str(row["Dirección"])[:42]}</div>'
                         f'<div style="font-size:.68rem;color:#94a3b8;margin-top:2px">'
@@ -13029,12 +13111,15 @@ elif _page == _NAV_PAGES[2]:
                 _df_show_pr = _df_show_pr.assign(
                     _o=_df_show_pr["Estado"].map(_ord_est).fillna(9)
                 ).sort_values(["_o","_fprog_dt"], ascending=[True, True])
-                _cols_pr = ["Estado","F. Programada","F. Ejecución","OT Fracttal","Responsable",
-                            "Cód. EDS","N°","Dirección","Semana","Comuna","Tipo MP"]
+                _cols_pr = ["Estado","Origen","F. Programada","F. Ejecución","OT Fracttal",
+                            "Responsable","Cód. EDS","N°","Dirección","Semana","Comuna","Tipo MP"]
                 _show_df(_df_show_pr[_cols_pr].reset_index(drop=True),
                     hide_index=True, width="stretch",
                     column_config={
                         "Estado":        st.column_config.TextColumn(width=115),
+                        "Origen":        st.column_config.TextColumn(width=120,
+                            help="Cruce Excel ↔ Fracttal. '🆕 Solo Fracttal' = "
+                                 "no está registrada en el Excel."),
                         "F. Programada": st.column_config.TextColumn(width=105),
                         "F. Ejecución":  st.column_config.TextColumn(width=105,
                             help="Fecha real de ejecución (Fracttal). — si aún no se ha hecho."),
@@ -13044,9 +13129,9 @@ elif _page == _NAV_PAGES[2]:
                             help="Técnico que ejecutó la MP según Fracttal."),
                         "Cód. EDS":      st.column_config.TextColumn(width=90),
                         "N°":            st.column_config.TextColumn(width=55),
-                        "Dirección":     st.column_config.TextColumn(width=220),
-                        "Semana":        st.column_config.TextColumn(width=105),
-                        "Comuna":        st.column_config.TextColumn(width=120),
+                        "Dirección":     st.column_config.TextColumn(width=210),
+                        "Semana":        st.column_config.TextColumn(width=100),
+                        "Comuna":        st.column_config.TextColumn(width=115),
                         "Tipo MP":       st.column_config.TextColumn(width=70),
                     })
 
