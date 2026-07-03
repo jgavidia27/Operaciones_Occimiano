@@ -5578,11 +5578,16 @@ elif _page == _NAV_PAGES[4]:
                 return None, None, f"Hoja '{mes_hoja}' no existe"
             _ws = _wb[mes_hoja]
             # Fila 1: encabezados (col A=Fecha, B-R=técnicos)
-            _tecnicos_cols = {}   # {col_letter_int: nombre_tecnico}
+            # Excluir columnas que no son técnicos operativos.
+            _EXCLUIR_COL = {"ALEXIS"}
+            _tecnicos_cols = {}   # {col_int: nombre_tecnico (original del Excel)}
             for c in range(2, min(19, _ws.max_column + 1)):
                 v = _ws.cell(1, c).value
                 if v and str(v).strip():
-                    _tecnicos_cols[c] = str(v).strip()
+                    _nom = str(v).strip()
+                    if _nom.upper() in _EXCLUIR_COL:
+                        continue
+                    _tecnicos_cols[c] = _nom
             # Filas de datos: buscar todas las filas con Fecha en col A
             _rows_data = []
             _colores = {}
@@ -5608,16 +5613,31 @@ elif _page == _NAV_PAGES[4]:
         # ── Filtros ────────────────────────────────────────────────────
         _MESES_STO = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
                       "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
+        _MES_ABR_STO = ["Ene","Feb","Mar","Abr","May","Jun",
+                        "Jul","Ago","Sep","Oct","Nov","Dic"]
         _yr_actual = _date_sto.today().year
         _mes_actual = _date_sto.today().month
-        _hojas_disp = [f"{_MESES_STO[m-1]} {_yr_actual}"
-                       for m in range(_mes_actual, 0, -1)] + \
-                      [f"{_MESES_STO[m-1]} {_yr_actual-1}"
-                       for m in range(12, 0, -1)]
+        # label corto ('Jul 26') -> hoja Excel ('JULIO 2026')
+        _hoja_de_lbl = {}
+        _lbls_mes = []
+        for _m in range(_mes_actual, 0, -1):
+            _lbl = f"{_MES_ABR_STO[_m-1]} {str(_yr_actual)[2:]}"
+            _hoja_de_lbl[_lbl] = f"{_MESES_STO[_m-1]} {_yr_actual}"
+            _lbls_mes.append(_lbl)
+        for _m in range(12, 0, -1):
+            _lbl = f"{_MES_ABR_STO[_m-1]} {str(_yr_actual-1)[2:]}"
+            _hoja_de_lbl[_lbl] = f"{_MESES_STO[_m-1]} {_yr_actual-1}"
+            _lbls_mes.append(_lbl)
+
+        # Alias de display para nombres de técnico (interno vs mostrado)
+        _ALIAS_TEC = {"Juan Francisco": "Juan F. Toro"}
+        def _disp_tec(t):
+            return _ALIAS_TEC.get(str(t), str(t))
 
         _fc1, _fc2, _fc3, _fc4, _fc5 = st.columns([1.6, 1.3, 1.5, 1.5, 1])
         with _fc1:
-            _mes_sel = st.selectbox("Mes", _hojas_disp, key="sto_mes_sel")
+            _mes_lbl = st.selectbox("Mes", _lbls_mes, key="sto_mes_sel")
+            _mes_sel = _hoja_de_lbl[_mes_lbl]   # hoja real del Excel
         with _fc2:
             _vista = st.selectbox(
                 "Vista",
@@ -5658,7 +5678,12 @@ elif _page == _NAV_PAGES[4]:
                             if _norm_nom(m) in _cols_norm]
                 if _cols_eq:
                     _senior = _gval.get("senior", _gkey)
-                    _lbl = f"{_gkey}" if _gkey == _senior else f"{_gkey} (Sr. {_senior})"
+                    if _gkey == _senior:
+                        _lbl = _gkey
+                    else:
+                        # 'Carlos Avila Norte' (sr. Carlos Avila) -> 'Carlos Avila (Norte)'
+                        _zona = _gkey.replace(_senior, "").strip()
+                        _lbl = f"{_senior} ({_zona})" if _zona else _gkey
                     _equipos_sto[_lbl] = _cols_eq
 
             _eq_opts = ["Todos"] + list(_equipos_sto.keys())
@@ -5673,6 +5698,7 @@ elif _page == _NAV_PAGES[4]:
             _tec_opts = ["Todos"] + _tec_pool
             with _fc4:
                 _tec_sel = st.selectbox("Técnico", _tec_opts,
+                                        format_func=lambda t: t if t == "Todos" else _disp_tec(t),
                                         key=f"sto_tec_sel_{_eq_sel}")
 
             _df_vista = _df_sto.copy()
@@ -5757,7 +5783,7 @@ elif _page == _NAV_PAGES[4]:
                             f'<div style="background:#fff;border:1px solid #e2e8f0;'
                             f'border-left:3px solid {_ci};border-radius:8px;padding:8px 10px;'
                             f'margin-bottom:8px;"><div style="font-weight:700;font-size:.85rem;'
-                            f'color:#1e293b">{_tec}</div>'
+                            f'color:#1e293b">{_disp_tec(_tec)}</div>'
                             + (f'<div style="font-size:.76rem;color:#64748b;margin-top:2px">{_txt}</div>'
                                if _txt.strip() else '')
                             + '</div>'
@@ -5810,7 +5836,7 @@ elif _page == _NAV_PAGES[4]:
                 def _fila_tec(_tec):
                     _cells = (f'<div style="padding:10px 12px;font-weight:650;font-size:.82rem;'
                               f'border-right:1px solid #e2e8f0;display:flex;align-items:center;'
-                              f'background:#fff">{_tec}</div>')
+                              f'background:#fff">{_disp_tec(_tec)}</div>')
                     for _d in _dias_sem:
                         _we = _d.weekday() >= 5
                         _txt = str(_df_sem[pd.to_datetime(_df_sem["_fecha"]).dt.date == _d]
@@ -5881,7 +5907,7 @@ elif _page == _NAV_PAGES[4]:
                     for _tec in _tecs_all:
                         _cells = (f'<div style="font-size:.74rem;font-weight:650;padding:4px 8px;'
                                   f'display:flex;align-items:center;background:#fff;border-radius:4px">'
-                                  f'{_tec}</div>')
+                                  f'{_disp_tec(_tec)}</div>')
                         _rmap = {pd.to_datetime(r["_fecha"]).date(): r
                                  for _, r in _df_vista.iterrows()}
                         for _d in _fechas_mes:
@@ -5889,7 +5915,7 @@ elif _page == _NAV_PAGES[4]:
                             _tp = _tipo_sto(_d, _tec, _txt)
                             _lbl, _ci, _bg = _TIPOS_STO[_tp]
                             _op = ".25" if _tp == "libre" else ".9"
-                            _tip = f"{_tec} · {_d.strftime('%d/%m')}: {_txt or 'sin asignar'}"
+                            _tip = f"{_disp_tec(_tec)} · {_d.strftime('%d/%m')}: {_txt or 'sin asignar'}"
                             _cells += (f'<div title="{_tip}" style="aspect-ratio:1;border-radius:3px;'
                                        f'background:{_ci};opacity:{_op};cursor:default"></div>')
                         _rows += (f'<div style="display:grid;grid-template-columns:130px repeat('
@@ -5914,7 +5940,7 @@ elif _page == _NAV_PAGES[4]:
                     unsafe_allow_html=True,
                 )
                 st.caption(
-                    f"📖 Fuente: `{_PATH_STO.split('/')[-1]}` hoja **{_mes_sel}** · "
+                    f"📖 Fuente: `{_PATH_STO.split('/')[-1]}` hoja **{_mes_lbl}** · "
                     f"cache 5 min · botón 🔄 Refrescar para forzar recarga."
                 )
 
