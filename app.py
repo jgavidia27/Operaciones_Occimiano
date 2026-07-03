@@ -1246,7 +1246,7 @@ _NAV_PAGES_BASE = [
     "✅  Cumplimiento SLA",
     "🛠️  Mantenciones Preventivas",
     "⛽  Estaciones de Servicio",
-    "⌛  Utilización del Tiempo",
+    "📅  Programación STO",
 ]
 # La página Admin solo aparece para usuarios con rol admin
 _is_admin   = st.session_state.get("_auth_rol", "usuario") == "admin"
@@ -1581,7 +1581,7 @@ _PAGE_TITLE = {
     _NAV_PAGES_BASE[1]: "Cumplimiento SLA",
     _NAV_PAGES_BASE[2]: "Mantenciones Preventivas",
     _NAV_PAGES_BASE[3]: "Estaciones de Servicio",
-    _NAV_PAGES_BASE[4]: "Utilización del Tiempo",
+    _NAV_PAGES_BASE[4]: "Programación STO",
     "🔐  Administración":  "Administración",
 }
 _n_ll = f"{len(df_llamados):,}" if not df_llamados.empty else "–"
@@ -5535,12 +5535,224 @@ elif _page == _NAV_PAGES[4]:
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
     _util_sub_tab = st.radio(
         "",
-        ["📅 Planificación Turnos", "📡 En Vivo", "📊 Utilización del tiempo"],
+        ["📅 Grid Técnicos", "📅 Planificación Turnos", "📡 En Vivo", "📊 Utilización del tiempo"],
         horizontal=True,
         label_visibility="collapsed",
         key="util_sub_tab",
     )
     st.divider()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # SUB-TAB: 📅 Grid Técnicos — nueva vista de programación diaria por
+    # técnico leyendo directo el Excel '2026 UTILIZACIÓN DE TIEMPO.xlsx'
+    # con colores replicados (verde=MP regional, rojo=vacaciones,
+    # naranja=feriado, blanco=actividad normal).
+    # ─────────────────────────────────────────────────────────────────────
+    if _util_sub_tab == "📅 Grid Técnicos":
+        from openpyxl import load_workbook as _lwb
+        import calendar as _cal_sto
+        from datetime import date as _date_sto
+
+        st.title("📅 Grid Técnicos — Programación diaria")
+        st.caption(
+            "Cronograma leído directo del Excel `2026 UTILIZACIÓN DE TIEMPO.xlsx` en Google Drive. "
+            "**🟢 verde** = MP fuera de Santiago · "
+            "**🔴 rojo** = vacaciones / día libre · "
+            "**🟠 naranja** = feriado · "
+            "**⬜ blanco** = actividad normal (turno / oficina / MP local)."
+        )
+
+        _PATH_STO = ("G:/.shortcut-targets-by-id/15zHnoU5VZlkOwYc6EBziNcnS-sAAtwtk/"
+                     "OPERACIONES/OPERACIONES/2026 UTILIZACIÓN DE TIEMPO.xlsx")
+
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _load_grid_sto(mes_hoja: str):
+            """Lee la hoja del Excel y devuelve (df, dict_colores).
+            df: filas=días del mes, cols=técnicos, celdas=descripción de actividad
+            dict_colores: {(fecha, tecnico): hex_color}"""
+            try:
+                _wb = _lwb(_PATH_STO, data_only=True)
+            except Exception as e:
+                return None, None, str(e)
+            if mes_hoja not in _wb.sheetnames:
+                return None, None, f"Hoja '{mes_hoja}' no existe"
+            _ws = _wb[mes_hoja]
+            # Fila 1: encabezados (col A=Fecha, B-R=técnicos)
+            _tecnicos_cols = {}   # {col_letter_int: nombre_tecnico}
+            for c in range(2, min(19, _ws.max_column + 1)):
+                v = _ws.cell(1, c).value
+                if v and str(v).strip():
+                    _tecnicos_cols[c] = str(v).strip()
+            # Filas de datos: buscar todas las filas con Fecha en col A
+            _rows_data = []
+            _colores = {}
+            for r in range(2, _ws.max_row + 1):
+                _fecha = _ws.cell(r, 1).value
+                if not _fecha or not hasattr(_fecha, "year"):
+                    continue
+                _fila = {"_fecha": _fecha}
+                for c, tec in _tecnicos_cols.items():
+                    cell = _ws.cell(r, c)
+                    _fila[tec] = cell.value or ""
+                    if cell.fill and cell.fill.start_color:
+                        try:
+                            rgb = cell.fill.start_color.rgb
+                            if rgb and isinstance(rgb, str) and rgb not in ("00000000","FFFFFFFF"):
+                                _colores[(_fecha.date(), tec)] = "#" + rgb[-6:]
+                        except Exception:
+                            pass
+                _rows_data.append(_fila)
+            _df = pd.DataFrame(_rows_data)
+            return _df, _colores, None
+
+        # ── Filtros ────────────────────────────────────────────────────
+        _MESES_STO = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
+                      "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
+        _yr_actual = _date_sto.today().year
+        _mes_actual = _date_sto.today().month
+        _hojas_disp = [f"{_MESES_STO[m-1]} {_yr_actual}"
+                       for m in range(_mes_actual, 0, -1)] + \
+                      [f"{_MESES_STO[m-1]} {_yr_actual-1}"
+                       for m in range(12, 0, -1)]
+
+        _fc1, _fc2, _fc3, _fc4 = st.columns([2, 1.5, 1.5, 1])
+        with _fc1:
+            _mes_sel = st.selectbox("Mes", _hojas_disp, key="sto_mes_sel")
+        with _fc2:
+            _vista = st.selectbox("Vista", ["Mes completo","Semana","Día"],
+                                  key="sto_vista")
+        with _fc4:
+            st.write("")
+            if st.button("🔄 Refrescar", key="sto_refresh",
+                         use_container_width=True):
+                _load_grid_sto.clear()
+                st.rerun()
+
+        # Cargar datos
+        with st.spinner(f"Leyendo {_mes_sel}…"):
+            _df_sto, _colores_sto, _err_sto = _load_grid_sto(_mes_sel)
+
+        if _err_sto:
+            st.error(f"No se pudo leer el archivo: {_err_sto}")
+        elif _df_sto is None or _df_sto.empty:
+            st.warning(f"Sin datos en la hoja {_mes_sel}.")
+        else:
+            # Tercer filtro: técnico (dropdown poblado con los que existen)
+            _tec_opts = ["Todos"] + [c for c in _df_sto.columns if c != "_fecha"]
+            with _fc3:
+                _tec_sel = st.selectbox("Técnico", _tec_opts, key="sto_tec_sel")
+
+            _df_vista = _df_sto.copy()
+
+            # Aplicar filtro de vista (semana / día)
+            _hoy_norm = pd.Timestamp.today().normalize()
+            if _vista == "Semana":
+                # Selector de semana ISO
+                _df_vista["_iso_wk"] = pd.to_datetime(_df_vista["_fecha"]).dt.isocalendar().week
+                _semanas = sorted(_df_vista["_iso_wk"].unique().tolist())
+                _sem_lbl = [f"Semana {w}" for w in _semanas]
+                _sem_pick = st.selectbox("Semana", _sem_lbl, key="sto_sem_pick")
+                _sem_n = int(_sem_pick.split()[1])
+                _df_vista = _df_vista[_df_vista["_iso_wk"] == _sem_n].drop(columns="_iso_wk")
+            elif _vista == "Día":
+                _fechas_disp = pd.to_datetime(_df_vista["_fecha"]).dt.date.tolist()
+                _dia_pick = st.selectbox("Día", _fechas_disp,
+                    format_func=lambda d: d.strftime("%A %d/%m/%Y"),
+                    key="sto_dia_pick")
+                _df_vista = _df_vista[
+                    pd.to_datetime(_df_vista["_fecha"]).dt.date == _dia_pick
+                ]
+
+            # Filtrar por técnico
+            if _tec_sel != "Todos":
+                _cols_keep = ["_fecha", _tec_sel]
+                _df_vista = _df_vista[[c for c in _cols_keep if c in _df_vista.columns]]
+
+            if _df_vista.empty:
+                st.info("No hay registros para el filtro seleccionado.")
+            else:
+                # ── KPIs por técnico (solo si se ven varios) ──────────
+                if _tec_sel == "Todos":
+                    _n_dias = len(_df_vista)
+                    _tecs = [c for c in _df_vista.columns if c != "_fecha"]
+                    st.markdown(f"**{_n_dias} día(s) · {len(_tecs)} técnicos**")
+
+                    # Contar por técnico: vacaciones, feriados, MP regional
+                    _resumen = []
+                    for _tec in _tecs:
+                        _n_vac = _n_fer = _n_mp = _n_norm = 0
+                        for _, _row in _df_vista.iterrows():
+                            _d = pd.to_datetime(_row["_fecha"]).date()
+                            _col = _colores_sto.get((_d, _tec), "").upper()
+                            _val = str(_row.get(_tec, "") or "").upper()
+                            if _col == "#FF0000" or "VACACIONES" in _val:
+                                _n_vac += 1
+                            elif _col == "#FFC000" or "FERIADO" in _val:
+                                _n_fer += 1
+                            elif _col == "#00FF00":
+                                _n_mp += 1
+                            elif _val.strip():
+                                _n_norm += 1
+                        _resumen.append({
+                            "Técnico": _tec, "Días activos": _n_norm,
+                            "🟢 MP regional": _n_mp,
+                            "🔴 Vacaciones": _n_vac,
+                            "🟠 Feriados": _n_fer,
+                        })
+                    _df_resumen = pd.DataFrame(_resumen)
+                    with st.expander("📊 Resumen por técnico (conteos)", expanded=False):
+                        _show_df(_df_resumen, hide_index=True, use_container_width=True)
+
+                # ── Grid principal con colores ────────────────────────
+                # Preparar DataFrame para display
+                _df_disp = _df_vista.copy()
+                _df_disp["Fecha"] = pd.to_datetime(_df_disp["_fecha"]).apply(
+                    lambda d: f"{['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'][d.weekday()]} "
+                              f"{d.strftime('%d/%m')}"
+                )
+                _df_disp = _df_disp.drop(columns="_fecha")
+                _cols_final_sto = ["Fecha"] + [c for c in _df_disp.columns if c != "Fecha"]
+                _df_disp = _df_disp[_cols_final_sto]
+
+                # Aplicar estilos con Styler
+                def _estilo_celda(v, fecha_str, tec):
+                    """Color de fondo basado en el dict de colores del Excel"""
+                    # Extraer fecha del formato "LUN 30/06"
+                    try:
+                        _dd_mm = fecha_str.split(" ")[-1]
+                        _mes_num_e = _MESES_STO.index(_mes_sel.split()[0]) + 1
+                        _yr_e = int(_mes_sel.split()[1])
+                        _d, _m = _dd_mm.split("/")
+                        _fe = _date_sto(_yr_e, int(_m), int(_d))
+                    except Exception:
+                        return ""
+                    _clr = _colores_sto.get((_fe, tec), "").upper()
+                    _v_up = str(v or "").upper()
+                    # Overrides por texto (si no hay color explícito)
+                    if _clr == "#FF0000" or "VACACIONES" in _v_up:
+                        return "background-color: #fecaca; color: #7f1d1d; font-weight:600"
+                    if _clr == "#FFC000" or "FERIADO" in _v_up:
+                        return "background-color: #fed7aa; color: #7c2d12; font-weight:600"
+                    if _clr == "#00FF00":
+                        return "background-color: #bbf7d0; color: #14532d; font-weight:500"
+                    return ""
+
+                def _apply_styles(row):
+                    """Aplica estilos por celda leyendo la fecha de la col 'Fecha'"""
+                    _fecha_str = row["Fecha"]
+                    return [""] + [_estilo_celda(row[c], _fecha_str, c)
+                                   for c in row.index if c != "Fecha"]
+
+                _styled = _df_disp.style.apply(_apply_styles, axis=1)
+                st.dataframe(_styled, use_container_width=True, hide_index=True,
+                             height=min(600, 40 * len(_df_disp) + 50))
+
+                st.caption(
+                    f"📖 Fuente: `{_PATH_STO.split('/')[-1]}` hoja **{_mes_sel}** · "
+                    f"cache 5 min · botón 🔄 Refrescar para forzar recarga."
+                )
+
+        st.stop()
 
     if _util_sub_tab == "📡 En Vivo":
         from datetime import datetime as _dt_vivo
