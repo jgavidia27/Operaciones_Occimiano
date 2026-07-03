@@ -3086,18 +3086,26 @@ if _page == _NAV_PAGES[1]:
                 "**🔴 rojo** = <25% o vencido · **⚫ negro** = sin iniciar (nadie la ha tomado)."
             )
 
-            # ── Botón de actualización manual + timestamp ──────────────────
-            _c_refresh, _c_ts = st.columns([1, 4])
+            # ── Filtro de Cliente + Botón de actualización + timestamp ─────
+            _c_cli, _c_refresh, _c_ts = st.columns([2, 1, 3])
+            with _c_cli:
+                _CLI_PREF_LIVE = ["COPEC", "Aramco (Esmax)", "ESMAX (Aramco)",
+                                  "SHELL (Enex)", "OCCIMIANO", "ABASTIBLE"]
+                sel_cli_live = st.selectbox(
+                    "Cliente", ["Todos"] + _CLI_PREF_LIVE,
+                    key="sla_curso_cli",
+                )
             with _c_refresh:
+                st.write("")   # spacer para alinear con selectbox
                 if st.button("🔄 Actualizar", key="sla_curso_refresh",
                              use_container_width=True):
                     st.rerun()
             _hoy_now = pd.Timestamp.now()
             with _c_ts:
                 st.markdown(
-                    f'<div style="padding:8px 0;color:{_t["muted"]};font-size:0.82rem;">'
+                    f'<div style="padding:32px 0 0 0;color:{_t["muted"]};font-size:0.82rem;">'
                     f'Última actualización: <b>{_hoy_now.strftime("%d/%m/%Y %H:%M:%S")}</b> · '
-                    f'usa el botón para refrescar cronómetros y detectar OTs recién asignadas.'
+                    f'usa el botón para refrescar cronómetros.'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -3122,10 +3130,36 @@ if _page == _NAV_PAGES[1]:
                 st.error(f"No se pudo cargar correctivas abiertas: {_e_ab}")
                 _rows_ab = []
 
+            _df_ab = pd.DataFrame(_rows_ab) if _rows_ab else pd.DataFrame()
+
             if not _rows_ab:
                 st.success("✅ ¡Excelente! No hay correctivas abiertas en este momento.")
+            elif _df_ab.empty:
+                pass  # imposible ya que _rows_ab es truthy → _df_ab tendría filas
             else:
-                _df_ab = pd.DataFrame(_rows_ab)
+                # Aplicar filtro de Cliente (normalizando Aramco/ESMAX)
+                if sel_cli_live != "Todos":
+                    def _norm_cli_live(s):
+                        s = str(s or "").upper()
+                        if "COPEC" in s: return "COPEC"
+                        if "ARAMCO" in s or "ESMAX" in s: return "ARAMCO"
+                        if "SHELL" in s or "ENEX" in s: return "SHELL"
+                        if "OCCIMIANO" in s: return "OCCIMIANO"
+                        if "ABASTIBLE" in s: return "ABASTIBLE"
+                        return s.strip()
+                    _sel_norm = _norm_cli_live(sel_cli_live)
+                    _df_ab = _df_ab[_df_ab["cliente"].apply(_norm_cli_live) == _sel_norm]
+                if _df_ab.empty:
+                    st.info(f"No hay correctivas abiertas para **{sel_cli_live}**.")
+
+            if not _df_ab.empty:
+                # ── N° Aviso (Cotalker para Aramco / No. Aviso para COPEC) ─
+                # load_cotalker_index_supabase() cachea por 30min, es barato.
+                try:
+                    _n_aviso_idx = load_cotalker_index_supabase()
+                except Exception:
+                    _n_aviso_idx = {}
+                _df_ab["_n_aviso"] = _df_ab["id_ot"].astype(str).map(_n_aviso_idx).fillna("—")
 
                 # ── Enrich: umbral SLA desde sla_umbrales_horas ─────────
                 # cliente + prioridad_calc + zona_sla (default Regiones)
@@ -3296,10 +3330,11 @@ if _page == _NAV_PAGES[1]:
                         unsafe_allow_html=True,
                     )
                     _crit_show = _criticas.sort_values("_restante_min", ascending=True)[[
-                        "_semaf","id_ot","cliente","prioridad_calc","_tipo_eq",
+                        "_semaf","id_ot","_n_aviso","cliente","prioridad_calc","_tipo_eq",
                         "estacion","_t0_lbl","_umbral_lbl","_crono","_req","responsable",
                     ]].rename(columns={
-                        "_semaf":"🚦", "id_ot":"OT", "cliente":"Cliente",
+                        "_semaf":"🚦", "id_ot":"OT", "_n_aviso":"N° Aviso",
+                        "cliente":"Cliente",
                         "prioridad_calc":"Prio", "_tipo_eq":"Equipo",
                         "estacion":"Estación", "_t0_lbl":"Llamado (T0)",
                         "_umbral_lbl":"Umbral", "_crono":"⏳ Restante",
@@ -3309,6 +3344,8 @@ if _page == _NAV_PAGES[1]:
                         column_config={
                             "🚦":            st.column_config.TextColumn(width=45),
                             "OT":            st.column_config.TextColumn(width=95),
+                            "N° Aviso":      st.column_config.TextColumn(width=100,
+                                help="N° Cotalker (Aramco) / N° Aviso del email (COPEC/Shell)."),
                             "Cliente":       st.column_config.TextColumn(width=110),
                             "Prio":          st.column_config.TextColumn(width=55),
                             "Equipo":        st.column_config.TextColumn(width=140),
@@ -3346,11 +3383,12 @@ if _page == _NAV_PAGES[1]:
                         unsafe_allow_html=True,
                     )
                     _blk = df_blk.sort_values("_restante_min", ascending=True)[[
-                        "_semaf","id_ot","_estado_lbl","cliente","prioridad_calc","_tipo_eq",
+                        "_semaf","id_ot","_n_aviso","_estado_lbl","cliente","prioridad_calc","_tipo_eq",
                         "estacion","_t0_lbl","_umbral_lbl","_pct_restante","_crono",
                         "_req","responsable",
                     ]].rename(columns={
-                        "_semaf":"🚦","id_ot":"OT","_estado_lbl":"Estado",
+                        "_semaf":"🚦","id_ot":"OT","_n_aviso":"N° Aviso",
+                        "_estado_lbl":"Estado",
                         "cliente":"Cliente","prioridad_calc":"Prio","_tipo_eq":"Equipo",
                         "estacion":"Estación","_t0_lbl":"Llamado (T0)","_umbral_lbl":"Umbral",
                         "_pct_restante":"% restante","_crono":"⏳ Restante",
@@ -3362,6 +3400,8 @@ if _page == _NAV_PAGES[1]:
                         column_config={
                             "🚦":            st.column_config.TextColumn(width=45),
                             "OT":            st.column_config.TextColumn(width=95),
+                            "N° Aviso":      st.column_config.TextColumn(width=100,
+                                help="N° Cotalker (Aramco) / N° Aviso del email (COPEC/Shell)."),
                             "Estado":        st.column_config.TextColumn(width=110),
                             "Cliente":       st.column_config.TextColumn(width=110),
                             "Prio":          st.column_config.TextColumn(width=55),
