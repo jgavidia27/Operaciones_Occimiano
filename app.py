@@ -12237,10 +12237,170 @@ elif _page == _NAV_PAGES[2]:
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
-    _ptab_plan, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
-        "📅  Planificación", "🏢  Por Cliente", "👷  Por Técnico",
+    _ptab_plan, _ptab_norea, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
+        "📅  Planificación", "🚫  No Realizadas",
+        "🏢  Por Cliente", "👷  Por Técnico",
         "🏭  Por Activo/EDS", "⏱️  Uptime"
     ])
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SUB-TAB: 🚫 No Realizadas — lee la seccion T-Z (filas 3-22 aprox)
+    # del Excel de Utilizacion, donde operaciones registra las EDS que
+    # no se pudieron atender (motivo: CLAUSURADA, SIN MSELF, RECAMBIO,
+    # NO ACEPTA MTTO, etc.). Fuente unica: el Excel del mes actual.
+    # ══════════════════════════════════════════════════════════════════════
+    with _ptab_norea:
+        from openpyxl import load_workbook as _lwb_nr
+        from datetime import date as _date_nr
+
+        st.markdown(
+            '<div class="section-header">'
+            '🚫  Estaciones No Realizadas — Respaldo del mes'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "EDS registradas en el Excel de Utilización de Tiempo como **no atendidas** "
+            "por razones ajenas al equipo (estación clausurada, sin MSELF, en recambio, "
+            "planta en marcha, etc.). Es el respaldo documental para justificar por qué "
+            "no se ejecutó el mantenimiento en la fecha programada."
+        )
+
+        _PATH_NR = ("G:/.shortcut-targets-by-id/15zHnoU5VZlkOwYc6EBziNcnS-sAAtwtk/"
+                    "OPERACIONES/OPERACIONES/2026 UTILIZACIÓN DE TIEMPO.xlsx")
+
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _load_no_realizadas(mes_hoja: str) -> pd.DataFrame:
+            """Lee la seccion T-Z de la hoja hasta encontrar 'POR REALIZAR'
+            en col X (encabezado que separa 'no realizadas' de 'pendientes')."""
+            try:
+                _wb = _lwb_nr(_PATH_NR, data_only=True)
+            except Exception:
+                return pd.DataFrame()
+            if mes_hoja not in _wb.sheetnames:
+                return pd.DataFrame()
+            _ws = _wb[mes_hoja]
+            rows = []
+            for r in range(3, 30):
+                # Detectar fin de seccion
+                _x = _ws.cell(r, 24).value or ""   # col X
+                if _x and "POR REALIZAR" in str(_x).upper():
+                    break
+                _motivo   = _ws.cell(r, 20).value   # T
+                _fprog    = _ws.cell(r, 21).value   # U
+                _cod_eds  = _ws.cell(r, 22).value   # V
+                _n        = _ws.cell(r, 23).value   # W
+                _direccion= _ws.cell(r, 24).value   # X
+                _semana   = _ws.cell(r, 25).value   # Y
+                _fult     = _ws.cell(r, 26).value   # Z
+                _dia_sem  = _ws.cell(r, 27).value   # AA
+                _prov     = _ws.cell(r, 28).value   # AB
+                _comuna   = _ws.cell(r, 29).value   # AC
+                _tipo_mp  = _ws.cell(r, 30).value   # AD
+                # Solo agregar si tiene motivo o codigo EDS
+                if not _motivo and not _cod_eds:
+                    continue
+                # Excluir encabezados repetidos
+                if str(_motivo or "").upper() == "FECHA REAL":
+                    continue
+                rows.append({
+                    "Motivo":       str(_motivo or "").strip(),
+                    "F. Programada": _fprog,
+                    "Cód. EDS":     str(_cod_eds or "").strip(),
+                    "N°":           str(_n or "").strip(),
+                    "Dirección":    str(_direccion or "").strip(),
+                    "Semana":       str(_semana or "").strip(),
+                    "Última mant.": _fult,
+                    "Día semana":   str(_dia_sem or "").strip(),
+                    "Provincia":    str(_prov or "").strip(),
+                    "Comuna":       str(_comuna or "").strip(),
+                    "Tipo MP":      str(_tipo_mp or "").strip(),
+                })
+            return pd.DataFrame(rows)
+
+        # ── Filtros ─────────────────────────────────────────────────────
+        _MESES_NR = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
+                     "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
+        _yr_nr = _date_nr.today().year
+        _mes_actual_nr = _date_nr.today().month
+        _hojas_disp_nr = [f"{_MESES_NR[m-1]} {_yr_nr}"
+                          for m in range(_mes_actual_nr, 0, -1)] + \
+                         [f"{_MESES_NR[m-1]} {_yr_nr-1}"
+                          for m in range(12, 0, -1)]
+
+        _fnr1, _fnr2, _fnr3 = st.columns([2, 2, 1])
+        with _fnr1:
+            _mes_nr = st.selectbox("Mes", _hojas_disp_nr, key="nr_mes_sel")
+        with _fnr3:
+            st.write("")
+            if st.button("🔄 Refrescar", key="nr_refresh", use_container_width=True):
+                _load_no_realizadas.clear()
+                st.rerun()
+
+        with st.spinner(f"Leyendo {_mes_nr}…"):
+            _df_nr = _load_no_realizadas(_mes_nr)
+
+        if _df_nr.empty:
+            st.info(
+                f"No hay estaciones registradas como 'no realizadas' en **{_mes_nr}**. "
+                "Operaciones aún no ha poblado la sección T-Z de esa hoja, "
+                "o el mes no tenía casos."
+            )
+        else:
+            # Filtro por motivo
+            _motivos_disp = ["Todos"] + sorted(_df_nr["Motivo"].dropna().unique().tolist())
+            with _fnr2:
+                _mot_sel = st.selectbox("Motivo", _motivos_disp, key="nr_mot_sel")
+            _df_nr_disp = _df_nr.copy()
+            if _mot_sel != "Todos":
+                _df_nr_disp = _df_nr_disp[_df_nr_disp["Motivo"] == _mot_sel]
+
+            # KPIs por motivo
+            _nk1, _nk2, _nk3, _nk4 = st.columns(4)
+            _nk1.metric("Total no realizadas", f"{len(_df_nr):,}")
+            _clausur = int((_df_nr["Motivo"].str.upper().str.contains("CLAUSUR|CIERRE", na=False)).sum())
+            _sinmself = int((_df_nr["Motivo"].str.upper().str.contains("SIN MSELF|SIN M", na=False)).sum())
+            _recambio = int((_df_nr["Motivo"].str.upper().str.contains("RECAMBIO", na=False)).sum())
+            _nk2.metric("🚧 Clausuradas/Cerradas", f"{_clausur:,}")
+            _nk3.metric("⚠️ Sin equipo", f"{_sinmself:,}")
+            _nk4.metric("🔄 Recambio", f"{_recambio:,}")
+
+            # Formatear fechas
+            for _c in ("F. Programada", "Última mant."):
+                if _c in _df_nr_disp.columns:
+                    _df_nr_disp[_c] = pd.to_datetime(
+                        _df_nr_disp[_c], errors="coerce"
+                    ).dt.strftime("%d/%m/%Y").fillna("—")
+
+            _show_df(_df_nr_disp.reset_index(drop=True), hide_index=True,
+                width="stretch",
+                column_config={
+                    "Motivo":       st.column_config.TextColumn(width=180,
+                        help="Razón por la que no se realizó el mantenimiento."),
+                    "F. Programada":st.column_config.TextColumn(width=110),
+                    "Cód. EDS":     st.column_config.TextColumn(width=90),
+                    "N°":           st.column_config.TextColumn(width=55),
+                    "Dirección":    st.column_config.TextColumn(width=260),
+                    "Semana":       st.column_config.TextColumn(width=130),
+                    "Última mant.": st.column_config.TextColumn(width=110),
+                    "Día semana":   st.column_config.TextColumn(width=90),
+                    "Provincia":    st.column_config.TextColumn(width=130),
+                    "Comuna":       st.column_config.TextColumn(width=130),
+                    "Tipo MP":      st.column_config.TextColumn(width=70),
+                })
+
+            # Desglose por motivo
+            with st.expander("📊 Desglose por motivo", expanded=False):
+                _mot_ct = (_df_nr.groupby("Motivo").size()
+                           .reset_index(name="Cantidad")
+                           .sort_values("Cantidad", ascending=False))
+                _show_df(_mot_ct, hide_index=True, width="stretch")
+
+            st.caption(
+                f"📖 Fuente: `2026 UTILIZACIÓN DE TIEMPO.xlsx` hoja **{_mes_nr}** · "
+                "sección T-Z (columnas Motivo, Fecha Programada, EDS, Dirección, etc.) · "
+                "cache 5 min."
+            )
 
     # ── Tab 1: Por Cliente ────────────────────────────────────────────────
     with _ptab_cli:
