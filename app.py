@@ -3509,16 +3509,37 @@ if _page == _NAV_PAGES[1]:
                 # (2) OTs abiertas ya vencidas — del df_ab filtrado
                 _venc_abiertas = _df_ab[_df_ab["_vencida"]].copy()
 
+                # Normalizar técnico: consolidar variantes de la misma
+                # persona/empresa antes de agrupar.
+                #   - AUTEC LTDA, AUTEC IQUIQUE, AUTEC IQUIQUE Francisco Munoz,
+                #     etc. → todo 'AUTEC'
+                #   - 'Jaime Humberto Ocampo Romero' y variaciones con 'ocampo'
+                #     → 'Jaime Ocampo (Elecons)'
+                def _norm_tec(t):
+                    s = str(t or "").strip()
+                    if not s:
+                        return ""
+                    su = s.upper()
+                    if "AUTEC" in su:
+                        return "AUTEC"
+                    if "OCAMPO" in su:
+                        return "Jaime Ocampo (Elecons)"
+                    return s
+
                 # Agregar por técnico
                 _rk_data = []
                 if not _venc_cerradas.empty:
-                    _rk_data.append(_venc_cerradas.groupby("tecnico").agg(
+                    _venc_cerradas = _venc_cerradas.assign(
+                        _tec_norm=_venc_cerradas["tecnico"].apply(_norm_tec))
+                    _rk_data.append(_venc_cerradas.groupby("_tec_norm").agg(
                         cerradas=("os_fracttal", "count"),
-                    ).reset_index().rename(columns={"tecnico": "_tec"}))
+                    ).reset_index().rename(columns={"_tec_norm": "_tec"}))
                 if not _venc_abiertas.empty:
-                    _rk_data.append(_venc_abiertas.groupby("responsable").agg(
+                    _venc_abiertas = _venc_abiertas.assign(
+                        _tec_norm=_venc_abiertas["responsable"].apply(_norm_tec))
+                    _rk_data.append(_venc_abiertas.groupby("_tec_norm").agg(
                         abiertas=("id_ot", "count"),
-                    ).reset_index().rename(columns={"responsable": "_tec"}))
+                    ).reset_index().rename(columns={"_tec_norm": "_tec"}))
 
                 if not _rk_data:
                     st.success("✅ No hay OTs vencidas en el filtro seleccionado.")
