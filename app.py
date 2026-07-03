@@ -3111,18 +3111,24 @@ if _page == _NAV_PAGES[1]:
                 )
 
             # ── Traer correctivas ABIERTAS desde ordenes_trabajo ─────────
-            # (df_llamados solo tiene lo cerrado; necesitamos las abiertas con
-            # sus fechas de inicio para calcular estado)
+            # Excluir estados basura/anulados que no cuentan como OT operativa:
+            # ERROR DE INGRESO, DUPLICADO, DE PRUEBA, etc. + cualquier variante
+            # de Cancelada. Esto quita ~80% del ruido en la vista.
+            _ESTADOS_EXCLUIR = (
+                "Canceladas,Cancelada,Cancelado,ERROR DE INGRESO,DUPLICADO,"
+                "Duplicidad,DE PRUEBA,PRUEBA ROBOT,EQUIPO CON RECAMBIO,"
+                "FUE REPETIDA EN OTRA OS,PLAN INCOMPLETO,PENDIENTE,Finalizadas"
+            )
             try:
                 from supabase_client import _query as _sc_query
                 _rows_ab = _sc_query(
                     "ordenes_trabajo",
                     "select=id_ot,cliente,estacion,codigo_eds,responsable,"
                     "prioridad_calc,fecha_creacion,fecha_incidente,fecha_inicio,"
-                    "fecha_finalizacion,estado,nombre_activo,nota_tarea"
+                    "fecha_finalizacion,estado,estado_tarea,nombre_activo,nota_tarea"
                     "&tipo_tarea=ilike.*CORRECTIV*"
                     "&fecha_finalizacion=is.null"
-                    "&estado=not.in.(Canceladas,Cancelada,Cancelado)"
+                    f"&estado=not.in.({_ESTADOS_EXCLUIR})"
                     "&fecha_creacion=gte.2026-01-01",
                     limit=2000,
                 )
