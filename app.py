@@ -5931,38 +5931,73 @@ elif _page == _NAV_PAGES[4]:
             elif _vista == "🔥 Heatmap mensual":
                 _fechas_mes = sorted(pd.to_datetime(_df_vista["_fecha"]).dt.date.tolist())
                 if _fechas_mes:
-                    # Header con números de día
-                    _hdr = (f'<div style="display:grid;grid-template-columns:130px repeat('
-                            f'{len(_fechas_mes)},1fr);gap:2px;margin-bottom:2px">'
+                    _MES_TIT = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+                                "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
+                    _n = len(_fechas_mes)
+                    _colw = f'130px repeat({_n},1fr)'
+                    _DIV = "2px solid #334155"   # línea divisoria entre meses
+                    # Índice de la primera fecha de cada mes (para la línea)
+                    _es_inicio_mes = [False]*_n
+                    for _i in range(1, _n):
+                        if _fechas_mes[_i].month != _fechas_mes[_i-1].month:
+                            _es_inicio_mes[_i] = True
+
+                    # ── Banda superior: nombre de mes agrupado (colspan) ──
+                    _banda = (f'<div style="display:grid;grid-template-columns:{_colw};'
+                              'gap:2px;margin-bottom:3px">'
+                              '<div></div>')  # celda vacía sobre la col de nombres
+                    _i = 0
+                    while _i < _n:
+                        _m = _fechas_mes[_i].month
+                        _span = 1
+                        while _i + _span < _n and _fechas_mes[_i+_span].month == _m:
+                            _span += 1
+                        _borde_izq = f'border-left:{_DIV};' if _i > 0 else ''
+                        _banda += (f'<div style="grid-column:span {_span};text-align:center;'
+                                   f'font-size:.72rem;font-weight:800;color:#334155;'
+                                   f'text-transform:uppercase;letter-spacing:.05em;'
+                                   f'padding:3px 0;background:#f1f5f9;border-radius:5px;{_borde_izq}">'
+                                   f'{_MES_TIT[_m-1]}</div>')
+                        _i += _span
+                    _banda += '</div>'
+
+                    # ── Header con números de día ──
+                    _hdr = (f'<div style="display:grid;grid-template-columns:{_colw};'
+                            'gap:2px;margin-bottom:2px">'
                             '<div style="font-size:.7rem;color:#64748b;font-weight:600;'
                             'display:flex;align-items:center;padding:0 6px">Técnico ↓ / Día →</div>')
-                    for _d in _fechas_mes:
+                    for _idx, _d in enumerate(_fechas_mes):
                         _we = _d.weekday() >= 5
+                        _bl = f'border-left:{_DIV};' if _es_inicio_mes[_idx] else ''
                         _hdr += (f'<div style="font-size:.6rem;text-align:center;font-weight:600;'
-                                 f'color:{"#d97706" if _we else "#94a3b8"}">{_d.day}</div>')
+                                 f'{_bl}color:{"#d97706" if _we else "#94a3b8"}">{_d.day}</div>')
                     _hdr += '</div>'
+
+                    _rmap = {pd.to_datetime(r["_fecha"]).date(): r
+                             for _, r in _df_vista.iterrows()}
                     _rows = ""
                     for _tec in _tecs_all:
                         _cells = (f'<div style="font-size:.74rem;font-weight:650;padding:4px 8px;'
                                   f'display:flex;align-items:center;background:#fff;border-radius:4px">'
                                   f'{_disp_tec(_tec)}</div>')
-                        _rmap = {pd.to_datetime(r["_fecha"]).date(): r
-                                 for _, r in _df_vista.iterrows()}
-                        for _d in _fechas_mes:
+                        for _idx, _d in enumerate(_fechas_mes):
                             _txt = str(_rmap.get(_d, {}).get(_tec, "") or "") if _d in _rmap else ""
                             _tp = _tipo_sto(_d, _tec, _txt)
                             _lbl, _ci, _bg = _TIPOS_STO[_tp]
                             _op = ".25" if _tp == "libre" else ".9"
                             _tip = f"{_disp_tec(_tec)} · {_d.strftime('%d/%m')}: {_txt or 'sin asignar'}"
+                            _bl = f'border-left:{_DIV};' if _es_inicio_mes[_idx] else ''
                             _cells += (f'<div title="{_tip}" style="aspect-ratio:1;border-radius:3px;'
-                                       f'background:{_ci};opacity:{_op};cursor:default"></div>')
-                        _rows += (f'<div style="display:grid;grid-template-columns:130px repeat('
-                                  f'{len(_fechas_mes)},1fr);gap:2px;margin-bottom:2px">{_cells}</div>')
+                                       f'{_bl}background:{_ci};opacity:{_op};cursor:default"></div>')
+                        _rows += (f'<div style="display:grid;grid-template-columns:{_colw};'
+                                  f'gap:2px;margin-bottom:2px">{_cells}</div>')
                     st.markdown(
-                        f'<div style="overflow-x:auto"><div style="min-width:900px">{_hdr}{_rows}</div></div>',
+                        f'<div style="overflow-x:auto"><div style="min-width:900px">'
+                        f'{_banda}{_hdr}{_rows}</div></div>',
                         unsafe_allow_html=True,
                     )
-                    st.caption("Pasa el mouse sobre cualquier celda para ver el detalle del día.")
+                    st.caption("Pasa el mouse sobre cualquier celda para ver el detalle del día. "
+                               "La línea vertical marca el cambio de mes.")
 
             # ── Leyenda + resumen (comun a todas las vistas) ──────────────
             if not _df_vista.empty and _tecs_all:
