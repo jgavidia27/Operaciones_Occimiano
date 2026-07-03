@@ -3148,6 +3148,17 @@ if _page == _NAV_PAGES[1]:
 
             _df_ab = pd.DataFrame(_rows_ab) if _rows_ab else pd.DataFrame()
 
+            # Helpers globales del tab (se usan en KPIs de abiertas + historico + ranking).
+            def _norm_cli_live(s):
+                s = str(s or "").upper()
+                if "COPEC" in s: return "COPEC"
+                if "ARAMCO" in s or "ESMAX" in s: return "ARAMCO"
+                if "SHELL" in s or "ENEX" in s: return "SHELL"
+                if "OCCIMIANO" in s: return "OCCIMIANO"
+                if "ABASTIBLE" in s: return "ABASTIBLE"
+                return s.strip()
+            _sel_norm = _norm_cli_live(sel_cli_live) if sel_cli_live != "Todos" else ""
+
             if not _rows_ab:
                 st.success("✅ ¡Excelente! No hay correctivas abiertas en este momento.")
             elif _df_ab.empty:
@@ -3155,15 +3166,6 @@ if _page == _NAV_PAGES[1]:
             else:
                 # Aplicar filtro de Cliente (normalizando Aramco/ESMAX)
                 if sel_cli_live != "Todos":
-                    def _norm_cli_live(s):
-                        s = str(s or "").upper()
-                        if "COPEC" in s: return "COPEC"
-                        if "ARAMCO" in s or "ESMAX" in s: return "ARAMCO"
-                        if "SHELL" in s or "ENEX" in s: return "SHELL"
-                        if "OCCIMIANO" in s: return "OCCIMIANO"
-                        if "ABASTIBLE" in s: return "ABASTIBLE"
-                        return s.strip()
-                    _sel_norm = _norm_cli_live(sel_cli_live)
                     _df_ab = _df_ab[_df_ab["cliente"].apply(_norm_cli_live) == _sel_norm]
                 # Aplicar filtro de Mes por fecha_creacion (T0 se calcula despues)
                 if sel_mes_live != "Todos":
@@ -3464,257 +3466,243 @@ if _page == _NAV_PAGES[1]:
 
                 st.divider()
 
-                # ══════════════════════════════════════════════════════════════
-                # HISTÓRICO DEL MES (solo si hay filtro de mes)
-                # Muestra las correctivas CERRADAS del mes con su cumplimiento
-                # (CUMPLE / NO CUMPLE / Excepción). Complementa la vista de
-                # OTs abiertas para dar contexto operativo del periodo.
-                # ══════════════════════════════════════════════════════════════
-                if sel_mes_live != "Todos":
-                    st.markdown(
-                        f'<div class="section-header">'
-                        f'📚  Histórico correctivas — {sel_mes_live}'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-                    _mes_num_h = {v: k for k, v in _MES_ES_LIVE.items()}.get(
-                        sel_mes_live.split(" ")[0])
-                    if _mes_num_h and not df_llamados.empty:
-                        _hist = df_llamados.copy()
-                        _fl_h = pd.to_datetime(_hist["fecha_llamado"],
-                                               errors="coerce", utc=True)
-                        _hist = _hist[
-                            (_fl_h.dt.year == _year) &
-                            (_fl_h.dt.month == _mes_num_h)
-                        ]
-                        if sel_cli_live != "Todos":
-                            _hist = _hist[
-                                _hist["cliente"].apply(_norm_cli_live) == _sel_norm
-                            ]
-                        _hist = _hist[_hist["fecha_atencion"].notna()]
-
-                        if _hist.empty:
-                            st.info(
-                                f"No hay correctivas cerradas registradas para "
-                                f"**{sel_mes_live}** con el filtro actual."
-                            )
-                        else:
-                            _hist["_tiene_exc"] = (
-                                _hist["excepcion_motivo"].notna()
-                                & (_hist["excepcion_motivo"].astype(str).str.strip() != "")
-                            ) if "excepcion_motivo" in _hist.columns else False
-
-                            _cumple_n   = int((_hist["cumplimiento"] == "CUMPLE").sum())
-                            _nocumple_n = int((_hist["cumplimiento"] == "NO CUMPLE").sum())
-                            _exc_n      = int(_hist["_tiene_exc"].sum())
-                            _tot_h      = _cumple_n + _nocumple_n
-                            _pct_ok     = round(_cumple_n / _tot_h * 100, 1) if _tot_h else 0
-
-                            _hk1,_hk2,_hk3,_hk4,_hk5 = st.columns(5)
-                            _hk1.metric("Total atendidas", f"{_tot_h:,}")
-                            _hk2.metric("✅ Cumplen SLA", f"{_cumple_n:,}",
-                                        delta=f"{_pct_ok}%")
-                            _hk3.metric("❌ No cumplen SLA", f"{_nocumple_n:,}",
-                                        delta=f"{100-_pct_ok:.1f}%",
-                                        delta_color="inverse")
-                            _hk4.metric("ℹ️ Con excepción", f"{_exc_n:,}",
-                                        delta="ya cuentan como cumple",
-                                        delta_color="off")
-                            _hk5.metric("Cumplimiento", f"{_pct_ok}%")
-
-                            # Tabla resumen de OTs cerradas del mes
-                            _hist_disp = _hist.copy()
-                            def _estado_h(row):
-                                cumpl = str(row.get("cumplimiento","")).upper()
-                                if bool(row.get("_tiene_exc")): return "ℹ️ Excepción"
-                                if cumpl == "CUMPLE":    return "✅ Cumple"
-                                if cumpl == "NO CUMPLE": return "❌ No cumple"
-                                return "⚪ Sin datos"
-                            _hist_disp["_estado"] = _hist_disp.apply(_estado_h, axis=1)
-                            _hist_disp["_fecha"] = pd.to_datetime(
-                                _hist_disp["fecha_llamado"], errors="coerce"
-                            ).dt.strftime("%d/%m/%Y")
-                            _hist_disp["_atencion"] = pd.to_datetime(
-                                _hist_disp["fecha_atencion"], errors="coerce"
-                            ).dt.strftime("%d/%m/%Y")
-
-                            _hist_cols = [c for c in [
-                                "os_fracttal","_fecha","_atencion","cliente","eds_nombre",
-                                "tecnico","prioridad","horas_resolucion","tiempo_resp_esp",
-                                "_estado",
-                            ] if c in _hist_disp.columns]
-                            _hist_show = _hist_disp[_hist_cols].rename(columns={
-                                "os_fracttal":"OS Fracttal",
-                                "_fecha":"Fecha llamado",
-                                "_atencion":"Fecha atención",
-                                "cliente":"Cliente","eds_nombre":"EDS",
-                                "tecnico":"Técnico","prioridad":"Prio",
-                                "horas_resolucion":"Horas",
-                                "tiempo_resp_esp":"Umbral (h)",
-                                "_estado":"Estado SLA",
-                            })
-                            # Orden: NO CUMPLE primero (para ver problemas de un vistazo)
-                            _orden_estado = {"❌ No cumple":0, "ℹ️ Excepción":1,
-                                             "✅ Cumple":2, "⚪ Sin datos":3}
-                            _hist_show = _hist_show.assign(
-                                _ord=_hist_show["Estado SLA"].map(_orden_estado).fillna(9)
-                            ).sort_values(["_ord","Fecha llamado"], ascending=[True,False]) \
-                             .drop(columns="_ord")
-
-                            _show_df(_hist_show.reset_index(drop=True),
-                                hide_index=True, width="stretch",
-                                column_config={
-                                    "OS Fracttal":    st.column_config.TextColumn(width=105),
-                                    "Fecha llamado":  st.column_config.TextColumn(width=105),
-                                    "Fecha atención": st.column_config.TextColumn(width=110),
-                                    "Cliente":        st.column_config.TextColumn(width=110),
-                                    "EDS":            st.column_config.TextColumn(width=220),
-                                    "Técnico":        st.column_config.TextColumn(width=170),
-                                    "Prio":           st.column_config.TextColumn(width=55),
-                                    "Horas":          st.column_config.NumberColumn(
-                                        format="%.1f h", width=80),
-                                    "Umbral (h)":     st.column_config.NumberColumn(
-                                        format="%d h", width=80),
-                                    "Estado SLA":     st.column_config.TextColumn(width=130,
-                                        help="Ordenadas: No cumple → Excepción → Cumple."),
-                                })
-                    st.divider()
-
-                # ══════════════════════════════════════════════════════════════
-                # RANKING: Técnicos que MÁS dejan vencer SLA
-                # Combina: (1) OTs cerradas con cumplimiento=NO CUMPLE
-                #          (2) OTs abiertas ya vencidas del filtro actual
-                # Incluye TODAS las empresas (Occimiano, AUTEC, Elecons, etc.)
-                # ══════════════════════════════════════════════════════════════
+            # ══════════════════════════════════════════════════════════════════
+            # HISTÓRICO DEL MES + RANKING (fuera del if _df_ab.empty)
+            # Estas secciones SIEMPRE aparecen para dar contexto operativo,
+            # aunque no haya correctivas abiertas en el filtro actual.
+            # Nivel de indentación: 12 espacios (dentro de with _tab_en_curso).
+            # ══════════════════════════════════════════════════════════════════
+            if sel_mes_live != "Todos":
                 st.markdown(
-                    '<div class="section-header">'
-                    '📊  Ranking · Técnicos con más SLA vencidos'
-                    '</div>',
+                    f'<div class="section-header">'
+                    f'📚  Histórico correctivas — {sel_mes_live}'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
-                st.caption(
-                    "Consolidado histórico 2026 de OTs vencidas por técnico. "
-                    "Suma **OTs cerradas fuera de SLA** + **OTs actualmente vencidas y aún abiertas**. "
-                    "Incluye Occimiano, AUTEC, Elecons y externos."
-                )
-
-                # (1) OTs cerradas que NO cumplieron — de df_llamados
-                _venc_cerradas = pd.DataFrame()
-                if not df_llamados.empty and "cumplimiento" in df_llamados.columns:
-                    _venc_cerradas = df_llamados[
-                        (df_llamados["cumplimiento"] == "NO CUMPLE") &
-                        (df_llamados["tecnico"].notna())
-                    ].copy()
-                    # Aplicar mismo filtro de cliente si está activo
+                _mes_num_h = {v: k for k, v in _MES_ES_LIVE.items()}.get(
+                    sel_mes_live.split(" ")[0])
+                if _mes_num_h and not df_llamados.empty:
+                    _hist = df_llamados.copy()
+                    _fl_h = pd.to_datetime(_hist["fecha_llamado"],
+                                           errors="coerce", utc=True)
+                    _hist = _hist[
+                        (_fl_h.dt.year == _year) &
+                        (_fl_h.dt.month == _mes_num_h)
+                    ]
                     if sel_cli_live != "Todos":
-                        _venc_cerradas = _venc_cerradas[
-                            _venc_cerradas["cliente"].apply(_norm_cli_live) == _sel_norm
+                        _hist = _hist[
+                            _hist["cliente"].apply(_norm_cli_live) == _sel_norm
                         ]
-                    # Filtro de mes por fecha_llamado si aplica
-                    if sel_mes_live != "Todos":
-                        _mes_num_v = {v: k for k, v in _MES_ES_LIVE.items()}.get(
-                            sel_mes_live.split(" ")[0])
-                        if _mes_num_v:
-                            _fl_v = pd.to_datetime(_venc_cerradas["fecha_llamado"],
-                                                   errors="coerce", utc=True)
-                            _venc_cerradas = _venc_cerradas[
-                                (_fl_v.dt.year == _year) &
-                                (_fl_v.dt.month == _mes_num_v)
-                            ]
+                    _hist = _hist[_hist["fecha_atencion"].notna()]
 
-                # (2) OTs abiertas ya vencidas — del df_ab filtrado
+                    if _hist.empty:
+                        st.info(
+                            f"No hay correctivas cerradas registradas para "
+                            f"**{sel_mes_live}** con el filtro actual."
+                        )
+                    else:
+                        _hist["_tiene_exc"] = (
+                            _hist["excepcion_motivo"].notna()
+                            & (_hist["excepcion_motivo"].astype(str).str.strip() != "")
+                        ) if "excepcion_motivo" in _hist.columns else False
+
+                        _cumple_n   = int((_hist["cumplimiento"] == "CUMPLE").sum())
+                        _nocumple_n = int((_hist["cumplimiento"] == "NO CUMPLE").sum())
+                        _exc_n      = int(_hist["_tiene_exc"].sum())
+                        _tot_h      = _cumple_n + _nocumple_n
+                        _pct_ok     = round(_cumple_n / _tot_h * 100, 1) if _tot_h else 0
+
+                        _hk1,_hk2,_hk3,_hk4,_hk5 = st.columns(5)
+                        _hk1.metric("Total atendidas", f"{_tot_h:,}")
+                        _hk2.metric("✅ Cumplen SLA", f"{_cumple_n:,}",
+                                    delta=f"{_pct_ok}%")
+                        _hk3.metric("❌ No cumplen SLA", f"{_nocumple_n:,}",
+                                    delta=f"{100-_pct_ok:.1f}%",
+                                    delta_color="inverse")
+                        _hk4.metric("ℹ️ Con excepción", f"{_exc_n:,}",
+                                    delta="ya cuentan como cumple",
+                                    delta_color="off")
+                        _hk5.metric("Cumplimiento", f"{_pct_ok}%")
+
+                        # Tabla resumen de OTs cerradas del mes
+                        _hist_disp = _hist.copy()
+                        def _estado_h(row):
+                            cumpl = str(row.get("cumplimiento","")).upper()
+                            if bool(row.get("_tiene_exc")): return "ℹ️ Excepción"
+                            if cumpl == "CUMPLE":    return "✅ Cumple"
+                            if cumpl == "NO CUMPLE": return "❌ No cumple"
+                            return "⚪ Sin datos"
+                        _hist_disp["_estado"] = _hist_disp.apply(_estado_h, axis=1)
+                        _hist_disp["_fecha"] = pd.to_datetime(
+                            _hist_disp["fecha_llamado"], errors="coerce"
+                        ).dt.strftime("%d/%m/%Y")
+                        _hist_disp["_atencion"] = pd.to_datetime(
+                            _hist_disp["fecha_atencion"], errors="coerce"
+                        ).dt.strftime("%d/%m/%Y")
+
+                        _hist_cols = [c for c in [
+                            "os_fracttal","_fecha","_atencion","cliente","eds_nombre",
+                            "tecnico","prioridad","horas_resolucion","tiempo_resp_esp",
+                            "_estado",
+                        ] if c in _hist_disp.columns]
+                        _hist_show = _hist_disp[_hist_cols].rename(columns={
+                            "os_fracttal":"OS Fracttal",
+                            "_fecha":"Fecha llamado",
+                            "_atencion":"Fecha atención",
+                            "cliente":"Cliente","eds_nombre":"EDS",
+                            "tecnico":"Técnico","prioridad":"Prio",
+                            "horas_resolucion":"Horas",
+                            "tiempo_resp_esp":"Umbral (h)",
+                            "_estado":"Estado SLA",
+                        })
+                        # Orden: NO CUMPLE primero (para ver problemas de un vistazo)
+                        _orden_estado = {"❌ No cumple":0, "ℹ️ Excepción":1,
+                                         "✅ Cumple":2, "⚪ Sin datos":3}
+                        _hist_show = _hist_show.assign(
+                            _ord=_hist_show["Estado SLA"].map(_orden_estado).fillna(9)
+                        ).sort_values(["_ord","Fecha llamado"], ascending=[True,False]) \
+                         .drop(columns="_ord")
+
+                        _show_df(_hist_show.reset_index(drop=True),
+                            hide_index=True, width="stretch",
+                            column_config={
+                                "OS Fracttal":    st.column_config.TextColumn(width=105),
+                                "Fecha llamado":  st.column_config.TextColumn(width=105),
+                                "Fecha atención": st.column_config.TextColumn(width=110),
+                                "Cliente":        st.column_config.TextColumn(width=110),
+                                "EDS":            st.column_config.TextColumn(width=220),
+                                "Técnico":        st.column_config.TextColumn(width=170),
+                                "Prio":           st.column_config.TextColumn(width=55),
+                                "Horas":          st.column_config.NumberColumn(
+                                    format="%.1f h", width=80),
+                                "Umbral (h)":     st.column_config.NumberColumn(
+                                    format="%d h", width=80),
+                                "Estado SLA":     st.column_config.TextColumn(width=130,
+                                    help="Ordenadas: No cumple → Excepción → Cumple."),
+                            })
+                st.divider()
+
+            # ══════════════════════════════════════════════════════════════════
+            # RANKING: Técnicos que MÁS dejan vencer SLA
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown(
+                '<div class="section-header">'
+                '📊  Ranking · Técnicos con más SLA vencidos'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "Consolidado histórico 2026 de OTs vencidas por técnico. "
+                "Suma **OTs cerradas fuera de SLA** + **OTs actualmente vencidas y aún abiertas**. "
+                "Incluye Occimiano, AUTEC, Elecons y externos."
+            )
+
+            # (1) OTs cerradas que NO cumplieron
+            _venc_cerradas = pd.DataFrame()
+            if not df_llamados.empty and "cumplimiento" in df_llamados.columns:
+                _venc_cerradas = df_llamados[
+                    (df_llamados["cumplimiento"] == "NO CUMPLE") &
+                    (df_llamados["tecnico"].notna())
+                ].copy()
+                if sel_cli_live != "Todos":
+                    _venc_cerradas = _venc_cerradas[
+                        _venc_cerradas["cliente"].apply(_norm_cli_live) == _sel_norm
+                    ]
+                if sel_mes_live != "Todos":
+                    _mes_num_v = {v: k for k, v in _MES_ES_LIVE.items()}.get(
+                        sel_mes_live.split(" ")[0])
+                    if _mes_num_v:
+                        _fl_v = pd.to_datetime(_venc_cerradas["fecha_llamado"],
+                                               errors="coerce", utc=True)
+                        _venc_cerradas = _venc_cerradas[
+                            (_fl_v.dt.year == _year) &
+                            (_fl_v.dt.month == _mes_num_v)
+                        ]
+
+            # (2) OTs abiertas ya vencidas — protegido si _df_ab está vacío
+            _venc_abiertas = pd.DataFrame()
+            if not _df_ab.empty and "_vencida" in _df_ab.columns:
                 _venc_abiertas = _df_ab[_df_ab["_vencida"]].copy()
 
-                # Normalizar técnico: consolidar variantes de la misma
-                # persona/empresa antes de agrupar.
-                #   - AUTEC LTDA, AUTEC IQUIQUE, AUTEC IQUIQUE Francisco Munoz,
-                #     etc. → todo 'AUTEC'
-                #   - 'Jaime Humberto Ocampo Romero' y variaciones con 'ocampo'
-                #     → 'Jaime Ocampo (Elecons)'
-                def _norm_tec(t):
-                    s = str(t or "").strip()
-                    if not s:
-                        return ""
-                    su = s.upper()
-                    if "AUTEC" in su:
-                        return "AUTEC"
-                    if "OCAMPO" in su:
-                        return "Jaime Ocampo (Elecons)"
-                    return s
+            def _norm_tec(t):
+                s = str(t or "").strip()
+                if not s: return ""
+                su = s.upper()
+                if "AUTEC" in su: return "AUTEC"
+                if "OCAMPO" in su: return "Jaime Ocampo (Elecons)"
+                return s
 
-                # Agregar por técnico
-                _rk_data = []
-                if not _venc_cerradas.empty:
-                    _venc_cerradas = _venc_cerradas.assign(
-                        _tec_norm=_venc_cerradas["tecnico"].apply(_norm_tec))
-                    _rk_data.append(_venc_cerradas.groupby("_tec_norm").agg(
-                        cerradas=("os_fracttal", "count"),
-                    ).reset_index().rename(columns={"_tec_norm": "_tec"}))
-                if not _venc_abiertas.empty:
-                    _venc_abiertas = _venc_abiertas.assign(
-                        _tec_norm=_venc_abiertas["responsable"].apply(_norm_tec))
-                    _rk_data.append(_venc_abiertas.groupby("_tec_norm").agg(
-                        abiertas=("id_ot", "count"),
-                    ).reset_index().rename(columns={"_tec_norm": "_tec"}))
+            _rk_data = []
+            if not _venc_cerradas.empty:
+                _venc_cerradas = _venc_cerradas.assign(
+                    _tec_norm=_venc_cerradas["tecnico"].apply(_norm_tec))
+                _rk_data.append(_venc_cerradas.groupby("_tec_norm").agg(
+                    cerradas=("os_fracttal", "count"),
+                ).reset_index().rename(columns={"_tec_norm": "_tec"}))
+            if not _venc_abiertas.empty:
+                _venc_abiertas = _venc_abiertas.assign(
+                    _tec_norm=_venc_abiertas["responsable"].apply(_norm_tec))
+                _rk_data.append(_venc_abiertas.groupby("_tec_norm").agg(
+                    abiertas=("id_ot", "count"),
+                ).reset_index().rename(columns={"_tec_norm": "_tec"}))
 
-                if not _rk_data:
-                    st.success("✅ No hay OTs vencidas en el filtro seleccionado.")
-                else:
-                    _rk = _rk_data[0]
-                    for _extra in _rk_data[1:]:
-                        _rk = _rk.merge(_extra, on="_tec", how="outer")
-                    for _c in ("cerradas", "abiertas"):
-                        if _c not in _rk.columns:
-                            _rk[_c] = 0
-                    _rk["cerradas"] = _rk["cerradas"].fillna(0).astype(int)
-                    _rk["abiertas"] = _rk["abiertas"].fillna(0).astype(int)
-                    _rk["total"]    = _rk["cerradas"] + _rk["abiertas"]
-                    _rk = _rk[_rk["_tec"].astype(str).str.strip() != ""]
-                    _rk = _rk.sort_values("total", ascending=False)
+            if not _rk_data:
+                st.success("✅ No hay OTs vencidas en el filtro seleccionado.")
+            else:
+                _rk = _rk_data[0]
+                for _extra in _rk_data[1:]:
+                    _rk = _rk.merge(_extra, on="_tec", how="outer")
+                for _c in ("cerradas", "abiertas"):
+                    if _c not in _rk.columns:
+                        _rk[_c] = 0
+                _rk["cerradas"] = _rk["cerradas"].fillna(0).astype(int)
+                _rk["abiertas"] = _rk["abiertas"].fillna(0).astype(int)
+                _rk["total"]    = _rk["cerradas"] + _rk["abiertas"]
+                _rk = _rk[_rk["_tec"].astype(str).str.strip() != ""]
+                _rk = _rk.sort_values("total", ascending=False)
 
-                    # Categoría de empresa (para lectura rápida)
-                    def _empresa(tec):
-                        s = str(tec or "").upper()
-                        if "AUTEC" in s: return "🔵 AUTEC"
-                        if "OCAMPO" in s or "ELECONS" in s: return "🟣 Elecons"
-                        return "🟢 Occimiano"
-                    _rk["Empresa"] = _rk["_tec"].apply(_empresa)
+                def _empresa(tec):
+                    s = str(tec or "").upper()
+                    if "AUTEC" in s: return "🔵 AUTEC"
+                    if "OCAMPO" in s or "ELECONS" in s: return "🟣 Elecons"
+                    return "🟢 Occimiano"
+                _rk["Empresa"] = _rk["_tec"].apply(_empresa)
 
-                    _rk_show = _rk.head(20).rename(columns={
-                        "_tec":     "Técnico",
-                        "cerradas": "Vencidas cerradas",
-                        "abiertas": "Vencidas abiertas ahora",
-                        "total":    "Total SLA vencidos",
-                    })[["Técnico","Empresa","Vencidas cerradas",
-                        "Vencidas abiertas ahora","Total SLA vencidos"]]
+                _rk_show = _rk.head(20).rename(columns={
+                    "_tec":     "Técnico",
+                    "cerradas": "Vencidas cerradas",
+                    "abiertas": "Vencidas abiertas ahora",
+                    "total":    "Total SLA vencidos",
+                })[["Técnico","Empresa","Vencidas cerradas",
+                    "Vencidas abiertas ahora","Total SLA vencidos"]]
 
-                    _max_v = int(_rk_show["Total SLA vencidos"].max() or 1)
-                    _show_df(_rk_show.reset_index(drop=True), hide_index=True,
-                        width="stretch",
-                        column_config={
-                            "Técnico":                st.column_config.TextColumn(width=220),
-                            "Empresa":                st.column_config.TextColumn(width=110),
-                            "Vencidas cerradas":      st.column_config.NumberColumn(
-                                format="%d", width=140,
-                                help="OTs ya cerradas que NO cumplieron SLA (historico 2026)."),
-                            "Vencidas abiertas ahora":st.column_config.NumberColumn(
-                                format="%d", width=170,
-                                help="OTs actualmente abiertas y ya vencidas (del filtro actual)."),
-                            "Total SLA vencidos":     st.column_config.ProgressColumn(
-                                format="%d", min_value=0, max_value=_max_v, width=180,
-                                help="Suma total. Escala relativa al peor del ranking."),
-                        })
-                    _n_show = min(20, len(_rk))
-                    st.caption(f"Top {_n_show} de {len(_rk)} técnicos con al menos 1 SLA vencido.")
+                _max_v = int(_rk_show["Total SLA vencidos"].max() or 1)
+                _show_df(_rk_show.reset_index(drop=True), hide_index=True,
+                    width="stretch",
+                    column_config={
+                        "Técnico":                st.column_config.TextColumn(width=220),
+                        "Empresa":                st.column_config.TextColumn(width=110),
+                        "Vencidas cerradas":      st.column_config.NumberColumn(
+                            format="%d", width=140,
+                            help="OTs ya cerradas que NO cumplieron SLA (historico 2026)."),
+                        "Vencidas abiertas ahora":st.column_config.NumberColumn(
+                            format="%d", width=170,
+                            help="OTs actualmente abiertas y ya vencidas (del filtro actual)."),
+                        "Total SLA vencidos":     st.column_config.ProgressColumn(
+                            format="%d", min_value=0, max_value=_max_v, width=180,
+                            help="Suma total. Escala relativa al peor del ranking."),
+                    })
+                _n_show = min(20, len(_rk))
+                st.caption(f"Top {_n_show} de {len(_rk)} técnicos con al menos 1 SLA vencido.")
 
-                st.divider()
-                st.caption(
-                    "**Fuentes**: `ordenes_trabajo` con `tipo_tarea=CORRECTIVA` y sin "
-                    "`fecha_finalizacion` · Umbral SLA desde `sla_umbrales_horas` por "
-                    "(cliente, prioridad, zona) · T0 = `fecha_incidente` (o `fecha_creacion` "
-                    "como fallback) · Estado 'en curso' = existe `fecha_inicio` (técnico "
-                    "abrió Fracttal para trabajar). Se excluyen Canceladas."
-                )
+            st.divider()
+            st.caption(
+                "**Fuentes**: `ordenes_trabajo` con `tipo_tarea=CORRECTIVA` y sin "
+                "`fecha_finalizacion` · Umbral SLA desde `sla_umbrales_horas` por "
+                "(cliente, prioridad, zona) · T0 = `fecha_incidente` (o `fecha_creacion` "
+                "como fallback) · Estado 'en curso' = existe `fecha_inicio` (técnico "
+                "abrió Fracttal para trabajar). Se excluyen Canceladas."
+            )
 
         # ══════════════════════════════════════════════════════════════════════
         # SUB-PESTAÑA: UPTIME (llamados de emergencia / correctivas)
