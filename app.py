@@ -5619,8 +5619,10 @@ elif _page == _NAV_PAGES[4]:
         with _fc1:
             _mes_sel = st.selectbox("Mes", _hojas_disp, key="sto_mes_sel")
         with _fc2:
-            _vista = st.selectbox("Vista", ["Mes completo","Semana","Día"],
-                                  key="sto_vista")
+            _vista = st.selectbox(
+                "Vista",
+                ["📅 Agenda día", "📊 Timeline semanal", "🔥 Heatmap mensual"],
+                key="sto_vista")
         with _fc5:
             st.write("")
             if st.button("🔄 Refrescar", key="sto_refresh",
@@ -5678,119 +5680,234 @@ elif _page == _NAV_PAGES[4]:
             if _eq_sel != "Todos":
                 _keep = ["_fecha"] + _equipos_sto[_eq_sel]
                 _df_vista = _df_vista[[c for c in _keep if c in _df_vista.columns]]
-
-            # Aplicar filtro de vista (semana / día)
-            _hoy_norm = pd.Timestamp.today().normalize()
-            if _vista == "Semana":
-                # Selector de semana ISO
-                _df_vista["_iso_wk"] = pd.to_datetime(_df_vista["_fecha"]).dt.isocalendar().week
-                _semanas = sorted(_df_vista["_iso_wk"].unique().tolist())
-                # Rango de fechas por semana (min-max de la semana en la hoja)
-                _rango_sem = {}
-                for _w in _semanas:
-                    _sub = _df_vista[_df_vista["_iso_wk"] == _w]["_fecha"]
-                    _mn = pd.to_datetime(_sub.min())
-                    _mx = pd.to_datetime(_sub.max())
-                    _rango_sem[_w] = (
-                        f"Semana {_w} ({_mn.strftime('%d/%m')} – {_mx.strftime('%d/%m')})"
-                    )
-                _sem_lbl = [_rango_sem[w] for w in _semanas]
-                _sem_pick = st.selectbox("Semana", _sem_lbl, key="sto_sem_pick")
-                _sem_n = int(_sem_pick.split()[1])
-                _df_vista = _df_vista[_df_vista["_iso_wk"] == _sem_n].drop(columns="_iso_wk")
-            elif _vista == "Día":
-                _fechas_disp = pd.to_datetime(_df_vista["_fecha"]).dt.date.tolist()
-                _dia_pick = st.selectbox("Día", _fechas_disp,
-                    format_func=lambda d: d.strftime("%A %d/%m/%Y"),
-                    key="sto_dia_pick")
-                _df_vista = _df_vista[
-                    pd.to_datetime(_df_vista["_fecha"]).dt.date == _dia_pick
-                ]
-
             # Filtrar por técnico
             if _tec_sel != "Todos":
                 _cols_keep = ["_fecha", _tec_sel]
                 _df_vista = _df_vista[[c for c in _cols_keep if c in _df_vista.columns]]
 
-            if _df_vista.empty:
+            _tecs_all = [c for c in _df_vista.columns if c != "_fecha"]
+
+            # ── Clasificador de actividad → tipo (color del Excel + texto) ──
+            # Devuelve (clave_tipo, label, color_texto, color_fondo)
+            _TIPOS_STO = {
+                "mp":   ("🟢 MP fuera de Santiago", "#166534", "#dcfce7"),
+                "vac":  ("🔴 Vacaciones / libre",   "#991b1b", "#fee2e2"),
+                "fer":  ("🟠 Feriado",              "#9a3412", "#ffedd5"),
+                "ofi":  ("🟣 Oficina",              "#6b21a8", "#f3e8ff"),
+                "ins":  ("🔵 Instalación/Proyecto", "#075985", "#e0f2fe"),
+                "cap":  ("🩵 Capacitación",         "#155e75", "#cffafe"),
+                "tur":  ("⚪ Turno",                "#334155", "#f1f5f9"),
+                "asig": ("🟦 Asignación terreno",   "#0c4a6e", "#f0f9ff"),
+                "libre":("· Sin asignar",           "#94a3b8", "#ffffff"),
+            }
+            def _tipo_sto(fecha_d, tec, txt):
+                _clr = str(_colores_sto.get((fecha_d, tec), "") or "").upper()
+                s = str(txt or "").upper()
+                if _clr == "#FF0000" or "VACACION" in s or "LIBRE" in s: return "vac"
+                if _clr == "#FFC000" or "FERIADO" in s:                  return "fer"
+                if _clr == "#00FF00":                                    return "mp"
+                if not s.strip():                                        return "libre"
+                if "OFICINA" in s:                                       return "ofi"
+                if "INSTAL" in s or "PROYECTO" in s or "AUDITOR" in s:   return "ins"
+                if "CAPACITA" in s:                                      return "cap"
+                if "TURNO" in s:                                         return "tur"
+                if s.strip().isdigit():                                  return "asig"
+                if any(c in s for c in ("MP ","TEMUCO","OSORNO","ANTOFAGASTA","IQUIQUE",
+                        "CALAMA","ARICA","CONCEPCION","CHILLAN","VALDIVIA","RANCAGUA",
+                        "SERENA","OVALLE","COPIAPO","TALCA","CURICO")): return "mp"
+                return "asig"
+            _DIA_ABR = ["LUN","MAR","MIÉ","JUE","VIE","SÁB","DOM"]
+
+            if _df_vista.empty or not _tecs_all:
                 st.info("No hay registros para el filtro seleccionado.")
-            else:
-                # ── KPIs por técnico (solo si se ven varios) ──────────
-                if _tec_sel == "Todos":
-                    _n_dias = len(_df_vista)
-                    _tecs = [c for c in _df_vista.columns if c != "_fecha"]
-                    st.markdown(f"**{_n_dias} día(s) · {len(_tecs)} técnicos**")
 
-                    # Contar por técnico: vacaciones, feriados, MP regional
-                    _resumen = []
-                    for _tec in _tecs:
-                        _n_vac = _n_fer = _n_mp = _n_norm = 0
-                        for _, _row in _df_vista.iterrows():
-                            _d = pd.to_datetime(_row["_fecha"]).date()
-                            _col = _colores_sto.get((_d, _tec), "").upper()
-                            _val = str(_row.get(_tec, "") or "").upper()
-                            if _col == "#FF0000" or "VACACIONES" in _val:
-                                _n_vac += 1
-                            elif _col == "#FFC000" or "FERIADO" in _val:
-                                _n_fer += 1
-                            elif _col == "#00FF00":
-                                _n_mp += 1
-                            elif _val.strip():
-                                _n_norm += 1
-                        _resumen.append({
-                            "Técnico": _tec, "Días activos": _n_norm,
-                            "🟢 MP regional": _n_mp,
-                            "🔴 Vacaciones": _n_vac,
-                            "🟠 Feriados": _n_fer,
-                        })
-                    _df_resumen = pd.DataFrame(_resumen)
-                    with st.expander("📊 Resumen por técnico (conteos)", expanded=False):
-                        _show_df(_df_resumen, hide_index=True, use_container_width=True)
+            # ═══════════════════ VISTA 1: AGENDA DEL DÍA ═══════════════════
+            elif _vista == "📅 Agenda día":
+                _fechas_disp = pd.to_datetime(_df_vista["_fecha"]).dt.date.tolist()
+                # default = hoy si está en el mes, sino el primero
+                _hoy_d = _date_sto.today()
+                _idx_def = _fechas_disp.index(_hoy_d) if _hoy_d in _fechas_disp else 0
+                _dia_pick = st.selectbox("Día", _fechas_disp, index=_idx_def,
+                    format_func=lambda d: f"{_DIA_ABR[d.weekday()]} {d.strftime('%d/%m/%Y')}",
+                    key="sto_dia_pick")
+                _row_dia = _df_vista[
+                    pd.to_datetime(_df_vista["_fecha"]).dt.date == _dia_pick]
+                if _row_dia.empty:
+                    st.info("Sin datos para ese día.")
+                else:
+                    _row = _row_dia.iloc[0]
+                    # Agrupar técnicos por tipo
+                    _grupos = {}
+                    for _tec in _tecs_all:
+                        _txt = str(_row.get(_tec, "") or "")
+                        _tp = _tipo_sto(_dia_pick, _tec, _txt)
+                        if _tp == "libre":  # no mostrar sin-asignar
+                            continue
+                        _grupos.setdefault(_tp, []).append((_tec, _txt))
+                    _orden = ["mp","asig","ins","tur","ofi","cap","vac","fer"]
+                    _cols_html = ""
+                    for _o in [o for o in _orden if o in _grupos]:
+                        _lbl, _ci, _bg = _TIPOS_STO[_o]
+                        _tasks = "".join(
+                            f'<div style="background:#fff;border:1px solid #e2e8f0;'
+                            f'border-left:3px solid {_ci};border-radius:8px;padding:8px 10px;'
+                            f'margin-bottom:8px;"><div style="font-weight:700;font-size:.85rem;'
+                            f'color:#1e293b">{_tec}</div>'
+                            + (f'<div style="font-size:.76rem;color:#64748b;margin-top:2px">{_txt}</div>'
+                               if _txt.strip() else '')
+                            + '</div>'
+                            for _tec, _txt in _grupos[_o]
+                        )
+                        _cols_html += (
+                            f'<div style="background:#f1f5f9;border:1px solid #e2e8f0;'
+                            f'border-radius:12px;padding:12px;min-width:180px;flex:1">'
+                            f'<div style="font-size:.8rem;font-weight:700;margin-bottom:10px;'
+                            f'color:{_ci};text-transform:uppercase;letter-spacing:.03em">'
+                            f'{_lbl} <span style="background:#fff;border:1px solid #e2e8f0;'
+                            f'border-radius:20px;padding:1px 8px;font-size:.72rem;color:#64748b;'
+                            f'float:right">{len(_grupos[_o])}</span></div>{_tasks}</div>'
+                        )
+                    st.markdown(
+                        f'<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">'
+                        f'{_cols_html}</div>',
+                        unsafe_allow_html=True,
+                    )
 
-                # ── Grid principal con colores ────────────────────────
-                # Preparar DataFrame para display
-                _df_disp = _df_vista.copy()
-                _df_disp["Fecha"] = pd.to_datetime(_df_disp["_fecha"]).apply(
-                    lambda d: f"{['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'][d.weekday()]} "
-                              f"{d.strftime('%d/%m')}"
+            # ═══════════════════ VISTA 2: TIMELINE SEMANAL ═══════════════════
+            elif _vista == "📊 Timeline semanal":
+                _df_vista["_iso_wk"] = pd.to_datetime(_df_vista["_fecha"]).dt.isocalendar().week
+                _semanas = sorted(_df_vista["_iso_wk"].unique().tolist())
+                _rango_sem = {}
+                for _w in _semanas:
+                    _sub = _df_vista[_df_vista["_iso_wk"] == _w]["_fecha"]
+                    _mn = pd.to_datetime(_sub.min()); _mx = pd.to_datetime(_sub.max())
+                    _rango_sem[_w] = f"Semana {_w} ({_mn.strftime('%d/%m')} – {_mx.strftime('%d/%m')})"
+                _sem_pick = st.selectbox("Semana", [_rango_sem[w] for w in _semanas],
+                                         key="sto_sem_pick")
+                _sem_n = int(_sem_pick.split()[1])
+                _df_sem = _df_vista[_df_vista["_iso_wk"] == _sem_n].sort_values("_fecha")
+                _dias_sem = pd.to_datetime(_df_sem["_fecha"]).dt.date.tolist()
+
+                # Header
+                _hdr = ('<div style="display:grid;grid-template-columns:150px repeat('
+                        f'{len(_dias_sem)},1fr);background:#f1f5f9;font-weight:700;'
+                        'font-size:.74rem;color:#64748b;border:1px solid #e2e8f0;'
+                        'border-radius:10px 10px 0 0">'
+                        '<div style="padding:9px 12px;border-right:1px solid #e2e8f0">Técnico</div>')
+                for _d in _dias_sem:
+                    _we = _d.weekday() >= 5
+                    _hdr += (f'<div style="padding:9px 4px;text-align:center;'
+                             f'{"background:#fff7ed;" if _we else ""}border-right:1px solid #e2e8f0">'
+                             f'{_DIA_ABR[_d.weekday()]} {_d.strftime("%d/%m")}</div>')
+                _hdr += '</div>'
+
+                # Filas agrupadas por equipo
+                def _fila_tec(_tec):
+                    _cells = (f'<div style="padding:10px 12px;font-weight:650;font-size:.82rem;'
+                              f'border-right:1px solid #e2e8f0;display:flex;align-items:center;'
+                              f'background:#fff">{_tec}</div>')
+                    for _d in _dias_sem:
+                        _we = _d.weekday() >= 5
+                        _txt = str(_df_sem[pd.to_datetime(_df_sem["_fecha"]).dt.date == _d]
+                                   [_tec].iloc[0] or "")
+                        _tp = _tipo_sto(_d, _tec, _txt)
+                        _bg_we = ('background:repeating-linear-gradient(45deg,#fafafa,'
+                                  '#fafafa 6px,#f1f5f9 6px,#f1f5f9 12px);' if _we else '')
+                        _chip = ''
+                        if _txt.strip():
+                            _lbl, _ci, _bg = _TIPOS_STO[_tp]
+                            _chip = (f'<div style="background:{_bg};color:{_ci};border-radius:6px;'
+                                     f'padding:4px 6px;font-weight:600;font-size:.72rem;height:100%;'
+                                     f'display:flex;align-items:center;line-height:1.2" '
+                                     f'title="{_txt}">{_txt[:26]}</div>')
+                        _cells += (f'<div style="padding:6px;border-right:1px solid #e2e8f0;'
+                                   f'min-height:46px;{_bg_we}">{_chip}</div>')
+                    return _cells
+
+                _body = ""
+                _cols_presentes = set(_tecs_all)
+                for _eq, _miembros in _equipos_sto.items() if _eq_sel == "Todos" else [(_eq_sel, _equipos_sto.get(_eq_sel, _tecs_all))]:
+                    _miembros_v = [m for m in _miembros if m in _cols_presentes]
+                    if not _miembros_v:
+                        continue
+                    _body += (f'<div style="grid-column:1/-1;font-size:.68rem;font-weight:800;'
+                              f'text-transform:uppercase;letter-spacing:.04em;color:#075e6b;'
+                              f'padding:7px 12px;background:#e6f4f6;border-top:2px solid #01798A">'
+                              f'Equipo {_eq}</div>')
+                    for _tec in _miembros_v:
+                        _body += (f'<div style="display:grid;grid-template-columns:150px repeat('
+                                  f'{len(_dias_sem)},1fr);border-bottom:1px solid #e2e8f0">'
+                                  f'{_fila_tec(_tec)}</div>')
+                # Técnicos sin equipo (AUTEC, ALEXIS)
+                _sin_eq = [t for t in _tecs_all
+                           if not any(t in mm for mm in _equipos_sto.values())]
+                if _sin_eq and _eq_sel == "Todos":
+                    _body += ('<div style="grid-column:1/-1;font-size:.68rem;font-weight:800;'
+                              'text-transform:uppercase;letter-spacing:.04em;color:#475569;'
+                              'padding:7px 12px;background:#f1f5f9;border-top:2px solid #94a3b8">'
+                              'Externos / Otros</div>')
+                    for _tec in _sin_eq:
+                        _body += (f'<div style="display:grid;grid-template-columns:150px repeat('
+                                  f'{len(_dias_sem)},1fr);border-bottom:1px solid #e2e8f0">'
+                                  f'{_fila_tec(_tec)}</div>')
+
+                st.markdown(
+                    f'<div style="overflow-x:auto"><div style="min-width:820px;border:1px solid '
+                    f'#e2e8f0;border-top:none;border-radius:0 0 10px 10px">{_hdr}{_body}</div></div>',
+                    unsafe_allow_html=True,
                 )
-                _df_disp = _df_disp.drop(columns="_fecha")
-                _cols_final_sto = ["Fecha"] + [c for c in _df_disp.columns if c != "Fecha"]
-                _df_disp = _df_disp[_cols_final_sto]
+                _df_vista = _df_vista.drop(columns="_iso_wk", errors="ignore")
 
-                # Aplicar estilos con Styler
-                def _estilo_celda(v, fecha_str, tec):
-                    """Color de fondo basado en el dict de colores del Excel"""
-                    # Extraer fecha del formato "LUN 30/06"
-                    try:
-                        _dd_mm = fecha_str.split(" ")[-1]
-                        _mes_num_e = _MESES_STO.index(_mes_sel.split()[0]) + 1
-                        _yr_e = int(_mes_sel.split()[1])
-                        _d, _m = _dd_mm.split("/")
-                        _fe = _date_sto(_yr_e, int(_m), int(_d))
-                    except Exception:
-                        return ""
-                    _clr = _colores_sto.get((_fe, tec), "").upper()
-                    _v_up = str(v or "").upper()
-                    # Overrides por texto (si no hay color explícito)
-                    if _clr == "#FF0000" or "VACACIONES" in _v_up:
-                        return "background-color: #fecaca; color: #7f1d1d; font-weight:600"
-                    if _clr == "#FFC000" or "FERIADO" in _v_up:
-                        return "background-color: #fed7aa; color: #7c2d12; font-weight:600"
-                    if _clr == "#00FF00":
-                        return "background-color: #bbf7d0; color: #14532d; font-weight:500"
-                    return ""
+            # ═══════════════════ VISTA 3: HEATMAP MENSUAL ═══════════════════
+            elif _vista == "🔥 Heatmap mensual":
+                _fechas_mes = sorted(pd.to_datetime(_df_vista["_fecha"]).dt.date.tolist())
+                if _fechas_mes:
+                    # Header con números de día
+                    _hdr = (f'<div style="display:grid;grid-template-columns:130px repeat('
+                            f'{len(_fechas_mes)},1fr);gap:2px;margin-bottom:2px">'
+                            '<div style="font-size:.7rem;color:#64748b;font-weight:600;'
+                            'display:flex;align-items:center;padding:0 6px">Técnico ↓ / Día →</div>')
+                    for _d in _fechas_mes:
+                        _we = _d.weekday() >= 5
+                        _hdr += (f'<div style="font-size:.6rem;text-align:center;font-weight:600;'
+                                 f'color:{"#d97706" if _we else "#94a3b8"}">{_d.day}</div>')
+                    _hdr += '</div>'
+                    _rows = ""
+                    for _tec in _tecs_all:
+                        _cells = (f'<div style="font-size:.74rem;font-weight:650;padding:4px 8px;'
+                                  f'display:flex;align-items:center;background:#fff;border-radius:4px">'
+                                  f'{_tec}</div>')
+                        _rmap = {pd.to_datetime(r["_fecha"]).date(): r
+                                 for _, r in _df_vista.iterrows()}
+                        for _d in _fechas_mes:
+                            _txt = str(_rmap.get(_d, {}).get(_tec, "") or "") if _d in _rmap else ""
+                            _tp = _tipo_sto(_d, _tec, _txt)
+                            _lbl, _ci, _bg = _TIPOS_STO[_tp]
+                            _op = ".25" if _tp == "libre" else ".9"
+                            _tip = f"{_tec} · {_d.strftime('%d/%m')}: {_txt or 'sin asignar'}"
+                            _cells += (f'<div title="{_tip}" style="aspect-ratio:1;border-radius:3px;'
+                                       f'background:{_ci};opacity:{_op};cursor:default"></div>')
+                        _rows += (f'<div style="display:grid;grid-template-columns:130px repeat('
+                                  f'{len(_fechas_mes)},1fr);gap:2px;margin-bottom:2px">{_cells}</div>')
+                    st.markdown(
+                        f'<div style="overflow-x:auto"><div style="min-width:900px">{_hdr}{_rows}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("Pasa el mouse sobre cualquier celda para ver el detalle del día.")
 
-                def _apply_styles(row):
-                    """Aplica estilos por celda leyendo la fecha de la col 'Fecha'"""
-                    _fecha_str = row["Fecha"]
-                    return [""] + [_estilo_celda(row[c], _fecha_str, c)
-                                   for c in row.index if c != "Fecha"]
-
-                _styled = _df_disp.style.apply(_apply_styles, axis=1)
-                st.dataframe(_styled, use_container_width=True, hide_index=True,
-                             height=min(600, 40 * len(_df_disp) + 50))
-
+            # ── Leyenda + resumen (comun a todas las vistas) ──────────────
+            if not _df_vista.empty and _tecs_all:
+                _leg = " · ".join(
+                    f'<span style="display:inline-flex;align-items:center;gap:5px">'
+                    f'<span style="width:11px;height:11px;border-radius:3px;background:{_c};'
+                    f'display:inline-block"></span>{_l.split(" ",1)[1] if " " in _l else _l}</span>'
+                    for _k,(_l,_c,_b) in _TIPOS_STO.items() if _k != "libre"
+                )
+                st.markdown(
+                    f'<div style="font-size:.76rem;color:#64748b;margin:14px 0;'
+                    f'display:flex;gap:14px;flex-wrap:wrap">{_leg}</div>',
+                    unsafe_allow_html=True,
+                )
                 st.caption(
                     f"📖 Fuente: `{_PATH_STO.split('/')[-1]}` hoja **{_mes_sel}** · "
                     f"cache 5 min · botón 🔄 Refrescar para forzar recarga."
