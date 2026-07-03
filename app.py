@@ -5776,7 +5776,7 @@ elif _page == _NAV_PAGES[4]:
             @st.cache_data(ttl=1800, show_spinner=False)
             def _turnos_finde_idx():
                 import json as _js_t
-                _idx = {}   # {fecha_iso: set(nombres_norm de quienes trabajan)}
+                _idx = {}   # {fecha_iso: {nombre_norm: horario}}
                 try:
                     _pt = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                        "turnos_data.json")
@@ -5795,23 +5795,28 @@ elif _page == _NAV_PAGES[4]:
                             # solo sábado (5) y domingo (6)
                             for _di in (5, 6):
                                 if _di < len(_dts) and _di < len(_hrs):
-                                    _h = str(_hrs[_di] or "").strip().upper()
-                                    if _h and _h != "LIBRE":
-                                        _idx.setdefault(_dts[_di], set()).add(_norm_nom(_nom))
+                                    _h = str(_hrs[_di] or "").strip()
+                                    if _h and _h.upper() != "LIBRE":
+                                        _idx.setdefault(_dts[_di], {})[_norm_nom(_nom)] = _h
                 return _idx
             _TURNOS_FS = _turnos_finde_idx()
 
-            def _en_turno_finde(fecha_d, tec):
-                """True si el técnico está de turno ese sábado/domingo según
-                el cronograma de turnos (match por tokens del nombre)."""
-                _nombres = _TURNOS_FS.get(fecha_d.isoformat())
-                if not _nombres:
-                    return False
+            def _horario_finde(fecha_d, tec):
+                """Devuelve el horario de turno del técnico ese sábado/domingo
+                (o None si está libre). Match por tokens del nombre."""
+                _m = _TURNOS_FS.get(fecha_d.isoformat())
+                if not _m:
+                    return None
                 _tks = set(_norm_nom(tec).split())
-                for _full in _nombres:
-                    if _tks and _tks.issubset(set(_full.split())):
-                        return True
-                return False
+                if not _tks:
+                    return None
+                for _full, _hor in _m.items():
+                    if _tks.issubset(set(_full.split())):
+                        return _hor
+                return None
+
+            def _en_turno_finde(fecha_d, tec):
+                return _horario_finde(fecha_d, tec) is not None
 
             def _tipo_sto(fecha_d, tec, txt):
                 _clr = str(_colores_sto.get((fecha_d, tec), "") or "").upper()
@@ -5933,15 +5938,23 @@ elif _page == _NAV_PAGES[4]:
                         _txt = str(_df_sem[pd.to_datetime(_df_sem["_fecha"]).dt.date == _d]
                                    [_tec].iloc[0] or "")
                         _tp = _tipo_sto(_d, _tec, _txt)
-                        _bg_we = ('background:repeating-linear-gradient(45deg,#fafafa,'
-                                  '#fafafa 6px,#f1f5f9 6px,#f1f5f9 12px);' if _we else '')
+                        _bg_we = ('background:repeating-linear-gradient(45deg,#fffdf5,'
+                                  '#fffdf5 6px,#fef9e7 6px,#fef9e7 12px);' if _we else '')
                         _chip = ''
-                        if _txt.strip():
+                        # Texto a mostrar: el del Excel, o inyectado en fin de semana
+                        _chip_txt, _chip_tip = _txt.strip(), _txt
+                        if not _chip_txt and _we:
+                            _hor = _horario_finde(_d, _tec)
+                            if _hor:  # de turno el finde
+                                _chip_txt = f"Turno {_hor}"; _chip_tip = f"En turno · {_hor}"
+                            else:     # finde libre
+                                _chip_txt = "Libre"; _chip_tip = "Fin de semana libre"
+                        if _chip_txt:
                             _lbl, _ci, _bg = _TIPOS_STO[_tp]
                             _chip = (f'<div style="background:{_bg};color:{_ci};border-radius:6px;'
                                      f'padding:4px 6px;font-weight:600;font-size:.72rem;height:100%;'
                                      f'display:flex;align-items:center;line-height:1.2" '
-                                     f'title="{_txt}">{_txt[:26]}</div>')
+                                     f'title="{_chip_tip}">{_chip_txt[:26]}</div>')
                         _cells += (f'<div style="padding:6px;border-right:1px solid #e2e8f0;'
                                    f'min-height:46px;{_bg_we}">{_chip}</div>')
                     return _cells
@@ -6038,7 +6051,12 @@ elif _page == _NAV_PAGES[4]:
                             _tp = _tipo_sto(_d, _tec, _txt)
                             _lbl, _ci, _bg = _TIPOS_STO[_tp]
                             _op = ".25" if _tp == "libre" else ".9"
-                            _tip = f"{_disp_tec(_tec)} · {_d.strftime('%d/%m')}: {_txt or 'sin asignar'}"
+                            # Detalle del tooltip (inyecta turno de finde si aplica)
+                            _det = _txt
+                            if not _det and _d.weekday() >= 5:
+                                _hor = _horario_finde(_d, _tec)
+                                _det = f"Turno {_hor}" if _hor else "Fin de semana libre"
+                            _tip = f"{_disp_tec(_tec)} · {_d.strftime('%d/%m')}: {_det or 'sin asignar'}"
                             _bl = f'border-left:{_DIV};' if _es_inicio_mes[_idx] else ''
                             _cells += (f'<div title="{_tip}" style="aspect-ratio:1;border-radius:3px;'
                                        f'{_bl}background:{_ci};opacity:{_op};cursor:default"></div>')
