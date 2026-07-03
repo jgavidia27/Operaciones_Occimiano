@@ -12246,11 +12246,200 @@ elif _page == _NAV_PAGES[2]:
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
-    _ptab_plan, _ptab_norea, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
-        "📅  Planificación", "🚫  No Realizadas",
+    _ptab_plan, _ptab_prog, _ptab_norea, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
+        "📅  Planificación", "📋  Programación MP", "🚫  No Realizadas",
         "🏢  Por Cliente", "👷  Por Técnico",
         "🏭  Por Activo/EDS", "⏱️  Uptime"
     ])
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SUB-TAB: 📋 Programación MP — cronograma de MPs POR REALIZAR del mes.
+    # Lee la seccion T24+ del Excel (despues del encabezado 'POR REALIZAR').
+    # Cada fila = una EDS programada. Si tiene FECHA REAL (col T) = ya se hizo;
+    # si no = pendiente. Sirve para desglosar lo que viene y detectar
+    # programadas vencidas (fecha_progr pasada y aun sin ejecutar).
+    # ══════════════════════════════════════════════════════════════════════
+    with _ptab_prog:
+        from openpyxl import load_workbook as _lwb_pr
+        from datetime import date as _date_pr
+
+        st.markdown(
+            '<div class="section-header">'
+            '📋  Programación MP — Cronograma del mes'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "MPs programadas del mes según el Excel de Utilización de Tiempo. "
+            "**Pendientes** = aún sin ejecutar · **Realizadas** = ya tienen fecha real · "
+            "**⚠️ Vencidas** = fecha programada ya pasó y siguen sin ejecutarse. "
+            "Cada EDS puede tener varios equipos, cada uno con su propia frecuencia de MP."
+        )
+
+        _PATH_PR = ("G:/.shortcut-targets-by-id/15zHnoU5VZlkOwYc6EBziNcnS-sAAtwtk/"
+                    "OPERACIONES/OPERACIONES/2026 UTILIZACIÓN DE TIEMPO.xlsx")
+
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _load_programacion_mp(mes_hoja: str) -> pd.DataFrame:
+            """Lee la seccion POR REALIZAR (desde el encabezado en col X hasta
+            el fin de datos). Devuelve DataFrame con las MPs programadas."""
+            try:
+                _wb = _lwb_pr(_PATH_PR, data_only=True)
+            except Exception:
+                return pd.DataFrame()
+            if mes_hoja not in _wb.sheetnames:
+                return pd.DataFrame()
+            _ws = _wb[mes_hoja]
+            # Localizar la fila del encabezado 'POR REALIZAR' o el 2do 'FECHA REAL'
+            _start = None
+            for r in range(3, 60):
+                _x = str(_ws.cell(r, 24).value or "").upper()   # col X
+                _t = str(_ws.cell(r, 20).value or "").upper()   # col T
+                if "POR REALIZAR" in _x or (r > 5 and _t == "FECHA REAL"):
+                    _start = r + 1
+                    # Si es 'POR REALIZAR' el encabezado real esta 1 fila mas abajo
+                    if "POR REALIZAR" in _x:
+                        _start = r + 2
+                    break
+            if _start is None:
+                return pd.DataFrame()
+            rows = []
+            for r in range(_start, _ws.max_row + 1):
+                _cod = _ws.cell(r, 22).value   # V - N° EDS
+                _dir = _ws.cell(r, 24).value   # X - direccion
+                if not _cod and not _dir:
+                    continue
+                # Saltar encabezados repetidos
+                if str(_ws.cell(r, 20).value or "").upper() == "FECHA REAL":
+                    continue
+                rows.append({
+                    "F. Real":      _ws.cell(r, 20).value,   # T
+                    "F. Programada": _ws.cell(r, 21).value,  # U
+                    "Cód. EDS":     str(_ws.cell(r, 22).value or "").strip(),  # V
+                    "N°":           str(_ws.cell(r, 23).value or "").strip(),  # W
+                    "Dirección":    str(_ws.cell(r, 24).value or "").strip(),  # X
+                    "Semana":       str(_ws.cell(r, 25).value or "").strip(),  # Y
+                    "Última mant.": _ws.cell(r, 26).value,   # Z
+                    "Día":          str(_ws.cell(r, 27).value or "").strip(),  # AA
+                    "Provincia":    str(_ws.cell(r, 28).value or "").strip(),  # AB
+                    "Comuna":       str(_ws.cell(r, 29).value or "").strip(),  # AC
+                    "Tipo MP":      str(_ws.cell(r, 30).value or "").strip(),  # AD
+                })
+            return pd.DataFrame(rows)
+
+        # ── Filtros ─────────────────────────────────────────────────────
+        _MESES_PR = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
+                     "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
+        _yr_pr = _date_pr.today().year
+        _mes_actual_pr = _date_pr.today().month
+        _hojas_disp_pr = [f"{_MESES_PR[m-1]} {_yr_pr}"
+                          for m in range(_mes_actual_pr, 0, -1)] + \
+                         [f"{_MESES_PR[m-1]} {_yr_pr-1}"
+                          for m in range(12, 0, -1)]
+
+        _fp1, _fp2, _fp3, _fp4 = st.columns([1.8, 1.5, 1.5, 1])
+        with _fp1:
+            _mes_pr = st.selectbox("Mes", _hojas_disp_pr, key="pr_mes_sel")
+        with _fp4:
+            st.write("")
+            if st.button("🔄 Refrescar", key="pr_refresh", use_container_width=True):
+                _load_programacion_mp.clear()
+                st.rerun()
+
+        with st.spinner(f"Leyendo programación de {_mes_pr}…"):
+            _df_pr = _load_programacion_mp(_mes_pr)
+
+        if _df_pr.empty:
+            st.info(
+                f"No hay MPs programadas registradas en **{_mes_pr}**. "
+                "Verifica que la hoja tenga la sección 'POR REALIZAR' poblada."
+            )
+        else:
+            # Normalizar fechas y calcular estado
+            _hoy_pr = pd.Timestamp.today().normalize()
+            _df_pr["_freal_dt"] = pd.to_datetime(_df_pr["F. Real"], errors="coerce")
+            _df_pr["_fprog_dt"] = pd.to_datetime(_df_pr["F. Programada"], errors="coerce")
+
+            def _estado_pr(row):
+                if pd.notna(row["_freal_dt"]):
+                    return "✅ Realizada"
+                if pd.notna(row["_fprog_dt"]) and row["_fprog_dt"] < _hoy_pr:
+                    return "⚠️ Vencida"
+                return "🕓 Pendiente"
+            _df_pr["Estado"] = _df_pr.apply(_estado_pr, axis=1)
+
+            # Filtros estado + semana
+            with _fp2:
+                _est_opts = ["Todas","🕓 Pendiente","⚠️ Vencida","✅ Realizada"]
+                _est_sel = st.selectbox("Estado", _est_opts, key="pr_est_sel")
+            with _fp3:
+                _sem_opts = ["Todas"] + sorted(
+                    _df_pr["Semana"].dropna().unique().tolist())
+                _sem_sel = st.selectbox("Semana MP", _sem_opts, key="pr_sem_sel")
+
+            _df_pr_disp = _df_pr.copy()
+            if _est_sel != "Todas":
+                _df_pr_disp = _df_pr_disp[_df_pr_disp["Estado"] == _est_sel]
+            if _sem_sel != "Todas":
+                _df_pr_disp = _df_pr_disp[_df_pr_disp["Semana"] == _sem_sel]
+
+            # Buscar EDS
+            _buscar_pr = st.text_input("Buscar EDS o dirección",
+                placeholder="Ej: 60001 o Huechuraba", key="pr_buscar")
+            if _buscar_pr.strip():
+                _q = _buscar_pr.strip().upper()
+                _df_pr_disp = _df_pr_disp[
+                    _df_pr_disp["Cód. EDS"].str.upper().str.contains(_q, na=False) |
+                    _df_pr_disp["Dirección"].str.upper().str.contains(_q, na=False) |
+                    _df_pr_disp["Comuna"].str.upper().str.contains(_q, na=False)
+                ]
+
+            # KPIs
+            _n_tot  = len(_df_pr)
+            _n_pend = int((_df_pr["Estado"] == "🕓 Pendiente").sum())
+            _n_venc = int((_df_pr["Estado"] == "⚠️ Vencida").sum())
+            _n_real = int((_df_pr["Estado"] == "✅ Realizada").sum())
+            _pk1,_pk2,_pk3,_pk4 = st.columns(4)
+            _pk1.metric("Total programadas", f"{_n_tot:,}")
+            _pk2.metric("✅ Realizadas", f"{_n_real:,}",
+                        delta=f"{round(_n_real/_n_tot*100,1) if _n_tot else 0}%")
+            _pk3.metric("🕓 Pendientes", f"{_n_pend:,}")
+            _pk4.metric("⚠️ Vencidas", f"{_n_venc:,}",
+                        delta="prog. pasó, sin ejecutar", delta_color="inverse")
+
+            # Formatear fechas para display
+            _df_show_pr = _df_pr_disp.copy()
+            for _c in ("F. Real","F. Programada","Última mant."):
+                _df_show_pr[_c] = pd.to_datetime(
+                    _df_show_pr[_c], errors="coerce"
+                ).dt.strftime("%d/%m/%Y").fillna("—")
+            # Orden: vencidas primero, luego pendientes, luego realizadas
+            _ord_est = {"⚠️ Vencida":0, "🕓 Pendiente":1, "✅ Realizada":2}
+            _df_show_pr = _df_show_pr.assign(
+                _o=_df_show_pr["Estado"].map(_ord_est).fillna(9)
+            ).sort_values(["_o","_fprog_dt"], ascending=[True, True])
+
+            _cols_pr = ["Estado","F. Programada","F. Real","Cód. EDS","N°",
+                        "Dirección","Semana","Última mant.","Comuna","Tipo MP"]
+            _show_df(_df_show_pr[_cols_pr].reset_index(drop=True),
+                hide_index=True, width="stretch",
+                column_config={
+                    "Estado":        st.column_config.TextColumn(width=115),
+                    "F. Programada": st.column_config.TextColumn(width=110),
+                    "F. Real":       st.column_config.TextColumn(width=100,
+                        help="Fecha en que se ejecutó realmente (— si pendiente)."),
+                    "Cód. EDS":      st.column_config.TextColumn(width=90),
+                    "N°":            st.column_config.TextColumn(width=55),
+                    "Dirección":     st.column_config.TextColumn(width=250),
+                    "Semana":        st.column_config.TextColumn(width=110),
+                    "Última mant.":  st.column_config.TextColumn(width=105),
+                    "Comuna":        st.column_config.TextColumn(width=130),
+                    "Tipo MP":       st.column_config.TextColumn(width=70),
+                })
+            st.caption(
+                f"Mostrando **{len(_df_pr_disp):,}** de {_n_tot:,} EDS · "
+                f"Fuente: `2026 UTILIZACIÓN DE TIEMPO.xlsx` hoja **{_mes_pr}** sección POR REALIZAR · cache 5 min."
+            )
 
     # ══════════════════════════════════════════════════════════════════════
     # SUB-TAB: 🚫 No Realizadas — lee la seccion T-Z (filas 3-22 aprox)
