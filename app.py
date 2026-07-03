@@ -5762,7 +5762,7 @@ elif _page == _NAV_PAGES[4]:
                 "fer":  ("🟠 Feriado",              "#f59e0b", "#fef3c7"),
                 "ofi":  ("📚 Oficina",              "#64748b", "#f1f5f9"),
                 "ins":  ("🔵 Instalación/Proyecto", "#2563eb", "#dbeafe"),
-                "tur":  ("👔 En Turno",             "#0ea5e9", "#e0f2fe"),
+                "tur":  ("👔 Turno",                "#0ea5e9", "#e0f2fe"),
                 "asig": ("🌎 Terreno",              "#14b8a6", "#ccfbf1"),
                 "cap":  ("🟣 Capacitación",         "#a855f7", "#f3e8ff"),
                 "libre":("· Sin asignar",           "#cbd5e1", "#ffffff"),
