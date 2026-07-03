@@ -2,10 +2,10 @@ name: Sync Fracttal → Supabase
 
 on:
   schedule:
-    # 06:00, 12:00, 18:00 Chile (10:00, 16:00, 22:00 UTC)
-    - cron: "0 10 * * *"
-    - cron: "0 16 * * *"
-    - cron: "0 22 * * *"
+    # Cada hora en punto. Necesario para que el tab 'SLA en curso' refleje
+    # con maximo 1h de retraso: nuevas correctivas, cierres, cancelaciones,
+    # y no muestre OTs que ya fueron cerradas en Fracttal como 'pendientes'.
+    - cron: "0 * * * *"
   workflow_dispatch: {}
 
 jobs:
