@@ -1736,7 +1736,12 @@ if _page == _NAV_PAGES[1]:
             with cf5:
                 sel_cu_c = st.selectbox("Cumplimiento SLA", ["Todos","CUMPLE","NO CUMPLE"], key="cl_cu")
             with cf6:
-                sel_zona_c = st.selectbox("Zona", ["Todas","Centro (Santiago)","Norte","Sur"], key="cl_zona")
+                # Multiselect (permite combinar Centro + Norte + Sur).
+                # Vacío = todas (equivalente a "Todas").
+                sel_zona_c = st.multiselect(
+                    "Zona", ["Centro (Santiago)", "Norte", "Sur"],
+                    key="cl_zona", placeholder="Todas las zonas",
+                )
 
             # ── Aplicar filtros ───────────────────────────────────────────────
             df_ll = df_llamados.copy()
@@ -1760,7 +1765,7 @@ if _page == _NAV_PAGES[1]:
             if sel_cl_c != "Todos":  df_ll = df_ll[df_ll["cliente"] == sel_cl_c]
             if sel_pr_c != "Todas":  df_ll = df_ll[df_ll["prioridad"].str.upper() == sel_pr_c.upper()]
             if sel_cu_c != "Todos":  df_ll = df_ll[df_ll["cumplimiento"] == sel_cu_c]
-            if sel_zona_c != "Todas": df_ll = df_ll[df_ll["_macrozona"] == sel_zona_c]
+            if sel_zona_c: df_ll = df_ll[df_ll["_macrozona"].isin(sel_zona_c)]
 
             # ── KPIs ──────────────────────────────────────────────────────────
             _mes_lbl_tit = f" — {', '.join(sel_mes_c)}" if sel_mes_c else ""
@@ -1806,7 +1811,7 @@ if _page == _NAV_PAGES[1]:
 
             st.divider()
             st.markdown('<div class="section-header">Distribución por prioridad y cliente</div>', unsafe_allow_html=True)
-            _ll_sig_c = f"{len(df_ll)}_{sel_trim_c}_{sel_mes_c}_{sel_cl_c}_{sel_pr_c}_{sel_cu_c}_{sel_zona_c}"
+            _ll_sig_c = f"{len(df_ll)}_{sel_trim_c}_{sel_mes_c}_{sel_cl_c}_{sel_pr_c}_{sel_cu_c}_{tuple(sorted(sel_zona_c))}"
             gc1, gc2, gc3 = st.columns([2, 1.1, 2.7])
 
             with gc1:
