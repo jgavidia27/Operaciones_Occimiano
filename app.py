@@ -3633,13 +3633,15 @@ if _page == _NAV_PAGES[1]:
                 return s
 
             # Excluir técnicos "no aplica" (personas que no son técnicos
-            # operativos, dueños o similares). Se preserva 'Jaime Ocampo'
-            # porque lo tratamos como Elecons (contratista externo).
+            # operativos, dueños, administrativos o similares).
+            # Se preserva 'Jaime Ocampo' porque lo tratamos como Elecons
+            # (contratista externo válido).
             def _es_no_aplica_ranking(tec_norm):
                 s = str(tec_norm or "").upper()
                 for excluido in ("WALTER SOTO", "ANA GUZMAN", "JUAN VALLE",
                                  "WALTER MAURICIO", "ANA MARIA GUZMAN",
-                                 "JUAN PABLO VALLE"):
+                                 "JUAN PABLO VALLE", "ERIC DAYLLER",
+                                 "ERIC ESTEBAN", "DAYLLER MESA"):
                     if excluido in s: return True
                 return False
 
