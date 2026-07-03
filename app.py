@@ -12744,35 +12744,192 @@ elif _page == _NAV_PAGES[2]:
             _pk4.metric("⚠️ Vencidas", f"{_n_venc:,}",
                         delta="prog. pasó, sin ejecutar", delta_color="inverse")
 
-            # Formatear fechas para display
-            _df_show_pr = _df_pr_disp.copy()
-            for _c in ("F. Real","F. Programada","Última mant."):
-                _df_show_pr[_c] = pd.to_datetime(
-                    _df_show_pr[_c], errors="coerce"
-                ).dt.strftime("%d/%m/%Y").fillna("—")
-            # Orden: vencidas primero, luego pendientes, luego realizadas
-            _ord_est = {"⚠️ Vencida":0, "🕓 Pendiente":1, "✅ Realizada":2}
-            _df_show_pr = _df_show_pr.assign(
-                _o=_df_show_pr["Estado"].map(_ord_est).fillna(9)
-            ).sort_values(["_o","_fprog_dt"], ascending=[True, True])
+            st.divider()
 
-            _cols_pr = ["Estado","F. Programada","F. Real","Cód. EDS","N°",
-                        "Dirección","Semana","Última mant.","Comuna","Tipo MP"]
-            _show_df(_df_show_pr[_cols_pr].reset_index(drop=True),
-                hide_index=True, width="stretch",
-                column_config={
-                    "Estado":        st.column_config.TextColumn(width=115),
-                    "F. Programada": st.column_config.TextColumn(width=110),
-                    "F. Real":       st.column_config.TextColumn(width=100,
-                        help="Fecha en que se ejecutó realmente (— si pendiente)."),
-                    "Cód. EDS":      st.column_config.TextColumn(width=90),
-                    "N°":            st.column_config.TextColumn(width=55),
-                    "Dirección":     st.column_config.TextColumn(width=250),
-                    "Semana":        st.column_config.TextColumn(width=110),
-                    "Última mant.":  st.column_config.TextColumn(width=105),
-                    "Comuna":        st.column_config.TextColumn(width=130),
-                    "Tipo MP":       st.column_config.TextColumn(width=70),
-                })
+            # ── Selector de vista (mismo enfoque que Programación STO) ──
+            _EST_PR = {   # estado -> (color, bg, orden)
+                "✅ Realizada": ("#16a34a", "#dcfce7", 2),
+                "🕓 Pendiente": ("#0284c7", "#e0f2fe", 1),
+                "⚠️ Vencida":   ("#dc2626", "#fee2e2", 0),
+            }
+            _DIA_ABR_PR = ["LUN","MAR","MIÉ","JUE","VIE","SÁB","DOM"]
+            _DIA_FULL_PR = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"]
+
+            _vista_pr = st.radio(
+                "Vista", ["📅 Agenda día", "📊 Semana", "🔥 Calendario mes", "📋 Tabla"],
+                horizontal=True, label_visibility="collapsed", key="pr_vista")
+
+            def _card_eds(row):
+                """Tarjeta HTML de una EDS programada."""
+                _c, _bg, _ = _EST_PR.get(row["Estado"], ("#64748b","#f1f5f9",9))
+                _fr = ""
+                if pd.notna(row["_freal_dt"]):
+                    _fr = f' · hecha {row["_freal_dt"].strftime("%d/%m")}'
+                return (f'<div style="background:#fff;border:1px solid #e2e8f0;'
+                        f'border-left:3px solid {_c};border-radius:8px;padding:7px 10px;'
+                        f'margin-bottom:7px;">'
+                        f'<div style="font-weight:700;font-size:.82rem;color:#1e293b">'
+                        f'{row["Cód. EDS"]} <span style="color:#94a3b8;font-weight:500">'
+                        f'N°{row["N°"]}</span></div>'
+                        f'<div style="font-size:.74rem;color:#475569;margin-top:1px">'
+                        f'{str(row["Dirección"])[:42]}</div>'
+                        f'<div style="font-size:.68rem;color:#94a3b8;margin-top:2px">'
+                        f'{row["Comuna"]} · {row["Semana"]}{_fr}</div></div>')
+
+            _df_v = _df_pr_disp.copy()
+            _df_v = _df_v[_df_v["_fprog_dt"].notna()]
+
+            # ═══════════ AGENDA DÍA ═══════════
+            if _vista_pr == "📅 Agenda día":
+                _dias_pr = sorted(_df_v["_fprog_dt"].dt.date.unique().tolist())
+                if not _dias_pr:
+                    st.info("Sin MPs con fecha programada en el filtro actual.")
+                else:
+                    _hoy_pr_d = _hoy_pr.date()
+                    _idx_pr = _dias_pr.index(_hoy_pr_d) if _hoy_pr_d in _dias_pr else 0
+                    _dia_pr = st.selectbox("Día programado", _dias_pr, index=_idx_pr,
+                        format_func=lambda d: f"{_DIA_FULL_PR[d.weekday()]} {d.strftime('%d/%m')}",
+                        key="pr_dia_pick")
+                    _dd = _df_v[_df_v["_fprog_dt"].dt.date == _dia_pr]
+                    _cols_html = ""
+                    for _est in ["⚠️ Vencida","🕓 Pendiente","✅ Realizada"]:
+                        _sub = _dd[_dd["Estado"] == _est]
+                        if _sub.empty:
+                            continue
+                        _c, _bg, _ = _EST_PR[_est]
+                        _cards = "".join(_card_eds(r) for _, r in _sub.iterrows())
+                        _cols_html += (
+                            f'<div style="background:#f1f5f9;border:1px solid #e2e8f0;'
+                            f'border-radius:12px;padding:12px;min-width:230px;flex:1">'
+                            f'<div style="font-size:.8rem;font-weight:700;margin-bottom:10px;'
+                            f'color:{_c};text-transform:uppercase;letter-spacing:.03em">'
+                            f'{_est} <span style="background:#fff;border:1px solid #e2e8f0;'
+                            f'border-radius:20px;padding:1px 8px;font-size:.72rem;color:#64748b;'
+                            f'float:right">{len(_sub)}</span></div>{_cards}</div>')
+                    st.markdown(f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
+                                f'align-items:flex-start">{_cols_html}</div>',
+                                unsafe_allow_html=True)
+
+            # ═══════════ SEMANA ═══════════
+            elif _vista_pr == "📊 Semana":
+                _df_v["_wk"] = _df_v["_fprog_dt"].dt.isocalendar().week
+                _wks = sorted(_df_v["_wk"].unique().tolist())
+                if not _wks:
+                    st.info("Sin MPs con fecha programada.")
+                else:
+                    _rng = {}
+                    for _w in _wks:
+                        _s = _df_v[_df_v["_wk"] == _w]["_fprog_dt"]
+                        _rng[_w] = f"Semana {_w} ({_s.min().strftime('%d/%m')} – {_s.max().strftime('%d/%m')})"
+                    _wpick = st.selectbox("Semana", [_rng[w] for w in _wks], key="pr_wk_pick")
+                    _wn = int(_wpick.split()[1])
+                    _dfw = _df_v[_df_v["_wk"] == _wn]
+                    # Columnas por día de la semana presentes
+                    _dias_w = sorted(_dfw["_fprog_dt"].dt.date.unique().tolist())
+                    _cols_html = ""
+                    for _d in _dias_w:
+                        _sub = _dfw[_dfw["_fprog_dt"].dt.date == _d]
+                        _we = _d.weekday() >= 5
+                        _cards = "".join(_card_eds(r) for _, r in _sub.iterrows())
+                        _cols_html += (
+                            f'<div style="background:{"#fffbeb" if _we else "#f8fafc"};'
+                            f'border:1px solid #e2e8f0;border-radius:12px;padding:10px;'
+                            f'min-width:210px;flex:1">'
+                            f'<div style="font-size:.78rem;font-weight:700;margin-bottom:8px;'
+                            f'color:#334155;text-align:center">'
+                            f'{_DIA_ABR_PR[_d.weekday()]} {_d.strftime("%d/%m")} '
+                            f'<span style="color:#94a3b8;font-weight:500">({len(_sub)})</span>'
+                            f'</div>{_cards}</div>')
+                    st.markdown(f'<div style="display:flex;gap:12px;overflow-x:auto;'
+                                f'align-items:flex-start;padding-bottom:8px">{_cols_html}</div>',
+                                unsafe_allow_html=True)
+
+            # ═══════════ CALENDARIO MES ═══════════
+            elif _vista_pr == "🔥 Calendario mes":
+                import calendar as _cal_pr
+                _mes_num_pr = _MESES_PR.index(_mes_pr.split()[0]) + 1
+                _yr_pr_c = int(_mes_pr.split()[1])
+                _cal = _cal_pr.Calendar(firstweekday=0)  # lunes
+                _semanas_cal = _cal.monthdayscalendar(_yr_pr_c, _mes_num_pr)
+                # Índice: día -> {estados}
+                _por_dia = {}
+                for _, r in _df_v.iterrows():
+                    if r["_fprog_dt"].month == _mes_num_pr and r["_fprog_dt"].year == _yr_pr_c:
+                        _por_dia.setdefault(r["_fprog_dt"].day, []).append(r["Estado"])
+                # Header días
+                _cal_html = ('<div style="display:grid;grid-template-columns:repeat(7,1fr);'
+                             'gap:6px;margin-bottom:6px">')
+                for _dn in _DIA_ABR_PR:
+                    _cal_html += (f'<div style="text-align:center;font-size:.72rem;'
+                                  f'font-weight:700;color:#64748b">{_dn}</div>')
+                _cal_html += '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">'
+                for _sem in _semanas_cal:
+                    for _d in _sem:
+                        if _d == 0:
+                            _cal_html += '<div></div>'
+                            continue
+                        _ests = _por_dia.get(_d, [])
+                        _n = len(_ests)
+                        if _n == 0:
+                            _cal_html += (f'<div style="border:1px solid #f1f5f9;border-radius:8px;'
+                                          f'min-height:64px;padding:5px;background:#fcfcfd">'
+                                          f'<div style="font-size:.72rem;color:#cbd5e1">{_d}</div></div>')
+                            continue
+                        _nv = sum(1 for e in _ests if e == "⚠️ Vencida")
+                        _np = sum(1 for e in _ests if e == "🕓 Pendiente")
+                        _nr = sum(1 for e in _ests if e == "✅ Realizada")
+                        # Color dominante: vencida > pendiente > realizada
+                        if _nv: _bd = "#dc2626"; _bgc = "#fef2f2"
+                        elif _np: _bd = "#0284c7"; _bgc = "#f0f9ff"
+                        else: _bd = "#16a34a"; _bgc = "#f0fdf4"
+                        _mini = ""
+                        if _nr: _mini += f'<span style="color:#16a34a">●{_nr}</span> '
+                        if _np: _mini += f'<span style="color:#0284c7">●{_np}</span> '
+                        if _nv: _mini += f'<span style="color:#dc2626">●{_nv}</span>'
+                        _cal_html += (
+                            f'<div title="{_d}/{_mes_num_pr}: {_nr} hechas · {_np} pend · {_nv} venc" '
+                            f'style="border:1px solid {_bd}55;border-left:3px solid {_bd};'
+                            f'border-radius:8px;min-height:64px;padding:5px;background:{_bgc}">'
+                            f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                            f'<span style="font-size:.72rem;font-weight:700;color:#334155">{_d}</span>'
+                            f'<span style="font-size:.7rem;font-weight:800;color:{_bd};'
+                            f'background:#fff;border-radius:10px;padding:0 6px">{_n}</span></div>'
+                            f'<div style="font-size:.64rem;margin-top:6px;line-height:1.6">{_mini}</div>'
+                            f'</div>')
+                _cal_html += '</div>'
+                st.markdown(_cal_html, unsafe_allow_html=True)
+                st.caption("Cada día muestra el total de MP y el desglose ●verde=hechas "
+                           "●azul=pendientes ●rojo=vencidas. Borde = estado más urgente del día.")
+
+            # ═══════════ TABLA ═══════════
+            else:
+                _df_show_pr = _df_pr_disp.copy()
+                for _c in ("F. Real","F. Programada","Última mant."):
+                    _df_show_pr[_c] = pd.to_datetime(
+                        _df_show_pr[_c], errors="coerce"
+                    ).dt.strftime("%d/%m/%Y").fillna("—")
+                _ord_est = {"⚠️ Vencida":0, "🕓 Pendiente":1, "✅ Realizada":2}
+                _df_show_pr = _df_show_pr.assign(
+                    _o=_df_show_pr["Estado"].map(_ord_est).fillna(9)
+                ).sort_values(["_o","_fprog_dt"], ascending=[True, True])
+                _cols_pr = ["Estado","F. Programada","F. Real","Cód. EDS","N°",
+                            "Dirección","Semana","Última mant.","Comuna","Tipo MP"]
+                _show_df(_df_show_pr[_cols_pr].reset_index(drop=True),
+                    hide_index=True, width="stretch",
+                    column_config={
+                        "Estado":        st.column_config.TextColumn(width=115),
+                        "F. Programada": st.column_config.TextColumn(width=110),
+                        "F. Real":       st.column_config.TextColumn(width=100,
+                            help="Fecha en que se ejecutó realmente (— si pendiente)."),
+                        "Cód. EDS":      st.column_config.TextColumn(width=90),
+                        "N°":            st.column_config.TextColumn(width=55),
+                        "Dirección":     st.column_config.TextColumn(width=250),
+                        "Semana":        st.column_config.TextColumn(width=110),
+                        "Última mant.":  st.column_config.TextColumn(width=105),
+                        "Comuna":        st.column_config.TextColumn(width=130),
+                        "Tipo MP":       st.column_config.TextColumn(width=70),
+                    })
+
             st.caption(
                 f"Mostrando **{len(_df_pr_disp):,}** de {_n_tot:,} EDS · "
                 f"Fuente: `2026 UTILIZACIÓN DE TIEMPO.xlsx` hoja **{_mes_pr}** sección POR REALIZAR · cache 5 min."
