@@ -515,8 +515,13 @@ def main():
     args = parser.parse_args()
 
     if args.modo == "incremental":
-        desde = (datetime.now() - timedelta(hours=48)).strftime("%Y-%m-%d")
-        log(f"Modo incremental - ultimas 48h (desde {desde})")
+        # Antes eran 48h — pero el sync usa creation_date, entonces OTs viejas
+        # que cambiaban de estado en Fracttal (cierre, cancelacion) NO se
+        # re-sincronizaban. Ahora 30 dias: captura cambios de estado en OTs
+        # que llevan hasta un mes abiertas (que es la vida util tipica de una
+        # correctiva). Se ejecuta en <1 min con la infra actual.
+        desde = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        log(f"Modo incremental - ultimos 30 dias (desde {desde})")
     else:
         desde = args.desde
         log(f"Modo completo - desde {desde}")
