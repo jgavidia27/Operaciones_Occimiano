@@ -5760,7 +5760,7 @@ elif _page == _NAV_PAGES[4]:
                 "mp":   ("🟢 MP fuera de Santiago", "#16a34a", "#dcfce7"),
                 "vac":  ("🔻 Vacaciones / libre",   "#dc2626", "#fee2e2"),
                 "fer":  ("🟠 Feriado",              "#f59e0b", "#fef3c7"),
-                "ofi":  ("📎 Oficina",              "#64748b", "#f1f5f9"),
+                "ofi":  ("📚 Oficina",              "#64748b", "#f1f5f9"),
                 "ins":  ("🔵 Instalación/Proyecto", "#2563eb", "#dbeafe"),
                 "tur":  ("👔 Turno",                "#0ea5e9", "#e0f2fe"),
                 "asig": ("🌎 Asignación terreno",   "#14b8a6", "#ccfbf1"),
