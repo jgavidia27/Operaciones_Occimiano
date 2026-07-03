@@ -12697,13 +12697,78 @@ elif _page == _NAV_PAGES[2]:
             _df_pr["_freal_dt"] = pd.to_datetime(_df_pr["F. Real"], errors="coerce")
             _df_pr["_fprog_dt"] = pd.to_datetime(_df_pr["F. Programada"], errors="coerce")
 
+            # ── Cruce con Fracttal (Supabase) para validar ejecución real ──
+            # El Excel no siempre se actualiza; Fracttal es la fuente de verdad.
+            # Indexamos preventivas del mes por codigo_eds -> mejor OT.
+            _mes_num_pr0 = _MESES_PR.index(_mes_pr.split()[0]) + 1
+            _yr_pr0 = int(_mes_pr.split()[1])
+
+            @st.cache_data(ttl=900, show_spinner=False)
+            def _fracttal_mp_idx(mes_num, anio):
+                """{codigo_eds: {id_ot, responsable, fin, estado}} de las
+                preventivas de Fracttal cuya creación cae en el mes ±10 días."""
+                from supabase_client import _query as _sq
+                _d0 = f"{anio}-{mes_num:02d}-01"
+                _mn2, _yr2 = (mes_num + 1, anio) if mes_num < 12 else (1, anio + 1)
+                _d1 = f"{_yr2}-{_mn2:02d}-05"
+                try:
+                    _rows = _sq("ordenes_trabajo",
+                        "select=id_ot,codigo_eds,estado,fecha_finalizacion,responsable,nombre_activo"
+                        "&tipo_tarea=ilike.*PREVENTIV*"
+                        f"&fecha_creacion=gte.{_d0}&fecha_creacion=lt.{_d1}",
+                        limit=5000)
+                except Exception:
+                    return {}
+                _idx = {}
+                _BASURA = ("ERROR DE INGRESO","DUPLICADO","DUPLICIDAD","DE PRUEBA",
+                           "PRUEBA ROBOT","CANCELAD")
+                for r in _rows:
+                    _ce = str(r.get("codigo_eds") or "").strip().upper()
+                    if not _ce:
+                        continue
+                    _est = str(r.get("estado") or "").upper()
+                    if any(b in _est for b in _BASURA):
+                        continue
+                    _fin = r.get("fecha_finalizacion")
+                    _prev = _idx.get(_ce)
+                    # Preferir: la que tiene fecha_finalizacion (realizada)
+                    if _prev is None or (_fin and not _prev.get("fin")):
+                        _idx[_ce] = {
+                            "id_ot": r.get("id_ot"),
+                            "responsable": r.get("responsable") or "",
+                            "fin": _fin,
+                            "estado": r.get("estado") or "",
+                        }
+                return _idx
+            _FR_IDX = _fracttal_mp_idx(_mes_num_pr0, _yr_pr0)
+
+            def _match_fr(cod_eds):
+                return _FR_IDX.get(str(cod_eds or "").strip().upper())
+
             def _estado_pr(row):
+                _fr = _match_fr(row["Cód. EDS"])
+                # 1) Fracttal manda: si hay OT finalizada -> Realizada
+                if _fr and _fr.get("fin"):
+                    return "✅ Realizada"
+                # 2) Excel marca realizada
                 if pd.notna(row["_freal_dt"]):
                     return "✅ Realizada"
+                # 3) Hay OT abierta en Fracttal (en progreso / por iniciar)
+                if _fr:
+                    return "🕓 Pendiente"
+                # 4) Sin rastro en Fracttal y fecha programada ya pasó
                 if pd.notna(row["_fprog_dt"]) and row["_fprog_dt"] < _hoy_pr:
                     return "⚠️ Vencida"
                 return "🕓 Pendiente"
             _df_pr["Estado"] = _df_pr.apply(_estado_pr, axis=1)
+            # Enriquecer con OT y responsable de Fracttal
+            _df_pr["_ot_fr"]   = _df_pr["Cód. EDS"].apply(
+                lambda c: (_match_fr(c) or {}).get("id_ot") or "")
+            _df_pr["_resp_fr"] = _df_pr["Cód. EDS"].apply(
+                lambda c: (_match_fr(c) or {}).get("responsable") or "")
+            _df_pr["_finfr_dt"] = pd.to_datetime(
+                _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fin")),
+                errors="coerce")
 
             # Filtros estado + semana
             with _fp2:
@@ -12760,11 +12825,24 @@ elif _page == _NAV_PAGES[2]:
                 horizontal=True, label_visibility="collapsed", key="pr_vista")
 
             def _card_eds(row):
-                """Tarjeta HTML de una EDS programada."""
+                """Tarjeta HTML de una EDS programada, con validación Fracttal."""
                 _c, _bg, _ = _EST_PR.get(row["Estado"], ("#64748b","#f1f5f9",9))
+                # Línea de ejecución real (Fracttal / Excel)
                 _fr = ""
-                if pd.notna(row["_freal_dt"]):
+                _fin_fr = row.get("_finfr_dt")
+                if pd.notna(_fin_fr):
+                    _fr = f' · hecha {_fin_fr.strftime("%d/%m")}'
+                elif pd.notna(row.get("_freal_dt")):
                     _fr = f' · hecha {row["_freal_dt"].strftime("%d/%m")}'
+                # Línea OT + responsable de Fracttal
+                _ot = str(row.get("_ot_fr") or "")
+                _resp = str(row.get("_resp_fr") or "")
+                _ot_html = ""
+                if _ot:
+                    _resp_corto = _resp.split()[0] + " " + (_resp.split()[1] if len(_resp.split())>1 else "") if _resp else "—"
+                    _ot_html = (f'<div style="font-size:.68rem;color:#0369a1;margin-top:2px;'
+                                f'font-weight:600">🔧 {_ot}'
+                                + (f' · {_resp_corto}' if _resp else '') + '</div>')
                 return (f'<div style="background:#fff;border:1px solid #e2e8f0;'
                         f'border-left:3px solid {_c};border-radius:8px;padding:7px 10px;'
                         f'margin-bottom:7px;">'
@@ -12774,7 +12852,8 @@ elif _page == _NAV_PAGES[2]:
                         f'<div style="font-size:.74rem;color:#475569;margin-top:1px">'
                         f'{str(row["Dirección"])[:42]}</div>'
                         f'<div style="font-size:.68rem;color:#94a3b8;margin-top:2px">'
-                        f'{row["Comuna"]} · {row["Semana"]}{_fr}</div></div>')
+                        f'{row["Comuna"]} · {row["Semana"]}{_fr}</div>'
+                        f'{_ot_html}</div>')
 
             _df_v = _df_pr_disp.copy()
             _df_v = _df_v[_df_v["_fprog_dt"].notna()]
@@ -12901,10 +12980,48 @@ elif _page == _NAV_PAGES[2]:
                 st.caption("Cada día muestra el total de MP y el desglose ●verde=hechas "
                            "●azul=pendientes ●rojo=vencidas. Borde = estado más urgente del día.")
 
+                # ── Detalle del día seleccionado (debajo del calendario) ──
+                _dias_con_mp = sorted(_por_dia.keys())
+                if _dias_con_mp:
+                    st.divider()
+                    _dsel = st.selectbox(
+                        "Ver detalle del día:",
+                        _dias_con_mp,
+                        format_func=lambda d: f"{d}/{_mes_num_pr:02d} — "
+                            f"{len(_por_dia.get(d, []))} MP",
+                        key="pr_cal_dia")
+                    _dd_cal = _df_v[
+                        (_df_v["_fprog_dt"].dt.day == _dsel) &
+                        (_df_v["_fprog_dt"].dt.month == _mes_num_pr) &
+                        (_df_v["_fprog_dt"].dt.year == _yr_pr_c)]
+                    _cols_det = ""
+                    for _est in ["⚠️ Vencida","🕓 Pendiente","✅ Realizada"]:
+                        _sub = _dd_cal[_dd_cal["Estado"] == _est]
+                        if _sub.empty:
+                            continue
+                        _c, _bg, _ = _EST_PR[_est]
+                        _cards = "".join(_card_eds(r) for _, r in _sub.iterrows())
+                        _cols_det += (
+                            f'<div style="background:#f1f5f9;border:1px solid #e2e8f0;'
+                            f'border-radius:12px;padding:12px;min-width:230px;flex:1">'
+                            f'<div style="font-size:.8rem;font-weight:700;margin-bottom:10px;'
+                            f'color:{_c};text-transform:uppercase;letter-spacing:.03em">'
+                            f'{_est} <span style="background:#fff;border:1px solid #e2e8f0;'
+                            f'border-radius:20px;padding:1px 8px;font-size:.72rem;color:#64748b;'
+                            f'float:right">{len(_sub)}</span></div>{_cards}</div>')
+                    st.markdown(f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
+                                f'align-items:flex-start">{_cols_det}</div>',
+                                unsafe_allow_html=True)
+
             # ═══════════ TABLA ═══════════
             else:
                 _df_show_pr = _df_pr_disp.copy()
-                for _c in ("F. Real","F. Programada","Última mant."):
+                # Fecha de ejecución real: Fracttal manda, sino Excel
+                _df_show_pr["OT Fracttal"] = _df_show_pr["_ot_fr"].fillna("").replace("", "—")
+                _df_show_pr["Responsable"] = _df_show_pr["_resp_fr"].fillna("").replace("", "—")
+                _df_show_pr["F. Ejecución"] = _df_show_pr["_finfr_dt"].fillna(
+                    _df_show_pr["_freal_dt"])
+                for _c in ("F. Ejecución","F. Programada","Última mant."):
                     _df_show_pr[_c] = pd.to_datetime(
                         _df_show_pr[_c], errors="coerce"
                     ).dt.strftime("%d/%m/%Y").fillna("—")
@@ -12912,21 +13029,24 @@ elif _page == _NAV_PAGES[2]:
                 _df_show_pr = _df_show_pr.assign(
                     _o=_df_show_pr["Estado"].map(_ord_est).fillna(9)
                 ).sort_values(["_o","_fprog_dt"], ascending=[True, True])
-                _cols_pr = ["Estado","F. Programada","F. Real","Cód. EDS","N°",
-                            "Dirección","Semana","Última mant.","Comuna","Tipo MP"]
+                _cols_pr = ["Estado","F. Programada","F. Ejecución","OT Fracttal","Responsable",
+                            "Cód. EDS","N°","Dirección","Semana","Comuna","Tipo MP"]
                 _show_df(_df_show_pr[_cols_pr].reset_index(drop=True),
                     hide_index=True, width="stretch",
                     column_config={
                         "Estado":        st.column_config.TextColumn(width=115),
-                        "F. Programada": st.column_config.TextColumn(width=110),
-                        "F. Real":       st.column_config.TextColumn(width=100,
-                            help="Fecha en que se ejecutó realmente (— si pendiente)."),
+                        "F. Programada": st.column_config.TextColumn(width=105),
+                        "F. Ejecución":  st.column_config.TextColumn(width=105,
+                            help="Fecha real de ejecución (Fracttal). — si aún no se ha hecho."),
+                        "OT Fracttal":   st.column_config.TextColumn(width=100,
+                            help="N° de orden de trabajo en Fracttal (validación de ejecución)."),
+                        "Responsable":   st.column_config.TextColumn(width=160,
+                            help="Técnico que ejecutó la MP según Fracttal."),
                         "Cód. EDS":      st.column_config.TextColumn(width=90),
                         "N°":            st.column_config.TextColumn(width=55),
-                        "Dirección":     st.column_config.TextColumn(width=250),
-                        "Semana":        st.column_config.TextColumn(width=110),
-                        "Última mant.":  st.column_config.TextColumn(width=105),
-                        "Comuna":        st.column_config.TextColumn(width=130),
+                        "Dirección":     st.column_config.TextColumn(width=220),
+                        "Semana":        st.column_config.TextColumn(width=105),
+                        "Comuna":        st.column_config.TextColumn(width=120),
                         "Tipo MP":       st.column_config.TextColumn(width=70),
                     })
 
