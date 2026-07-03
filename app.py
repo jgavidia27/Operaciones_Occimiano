@@ -5689,16 +5689,20 @@ elif _page == _NAV_PAGES[4]:
 
             # ── Clasificador de actividad → tipo (color del Excel + texto) ──
             # Devuelve (clave_tipo, label, color_texto, color_fondo)
+            # Paleta (texto/borde/heatmap = _ci ; fondo chip = _bg):
+            #   MP regional=verde · Vacaciones=rojo · Feriado=naranja ·
+            #   Oficina=gris metal · Instalación=azul · Turno=celeste ·
+            #   Asignación terreno=aguamarina · Capacitación=morado
             _TIPOS_STO = {
-                "mp":   ("🟢 MP fuera de Santiago", "#166534", "#dcfce7"),
-                "vac":  ("🔴 Vacaciones / libre",   "#991b1b", "#fee2e2"),
-                "fer":  ("🟠 Feriado",              "#9a3412", "#ffedd5"),
-                "ofi":  ("🟣 Oficina",              "#6b21a8", "#f3e8ff"),
-                "ins":  ("🔵 Instalación/Proyecto", "#075985", "#e0f2fe"),
-                "cap":  ("🩵 Capacitación",         "#155e75", "#cffafe"),
-                "tur":  ("⚪ Turno",                "#334155", "#f1f5f9"),
-                "asig": ("🟦 Asignación terreno",   "#0c4a6e", "#f0f9ff"),
-                "libre":("· Sin asignar",           "#94a3b8", "#ffffff"),
+                "mp":   ("🟢 MP fuera de Santiago", "#16a34a", "#dcfce7"),
+                "vac":  ("🔴 Vacaciones / libre",   "#dc2626", "#fee2e2"),
+                "fer":  ("🟠 Feriado",              "#f59e0b", "#fef3c7"),
+                "ofi":  ("⚙️ Oficina",              "#64748b", "#f1f5f9"),
+                "ins":  ("🔵 Instalación/Proyecto", "#2563eb", "#dbeafe"),
+                "tur":  ("🩵 Turno",                "#0ea5e9", "#e0f2fe"),
+                "asig": ("💠 Asignación terreno",   "#14b8a6", "#ccfbf1"),
+                "cap":  ("🟣 Capacitación",         "#a855f7", "#f3e8ff"),
+                "libre":("· Sin asignar",           "#cbd5e1", "#ffffff"),
             }
             def _tipo_sto(fecha_d, tec, txt):
                 _clr = str(_colores_sto.get((fecha_d, tec), "") or "").upper()
