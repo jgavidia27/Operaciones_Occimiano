@@ -5615,13 +5615,13 @@ elif _page == _NAV_PAGES[4]:
                       [f"{_MESES_STO[m-1]} {_yr_actual-1}"
                        for m in range(12, 0, -1)]
 
-        _fc1, _fc2, _fc3, _fc4 = st.columns([2, 1.5, 1.5, 1])
+        _fc1, _fc2, _fc3, _fc4, _fc5 = st.columns([1.6, 1.3, 1.5, 1.5, 1])
         with _fc1:
             _mes_sel = st.selectbox("Mes", _hojas_disp, key="sto_mes_sel")
         with _fc2:
             _vista = st.selectbox("Vista", ["Mes completo","Semana","Día"],
                                   key="sto_vista")
-        with _fc4:
+        with _fc5:
             st.write("")
             if st.button("🔄 Refrescar", key="sto_refresh",
                          use_container_width=True):
@@ -5637,12 +5637,47 @@ elif _page == _NAV_PAGES[4]:
         elif _df_sto is None or _df_sto.empty:
             st.warning(f"Sin datos en la hoja {_mes_sel}.")
         else:
-            # Tercer filtro: técnico (dropdown poblado con los que existen)
-            _tec_opts = ["Todos"] + [c for c in _df_sto.columns if c != "_fecha"]
+            # ── Filtro por EQUIPO (senior + miembros) ─────────────────
+            # Los nombres del Excel pueden diferir en acentos/espacios de
+            # GRUPOS_TERRENO — normalizamos para hacer match.
+            import unicodedata as _ud_sto
+            def _norm_nom(s):
+                s = str(s or "").strip().lower()
+                return "".join(c for c in _ud_sto.normalize("NFD", s)
+                               if _ud_sto.category(c) != "Mn")
+            _cols_tec = [c for c in _df_sto.columns if c != "_fecha"]
+            _cols_norm = {_norm_nom(c): c for c in _cols_tec}  # {norm: nombre_real_excel}
+
+            # Construir mapa Equipo -> [nombres reales en el Excel]
+            _equipos_sto = {}   # {label: [cols_excel]}
+            for _gkey, _gval in GRUPOS_TERRENO.items():
+                _miembros = _gval.get("miembros", [])
+                _cols_eq = [_cols_norm[_norm_nom(m)] for m in _miembros
+                            if _norm_nom(m) in _cols_norm]
+                if _cols_eq:
+                    _senior = _gval.get("senior", _gkey)
+                    _lbl = f"{_gkey}" if _gkey == _senior else f"{_gkey} (Sr. {_senior})"
+                    _equipos_sto[_lbl] = _cols_eq
+
+            _eq_opts = ["Todos"] + list(_equipos_sto.keys())
             with _fc3:
-                _tec_sel = st.selectbox("Técnico", _tec_opts, key="sto_tec_sel")
+                _eq_sel = st.selectbox("Equipo", _eq_opts, key="sto_eq_sel")
+
+            # El dropdown de técnico se restringe al equipo elegido
+            if _eq_sel != "Todos":
+                _tec_pool = _equipos_sto[_eq_sel]
+            else:
+                _tec_pool = _cols_tec
+            _tec_opts = ["Todos"] + _tec_pool
+            with _fc4:
+                _tec_sel = st.selectbox("Técnico", _tec_opts,
+                                        key=f"sto_tec_sel_{_eq_sel}")
 
             _df_vista = _df_sto.copy()
+            # Aplicar filtro de equipo (recortar columnas a sus miembros)
+            if _eq_sel != "Todos":
+                _keep = ["_fecha"] + _equipos_sto[_eq_sel]
+                _df_vista = _df_vista[[c for c in _keep if c in _df_vista.columns]]
 
             # Aplicar filtro de vista (semana / día)
             _hoy_norm = pd.Timestamp.today().normalize()
