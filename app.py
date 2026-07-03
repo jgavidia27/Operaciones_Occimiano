@@ -5565,11 +5565,46 @@ elif _page == _NAV_PAGES[4]:
         _PATH_STO = ("G:/.shortcut-targets-by-id/15zHnoU5VZlkOwYc6EBziNcnS-sAAtwtk/"
                      "OPERACIONES/OPERACIONES/2026 UTILIZACIÓN DE TIEMPO.xlsx")
 
+        @st.cache_data(ttl=1800, show_spinner=False)
+        def _load_grid_sto_supabase(mes_hoja: str):
+            """Lee el grid desde Supabase (programacion_sto). Rápido (~300ms).
+            Devuelve (df, colores, error). Si la tabla no existe o está vacía
+            para ese mes, devuelve (None, None, None) para caer al fallback Excel."""
+            try:
+                from supabase_client import _query as _sq
+                _rows = _sq("programacion_sto",
+                    f"select=fecha,tecnico,actividad,color_excel"
+                    f"&mes_hoja=eq.{mes_hoja.replace(' ', '%20')}",
+                    limit=5000)
+            except Exception:
+                return None, None, None
+            if not _rows:
+                return None, None, None
+            # Pivote: filas=fecha, columnas=técnico
+            _by_fecha = {}
+            _colores = {}
+            for r in _rows:
+                _f = pd.to_datetime(r["fecha"], errors="coerce")
+                if pd.isna(_f):
+                    continue
+                _fd = _f.date()
+                _tec = r["tecnico"]
+                _by_fecha.setdefault(_f, {"_fecha": _f})[_tec] = r.get("actividad") or ""
+                if r.get("color_excel"):
+                    _colores[(_fd, _tec)] = str(r["color_excel"]).upper()
+            _df = pd.DataFrame(sorted(_by_fecha.values(), key=lambda x: x["_fecha"]))
+            return _df, _colores, None
+
         @st.cache_data(ttl=300, show_spinner=False)
         def _load_grid_sto(mes_hoja: str):
-            """Lee la hoja del Excel y devuelve (df, dict_colores).
+            """Fuente PRIMARIA: Supabase (rápido). FALLBACK: Excel de Drive.
             df: filas=días del mes, cols=técnicos, celdas=descripción de actividad
             dict_colores: {(fecha, tecnico): hex_color}"""
+            # 1) Intentar Supabase
+            _df_sb, _col_sb, _ = _load_grid_sto_supabase(mes_hoja)
+            if _df_sb is not None and not _df_sb.empty:
+                return _df_sb, _col_sb, None
+            # 2) Fallback: leer Excel directo (más lento, requiere G: montado)
             try:
                 _wb = _lwb(_PATH_STO, data_only=True)
             except Exception as e:
