@@ -6540,7 +6540,7 @@ elif _page == _NAV_PAGES[4]:
         _MES_LABEL_T = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
                         7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
         _ZONE_LABEL_T = {"centro": "Zona Centro (Santiago)", "norte": "Zona Norte", "sur": "Zona Sur"}
-        _ZONE_ICON_T  = {"centro": "🏙️", "norte": "🏔️", "sur": "🌲"}
+        _ZONE_ICON_T  = {"centro": "🚀", "norte": "⛵", "sur": "🗻"}
 
         _sem_idx_actual = 0
         for _si, _w in enumerate(_weeks):
