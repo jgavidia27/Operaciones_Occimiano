@@ -1246,7 +1246,7 @@ _NAV_PAGES_BASE = [
     "✅  Cumplimiento SLA",
     "🛠️  Mantenciones Preventivas",
     "⛽  Estaciones de Servicio",
-    "📅  Programación STO",
+    "⌛  Utilización del Tiempo",
 ]
 # La página Admin solo aparece para usuarios con rol admin
 _is_admin   = st.session_state.get("_auth_rol", "usuario") == "admin"
@@ -1581,7 +1581,7 @@ _PAGE_TITLE = {
     _NAV_PAGES_BASE[1]: "Cumplimiento SLA",
     _NAV_PAGES_BASE[2]: "Mantenciones Preventivas",
     _NAV_PAGES_BASE[3]: "Estaciones de Servicio",
-    _NAV_PAGES_BASE[4]: "Programación STO",
+    _NAV_PAGES_BASE[4]: "Utilización del Tiempo",
     "🔐  Administración":  "Administración",
 }
 _n_ll = f"{len(df_llamados):,}" if not df_llamados.empty else "–"
@@ -5535,7 +5535,7 @@ elif _page == _NAV_PAGES[4]:
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
     _util_sub_tab = st.radio(
         "",
-        ["📅 Grid Técnicos", "📅 Planificación Turnos", "📡 En Vivo", "📊 Utilización del tiempo"],
+        ["📅 Programación STO", "📅 Planificación Turnos", "📡 En Vivo", "📊 Utilización del tiempo"],
         horizontal=True,
         label_visibility="collapsed",
         key="util_sub_tab",
@@ -5543,17 +5543,17 @@ elif _page == _NAV_PAGES[4]:
     st.divider()
 
     # ─────────────────────────────────────────────────────────────────────
-    # SUB-TAB: 📅 Grid Técnicos — nueva vista de programación diaria por
+    # SUB-TAB: 📅 Programación STO — grid de programación diaria por
     # técnico leyendo directo el Excel '2026 UTILIZACIÓN DE TIEMPO.xlsx'
     # con colores replicados (verde=MP regional, rojo=vacaciones,
     # naranja=feriado, blanco=actividad normal).
     # ─────────────────────────────────────────────────────────────────────
-    if _util_sub_tab == "📅 Grid Técnicos":
+    if _util_sub_tab == "📅 Programación STO":
         from openpyxl import load_workbook as _lwb
         import calendar as _cal_sto
         from datetime import date as _date_sto
 
-        st.title("📅 Grid Técnicos — Programación diaria")
+        st.title("📅 Programación STO — Cronograma diario de técnicos")
         st.caption(
             "Cronograma leído directo del Excel `2026 UTILIZACIÓN DE TIEMPO.xlsx` en Google Drive. "
             "**🟢 verde** = MP fuera de Santiago · "
