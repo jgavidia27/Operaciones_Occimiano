@@ -5652,17 +5652,19 @@ elif _page == _NAV_PAGES[4]:
                           "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
         _yr_actual = _date_sto.today().year
         _mes_actual = _date_sto.today().month
-        # label ('Julio 26') -> hoja Excel ('JULIO 2026')
+        # Límite inferior: abril 2026 (no interesa nada anterior).
+        _MIN_YR_STO, _MIN_MES_STO = 2026, 4
+        # Generar (año, mes) desde el actual hacia atrás hasta el límite.
         _hoja_de_lbl = {}
         _lbls_mes = []
-        for _m in range(_mes_actual, 0, -1):
-            _lbl = f"{_MES_TITLE_STO[_m-1]} {str(_yr_actual)[2:]}"
-            _hoja_de_lbl[_lbl] = f"{_MESES_STO[_m-1]} {_yr_actual}"
+        _cy, _cm = _yr_actual, _mes_actual
+        while (_cy, _cm) >= (_MIN_YR_STO, _MIN_MES_STO):
+            _lbl = f"{_MES_TITLE_STO[_cm-1]} {str(_cy)[2:]}"
+            _hoja_de_lbl[_lbl] = f"{_MESES_STO[_cm-1]} {_cy}"
             _lbls_mes.append(_lbl)
-        for _m in range(12, 0, -1):
-            _lbl = f"{_MES_TITLE_STO[_m-1]} {str(_yr_actual-1)[2:]}"
-            _hoja_de_lbl[_lbl] = f"{_MESES_STO[_m-1]} {_yr_actual-1}"
-            _lbls_mes.append(_lbl)
+            _cm -= 1
+            if _cm == 0:
+                _cm = 12; _cy -= 1
 
         # Alias de display para nombres de técnico (interno vs mostrado)
         _ALIAS_TEC = {"Juan Francisco": "Juan F. Toro"}

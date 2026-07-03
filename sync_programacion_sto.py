@@ -120,8 +120,8 @@ def upsert(registros):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--desde-mes", type=int, default=5,
-                    help="Mes desde el cual sincronizar (1-12). Default 5=mayo.")
+    ap.add_argument("--desde-mes", type=int, default=4,
+                    help="Mes desde el cual sincronizar (1-12). Default 4=abril.")
     ap.add_argument("--anio", type=int, default=datetime.now().year)
     args = ap.parse_args()
 
