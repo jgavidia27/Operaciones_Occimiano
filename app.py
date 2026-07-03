@@ -5648,19 +5648,19 @@ elif _page == _NAV_PAGES[4]:
         # ── Filtros ────────────────────────────────────────────────────
         _MESES_STO = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
                       "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
-        _MES_ABR_STO = ["Ene","Feb","Mar","Abr","May","Jun",
-                        "Jul","Ago","Sep","Oct","Nov","Dic"]
+        _MES_TITLE_STO = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+                          "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
         _yr_actual = _date_sto.today().year
         _mes_actual = _date_sto.today().month
-        # label corto ('Jul 26') -> hoja Excel ('JULIO 2026')
+        # label ('Julio 26') -> hoja Excel ('JULIO 2026')
         _hoja_de_lbl = {}
         _lbls_mes = []
         for _m in range(_mes_actual, 0, -1):
-            _lbl = f"{_MES_ABR_STO[_m-1]} {str(_yr_actual)[2:]}"
+            _lbl = f"{_MES_TITLE_STO[_m-1]} {str(_yr_actual)[2:]}"
             _hoja_de_lbl[_lbl] = f"{_MESES_STO[_m-1]} {_yr_actual}"
             _lbls_mes.append(_lbl)
         for _m in range(12, 0, -1):
-            _lbl = f"{_MES_ABR_STO[_m-1]} {str(_yr_actual-1)[2:]}"
+            _lbl = f"{_MES_TITLE_STO[_m-1]} {str(_yr_actual-1)[2:]}"
             _hoja_de_lbl[_lbl] = f"{_MESES_STO[_m-1]} {_yr_actual-1}"
             _lbls_mes.append(_lbl)
 
@@ -5793,8 +5793,9 @@ elif _page == _NAV_PAGES[4]:
                 # default = hoy si está en el mes, sino el primero
                 _hoy_d = _date_sto.today()
                 _idx_def = _fechas_disp.index(_hoy_d) if _hoy_d in _fechas_disp else 0
+                _DIA_FULL = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"]
                 _dia_pick = st.selectbox("Día", _fechas_disp, index=_idx_def,
-                    format_func=lambda d: f"{_DIA_ABR[d.weekday()]} {d.strftime('%d/%m/%Y')}",
+                    format_func=lambda d: f"{_DIA_FULL[d.weekday()]} {d.strftime('%d/%m')}",
                     key="sto_dia_pick")
                 _row_dia = _df_vista[
                     pd.to_datetime(_df_vista["_fecha"]).dt.date == _dia_pick]
