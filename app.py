@@ -12953,15 +12953,34 @@ elif _page == _NAV_PAGES[2]:
                         f'{row["Comuna"]} · {row["Semana"]}{_fr}</div>'
                         f'{_ot_html}</div>')
 
-            _df_v = _df_pr_disp.copy()
-            _df_v = _df_v[_df_v["_fprog_dt"].notna()]
+            # Partición: con fecha exacta vs. sin fecha (solo semana)
+            _df_v      = _df_pr_disp[_df_pr_disp["_fprog_dt"].notna()].copy()
+            _df_sinfec = _df_pr_disp[_df_pr_disp["_fprog_dt"].isna()].copy()
+
+            # Normalizar "Semana" para agruparla (1era/1ra -> W1, 2da/2a -> W2 ...)
+            def _norm_sem(s):
+                s = str(s or "").upper().strip()
+                if not s or s in ("NAN","NO TIENE MP"):
+                    return "Sin semana"
+                for _n, _tk in [
+                    (1, ("1ERA","1RA","1A ","1° ","1° ","1 ")),
+                    (2, ("2DA","2A ","2ERA","2° ","2 ")),
+                    (3, ("3ERA","3RA","3TA","3A ","3° ","3 ")),
+                    (4, ("4TA","4A ","4° ","4 ")),
+                    (5, ("5TA","5A ","5° ","5 ")),
+                ]:
+                    if any(t.strip() in s for t in _tk):
+                        return f"Semana {_n}"
+                return f"Semana ?"
+
+            if not _df_sinfec.empty:
+                _df_sinfec["_sem_norm"] = _df_sinfec["Semana"].apply(_norm_sem)
 
             # ═══════════ AGENDA DÍA ═══════════
             if _vista_pr == "📅 Agenda día":
                 _dias_pr = sorted(_df_v["_fprog_dt"].dt.date.unique().tolist())
-                if not _dias_pr:
-                    st.info("Sin MPs con fecha programada en el filtro actual.")
-                else:
+
+                if _dias_pr:
                     _hoy_pr_d = _hoy_pr.date()
                     _idx_pr = _dias_pr.index(_hoy_pr_d) if _hoy_pr_d in _dias_pr else 0
                     _dia_pr = st.selectbox("Día programado", _dias_pr, index=_idx_pr,
@@ -12986,23 +13005,67 @@ elif _page == _NAV_PAGES[2]:
                     st.markdown(f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
                                 f'align-items:flex-start">{_cols_html}</div>',
                                 unsafe_allow_html=True)
+                else:
+                    st.info("Sin MPs con **fecha exacta** en este filtro. La mayoría "
+                            "del Excel se planifica por semana (ver sección de abajo).")
+
+                # ── MPs programadas sin fecha exacta (agrupadas por semana) ──
+                if not _df_sinfec.empty:
+                    st.markdown(
+                        '<div style="margin-top:22px;padding:10px 14px;'
+                        'background:#fff7ed;border-left:4px solid #f59e0b;'
+                        'border-radius:6px;font-size:.85rem;color:#92400e">'
+                        '📅 <b>Programadas sin día exacto</b> — planificadas por '
+                        'semana en el Excel (sin fecha específica).</div>',
+                        unsafe_allow_html=True)
+                    _sems_orden = ["Semana 1","Semana 2","Semana 3","Semana 4",
+                                   "Semana 5","Semana ?","Sin semana"]
+                    _sems_pres = [s for s in _sems_orden
+                                  if s in _df_sinfec["_sem_norm"].unique()]
+                    _cols_html2 = ""
+                    for _s in _sems_pres:
+                        _sub = _df_sinfec[_df_sinfec["_sem_norm"] == _s]
+                        _cards = "".join(_card_eds(r) for _, r in _sub.iterrows())
+                        _cols_html2 += (
+                            f'<div style="background:#fefce8;border:1px solid #fde68a;'
+                            f'border-radius:12px;padding:12px;min-width:240px;flex:1">'
+                            f'<div style="font-size:.8rem;font-weight:700;margin-bottom:10px;'
+                            f'color:#92400e;text-transform:uppercase">'
+                            f'{_s} <span style="background:#fff;border:1px solid #fde68a;'
+                            f'border-radius:20px;padding:1px 8px;font-size:.72rem;color:#78350f;'
+                            f'float:right">{len(_sub)}</span></div>{_cards}</div>')
+                    st.markdown(f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
+                                f'align-items:flex-start;margin-top:8px">{_cols_html2}</div>',
+                                unsafe_allow_html=True)
 
             # ═══════════ SEMANA ═══════════
             elif _vista_pr == "📊 Semana":
-                _df_v["_wk"] = _df_v["_fprog_dt"].dt.isocalendar().week
-                _wks = sorted(_df_v["_wk"].unique().tolist())
-                if not _wks:
-                    st.info("Sin MPs con fecha programada.")
+                # Semana del MES (1..5) — más útil que la ISO week porque el Excel
+                # planifica en "1era/2da/3era/4ta/5ta semana" del mes.
+                def _wk_mes(d):
+                    # semana del mes basada en el día (1-7=W1, 8-14=W2, ...)
+                    return (d.day - 1) // 7 + 1
+                _df_v["_wkm"]  = _df_v["_fprog_dt"].dt.date.apply(_wk_mes) \
+                    if not _df_v.empty else []
+                _wks_con_fec = sorted(_df_v["_wkm"].unique().tolist()) if not _df_v.empty else []
+                _wks_sinfec  = sorted({int(s.split()[1]) for s in _df_sinfec["_sem_norm"].unique()
+                                       if s.startswith("Semana ") and s.split()[1].isdigit()}) \
+                                if not _df_sinfec.empty else []
+                _wks_all = sorted(set(_wks_con_fec) | set(_wks_sinfec))
+
+                if not _wks_all:
+                    st.info("Sin MPs programadas.")
                 else:
-                    _rng = {}
-                    for _w in _wks:
-                        _s = _df_v[_df_v["_wk"] == _w]["_fprog_dt"]
-                        _rng[_w] = f"Semana {_w} ({_s.min().strftime('%d/%m')} – {_s.max().strftime('%d/%m')})"
-                    _wpick = st.selectbox("Semana", [_rng[w] for w in _wks], key="pr_wk_pick")
+                    _wpick = st.selectbox("Semana",
+                        [f"Semana {w} del mes" for w in _wks_all], key="pr_wk_pick")
                     _wn = int(_wpick.split()[1])
-                    _dfw = _df_v[_df_v["_wk"] == _wn]
-                    # Columnas por día de la semana presentes
-                    _dias_w = sorted(_dfw["_fprog_dt"].dt.date.unique().tolist())
+                    _dfw     = _df_v[_df_v["_wkm"] == _wn] if not _df_v.empty else _df_v.iloc[0:0]
+                    _dfw_sf  = _df_sinfec[_df_sinfec["_sem_norm"] == f"Semana {_wn}"] \
+                                if not _df_sinfec.empty else _df_sinfec.iloc[0:0]
+
+                    # Columnas por día de la semana presentes (fecha exacta)
+                    _dias_w = sorted(_dfw["_fprog_dt"].dt.date.unique().tolist()) \
+                                if not _dfw.empty else []
                     _cols_html = ""
                     for _d in _dias_w:
                         _sub = _dfw[_dfw["_fprog_dt"].dt.date == _d]
@@ -13017,6 +13080,17 @@ elif _page == _NAV_PAGES[2]:
                             f'{_DIA_ABR_PR[_d.weekday()]} {_d.strftime("%d/%m")} '
                             f'<span style="color:#94a3b8;font-weight:500">({len(_sub)})</span>'
                             f'</div>{_cards}</div>')
+                    # Columna "Sin día" con las MPs de la semana sin fecha exacta
+                    if not _dfw_sf.empty:
+                        _cards_sf = "".join(_card_eds(r) for _, r in _dfw_sf.iterrows())
+                        _cols_html += (
+                            f'<div style="background:#fefce8;border:1px solid #fde68a;'
+                            f'border-radius:12px;padding:10px;min-width:230px;flex:1">'
+                            f'<div style="font-size:.78rem;font-weight:700;margin-bottom:8px;'
+                            f'color:#92400e;text-align:center">'
+                            f'📅 Sin día exacto '
+                            f'<span style="color:#78350f;font-weight:500">({len(_dfw_sf)})</span>'
+                            f'</div>{_cards_sf}</div>')
                     st.markdown(f'<div style="display:flex;gap:12px;overflow-x:auto;'
                                 f'align-items:flex-start;padding-bottom:8px">{_cols_html}</div>',
                                 unsafe_allow_html=True)
