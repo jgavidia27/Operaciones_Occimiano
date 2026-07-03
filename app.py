@@ -5707,7 +5707,8 @@ elif _page == _NAV_PAGES[4]:
                 if _clr == "#FFC000" or "FERIADO" in s:                  return "fer"
                 if _clr == "#00FF00":                                    return "mp"
                 if not s.strip():                                        return "libre"
-                if "OFICINA" in s:                                       return "ofi"
+                # 'REEMPLAZO WSOTO' (reemplazo de Walter Soto) = labor de oficina
+                if "OFICINA" in s or "REEMPLAZO" in s or "WSOTO" in s:   return "ofi"
                 if "INSTAL" in s or "PROYECTO" in s or "AUDITOR" in s:   return "ins"
                 if "CAPACITA" in s:                                      return "cap"
                 if "TURNO" in s:                                         return "tur"
