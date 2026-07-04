@@ -12872,18 +12872,27 @@ elif _page == _NAV_PAGES[2]:
             _df_pr["_sem_canon"] = _df_pr["_sem_n"].apply(
                 lambda n: _SEM_LBL.get(int(n)) if pd.notna(n) else "Sin semana")
 
-            # Rango de días por semana del mes (1-7, 8-14, 15-21, 22-28, 29-fin)
+            # Rango de días por semana del mes: la 1era semana termina el
+            # primer DOMINGO del mes (aunque tenga menos de 7 días); las
+            # siguientes van lunes-domingo, y la última se recorta al último
+            # día del mes.
             import calendar as _cal_pr
-            _last_day = _cal_pr.monthrange(_yr_pr0, _mes_num_pr0)[1]
+            from datetime import date as _date_sem, timedelta as _td_sem
+            _last_day   = _cal_pr.monthrange(_yr_pr0, _mes_num_pr0)[1]
             _mes_titulo = _MESES_PR_TIT[_mes_num_pr0 - 1].lower()
+            _first_dow  = _date_sem(_yr_pr0, _mes_num_pr0, 1).weekday()   # 0=lun..6=dom
+            _first_sun  = 7 - _first_dow                                    # día del 1er dom
             def _sem_rango(n):
                 if n is None or (isinstance(n, float) and pd.isna(n)):
                     return "sin semana"
                 _n = int(n)
-                _ini = (_n - 1) * 7 + 1
-                _fin = min(_n * 7, _last_day)
+                if _n == 1:
+                    _ini, _fin = 1, min(_first_sun, _last_day)
+                else:
+                    _ini = _first_sun + 7 * (_n - 2) + 1
+                    _fin = min(_first_sun + 7 * (_n - 1), _last_day)
                 if _ini > _last_day:
-                    return f"—"
+                    return "—"
                 return f"{_ini:02d} al {_fin:02d} de {_mes_titulo}"
 
             # Filtros estado + semana
