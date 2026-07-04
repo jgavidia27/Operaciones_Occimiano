@@ -12855,20 +12855,58 @@ elif _page == _NAV_PAGES[2]:
 
             _n_huerf = len(_huerf)
 
+            # ── Normalizar 'Semana' (corrige typeos: 3ta/3era/3ra → 3ra, etc.) ──
+            import re as _re_pr
+            _SEM_LBL = {1:"1era semana", 2:"2da semana", 3:"3ra semana",
+                        4:"4ta semana", 5:"5ta semana"}
+            def _sem_num_canon(s):
+                s = str(s or "").upper().strip()
+                if not s or s in ("NAN","NONE","NO TIENE MP"):
+                    return None
+                _m = _re_pr.search(r"(\d)", s)
+                if not _m:
+                    return None
+                _n = int(_m.group(1))
+                return _n if 1 <= _n <= 5 else None
+            _df_pr["_sem_n"]     = _df_pr["Semana"].apply(_sem_num_canon)
+            _df_pr["_sem_canon"] = _df_pr["_sem_n"].apply(
+                lambda n: _SEM_LBL.get(int(n)) if pd.notna(n) else "Sin semana")
+
+            # Rango de días por semana del mes (1-7, 8-14, 15-21, 22-28, 29-fin)
+            import calendar as _cal_pr
+            _last_day = _cal_pr.monthrange(_yr_pr0, _mes_num_pr0)[1]
+            _mes_titulo = _MESES_PR_TIT[_mes_num_pr0 - 1].lower()
+            def _sem_rango(n):
+                if n is None or (isinstance(n, float) and pd.isna(n)):
+                    return "sin semana"
+                _n = int(n)
+                _ini = (_n - 1) * 7 + 1
+                _fin = min(_n * 7, _last_day)
+                if _ini > _last_day:
+                    return f"—"
+                return f"{_ini:02d} al {_fin:02d} de {_mes_titulo}"
+
             # Filtros estado + semana
             with _fp2:
                 _est_opts = ["Todas","🕓 Pendiente","⚠️ Vencida","✅ Realizada"]
                 _est_sel = st.selectbox("Estado", _est_opts, key="pr_est_sel")
             with _fp3:
-                _sem_opts = ["Todas"] + sorted(
-                    _df_pr["Semana"].dropna().unique().tolist())
-                _sem_sel = st.selectbox("Semana MP", _sem_opts, key="pr_sem_sel")
+                _sems_pres = sorted([n for n in _df_pr["_sem_n"].dropna().unique()])
+                _sem_opts_lbl = ["Todas"] + [
+                    f"{_SEM_LBL[int(n)]} ({_sem_rango(n)})" for n in _sems_pres]
+                if _df_pr["_sem_n"].isna().any():
+                    _sem_opts_lbl.append("Sin semana")
+                _sem_sel = st.selectbox("Semana MP", _sem_opts_lbl, key="pr_sem_sel")
 
             _df_pr_disp = _df_pr.copy()
             if _est_sel != "Todas":
                 _df_pr_disp = _df_pr_disp[_df_pr_disp["Estado"] == _est_sel]
             if _sem_sel != "Todas":
-                _df_pr_disp = _df_pr_disp[_df_pr_disp["Semana"] == _sem_sel]
+                if _sem_sel == "Sin semana":
+                    _df_pr_disp = _df_pr_disp[_df_pr_disp["_sem_canon"] == "Sin semana"]
+                else:
+                    _lbl_only = _sem_sel.split(" (")[0]   # '1era semana'
+                    _df_pr_disp = _df_pr_disp[_df_pr_disp["_sem_canon"] == _lbl_only]
 
             # Filtro por origen (validación cruzada de fuentes)
             _org_col1, _org_col2 = st.columns([1.4, 2.6])
@@ -12976,31 +13014,18 @@ elif _page == _NAV_PAGES[2]:
                         f'<div style="font-size:.74rem;color:#475569;margin-top:1px">'
                         f'{str(row["Dirección"])[:42]}</div>'
                         f'<div style="font-size:.68rem;color:#94a3b8;margin-top:2px">'
-                        f'{row["Comuna"]} · {row["Semana"]}{_fr}</div>'
+                        f'{row["Comuna"]} · {row.get("_sem_canon") or row["Semana"]}{_fr}</div>'
                         f'{_ot_html}</div>')
 
             # Partición: con fecha exacta vs. sin fecha (solo semana)
             _df_v      = _df_pr_disp[_df_pr_disp["_fprog_dt"].notna()].copy()
             _df_sinfec = _df_pr_disp[_df_pr_disp["_fprog_dt"].isna()].copy()
 
-            # Normalizar "Semana" para agruparla (1era/1ra -> W1, 2da/2a -> W2 ...)
-            def _norm_sem(s):
-                s = str(s or "").upper().strip()
-                if not s or s in ("NAN","NO TIENE MP"):
-                    return "Sin semana"
-                for _n, _tk in [
-                    (1, ("1ERA","1RA","1A ","1° ","1° ","1 ")),
-                    (2, ("2DA","2A ","2ERA","2° ","2 ")),
-                    (3, ("3ERA","3RA","3TA","3A ","3° ","3 ")),
-                    (4, ("4TA","4A ","4° ","4 ")),
-                    (5, ("5TA","5A ","5° ","5 ")),
-                ]:
-                    if any(t.strip() in s for t in _tk):
-                        return f"Semana {_n}"
-                return f"Semana ?"
-
+            # Semana canónica ya calculada arriba en _df_pr; se propaga a _df_sinfec
+            # Alias por compatibilidad con la vista Semana (usa _sem_norm más abajo)
             if not _df_sinfec.empty:
-                _df_sinfec["_sem_norm"] = _df_sinfec["Semana"].apply(_norm_sem)
+                _df_sinfec["_sem_norm"] = _df_sinfec["_sem_n"].apply(
+                    lambda n: f"Semana {int(n)}" if pd.notna(n) else "Sin semana")
 
             # ═══════════ AGENDA DÍA ═══════════
             if _vista_pr == "📅 Agenda día":
