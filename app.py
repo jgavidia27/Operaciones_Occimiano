@@ -12799,9 +12799,22 @@ elif _page == _NAV_PAGES[2]:
             _df_pr["_finfr_dt"]   = _to_naive(_df_pr["_finfr_dt"])
             _df_pr["_freal_dt"]   = _to_naive(_df_pr["_freal_dt"])
             _df_pr["_fprog_dt"]   = _to_naive(_df_pr["_fprog_dt"])
-            # Fecha efectiva para agenda: Excel manda, sino Fracttal (tentativa)
-            _df_pr["_fprog_tent"] = _df_pr["_fprog_dt"].isna() & _df_pr["_fprogfr_dt"].notna()
-            _df_pr["_fprog_dt"]   = _df_pr["_fprog_dt"].fillna(_df_pr["_fprogfr_dt"])
+            # Fecha efectiva para la agenda, en orden de preferencia:
+            #  1) F. Programada Excel (definitiva)
+            #  2) fecha_programada Fracttal (tentativa)
+            #  3) fecha_finalizacion Fracttal (ya ejecutada)
+            #  4) F. Real Excel (registrada como hecha)
+            # Marca 'tentativa' solo si la fecha viene de (2) y no hay ejecución.
+            _df_pr["_fprog_tent"] = (
+                _df_pr["_fprog_dt"].isna()
+                & _df_pr["_fprogfr_dt"].notna()
+                & _df_pr["_finfr_dt"].isna()
+                & _df_pr["_freal_dt"].isna())
+            _df_pr["_fprog_dt"] = (
+                _df_pr["_fprog_dt"]
+                .fillna(_df_pr["_fprogfr_dt"])
+                .fillna(_df_pr["_finfr_dt"])
+                .fillna(_df_pr["_freal_dt"]))
 
             # ── Reconciliación bidireccional (Excel ↔ Fracttal) ──
             # El Excel es una GUÍA; Fracttal (Supabase) refleja lo que
