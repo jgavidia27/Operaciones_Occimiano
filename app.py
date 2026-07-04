@@ -12790,12 +12790,18 @@ elif _page == _NAV_PAGES[2]:
                 _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fin")),
                 errors="coerce")
             # Fecha programada Fracttal (usada como tentativa cuando Excel no tiene fecha)
-            _df_pr["_fprogfr_dt"] = pd.to_datetime(
-                _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fprog")),
-                errors="coerce")
+            # tz-naive: Fracttal viene con +00:00; el Excel es naive. Alineamos ambos.
+            def _to_naive(s):
+                s = pd.to_datetime(s, errors="coerce", utc=True)
+                return s.dt.tz_localize(None) if hasattr(s, "dt") else s
+            _df_pr["_fprogfr_dt"] = _to_naive(
+                _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fprog")))
+            _df_pr["_finfr_dt"]   = _to_naive(_df_pr["_finfr_dt"])
+            _df_pr["_freal_dt"]   = _to_naive(_df_pr["_freal_dt"])
+            _df_pr["_fprog_dt"]   = _to_naive(_df_pr["_fprog_dt"])
             # Fecha efectiva para agenda: Excel manda, sino Fracttal (tentativa)
             _df_pr["_fprog_tent"] = _df_pr["_fprog_dt"].isna() & _df_pr["_fprogfr_dt"].notna()
-            _df_pr["_fprog_dt"] = _df_pr["_fprog_dt"].fillna(_df_pr["_fprogfr_dt"])
+            _df_pr["_fprog_dt"]   = _df_pr["_fprog_dt"].fillna(_df_pr["_fprogfr_dt"])
 
             # ── Reconciliación bidireccional (Excel ↔ Fracttal) ──
             # El Excel es una GUÍA; Fracttal (Supabase) refleja lo que
