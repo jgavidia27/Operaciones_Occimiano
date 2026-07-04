@@ -12730,7 +12730,7 @@ elif _page == _NAV_PAGES[2]:
                 try:
                     _rows = _sq("ordenes_trabajo",
                         "select=id_ot,codigo_eds,estado,fecha_finalizacion,fecha_creacion,"
-                        "responsable,estacion,nombre_activo"
+                        "fecha_programada,responsable,estacion,nombre_activo"
                         "&tipo_tarea=ilike.*PREVENTIV*"
                         f"&fecha_creacion=gte.{_d0}&fecha_creacion=lt.{_d1}",
                         limit=5000)
@@ -12755,6 +12755,7 @@ elif _page == _NAV_PAGES[2]:
                             "responsable": r.get("responsable") or "",
                             "fin": _fin,
                             "fcrea": r.get("fecha_creacion"),
+                            "fprog": r.get("fecha_programada"),
                             "estado": r.get("estado") or "",
                             "estacion": r.get("estacion") or r.get("nombre_activo") or "",
                         }
@@ -12788,6 +12789,13 @@ elif _page == _NAV_PAGES[2]:
             _df_pr["_finfr_dt"] = pd.to_datetime(
                 _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fin")),
                 errors="coerce")
+            # Fecha programada Fracttal (usada como tentativa cuando Excel no tiene fecha)
+            _df_pr["_fprogfr_dt"] = pd.to_datetime(
+                _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fprog")),
+                errors="coerce")
+            # Fecha efectiva para agenda: Excel manda, sino Fracttal (tentativa)
+            _df_pr["_fprog_tent"] = _df_pr["_fprog_dt"].isna() & _df_pr["_fprogfr_dt"].notna()
+            _df_pr["_fprog_dt"] = _df_pr["_fprog_dt"].fillna(_df_pr["_fprogfr_dt"])
 
             # ── Reconciliación bidireccional (Excel ↔ Fracttal) ──
             # El Excel es una GUÍA; Fracttal (Supabase) refleja lo que
@@ -12806,8 +12814,9 @@ elif _page == _NAV_PAGES[2]:
                 _rows_fr = []
                 for _ce, _v in _huerf:
                     _fin = _v.get("fin")
+                    _fprogfr = _v.get("fprog")
                     _fcr = _v.get("fcrea")
-                    _fprog = _fin or _fcr        # fecha de referencia
+                    _fprog = _fin or _fprogfr or _fcr    # mejor fecha disponible
                     _rows_fr.append({
                         "F. Real":      _fin,
                         "F. Programada": _fprog,
@@ -12822,6 +12831,8 @@ elif _page == _NAV_PAGES[2]:
                         "Tipo MP":      "",
                         "_freal_dt":    pd.to_datetime(_fin, errors="coerce"),
                         "_fprog_dt":    pd.to_datetime(_fprog, errors="coerce"),
+                        "_fprogfr_dt":  pd.to_datetime(_fprogfr, errors="coerce"),
+                        "_fprog_tent":  bool(_fprogfr and not _fin),
                         "Estado":       "✅ Realizada" if _fin else "🕓 Pendiente",
                         "_ot_fr":       _v.get("id_ot") or "",
                         "_resp_fr":     _v.get("responsable") or "",
@@ -12941,6 +12952,15 @@ elif _page == _NAV_PAGES[2]:
                     _org_badge = ('<span style="background:#fef3c7;color:#92400e;'
                                   'font-size:.6rem;font-weight:700;padding:1px 5px;'
                                   'border-radius:4px;margin-left:4px">🆕 no en Excel</span>')
+                # Badge cuando la fecha viene de Fracttal (tentativa, no definitiva en Excel)
+                if row.get("_fprog_tent") and pd.isna(row.get("_freal_dt")) and pd.isna(row.get("_finfr_dt")):
+                    _fp_fr = row.get("_fprogfr_dt")
+                    _tent_txt = f' Fracttal: {_fp_fr.strftime("%d/%m")}' if pd.notna(_fp_fr) else ''
+                    _org_badge += ('<span style="background:#fef9c3;color:#854d0e;'
+                                   'font-size:.6rem;font-weight:700;padding:1px 5px;'
+                                   f'border-radius:4px;margin-left:4px" '
+                                   f'title="Fecha tentativa (Fracttal, pendiente de confirmar en Excel)">'
+                                   f'📌 tentativa{_tent_txt}</span>')
                 return (f'<div style="background:#fff;border:1px solid #e2e8f0;'
                         f'border-left:3px solid {_c};border-radius:8px;padding:7px 10px;'
                         f'margin-bottom:7px;">'
@@ -13015,8 +13035,8 @@ elif _page == _NAV_PAGES[2]:
                         '<div style="margin-top:22px;padding:10px 14px;'
                         'background:#fff7ed;border-left:4px solid #f59e0b;'
                         'border-radius:6px;font-size:.85rem;color:#92400e">'
-                        '📅 <b>Programadas sin día exacto</b> — planificadas por '
-                        'semana en el Excel (sin fecha específica).</div>',
+                        '📅 <b>Sin día ni en Excel ni en Fracttal</b> — planificadas '
+                        'por semana en el Excel y aún sin OT creada en Fracttal.</div>',
                         unsafe_allow_html=True)
                     _sems_orden = ["Semana 1","Semana 2","Semana 3","Semana 4",
                                    "Semana 5","Semana ?","Sin semana"]
