@@ -4377,7 +4377,8 @@ elif _page == _NAV_PAGES[3]:
     _cur_month  = _hoy.month
     _MES_ES     = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
                    7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
-    _MESES_DISP = [f"{_cur_year}-{m:02d}" for m in range(1, _cur_month + 1)]
+    # Orden descendente: mes actual arriba, enero abajo (más reciente primero)
+    _MESES_DISP = [f"{_cur_year}-{m:02d}" for m in range(_cur_month, 0, -1)]
 
     # Work orders con eds_occim ──────────────────────────────────────────────
     raw_wo_eds = load_work_orders_supabase()
