@@ -5295,19 +5295,14 @@ elif _page == _NAV_PAGES[3]:
                 # ── Ranking de completitud de datos ────────────────────────
                 # Solo evaluamos LAVADORAS: los campos bomba_dosificadora,
                 # consumo_insumos y tiempo_fichas_seg solo aparecen en el
-                # formulario de lavadora. Aspiradoras/lavainterior no llevan
-                # esos campos así que no cuentan.
+                # formulario de lavadora. Y solo cuando la PLANTILLA los
+                # incluye (flags form_tiene_*), para no castigar al técnico
+                # por OTs generadas con plantilla vieja de Fracttal.
                 st.markdown(
                     f'<div style="font-weight:700;font-size:0.95rem;margin:28px 0 6px 0;'
                     f'color:{_t["text"]};">'
                     f'🏆 Calidad de registro Shell — completitud del formulario</div>',
                     unsafe_allow_html=True,
-                )
-                st.caption(
-                    "Se evalúan los 3 campos operativos clave del form Shell: "
-                    "**bomba dosificadora**, **consumo insumos**, **tiempo fichas**. "
-                    "Solo se cuentan las subtareas de **lavadora** desde el 2026-06-01 "
-                    "(los campos no existen en el form de aspiradora)."
                 )
                 _df_calidad = df_num_sub_eds[
                     (df_num_sub_eds["tipo_activo"] == "lavadora")
@@ -5321,84 +5316,127 @@ elif _page == _NAV_PAGES[3]:
                             "technician":"_tec","eds_occim":"_eds"}),
                         on="id_ot", how="left")
                     _df_calidad = _df_calidad[
-                        _df_calidad["_cd"] >= pd.Timestamp("2026-06-01", tz="UTC")
+                        _df_calidad["_cd"] >= pd.Timestamp("2026-06-08", tz="UTC")
                     ]
+
+                _CAMPOS = ["bomba_dosificadora", "consumo_insumos", "tiempo_fichas_seg"]
+                _FORMFLAGS = ["form_tiene_bomba", "form_tiene_consumo", "form_tiene_tiempo"]
+                _tiene_flags = all(c in _df_calidad.columns for c in _FORMFLAGS) if not _df_calidad.empty else False
+
+                # ── Diagnóstico global: plantilla vs técnico ──
+                if not _df_calidad.empty and _tiene_flags:
+                    _n_lav = len(_df_calidad)
+                    _n_form = int(_df_calidad["form_tiene_bomba"].sum())
+                    _n_vieja = _n_lav - _n_form
+                    _pct_vieja = _n_vieja / _n_lav * 100 if _n_lav else 0
+                    _con_form = _df_calidad[_df_calidad["form_tiene_bomba"] == True]
+                    _n_lleno = int(_con_form["bomba_dosificadora"].apply(
+                        lambda v: bool(v) and str(v).strip().lower() not in ("nan","none","null","")).sum())
+                    _n_novacio = _n_form - _n_lleno
+                    _pct_tec = _n_lleno / _n_form * 100 if _n_form else 0
+                    st.markdown(
+                        f'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
+                        f'<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;'
+                        f'padding:8px 14px;flex:1;min-width:200px">'
+                        f'<div style="font-size:.72rem;color:#991b1b;font-weight:700">🔴 PLANTILLA FRACTTAL VIEJA</div>'
+                        f'<div style="font-size:1.3rem;font-weight:800;color:#dc2626">{_pct_vieja:.0f}%</div>'
+                        f'<div style="font-size:.72rem;color:#7f1d1d">{_n_vieja:,} de {_n_lav:,} lavadoras sin el campo en el form</div>'
+                        f'</div>'
+                        f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;'
+                        f'padding:8px 14px;flex:1;min-width:200px">'
+                        f'<div style="font-size:.72rem;color:#166534;font-weight:700">🟢 TÉCNICO LLENÓ (cuando había campo)</div>'
+                        f'<div style="font-size:1.3rem;font-weight:800;color:#16a34a">{_pct_tec:.0f}%</div>'
+                        f'<div style="font-size:.72rem;color:#14532d">{_n_lleno:,} de {_n_form:,} · {_n_novacio:,} no completadas</div>'
+                        f'</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(
+                        "El ranking de técnicos solo cuenta OTs donde la **plantilla "
+                        "SÍ incluía** el campo (flags `form_tiene_*`) — así no se penaliza "
+                        "al técnico por plantillas viejas de Fracttal. Desde 2026-06-08."
+                    )
+
                 if _df_calidad.empty:
                     st.info("Sin datos suficientes para calcular ranking.")
                 else:
-                    _CAMPOS = ["bomba_dosificadora", "consumo_insumos", "tiempo_fichas_seg"]
-                    for _c in _CAMPOS:
-                        _df_calidad[f"_ok_{_c}"] = _df_calidad[_c].apply(
-                            lambda v: 1 if v not in (None, "") and str(v).strip().lower() not in ("nan","none","null") else 0
-                        )
-                    _df_calidad["_score"] = _df_calidad[[f"_ok_{c}" for c in _CAMPOS]].sum(axis=1)
+                    # OK = el técnico llenó el valor (solo cuenta si la plantilla tenía el campo)
+                    for _c, _ff in zip(_CAMPOS, _FORMFLAGS):
+                        if _tiene_flags:
+                            _df_calidad[f"_form_{_c}"] = _df_calidad[_ff].fillna(False).astype(bool)
+                        else:
+                            _df_calidad[f"_form_{_c}"] = True   # sin flags, contamos todo
+                        _df_calidad[f"_ok_{_c}"] = _df_calidad.apply(
+                            lambda r, c=_c: 1 if (r[f"_form_{c}"] and r[c] not in (None,"")
+                                and str(r[c]).strip().lower() not in ("nan","none","null")) else 0,
+                            axis=1)
 
                     _rk_col1, _rk_col2 = st.columns(2)
 
-                    # ── Ranking por TÉCNICO ──
+                    # ── Ranking por TÉCNICO (solo sobre OTs con plantilla completa) ──
                     with _rk_col1:
-                        st.markdown("**Técnicos — completitud promedio**")
-                        _tec_g = (_df_calidad.dropna(subset=["_tec"])
-                                  .groupby("_tec")
-                                  .agg(subtareas=("_score","count"),
-                                       score_total=("_score","sum"),
-                                       bomba=(f"_ok_bomba_dosificadora","sum"),
-                                       consumo=(f"_ok_consumo_insumos","sum"),
-                                       tiempo=(f"_ok_tiempo_fichas_seg","sum"))
-                                  .reset_index())
-                        _tec_g = _tec_g[_tec_g["subtareas"] >= 3]
-                        _tec_g["%"] = (_tec_g["score_total"] / (_tec_g["subtareas"] * 3) * 100).round(1)
-                        _tec_g["Bomba"] = (_tec_g["bomba"] / _tec_g["subtareas"] * 100).round(0).astype(int).astype(str) + "%"
-                        _tec_g["Consumo"] = (_tec_g["consumo"] / _tec_g["subtareas"] * 100).round(0).astype(int).astype(str) + "%"
-                        _tec_g["Tiempo"] = (_tec_g["tiempo"] / _tec_g["subtareas"] * 100).round(0).astype(int).astype(str) + "%"
-                        _tec_g = _tec_g.rename(columns={"_tec": "Técnico", "subtareas": "OTs"})
-                        _tec_g = _tec_g.sort_values("%", ascending=False)
-                        _show_df(
-                            _tec_g[["Técnico","OTs","%","Bomba","Consumo","Tiempo"]].reset_index(drop=True),
-                            use_container_width=True, hide_index=True, height=300,
-                            column_config={
-                                "Técnico": st.column_config.TextColumn(width=180),
-                                "OTs":     st.column_config.NumberColumn(width=55, format="%d"),
-                                "%":       st.column_config.ProgressColumn(width=100, format="%.1f%%", min_value=0, max_value=100),
-                                "Bomba":   st.column_config.TextColumn(width=70),
-                                "Consumo": st.column_config.TextColumn(width=75),
-                                "Tiempo":  st.column_config.TextColumn(width=70),
-                            })
+                        st.markdown("**Técnicos — % que llenó (base: plantilla con campo)**")
+                        _dc_form = _df_calidad[
+                            _df_calidad[[f"_form_{c}" for c in _CAMPOS]].any(axis=1)
+                        ] if _tiene_flags else _df_calidad
+                        if _dc_form.empty:
+                            st.info("Aún no hay OTs con la plantilla nueva (con campos).")
+                        else:
+                            # denominador = campos que la plantilla ofrecía (no siempre 3)
+                            _dc_form = _dc_form.copy()
+                            _dc_form["_ofrecidos"] = _dc_form[[f"_form_{c}" for c in _CAMPOS]].sum(axis=1)
+                            _dc_form["_llenados"]  = _dc_form[[f"_ok_{c}" for c in _CAMPOS]].sum(axis=1)
+                            _tec_g = (_dc_form.dropna(subset=["_tec"])
+                                      .groupby("_tec")
+                                      .agg(OTs=("_llenados","count"),
+                                           ofrecidos=("_ofrecidos","sum"),
+                                           llenados=("_llenados","sum"))
+                                      .reset_index())
+                            _tec_g = _tec_g[_tec_g["OTs"] >= 2]
+                            if _tec_g.empty:
+                                st.info("Sin técnicos con ≥2 OTs de plantilla nueva.")
+                            else:
+                                _tec_g["%"] = (_tec_g["llenados"] / _tec_g["ofrecidos"] * 100).round(1)
+                                _tec_g = _tec_g.rename(columns={"_tec": "Técnico"})
+                                _tec_g = _tec_g.sort_values("%", ascending=False)
+                                _show_df(
+                                    _tec_g[["Técnico","OTs","%"]].reset_index(drop=True),
+                                    use_container_width=True, hide_index=True, height=300,
+                                    column_config={
+                                        "Técnico": st.column_config.TextColumn(width=190),
+                                        "OTs":     st.column_config.NumberColumn(width=60, format="%d",
+                                            help="OTs con plantilla que incluía al menos un campo"),
+                                        "%":       st.column_config.ProgressColumn(width=110, format="%.0f%%", min_value=0, max_value=100),
+                                    })
 
-                    # ── Ranking por EDS ──
+                    # ── Ranking por EDS: dónde manda Fracttal plantilla vieja ──
                     with _rk_col2:
-                        st.markdown("**Estaciones — completitud promedio**")
-                        _eds_g = (_df_calidad.dropna(subset=["_eds"])
-                                  .groupby("_eds")
-                                  .agg(subtareas=("_score","count"),
-                                       score_total=("_score","sum"),
-                                       bomba=(f"_ok_bomba_dosificadora","sum"),
-                                       consumo=(f"_ok_consumo_insumos","sum"),
-                                       tiempo=(f"_ok_tiempo_fichas_seg","sum"))
-                                  .reset_index())
-                        _eds_g = _eds_g[_eds_g["subtareas"] >= 2]
-                        _eds_g["%"] = (_eds_g["score_total"] / (_eds_g["subtareas"] * 3) * 100).round(1)
-                        _eds_g["Nombre"] = _eds_g["_eds"].map(_eds_name_map).fillna("—")
-                        _eds_g = _eds_g.rename(columns={"_eds": "Cód. EDS", "subtareas": "OTs"})
-                        _eds_g = _eds_g.sort_values("%", ascending=False)
-                        _show_df(
-                            _eds_g[["Cód. EDS","Nombre","OTs","%"]].reset_index(drop=True),
-                            use_container_width=True, hide_index=True, height=300,
-                            column_config={
-                                "Cód. EDS": st.column_config.TextColumn(width=80),
-                                "Nombre":   st.column_config.TextColumn(width=180),
-                                "OTs":      st.column_config.NumberColumn(width=55, format="%d"),
-                                "%":        st.column_config.ProgressColumn(width=100, format="%.1f%%", min_value=0, max_value=100),
-                            })
-
-                    _total_lav = len(_df_calidad)
-                    _tot_score = int(_df_calidad["_score"].sum())
-                    _pct_global = _tot_score / (_total_lav * 3) * 100 if _total_lav else 0
-                    st.caption(
-                        f"📊 Global (todas las lavadoras Shell desde jun-26): "
-                        f"**{_total_lav:,} subtareas** · completitud promedio "
-                        f"**{_pct_global:.1f}%** ({_tot_score:,} de {_total_lav*3:,} celdas rellenas)."
-                    )
+                        st.markdown("**Estaciones — % de OTs con plantilla nueva**")
+                        if _tiene_flags:
+                            _df_calidad["_form_any"] = _df_calidad[[f"_form_{c}" for c in _CAMPOS]].any(axis=1).astype(int)
+                            _eds_g = (_df_calidad.dropna(subset=["_eds"])
+                                      .groupby("_eds")
+                                      .agg(OTs=("_form_any","count"),
+                                           con_form=("_form_any","sum"))
+                                      .reset_index())
+                            _eds_g = _eds_g[_eds_g["OTs"] >= 2]
+                            _eds_g["%"] = (_eds_g["con_form"] / _eds_g["OTs"] * 100).round(1)
+                            _eds_g["Nombre"] = _eds_g["_eds"].map(_eds_name_map).fillna("—")
+                            _eds_g = _eds_g.rename(columns={"_eds": "Cód. EDS"})
+                            _eds_g = _eds_g.sort_values("%", ascending=True)  # peor arriba
+                            _show_df(
+                                _eds_g[["Cód. EDS","Nombre","OTs","%"]].reset_index(drop=True),
+                                use_container_width=True, hide_index=True, height=300,
+                                column_config={
+                                    "Cód. EDS": st.column_config.TextColumn(width=80),
+                                    "Nombre":   st.column_config.TextColumn(width=170),
+                                    "OTs":      st.column_config.NumberColumn(width=55, format="%d"),
+                                    "%":        st.column_config.ProgressColumn(width=110, format="%.0f%%", min_value=0, max_value=100,
+                                        help="% de OTs de esta EDS generadas con plantilla nueva (con campos)"),
+                                })
+                            st.caption("Ordenado peor→mejor: las de arriba reciben más plantillas viejas de Fracttal.")
+                        else:
+                            st.info("Corre el sync con las flags form_tiene_* para este ranking.")
 
     # ════════════════════════════════════════════════════════════════════════
     # PESTAÑA: HISTORIAL DE NUMERALES (global, agrupado por EDS, con buscador)
