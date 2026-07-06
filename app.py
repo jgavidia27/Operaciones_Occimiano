@@ -4652,25 +4652,54 @@ elif _page == _NAV_PAGES[3]:
         _meses_activos = _mes_sel if _mes_sel else _MESES_DISP
 
         # Opciones EDS desde df_llamados (tienen eds_occim y eds_nombre)
+        # Construir opciones enriquecidas: "60107 · E/S Vivaceta 715 · CONCHALÍ"
+        # para que el buscador acepte código, nombre o comuna.
         if not df_ll_c.empty and "eds_occim" in df_ll_c.columns and "eds_nombre" in df_ll_c.columns:
+            _cols_disp = ["eds_occim","eds_nombre"]
+            if "comuna" in df_ll_c.columns:
+                _cols_disp.append("comuna")
             _eds_opts_df = (
-                df_ll_c[["eds_occim","eds_nombre"]]
+                df_ll_c[_cols_disp]
                 .dropna(subset=["eds_occim","eds_nombre"])
-                .drop_duplicates()
+                .drop_duplicates(subset=["eds_occim"])
                 .sort_values("eds_nombre")
             )
-            _eds_nombre_to_code = dict(zip(_eds_opts_df["eds_nombre"], _eds_opts_df["eds_occim"]))
-            _eds_opts_list = ["Todas"] + list(_eds_opts_df["eds_nombre"])
+            def _mk_label(r):
+                _lbl = f"{r['eds_occim']} · {r['eds_nombre']}"
+                if "comuna" in r and pd.notna(r.get("comuna")):
+                    _lbl += f" · {r['comuna']}"
+                return _lbl
+            _eds_opts_df["_label"] = _eds_opts_df.apply(_mk_label, axis=1)
+            _eds_label_to_code   = dict(zip(_eds_opts_df["_label"], _eds_opts_df["eds_occim"]))
+            _eds_label_to_nombre = dict(zip(_eds_opts_df["_label"], _eds_opts_df["eds_nombre"]))
+            _eds_opts_all = list(_eds_opts_df["_label"])
         else:
-            _eds_nombre_to_code = {}
-            _eds_opts_list = ["Todas"]
+            _eds_label_to_code   = {}
+            _eds_label_to_nombre = {}
+            _eds_opts_all = []
         with _frow2:
-            _eds_sel_nombre = st.selectbox(
-                "EDS específica",
-                _eds_opts_list,
-                key=f"eds_sel_{_ck}",
-            )
-        _eds_sel_code = _eds_nombre_to_code.get(_eds_sel_nombre) if _eds_sel_nombre != "Todas" else None
+            _bcol1, _bcol2 = st.columns([1, 2])
+            with _bcol1:
+                _eds_buscar = st.text_input(
+                    "🔍 Buscar EDS",
+                    placeholder="Código, dirección o comuna…",
+                    key=f"eds_buscar_{_ck}",
+                ).strip().upper()
+            # Aplicar filtro tipeado
+            if _eds_buscar and _eds_opts_all:
+                _eds_opts_filt = [o for o in _eds_opts_all if _eds_buscar in o.upper()]
+            else:
+                _eds_opts_filt = _eds_opts_all
+            _eds_opts_list = ["Todas"] + _eds_opts_filt
+            with _bcol2:
+                _eds_sel_label = st.selectbox(
+                    f"EDS específica ({len(_eds_opts_filt)} coincidencias)"
+                    if _eds_buscar else "EDS específica",
+                    _eds_opts_list,
+                    key=f"eds_sel_{_ck}",
+                )
+        _eds_sel_code   = _eds_label_to_code.get(_eds_sel_label)   if _eds_sel_label != "Todas" else None
+        _eds_sel_nombre = _eds_label_to_nombre.get(_eds_sel_label) if _eds_sel_label != "Todas" else "Todas"
 
         # ── Aplicar filtros ──────────────────────────────────────────────────
         def _filtrar_ll(df):
@@ -5040,6 +5069,12 @@ elif _page == _NAV_PAGES[3]:
             f'· período: {_rango_lbl}</span></div>',
             unsafe_allow_html=True,
         )
+        # Buscador tipeable para el listado (código, nombre, dirección, comuna, LOC)
+        _lst_buscar = st.text_input(
+            "🔍 Buscar estación",
+            placeholder="Código, nombre, dirección, comuna, LOC Fracttal…",
+            key=f"lst_buscar_{_ck}",
+        ).strip().upper()
 
         # ── Construir tabla desde EDS master + df_ll_f (correctivas filtradas)
         #    + df_pm_f (preventivas filtradas). Ambos ya vienen filtrados por
@@ -5132,6 +5167,20 @@ elif _page == _NAV_PAGES[3]:
                      else _df_display.columns[0])
         _df_display = _df_display.sort_values(_sort_col, ascending=False, na_position="last")
         _df_display = _df_display.fillna("—")
+
+        # Aplicar filtro tipeado sobre TODAS las columnas de texto relevantes
+        if _lst_buscar:
+            _cols_search = [c for c in ("Cód. Occim","LOC Fracttal",
+                                        "Nombre / Dirección","Dirección","Comuna",
+                                        "Zona","Región","Último Técnico")
+                            if c in _df_display.columns]
+            _mask_lst = pd.Series(False, index=_df_display.index)
+            for _c in _cols_search:
+                _mask_lst = _mask_lst | _df_display[_c].astype(str).str.upper().str.contains(
+                    _lst_buscar, na=False, regex=False)
+            _df_display = _df_display[_mask_lst]
+            st.caption(f"Mostrando **{len(_df_display):,}** estaciones que coinciden con `{_lst_buscar}`.")
+
         _show_df(_df_display, use_container_width=True, hide_index=True,
             column_config={
                 "Cód. Occim":        st.column_config.TextColumn(width=90),
@@ -10691,6 +10740,17 @@ elif _page == _NAV_PAGES[0]:
                         st.session_state[_abs_sig] = _fig_abs
                     st.plotly_chart(st.session_state[_abs_sig], width="stretch")
 
+                    # ── Mapa EDS → Nombre (para enriquecer las 2 tablas siguientes) ──
+                    _eds_nombre_map_prec = {}
+                    if "df_eds" in globals() or "df_eds" in locals():
+                        try:
+                            _src = df_eds
+                            if not _src.empty and "eds_occim" in _src.columns and "nombre" in _src.columns:
+                                _eds_nombre_map_prec = dict(zip(
+                                    _src["eds_occim"].astype(str), _src["nombre"].astype(str)))
+                        except Exception:
+                            pass
+
                     # ── Tabla detalle de OTs injustificadas ──────────────────────────
                     _df_abs_only = _df_te_p[_df_te_p["_absurdo"]].copy()
                     _n_absurdo   = len(_df_abs_only)
@@ -10708,11 +10768,13 @@ elif _page == _NAV_PAGES[0]:
                         _det_abs["% Ejecutado"]  = _det_abs["_pct_ej_abs"]
                         if "eds_occim" in _det_abs.columns:
                             _det_abs["eds_occim"] = _det_abs["eds_occim"].fillna("").replace("", "—")
+                            _det_abs["eds_nombre"] = _det_abs["eds_occim"].map(_eds_nombre_map_prec).fillna("—")
                         _det_abs_disp = _det_abs[[c for c in
-                            ["folio","eds_occim","tecnico","creation_date","maint_type",
+                            ["folio","eds_occim","eds_nombre","tecnico","creation_date","maint_type",
                              "T. Estimado","T. Ejecución","% Ejecutado"]
                             if c in _det_abs.columns]].rename(columns={
-                                "folio":"OT","eds_occim":"EDS","tecnico":"Técnico",
+                                "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
+                                "tecnico":"Técnico",
                                 "creation_date":"Fecha","maint_type":"Tipo",
                             }).sort_values("Fecha", ascending=False)
 
@@ -10728,6 +10790,8 @@ elif _page == _NAV_PAGES[0]:
                                     "OT":          st.column_config.TextColumn(width=110),
                                     "EDS":         st.column_config.TextColumn(width=85,
                                         help="Código EDS Occimiano donde se realizó el MP."),
+                                    "Nombre EDS":  st.column_config.TextColumn(width=240,
+                                        help="Nombre / dirección de la estación."),
                                     "Técnico":     st.column_config.TextColumn(width=190),
                                     "Fecha":       st.column_config.TextColumn(width=100),
                                     "Tipo":        st.column_config.TextColumn(width=200),
@@ -10757,11 +10821,13 @@ elif _page == _NAV_PAGES[0]:
                         _det_ex["% Ejecutado"]  = _det_ex["_pct_ej_ex"]
                         if "eds_occim" in _det_ex.columns:
                             _det_ex["eds_occim"] = _det_ex["eds_occim"].fillna("").replace("", "—")
+                            _det_ex["eds_nombre"] = _det_ex["eds_occim"].map(_eds_nombre_map_prec).fillna("—")
                         _det_ex_disp = _det_ex[[c for c in
-                            ["folio","eds_occim","tecnico","creation_date","maint_type",
+                            ["folio","eds_occim","eds_nombre","tecnico","creation_date","maint_type",
                              "T. Estimado","T. Máximo","T. Ejecución","% Ejecutado"]
                             if c in _det_ex.columns]].rename(columns={
-                                "folio":"OT","eds_occim":"EDS","tecnico":"Técnico",
+                                "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
+                                "tecnico":"Técnico",
                                 "creation_date":"Fecha","maint_type":"Tipo",
                             }).sort_values("% Ejecutado", ascending=False)
 
@@ -10777,6 +10843,8 @@ elif _page == _NAV_PAGES[0]:
                                 column_config={
                                     "OT":          st.column_config.TextColumn(width=110),
                                     "EDS":         st.column_config.TextColumn(width=85),
+                                    "Nombre EDS":  st.column_config.TextColumn(width=240,
+                                        help="Nombre / dirección de la estación."),
                                     "Técnico":     st.column_config.TextColumn(width=190),
                                     "Fecha":       st.column_config.TextColumn(width=100),
                                     "Tipo":        st.column_config.TextColumn(width=200),
