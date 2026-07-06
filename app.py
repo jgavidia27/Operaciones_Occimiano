@@ -4391,13 +4391,56 @@ elif _page == _NAV_PAGES[3]:
             if wo.get("groups_2_description")
         }
         _df["eds_occim"] = _df["folio"].astype(str).map(_fmap)
+
+        # ── Rescate de eds_occim basura desde Fracttal ─────────────
+        # Ejemplo: OS-38025/26/27 Shell tienen codigo_eds='SANTIAGO' (la
+        # zona, no un código real). El equipment_code (LOC-XXX) sí es
+        # correcto y matchea con estaciones_servicio.loc_fracttal. Aquí
+        # detectamos valores basura (zonas, vacíos, no numéricos ni
+        # con prefijo cliente) y los reemplazamos con el eds_occim real
+        # vía LOC.
+        _EDS_BASURA = {"SANTIAGO", "NORTE", "SUR", "CENTRO", "V", "IV",
+                       "III", "II", "I", "RM", "RS", "REGIONES",
+                       "NAN", "NONE", "NULL", ""}
+        _valid_prefixes = ("SH_", "PBR", "EE_", "CE_", "60", "40")  # patrones válidos
+        if not df_eds.empty and "_loc_code" in df_eds.columns and "eds_occim" in df_eds.columns:
+            _loc_to_eds = dict(zip(
+                df_eds["_loc_code"].astype(str).str.strip().str.upper(),
+                df_eds["eds_occim"].astype(str),
+            ))
+        else:
+            _loc_to_eds = {}
+
+        def _es_basura(v):
+            if v is None:
+                return True
+            s = str(v).strip().upper()
+            if not s or s in _EDS_BASURA:
+                return True
+            # Códigos válidos: numéricos (60xxx, 40xxx) o con prefijo conocido
+            if s.isdigit():
+                return False
+            if any(s.startswith(p) for p in _valid_prefixes):
+                return False
+            return True   # cualquier otro string suelto es basura
+
+        _mask_bad = _df["eds_occim"].apply(_es_basura)
+        if _mask_bad.any() and _loc_to_eds:
+            _codes = _df.loc[_mask_bad, "equipment_code"].astype(str).str.strip().str.upper()
+            _fix = _codes.map(_loc_to_eds)
+            _rescued = _fix.notna().sum()
+            if _rescued:
+                _df.loc[_mask_bad, "eds_occim"] = _df.loc[_mask_bad, "eds_occim"].where(
+                    _fix.isna(), _fix
+                )
+
         _cd = _df["creation_date"].dt.tz_convert(None) if _df["creation_date"].dt.tz is not None else _df["creation_date"]
         _df["mes_str"] = _cd.dt.to_period("M").astype(str)
         _df["mes_num"] = _cd.dt.month
         _df["year"]    = _cd.dt.year
         return _df
 
-    df_wo_eds_full = _sc("df_wo_eds_v4_comentario", _wo_eds_sig, _build_wo_eds)
+    df_wo_eds_full = _sc("df_wo_eds_v5_rescue_loc", _wo_eds_sig, _build_wo_eds)
 
     # Filtrar a clientes EDS y año actual ────────────────────────────────────
     _EDS_CLIENTS = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)"}
