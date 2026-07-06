@@ -5281,8 +5281,9 @@ elif _page == _NAV_PAGES[3]:
                         ("Fichas mantención", "Aspirado"):             _rpval(_asp, "fichas_periodo"),
                         ("Insumos", "Bomba dosificadora"):             _rpval(_lav, "bomba_dosificadora"),
                         ("Insumos", "Consumo (%)"):                    _rpval(_lav, "consumo_insumos"),
-                        ("Tiempo fichas (seg)", "Lavado"):             _rpval(_lav, "tiempo_fichas_seg"),
-                        ("Tiempo fichas (seg)", "Aspirado"):           _rpval(_asp, "tiempo_fichas_seg"),
+                        # 'Tiempo fichas' solo existe en el form de lavadora
+                        # (aspiradora no lo tiene, quedaba siempre vacío).
+                        ("Tiempo fichas", "Lavado (seg)"):             _rpval(_lav, "tiempo_fichas_seg"),
                     })
 
                 if _reg_rows:
