@@ -1142,31 +1142,42 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     # ── Componente 1: Tiempo de ejecución (0–25 pts) ──────────────────────────
     # MC: < 5 min → 0 | 5-15 min → 12 | > 15 min → 25
     # MP (con estim.): usa max(tasks_duration, elapsed) / estimado
-    #   ≥75% → 25 | 35-74% → 12 | <35% → 0
+    #   Regla operativa (validada con Ops 06-jul-2026):
+    #     ≥75% → 25 (cumple)
+    #     35-74% → 12 (cumple parcial)
+    #     <35% → 0 (no cumple; posible ficticio o técnico no realizó bien)
+    #     >150% → 25 (CUMPLE + marca sobretiempo; informativo, no penaliza).
+    #             Un técnico que tarda más NO es un problema de calidad; solo
+    #             informa exceso. Se marca en 'sobretiempo' para reportes.
     # MP (sin estim.): <15 min → 0 | 15-30 min → 12 | >30 min → 25
     # NOTA: para PMs se usa max(exec_sec_sum, max_elapsed) porque si el técnico
     #       no llenó tasks_duration (= 0) pero tuvo el OT abierto 100 min, ese
     #       tiempo real debe contar. La función max() toma el mayor valor disponible.
-    def _score_tiempo(row) -> int:
+    def _score_tiempo(row) -> tuple:
+        """Retorna (puntaje, sobretiempo_bool) — sobretiempo NO penaliza."""
         if row["es_correctiva"]:
-            return 25  # Tiempo no se evalúa en correctivas → 25 pts auto (no penaliza)
+            return 25, False  # Tiempo no se evalúa en correctivas → 25 pts auto
+        elapsed = row["max_elapsed"]
+        estim = row.get("estim_sec_sum", 0) or 0
+        if estim > 60:
+            exec_r = row.get("exec_sec_sum", 0) or 0
+            effective = max(exec_r, elapsed)
+            ratio = effective / estim
+            if ratio > 1.50:
+                # SOBRETIEMPO: técnico duró más del 150% del estimado.
+                # Sigue siendo CUMPLE (25 pts) pero se marca para reporte.
+                return 25, True
+            if ratio >= 0.75: return 25, False
+            if ratio >= 0.35: return 12, False
+            return 0, False
         else:
-            elapsed = row["max_elapsed"]
-            estim = row.get("estim_sec_sum", 0) or 0
-            if estim > 60:
-                exec_r = row.get("exec_sec_sum", 0) or 0
-                # Usar el mayor entre tasks_duration y elapsed real (fecha_inicio→fin)
-                effective = max(exec_r, elapsed)
-                ratio = effective / estim
-                if ratio >= 0.75: return 25
-                if ratio >= 0.35: return 12
-                return 0
-            else:
-                if elapsed > 1800: return 25
-                if elapsed > 900:  return 12
-                return 0
+            if elapsed > 1800: return 25, False
+            if elapsed > 900:  return 12, False
+            return 0, False
 
-    ot["score_tiempo"] = ot.apply(_score_tiempo, axis=1)
+    _scores_time = ot.apply(_score_tiempo, axis=1)
+    ot["score_tiempo"]  = _scores_time.apply(lambda t: t[0])
+    ot["sobretiempo"]   = _scores_time.apply(lambda t: t[1])
 
     # ── Componente 2: Causa raíz llenada (0–25 pts) ───────────────────────────
     # SOLO aplica a CORRECTIVAS. Una preventiva no responde a una falla — no

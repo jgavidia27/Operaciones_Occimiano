@@ -10097,38 +10097,48 @@ elif _page == _NAV_PAGES[0]:
                         unsafe_allow_html=True)
 
             # ── Leyenda expandible ────────────────────────────────────────────
-            with st.expander("📖  Regla de cumplimiento de tiempo (banda 75% – 150% de la duración estimada)", expanded=False):
+            with st.expander("📖  Regla de cumplimiento de tiempo (piso 75% del estimado)", expanded=False):
                 st.markdown("""
 **¿Cómo funciona?**
 
 Cada mantenimiento preventivo tiene una **duración estimada** (programada en Fracttal).
-El técnico debe ejecutar la tarea dentro de una **banda de tolerancia**:
+La duración estimada se toma **solo de la subtarea LAVADORA** (no se suman bomba,
+ablandador, lavatapices ni cambio de aceite — esos son actividades aparte).
+El técnico debe ejecutar la tarea al menos por el **75% del tiempo estimado de la lavadora**.
 
 - **Piso: 75% del tiempo estimado** — si se ejecuta más rápido, es sospecha de quick-tick.
-- **Techo: 150% del tiempo estimado** — si se ejecuta más lento, es sobretiempo injustificado.
+- **Sin techo (informativo)** — si se ejecuta más lento del 150%, se marca como
+  🟣 **Sobretiempo**, pero **CUMPLE**. El técnico puede justificadamente tardar más
+  (falla adicional, revisión profunda, etc.). El dato queda registrado para monitoreo,
+  no penaliza el KPI.
 
-Ejemplo con MP de **1:30 h (90 min)** estimados:
+Ejemplo con MP de **1:30 h (90 min)** estimados (lavadora):
 
-| Duración estimada | Mínimo (75%) | Máximo (150%) | Ejemplo |
+| Duración estimada | Mínimo (75%) | Ejemplo | Resultado |
 |---|---|---|---|
-| 01:30 (90 min) | 01:07 (67 min) | 02:15 (135 min) | Ejecutó 1:20 (80 min) → ✅ Cumple |
-| 01:30 (90 min) | 01:07 (67 min) | 02:15 (135 min) | Ejecutó 0:30 (30 min) → ❌ No cumple (déficit) |
-| 01:30 (90 min) | 01:07 (67 min) | 02:15 (135 min) | Ejecutó 2:30 (150 min) → 🟣 Exceso |
-| 00:40 (40 min) | 00:30 (30 min) | 01:00 (60 min) | Ejecutó 32 min → ✅ Cumple |
-| 01:00 (60 min) | 00:45 (45 min) | 01:30 (90 min) | Ejecutó 50 min → ✅ Cumple |
+| 01:30 (90 min) | 01:07 (67 min) | Ejecutó 1:20 (80 min) | ✅ Cumple |
+| 01:30 (90 min) | 01:07 (67 min) | Ejecutó 0:30 (30 min) | ❌ No cumple (déficit) |
+| 01:30 (90 min) | 01:07 (67 min) | Ejecutó 2:30 (150 min) | ✅ Cumple 🟣 Sobretiempo |
+| 00:40 (40 min) | 00:30 (30 min) | Ejecutó 32 min | ✅ Cumple |
+| 01:00 (60 min) | 00:45 (45 min) | Ejecutó 50 min | ✅ Cumple |
 
 **¿Qué se mide?**
-- **Tiempo efectivo** = `max(tasks_duration, tiempo real por fechas OT)` vs **`Duración Estimada`**
-- Si `75% × Estimada ≤ Tiempo Efectivo ≤ 150% × Estimada` → **✅ CUMPLE** (verde)
-- Si `Tiempo Efectivo < 20% × Estimada` → **🔴 Injustificado** (quick-tick claro)
-- Si `20% ≤ Tiempo Efectivo < 75% × Estimada` → **🟡 Déficit** (por debajo del mínimo)
-- Si `Tiempo Efectivo > 150% × Estimada` → **🟣 Exceso** (sobretiempo injustificado)
+- **Tiempo efectivo** = `max(tasks_duration, tiempo real por fechas OT)`
+- **Duración estimada** = SOLO de la subtarea LAVADORA (fuente: `duracion_estim_neta_seg`)
+- Si `Tiempo Efectivo ≥ 75% × Estimada` → **✅ CUMPLE**
+- Si `Tiempo Efectivo < 75% × Estimada` → **❌ NO CUMPLE**
+- Si además `Tiempo Efectivo > 150% × Estimada` → **✅ CUMPLE + 🟣 Sobretiempo** (informativo)
 - Si no hay duración estimada → **Sin datos** (no penaliza)
 
-**¿Por qué la banda 75%–150%?**
-El piso protege contra quick-ticks (tareas marcadas hechas sin ejecutar).
-El techo protege contra pagos de sobretiempo no justificado o registros erróneos
-(un MP que "duró" 3× lo estimado suele ser un olvido de cierre en Fracttal).
+**¿Por qué solo lavadora?**
+Fracttal duplica en cada subtarea el tiempo total de la OT, entonces sumar todo
+inflaba el estimado a 3-4 horas cuando en realidad la lavadora sola tarda 1-1:30 h.
+El indicador mide la calidad del trabajo del técnico sobre el equipo principal.
+
+**¿Por qué sin techo?**
+Un técnico que tarda más NO es un problema de calidad. Puede tener causas legítimas
+(falla adicional que atiende en el momento, revisión profunda). Se marca para
+monitoreo pero no penaliza.
 
 **¿Por qué usar max(tasks_duration, elapsed)?**
 Si el técnico no llenó el campo de duración de tareas pero tuvo el OT abierto 90 min,
@@ -10157,13 +10167,17 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 # Si el técnico no llenó tasks_duration (=0) pero el OT estuvo abierto
                 # N minutos, ese tiempo cuenta. Consistente con _score_tiempo en data.py.
                 _df_te["_effective_sec"] = _df_te[["duration_sec","elapsed_sec"]].fillna(0).max(axis=1)
-                # CUMPLE si el tiempo efectivo está entre 75% y 150% del estimado.
-                # <75%  = déficit (posible quick-tick / trabajo incompleto)
-                # >150% = exceso (posible sobretiempo injustificado, holgazanería
-                #                 o error de registro). Ambos extremos son "no cumple".
-                _df_te["_te_ok"] = (
-                    (_df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75) &
-                    (_df_te["_effective_sec"] <= _df_te["estimated_sec"] * 1.50)
+                # Regla operativa validada con Ops (06-jul-2026):
+                #   ≥ 75%  del estimado → CUMPLE (verde)
+                #   < 75%  del estimado → NO CUMPLE (posible quick-tick,
+                #                          trabajo incompleto)
+                #   > 150% del estimado → CUMPLE + marca SOBRETIEMPO
+                #                          (informativo; se registra pero
+                #                          no penaliza. El técnico puede
+                #                          justificadamente tardar más.)
+                _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75
+                _df_te["_te_sobretiempo"] = (
+                    _df_te["_effective_sec"] > _df_te["estimated_sec"] * 1.50
                 )
                 # Una OT con múltiples equipos genera filas duplicadas con los
                 # mismos tiempos neta; mantener solo una fila por OT.
@@ -10238,23 +10252,27 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _det_te_disp["T. Ejecución"]   = _det_te_disp["_effective_sec"].apply(_fmt_seg)
                 _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
                 def _estado_lbl(r):
+                    # Regla operativa (validada Ops 06-jul-2026):
+                    #   ≥75%  → CUMPLE (verde)
+                    #   >150% → CUMPLE + marca 🟣 Sobretiempo (informativo, NO penaliza)
+                    #   <75%  → NO CUMPLE
                     if bool(r.get("_te_ok", False)):
+                        if bool(r.get("_es_exceso", False)):
+                            return "✅ Cumple · 🟣 Sobretiempo"
                         return "✅ Cumple"
-                    if bool(r.get("_es_exceso", False)):
-                        return "⚠️ Exceso (>150%)"
                     return "❌ No cumple"
                 _det_te_disp["Estado"] = _det_te_disp.apply(_estado_lbl, axis=1)
 
-                # Diagnóstico de no cumplimiento del tiempo. Solo se llena cuando
-                # _te_ok == False; cuando cumple queda vacío.
+                # Diagnóstico:
+                # - No cumple (déficit <75%): explica por qué.
+                # - Sobretiempo (>150% pero cumple): registro informativo.
+                # - Cumple normal (75-150%): vacío.
                 def _fmt_hm(seg):
                     if seg is None or pd.isna(seg) or seg <= 0: return "0min"
                     seg = int(seg); h, m = seg//3600, (seg%3600)//60
                     return f"{h}h{m:02d}min" if h else f"{m}min"
 
                 def _diag_tiempo(r):
-                    if bool(r.get("_te_ok", False)):
-                        return ""
                     estim = int(r.get("estimated_sec") or 0)
                     real  = int(r.get("_effective_sec") or 0)
                     minimo = int(r.get("_minimo_sec") or 0)
@@ -10264,15 +10282,16 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     real_h  = _fmt_hm(real)
                     min_h   = _fmt_hm(minimo)
                     max_h   = _fmt_hm(maximo)
-                    # ── EXCESO (>150% del estimado) ─────────────────────────
-                    if bool(r.get("_es_exceso", False)):
+                    # ── SOBRETIEMPO (cumple, informativo) ───────────────────
+                    if bool(r.get("_te_ok", False)) and bool(r.get("_es_exceso", False)):
                         exceso = real - maximo
-                        if pct > 250:
-                            return (f"Exceso extremo: registró {real_h} cuando el estimado era {estim_h} "
-                                    f"(tope máximo {max_h}). Más del doble del tope permitido; "
-                                    f"revisar si fue error de registro o sobretiempo real.")
-                        return (f"Sobretiempo: {real_h} ejecutado supera el tope de {max_h} "
-                                f"(150% de {estim_h}). Excedió por {_fmt_hm(exceso)}.")
+                        return (f"Sobretiempo (informativo, no penaliza): {real_h} ejecutado "
+                                f"supera el tope de referencia {max_h} (150% de {estim_h}) "
+                                f"por {_fmt_hm(exceso)}. La OT CUMPLE — puede haber tenido "
+                                f"causa legítima (falla adicional, revisión profunda).")
+                    # Si cumple sin sobretiempo, vacío
+                    if bool(r.get("_te_ok", False)):
+                        return ""
                     # ── DÉFICIT (<75% del estimado) ─────────────────────────
                     deficit = minimo - real
                     if real == 0:
@@ -10291,7 +10310,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     return (f"El acumulado del tiempo no cumple ni siquiera el 75% mínimo de {estim_h}: "
                             f"registró {real_h} y se requerían {min_h} (faltaron {_fmt_hm(deficit)}).")
 
-                _det_te_disp["Diagnóstico de no cumplimiento"] = _det_te.apply(_diag_tiempo, axis=1).values
+                _det_te_disp["Diagnóstico"] = _det_te.apply(_diag_tiempo, axis=1).values
                 # Normalizar EDS para display (Equipo se omite: una OT puede tener
                 # subtareas con activos distintos; lo que evalúa el KPI es la OT completa).
                 if "eds_occim" in _det_te_disp.columns:
@@ -10307,7 +10326,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 # Orden: OT - EDS - Técnico - resto, Diagnóstico al final
                 _orden_te = ["OT","EDS","Técnico","Fecha","Tipo",
                              "T. Estimado","Mín. 75%","Máx. 150%","T. Ejecución","% Ejecutado","Estado",
-                             "Diagnóstico de no cumplimiento"]
+                             "Diagnóstico"]
                 _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
                 _n_te_total = len(_det_te_disp)
@@ -10329,35 +10348,41 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             "Mín. 75%":    st.column_config.TextColumn(width=90,
                                 help="Tiempo mínimo aceptable = 75% del estimado"),
                             "Máx. 150%":   st.column_config.TextColumn(width=90,
-                                help="Tope máximo aceptable = 150% del estimado. Superarlo cuenta como Exceso."),
+                                help="Umbral de referencia = 150% del estimado. Superarlo se marca como 🟣 Sobretiempo (informativo, NO penaliza)."),
                             "T. Ejecución":st.column_config.TextColumn(width=110,
                                 help="Tiempo efectivo = max(tiempo tareas, tiempo real por fechas)"),
                             "% Ejecutado": st.column_config.ProgressColumn(
                                 label="% Ejecutado", min_value=0, max_value=250, format="%.1f%%",
-                                help="T.Efectivo / T.Estimado × 100. Cumple si está entre 75% y 150%."),
-                            "Estado":      st.column_config.TextColumn(width=130),
-                            "Diagnóstico de no cumplimiento": st.column_config.TextColumn(width=380,
-                                help="Razón concreta por la que el tiempo no cumple: exceso, absurdo, sin registro, déficit vs mínimo. Vacío cuando cumple."),
+                                help="T.Efectivo / T.Estimado × 100. Cumple si es ≥ 75%. Sobre 150% es informativo (cumple)."),
+                            "Estado":      st.column_config.TextColumn(width=180),
+                            "Diagnóstico": st.column_config.TextColumn(width=380,
+                                help="Razón concreta cuando NO cumple, o marca de sobretiempo informativo cuando cumple pero superó 150%. Vacío cuando cumple normalmente."),
                         })
 
-                # ── Subsección: OTs con tiempo fuera de rango (déficit o exceso) ────
+                # ── Subsección: OTs con tiempo fuera de rango ────
                 st.markdown("---")
-                st.markdown("**⚠️ OTs con tiempo de ejecución fuera de rango (< 20% ó > 150% del estimado)**")
+                st.markdown("**⚠️ OTs con tiempo de ejecución atípico (déficit < 75% o sobretiempo > 150%)**")
                 st.caption(
                     "Barras apiladas por equipo (o por técnico si filtras). "
-                    "**Verde** = cumplen (75%–150%) · "
-                    "**Amarillo** = déficit no razonable (20–75%) · "
-                    "**Rojo** = déficit injustificado (< 20%) · "
-                    "**Morado** = exceso injustificado (> 150%)"
+                    "**Verde** = cumplen (≥75%) · "
+                    "**Amarillo** = déficit parcial (20–75% → no cumple) · "
+                    "**Rojo** = déficit absurdo (< 20% → no cumple) · "
+                    "**Morado** = sobretiempo (> 150% → informativo, CUMPLE igual)"
                 )
 
-                # Marcar los 4 segmentos sobre el total de preventivos con estimado
+                # Segmentos sobre el total de preventivos con estimado:
+                #   _ok_normal    = ≥75% y ≤150%  (verde, cumple)
+                #   _exceso       = >150%          (púrpura, cumple con sobretiempo)
+                #   _just_fail    = 20-75%         (amarillo, no cumple)
+                #   _absurdo      = <20%           (rojo, no cumple)
+                # Nota: _te_ok es True para ok_normal + exceso (>= 75% sin techo).
                 _df_te_p["_exceso"]    = _df_te_p["_effective_sec"] > _df_te_p["estimated_sec"] * 1.50
+                _df_te_p["_ok_normal"] = _df_te_p["_te_ok"] & (~_df_te_p["_exceso"])
                 _df_te_p["_absurdo"]   = (
-                    (~_df_te_p["_te_ok"]) & (~_df_te_p["_exceso"]) &
+                    (~_df_te_p["_te_ok"]) &
                     (_df_te_p["_effective_sec"] < _df_te_p["estimated_sec"] * 0.20)
                 )
-                _df_te_p["_just_fail"] = (~_df_te_p["_te_ok"]) & (~_df_te_p["_absurdo"]) & (~_df_te_p["_exceso"])
+                _df_te_p["_just_fail"] = (~_df_te_p["_te_ok"]) & (~_df_te_p["_absurdo"])
 
                 # Determinar agrupación según filtros
                 if tec_kpi_sel != "Todos":
@@ -10370,7 +10395,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                 _te_grp = (
                     _df_te_p.groupby(_grp_col)
                     .agg(
-                        ok=("_te_ok",     "sum"),
+                        ok=("_ok_normal", "sum"),
                         just_fail=("_just_fail", "sum"),
                         absurdo=("_absurdo",  "sum"),
                         exceso=("_exceso",   "sum"),
