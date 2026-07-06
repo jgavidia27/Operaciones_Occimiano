@@ -133,9 +133,27 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
         if r.get("os_fracttal"):
             fuente_map[r["os_fracttal"]] = r.get("fuente")
     df["fuente"] = df["os_fracttal"].map(fuente_map)
-    # Sin match en llamados_correctivos => asumimos OT directa por Fracttal
-    # (los robots siempre registran en llamados_correctivos con su fuente).
-    df["fuente"] = df["fuente"].fillna("ot_directa")
+
+    # Fallback: si no hay match directo por os_fracttal (típico en Copec
+    # porque su robot no linkea os_fracttal al momento del correo), se
+    # infiere la fuente por cliente. Correlación real observada en la
+    # tabla llamados_correctivos:
+    #   robot_email → 100% Copec
+    #   robot_shell → 100% Shell (Enex)
+    #   robot_esmax → 100% Esmax (Aramco)
+    # Si el cliente no es uno de los 3 que tienen robot, asumimos
+    # ot_directa (OT manual/directa en Fracttal sin canal automatizado).
+    _cli_to_robot = {
+        "COPEC":          "robot_email",
+        "SHELL (Enex)":   "robot_shell",
+        "ESMAX":          "robot_esmax",
+        "Aramco (Esmax)": "robot_esmax",
+        "ESMAX (Aramco)": "robot_esmax",
+    }
+    _fallback = df["cliente"].map(_cli_to_robot).fillna("ot_directa")
+    df["fuente"] = df["fuente"].fillna(_fallback)
+    # Marca si fue inferida (para explicar en UI si hace falta)
+    df["fuente_inferida"] = df["os_fracttal"].map(fuente_map).isna()
 
     # 3) Normalización
     df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
@@ -360,7 +378,18 @@ if _n_tot:
         '</div>'
     )
     st.markdown(_resumen, unsafe_allow_html=True)
-    st.caption("Distribución por canal de entrada en el filtro actual.")
+
+    _n_inf = int(_df["fuente_inferida"].sum()) if "fuente_inferida" in _df.columns else 0
+    if _n_inf:
+        st.caption(
+            f"Distribución por canal en el filtro actual · "
+            f"⚠️ {_n_inf:,} OTs con fuente **inferida por cliente** "
+            f"(el robot Copec no linkea os_fracttal al recibir el correo, "
+            f"así que se asume: Copec→robot email, Shell→robot Shell, "
+            f"Aramco→robot Aramco, resto→directa Fracttal)."
+        )
+    else:
+        st.caption("Distribución por canal de entrada en el filtro actual.")
 
 
 # ══════════════════════════════════════════════════════════════════════
