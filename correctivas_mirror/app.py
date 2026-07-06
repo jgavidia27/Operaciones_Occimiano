@@ -359,7 +359,7 @@ if vista == "📰 Feed cronológico":
         _fc = r["fecha_cierre_local"]
         _fc_s = ("cerrada " + _fc.strftime("%d/%m %H:%M")) if pd.notna(_fc) else "abierta"
 
-        _hr = r.get("horas_respuesta")
+        _hr = pd.to_numeric(r.get("horas_respuesta"), errors="coerce")
         _hr_s = ""
         if pd.notna(_hr):
             _hr_s = f" · <b>{_hr:.1f}h</b> resp. / SLA {r.get('umbral_horas','?')}h"
@@ -399,8 +399,8 @@ else:
     )
     _dft["F. Llamado"] = _dft["fecha_llamado_local"].dt.strftime("%d/%m/%Y %H:%M")
     _dft["F. Cierre"] = _dft["fecha_cierre_local"].dt.strftime("%d/%m/%Y %H:%M")
-    _dft["Horas resp."] = _dft["horas_respuesta"].round(2)
-    _dft["SLA (h)"] = _dft["umbral_horas"]
+    _dft["Horas resp."] = pd.to_numeric(_dft["horas_respuesta"], errors="coerce").round(2)
+    _dft["SLA (h)"] = pd.to_numeric(_dft["umbral_horas"], errors="coerce")
     _dft["Cumplimiento"] = _dft["cumplimiento"].fillna("⏳ Pendiente")
 
     _cols = [
