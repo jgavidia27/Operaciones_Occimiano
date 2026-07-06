@@ -4427,7 +4427,22 @@ elif _page == _NAV_PAGES[3]:
     ].copy()
 
     # Numerales por subtarea (para detalle preventivas Shell)
-    df_num_sub_eds = _sc("df_num_sub_eds_v2", _wo_eds_sig, load_numerales_subtarea_supabase)
+    # Signature independiente: incluye el max(id_ot) de numerales_subtarea
+    # para que cuando el sync de subtareas añada filas sin cambiar
+    # ordenes_trabajo, el cache se invalide y recargue los nuevos datos.
+    # (Consulta ligera: solo trae 1 fila.)
+    try:
+        from supabase_client import _query as _sq_dash
+        _ns_last = _sq_dash(
+            "numerales_subtarea",
+            "select=id_ot&order=id_ot.desc&limit=1",
+            limit=1,
+        )
+        _ns_max = _ns_last[0]["id_ot"] if _ns_last else "0"
+    except Exception:
+        _ns_max = "0"
+    _ns_sig = f"{_wo_eds_sig}_ns{_ns_max}"
+    df_num_sub_eds = _sc("df_num_sub_eds_v3", _ns_sig, load_numerales_subtarea_supabase)
 
     # ── Override per-asset: el numeral correcto vive en numerales_subtarea,
     # NO en ordenes_trabajo (que es OT-level y se duplica al expandir activos).
