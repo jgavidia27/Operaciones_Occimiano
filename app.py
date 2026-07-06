@@ -10415,7 +10415,9 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                     _te_grp = _te_grp.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
                 else:
                     _te_grp["_label"] = _te_grp["tecnico"]
-                    _te_grp["_problemas"] = _te_grp["absurdo"] + _te_grp["exceso"]
+                    # 'Problemas' = solo los que realmente NO cumplen (absurdo + déficit).
+                    # El sobretiempo (>150%) CUMPLE y no es problema.
+                    _te_grp["_problemas"] = _te_grp["absurdo"] + _te_grp["just_fail"]
                     _te_grp = _te_grp.sort_values("_problemas", ascending=False).drop(columns=["_problemas"]).reset_index(drop=True)
 
                 _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}"
@@ -10424,25 +10426,28 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
 
                     if _use_donut:
                         # ── Dos donas: vista general todos los equipos ───────────
-                        _n_ok_d  = int(_te_grp["ok"].sum())
-                        _n_jd    = int(_te_grp["just_fail"].sum())
-                        _n_abd   = int(_te_grp["absurdo"].sum())
-                        _n_ex_d  = int(_te_grp["exceso"].sum())
-                        _n_no_cumple = _n_jd + _n_abd + _n_ex_d
-                        _n_total_d   = _n_ok_d + _n_no_cumple
+                        # ok = normal (75-150%) · exceso (>150%, CUMPLE + sobretiempo)
+                        # no cumple = just_fail (20-75%) + absurdo (<20%)
+                        _n_ok_normal = int(_te_grp["ok"].sum())
+                        _n_ex_d      = int(_te_grp["exceso"].sum())
+                        _n_jd        = int(_te_grp["just_fail"].sum())
+                        _n_abd       = int(_te_grp["absurdo"].sum())
+                        _n_ok_total  = _n_ok_normal + _n_ex_d       # todos los que cumplen
+                        _n_no_cumple = _n_jd + _n_abd               # solo déficit
+                        _n_total_d   = _n_ok_total + _n_no_cumple
 
                         _fig_abs = make_subplots(
                             rows=1, cols=2,
                             specs=[[{"type": "domain"}, {"type": "domain"}]],
                             subplot_titles=[
                                 "Cumplimiento general",
-                                "Desglose no cumplen",
+                                "Desglose de resultados",
                             ],
                         )
-                        # Dona 1: cumple vs no cumple (incluye exceso en amarillo)
+                        # Dona 1: cumple total (normal + sobretiempo) vs no cumple
                         _fig_abs.add_trace(go.Pie(
-                            labels=["Cumplen (75%–150%)", "No cumplen"],
-                            values=[_n_ok_d, _n_no_cumple],
+                            labels=["Cumplen (≥75%)", "No cumplen (<75%)"],
+                            values=[_n_ok_total, _n_no_cumple],
                             hole=0.52,
                             marker=dict(colors=["#22c55e", "#f59e0b"],
                                         line=dict(color="#ffffff", width=2)),
@@ -10452,13 +10457,20 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             direction="clockwise",
                             sort=False,
                         ), row=1, col=1)
-                        # Dona 2: de los que no cumplen → 3 categorías (déficit 20-75%,
-                        # injustificado <20%, exceso >150%)
+                        # Dona 2: desglose completo — cumple normal / sobretiempo /
+                        #         déficit parcial / déficit absurdo.
+                        #         El sobretiempo (púrpura) es CUMPLE, se separa
+                        #         para monitoreo pero no penaliza.
                         _fig_abs.add_trace(go.Pie(
-                            labels=["Déficit (20–75%)", "Injustificado (<20%)", "Exceso (>150%)"],
-                            values=[_n_jd, _n_abd, _n_ex_d],
+                            labels=[
+                                "✅ Cumple normal (75–150%)",
+                                "✅ Cumple · 🟣 Sobretiempo (>150%)",
+                                "❌ Déficit (20–75%)",
+                                "❌ Injustificado (<20%)",
+                            ],
+                            values=[_n_ok_normal, _n_ex_d, _n_jd, _n_abd],
                             hole=0.52,
-                            marker=dict(colors=["#f59e0b", "#ef4444", "#8b5cf6"],
+                            marker=dict(colors=["#22c55e", "#8b5cf6", "#f59e0b", "#ef4444"],
                                         line=dict(color="#ffffff", width=2)),
                             textinfo="percent+value",
                             texttemplate="%{percent:.1%}<br>%{value:,} OTs",
@@ -10476,7 +10488,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 dict(text=f"<b>{_n_total_d:,}</b><br>OTs",
                                      x=0.19, y=0.5, showarrow=False,
                                      font=dict(size=16)),
-                                dict(text=f"<b>{_n_no_cumple:,}</b><br>No cumplen",
+                                dict(text=f"<b>{_n_ok_total:,}</b><br>cumplen",
                                      x=0.81, y=0.5, showarrow=False,
                                      font=dict(size=14)),
                             ],
@@ -10486,7 +10498,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         _x_lbl = _te_grp["_label"].tolist()
                         _fig_abs = go.Figure()
                         _fig_abs.add_trace(go.Bar(
-                            name="Cumplen (75%–150%)",
+                            name="✅ Cumple normal (75–150%)",
                             x=_x_lbl,
                             y=_te_grp["ok"].tolist(),
                             marker_color="#22c55e",
@@ -10496,7 +10508,17 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             textfont=dict(size=11, color="#ffffff"),
                         ))
                         _fig_abs.add_trace(go.Bar(
-                            name="Déficit (20–75%)",
+                            name="✅ Cumple · 🟣 Sobretiempo (>150%)",
+                            x=_x_lbl,
+                            y=_te_grp["exceso"].tolist(),
+                            marker_color="#8b5cf6",
+                            text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                                  for v, p in zip(_te_grp["exceso"], _te_grp["pct_exceso"])],
+                            textposition="inside",
+                            textfont=dict(size=11, color="#ffffff"),
+                        ))
+                        _fig_abs.add_trace(go.Bar(
+                            name="❌ Déficit (20–75%)",
                             x=_x_lbl,
                             y=_te_grp["just_fail"].tolist(),
                             marker_color="#f59e0b",
@@ -10506,22 +10528,12 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             textfont=dict(size=11, color="#ffffff"),
                         ))
                         _fig_abs.add_trace(go.Bar(
-                            name="Injustificado (<20%)",
+                            name="❌ Injustificado (<20%)",
                             x=_x_lbl,
                             y=_te_grp["absurdo"].tolist(),
                             marker_color="#ef4444",
                             text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
                                   for v, p in zip(_te_grp["absurdo"], _te_grp["pct_absurdo"])],
-                            textposition="inside",
-                            textfont=dict(size=11, color="#ffffff"),
-                        ))
-                        _fig_abs.add_trace(go.Bar(
-                            name="Exceso (>150%)",
-                            x=_x_lbl,
-                            y=_te_grp["exceso"].tolist(),
-                            marker_color="#8b5cf6",
-                            text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
-                                  for v, p in zip(_te_grp["exceso"], _te_grp["pct_exceso"])],
                             textposition="inside",
                             textfont=dict(size=11, color="#ffffff"),
                         ))
