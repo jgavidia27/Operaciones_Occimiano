@@ -10446,11 +10446,13 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             ],
                         )
                         # Dona 1: cumple total (normal + sobretiempo) vs no cumple
+                        # Rojo (#dc2626) para no cumplen — distinto del naranja
+                        # de 'Déficit' en la dona 2 (evita confusión visual).
                         _fig_abs.add_trace(go.Pie(
                             labels=["Cumplen (≥75%)", "No cumplen (<75%)"],
                             values=[_n_ok_total, _n_no_cumple],
                             hole=0.52,
-                            marker=dict(colors=["#22c55e", "#f59e0b"],
+                            marker=dict(colors=["#22c55e", "#dc2626"],
                                         line=dict(color="#ffffff", width=2)),
                             textinfo="percent+value",
                             texttemplate="%{percent:.1%}<br>%{value:,} OTs",
