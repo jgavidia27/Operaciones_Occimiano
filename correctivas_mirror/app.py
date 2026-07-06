@@ -49,15 +49,53 @@ FUENTE_META = {
     "ot_directa":  ("📞", "Directa Fracttal", "#475569", "#f1f5f9"),
 }
 
-# Estado derivado del cumplimiento + excepción
+# Estado derivado combinando estado_atencion (Fracttal) + cumplimiento SLA
+#
+# Distingue:
+#   - Nadie la ha tomado (Por Iniciar)               → 🔴 SIN ATENDER
+#   - Técnico terminó pero admin no ha cerrado       → 🟢/🟠 TRABAJO HECHO
+#     (subdividido por SLA: cumple vs excedido)
+#   - Cerrada por completo (Finalizadas)             → ✅ CUMPLE / ❌ NO CUMPLE
+#   - Eximida por operaciones                        → ⚪ EXCEPCIÓN
+#   - Estados basura (ERROR, DUPLICADO, PRUEBA…)     → 🚫 DESCARTADA
+_BASURA_EST = {"ERROR DE INGRESO", "DUPLICADO", "Duplicidad", "PRUEBA ROBOT"}
+
 def estado_ot(row):
+    # 1) Excepción SLA gana sobre todo
     if pd.notna(row.get("excepcion_motivo")) and str(row.get("excepcion_motivo") or "").strip():
-        return ("EXCEPCIÓN", "⚪", "#0284c7")
-    c = str(row.get("cumplimiento") or "").upper()
-    if c == "CUMPLE":     return ("CUMPLE",     "✅", "#16a34a")
-    if c == "NO CUMPLE":  return ("NO CUMPLE",  "❌", "#dc2626")
-    if c == "PENDIENTE":  return ("EN CURSO",   "🕒", "#f59e0b")
-    return ("SIN DATOS", "⏳", "#64748b")
+        return ("EXCEPCIÓN", "⚪", "#0284c7", "Eximida por operaciones")
+    est = str(row.get("estado_atencion") or "").strip()
+    cum = str(row.get("cumplimiento") or "").upper()
+
+    # 2) Estados basura (filtrables aparte)
+    if est in _BASURA_EST:
+        return ("DESCARTADA", "🚫", "#94a3b8", f"Estado Fracttal: {est}")
+
+    # 3) Sin atender: nadie la ha tomado en Fracttal
+    if est == "Por Iniciar":
+        return ("SIN ATENDER", "🔴", "#dc2626", "Nadie la ha tomado en Fracttal")
+
+    # 4) En Progreso: técnico registró fecha_finalizacion pero la OT
+    #    sigue abierta administrativamente. Combinamos con cumplimiento.
+    if est == "En Progreso":
+        if cum == "CUMPLE":
+            return ("TRABAJO HECHO", "🟢", "#16a34a",
+                    "Técnico terminó · pendiente cierre administrativo · SLA cumple")
+        if cum == "NO CUMPLE":
+            return ("TRABAJO HECHO", "🟠", "#ea580c",
+                    "Técnico terminó · pendiente cierre administrativo · SLA excedido")
+        return ("EN TERRENO", "🟡", "#f59e0b",
+                "Técnico ya está en terreno")
+
+    # 5) Finalizadas: cerrada por completo
+    if est == "Finalizadas":
+        if cum == "CUMPLE":
+            return ("CUMPLE", "✅", "#16a34a", "Cerrada · SLA cumplido")
+        if cum == "NO CUMPLE":
+            return ("NO CUMPLE", "❌", "#dc2626", "Cerrada · SLA excedido")
+
+    # 6) Fallback
+    return ("SIN DATOS", "⏳", "#64748b", "Estado no clasificado")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -177,8 +215,8 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     # Técnico "amigable"
     df["tecnico_disp"] = df["tecnico_corto"].fillna(df["tecnico"])
 
-    # Estado derivado
-    df[["estado_lbl","estado_ico","estado_fg"]] = df.apply(
+    # Estado derivado + descripción tooltip
+    df[["estado_lbl","estado_ico","estado_fg","estado_desc"]] = df.apply(
         lambda r: pd.Series(estado_ot(r)), axis=1)
 
     return df
@@ -273,8 +311,12 @@ with _f3:
     _prios = sorted(df["prioridad"].dropna().unique())
     pri_sel = st.multiselect("Prioridad", _prios, default=_prios)
 with _f4:
-    _est_opts = ["CUMPLE", "NO CUMPLE", "EN CURSO", "EXCEPCIÓN", "SIN DATOS"]
-    est_sel = st.multiselect("Estado / SLA", _est_opts, default=_est_opts)
+    _est_opts = ["CUMPLE", "NO CUMPLE", "TRABAJO HECHO",
+                 "SIN ATENDER", "EN TERRENO", "EXCEPCIÓN",
+                 "DESCARTADA", "SIN DATOS"]
+    # Por defecto ocultamos DESCARTADA (basura de Fracttal)
+    _est_default = [e for e in _est_opts if e != "DESCARTADA"]
+    est_sel = st.multiselect("Estado / SLA", _est_opts, default=_est_default)
 with _f5:
     buscar = st.text_input(
         "Buscar",
@@ -324,22 +366,28 @@ _semana = _hoy - timedelta(days=7)
 
 _n_tot = len(_df)
 _n_hoy = int((_df["fecha_llamado"].dt.date == _hoy).sum())
-_n_semana = int((_df["fecha_llamado"].dt.date >= _semana).sum())
 _n_cumple = int((_df["estado_lbl"] == "CUMPLE").sum())
 _n_nocump = int((_df["estado_lbl"] == "NO CUMPLE").sum())
-_n_encur  = int((_df["estado_lbl"] == "EN CURSO").sum())
+_n_trab   = int((_df["estado_lbl"] == "TRABAJO HECHO").sum())
+_n_sinat  = int((_df["estado_lbl"] == "SIN ATENDER").sum())
+_n_terr   = int((_df["estado_lbl"] == "EN TERRENO").sum())
 _evaluadas = _n_cumple + _n_nocump
 _pct_cumpl = (_n_cumple / _evaluadas * 100) if _evaluadas else 0
 
 _k1, _k2, _k3, _k4, _k5 = st.columns(5)
-_k1.metric("Total (filtrado)", f"{_n_tot:,}")
-_k2.metric("Hoy", f"{_n_hoy:,}")
-_k3.metric("Últimos 7 días", f"{_n_semana:,}")
-_k4.metric("Cumplimiento SLA", f"{_pct_cumpl:.1f}%",
-           delta=f"{_n_cumple:,} de {_evaluadas:,}", delta_color="off")
-_k5.metric("🕒 En curso", f"{_n_encur:,}",
-           delta=f"{_n_nocump} no cumplen" if _n_nocump else "",
-           delta_color="inverse" if _n_nocump else "off")
+_k1.metric("Total (filtrado)", f"{_n_tot:,}",
+           delta=f"{_n_hoy} hoy" if _n_hoy else "", delta_color="off")
+_k2.metric("✅ Cerradas cumple", f"{_n_cumple:,}",
+           delta=f"{_pct_cumpl:.1f}% del SLA evaluado", delta_color="off")
+_k3.metric("❌ Cerradas no cumple", f"{_n_nocump:,}",
+           delta_color="inverse")
+_k4.metric("🟢 Trabajo hecho", f"{_n_trab:,}",
+           delta="pend. cierre admin", delta_color="off",
+           help="Técnico terminó pero la OT sigue abierta en Fracttal por trámite administrativo.")
+_k5.metric("🔴 Sin atender", f"{_n_sinat:,}",
+           delta=f"{_n_terr} en terreno" if _n_terr else "",
+           delta_color="inverse" if _n_sinat else "off",
+           help="OTs que nadie ha tomado en Fracttal (estado 'Por Iniciar').")
 
 # Distribución por fuente
 if _n_tot:
@@ -436,6 +484,7 @@ if vista == "📰 Feed cronológico":
             _f_ico, _f_lbl, _f_fg, _f_bg = ("📋", "Registro previo", "#64748b", "#f1f5f9")
 
         _e_lbl, _e_ico, _e_fg = r["estado_lbl"], r["estado_ico"], r["estado_fg"]
+        _e_desc = r.get("estado_desc") or ""
 
         _fl = r["fecha_llamado"]
         _fl_s = _fl.strftime("%d/%m %H:%M") if pd.notna(_fl) else "—"
@@ -474,7 +523,7 @@ if vista == "📰 Feed cronológico":
             f'<div>'
             f'<span class="badge fuente" style="--f-bg:{_f_bg};--f-fg:{_f_fg}">{_f_ico} {_f_lbl}</span>'
             f'<span class="badge pri" style="--p-bg:{_p_bg};--p-fg:{_p_fg}">{_p_lbl}</span>'
-            f'<span class="badge est" style="--e-fg:{_e_fg}">{_e_ico} {_e_lbl}</span>'
+            f'<span class="badge est" style="--e-fg:{_e_fg}" title="{_e_desc}">{_e_ico} {_e_lbl}</span>'
             f'</div>'
             f'</div>'
             f'<div class="eds">{_eds} · {_nom}</div>'
