@@ -10436,12 +10436,13 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                         _n_no_cumple = _n_jd + _n_abd               # solo déficit
                         _n_total_d   = _n_ok_total + _n_no_cumple
 
+                        _n_atipicos = _n_ex_d + _n_jd + _n_abd  # todo lo fuera de 75-150%
                         _fig_abs = make_subplots(
                             rows=1, cols=2,
                             specs=[[{"type": "domain"}, {"type": "domain"}]],
                             subplot_titles=[
                                 "Cumplimiento general",
-                                "Desglose de resultados",
+                                "OTs fuera de rango normal (75–150%)",
                             ],
                         )
                         # Dona 1: cumple total (normal + sobretiempo) vs no cumple
@@ -10457,27 +10458,29 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                             direction="clockwise",
                             sort=False,
                         ), row=1, col=1)
-                        # Dona 2: desglose completo — cumple normal / sobretiempo /
-                        #         déficit parcial / déficit absurdo.
-                        #         El sobretiempo (púrpura) es CUMPLE, se separa
-                        #         para monitoreo pero no penaliza.
-                        _fig_abs.add_trace(go.Pie(
-                            labels=[
-                                "✅ Cumple normal (75–150%)",
-                                "✅ Cumple · 🟣 Sobretiempo (>150%)",
-                                "❌ Déficit (20–75%)",
-                                "❌ Injustificado (<20%)",
-                            ],
-                            values=[_n_ok_normal, _n_ex_d, _n_jd, _n_abd],
-                            hole=0.52,
-                            marker=dict(colors=["#22c55e", "#8b5cf6", "#f59e0b", "#ef4444"],
-                                        line=dict(color="#ffffff", width=2)),
-                            textinfo="percent+value",
-                            texttemplate="%{percent:.1%}<br>%{value:,} OTs",
-                            hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%}<extra></extra>",
-                            direction="clockwise",
-                            sort=False,
-                        ), row=1, col=2)
+                        # Dona 2: SOLO los atípicos (fuera de 75-150%). Incluye:
+                        #   • ✅ Sobretiempo (>150%): cumple pero excede — monitoreo.
+                        #   • ❌ Déficit (20-75%): no cumple.
+                        #   • ❌ Injustificado (<20%): no cumple.
+                        # Excluye Cumple normal (mayoría) para destacar solo las
+                        # anomalías que ameritan revisión.
+                        if _n_atipicos > 0:
+                            _fig_abs.add_trace(go.Pie(
+                                labels=[
+                                    "✅ Sobretiempo (>150%) - cumple igual",
+                                    "❌ Déficit (20–75%)",
+                                    "❌ Injustificado (<20%)",
+                                ],
+                                values=[_n_ex_d, _n_jd, _n_abd],
+                                hole=0.52,
+                                marker=dict(colors=["#8b5cf6", "#f59e0b", "#ef4444"],
+                                            line=dict(color="#ffffff", width=2)),
+                                textinfo="percent+value",
+                                texttemplate="%{percent:.1%}<br>%{value:,} OTs",
+                                hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%} del atípico<extra></extra>",
+                                direction="clockwise",
+                                sort=False,
+                            ), row=1, col=2)
                         _fig_abs.update_layout(
                             height=360,
                             margin=dict(t=40, b=10, l=10, r=10),
@@ -10488,7 +10491,7 @@ esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
                                 dict(text=f"<b>{_n_total_d:,}</b><br>OTs",
                                      x=0.19, y=0.5, showarrow=False,
                                      font=dict(size=16)),
-                                dict(text=f"<b>{_n_ok_total:,}</b><br>cumplen",
+                                dict(text=f"<b>{_n_atipicos:,}</b><br>atípicas",
                                      x=0.81, y=0.5, showarrow=False,
                                      font=dict(size=14)),
                             ],
