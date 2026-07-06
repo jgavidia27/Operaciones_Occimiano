@@ -9723,6 +9723,28 @@ elif _page == _NAV_PAGES[0]:
                             help="OTs del técnico / total OTs del filtro actual"),
                     })
 
+                # ── Fila de totales ─────────────────────────────────────
+                _tot_cumple   = int(_agg["✅ Cumple"].sum())
+                _tot_no_cump  = int(_agg["❌ No cumple"].sum())
+                _pct_global   = (_tot_cumple / _tot_global * 100) if _tot_global else 0
+                _color_pct    = ("#16a34a" if _pct_global >= 80
+                                 else "#f59e0b" if _pct_global >= 60
+                                 else "#dc2626")
+                st.markdown(
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'align-items:center;background:#f8fafc;border:1px solid #e2e8f0;'
+                    f'border-radius:8px;padding:10px 16px;margin-top:-8px;'
+                    f'font-size:.88rem;font-weight:600;color:#0f172a">'
+                    f'<div>📊 <b>TOTAL FILTRO</b></div>'
+                    f'<div>OTs: <b>{_tot_global:,}</b></div>'
+                    f'<div style="color:#16a34a">✅ Cumple: <b>{_tot_cumple:,}</b></div>'
+                    f'<div style="color:#dc2626">❌ No cumple: <b>{_tot_no_cump:,}</b></div>'
+                    f'<div style="color:{_color_pct}">% Cumplimiento global: '
+                    f'<b>{_pct_global:.1f}%</b></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
             # ── Sub-pestañas de Precisión Fracttal ────────────────────────
             # Los KPIs globales y filtros quedan arriba (aplican a todas las
             # sub-pestañas). Cada sub-tab agrupa su desglose para reducir
