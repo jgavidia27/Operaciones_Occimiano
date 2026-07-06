@@ -9672,6 +9672,57 @@ elif _page == _NAV_PAGES[0]:
             gk5.metric("Técnicos con bono (≥90% exactitud)", f"{tecnicos_con_bono} / {total_tecnicos}")
 
             # ── Barra de puntaje global con desglose ──────────────────────────────
+            # ── Helper: ranking por técnico ───────────────────────────────
+            # Se usa en las 3 sub-pestañas (Causa/Tiempo/Numeral) para dar
+            # visibilidad de la contribución y desempeño individual. Muestra:
+            #   Técnico · Total OTs · Cumple · No cumple · % Cumplimiento · % Peso Total
+            # Ordenado por % Cumplimiento asc (peores arriba, para poder actuar).
+            def _render_ranking_tecnico(_df_r, _ok_col, _titulo,
+                                       _key_pfx="rk", _min_ots=1):
+                if _df_r.empty or "tecnico" not in _df_r.columns:
+                    return
+                _dfr = _df_r.copy()
+                _dfr["_ok_bool"] = _dfr[_ok_col].fillna(False).astype(bool)
+                _agg = (_dfr.groupby("tecnico")
+                        .agg(_tot=("_ok_bool","count"),
+                             _cumple=("_ok_bool","sum"))
+                        .reset_index())
+                _agg = _agg[_agg["_tot"] >= _min_ots]
+                if _agg.empty:
+                    return
+                _agg["_no_cumple"] = _agg["_tot"] - _agg["_cumple"]
+                _tot_global = int(_agg["_tot"].sum())
+                _agg["% Cumplimiento"] = (_agg["_cumple"] / _agg["_tot"] * 100).round(1)
+                _agg["% Peso Total"]   = (_agg["_tot"] / _tot_global * 100).round(1)
+                _agg = _agg.rename(columns={
+                    "tecnico":"Técnico", "_tot":"OTs",
+                    "_cumple":"✅ Cumple", "_no_cumple":"❌ No cumple",
+                })
+                _agg = _agg.sort_values(["% Cumplimiento","OTs"],
+                                        ascending=[True, False]).reset_index(drop=True)
+                st.markdown(f'<div class="section-header">{_titulo}</div>',
+                            unsafe_allow_html=True)
+                st.caption(
+                    f"Ranking ordenado por **% Cumplimiento ascendente** (los peores arriba "
+                    f"para priorizar acción). Total OTs evaluadas: **{_tot_global:,}**."
+                )
+                st.dataframe(
+                    _agg[["Técnico","OTs","✅ Cumple","❌ No cumple",
+                          "% Cumplimiento","% Peso Total"]],
+                    hide_index=True, use_container_width=True,
+                    column_config={
+                        "Técnico":         st.column_config.TextColumn(width=210),
+                        "OTs":             st.column_config.NumberColumn(width=70, format="%d"),
+                        "✅ Cumple":       st.column_config.NumberColumn(width=95, format="%d"),
+                        "❌ No cumple":    st.column_config.NumberColumn(width=105, format="%d"),
+                        "% Cumplimiento":  st.column_config.ProgressColumn(
+                            width=170, min_value=0, max_value=100, format="%.1f%%",
+                            help="OTs que cumplen / total OTs del técnico"),
+                        "% Peso Total":    st.column_config.ProgressColumn(
+                            width=140, min_value=0, max_value=100, format="%.1f%%",
+                            help="OTs del técnico / total OTs del filtro actual"),
+                    })
+
             # ── Sub-pestañas de Precisión Fracttal ────────────────────────
             # Los KPIs globales y filtros quedan arriba (aplican a todas las
             # sub-pestañas). Cada sub-tab agrupa su desglose para reducir
@@ -10007,6 +10058,13 @@ elif _page == _NAV_PAGES[0]:
                                     meta=80.0, titulo_y="% correctivas",
                                 )
                             st.plotly_chart(st.session_state[_cr_sig], width="stretch")
+
+                    # ── Ranking por técnico (peso + cumplimiento individual) ─
+                    _render_ranking_tecnico(
+                        _df_cr_base, "_causa_ok",
+                        "👤 Ranking por técnico — Causa Raíz",
+                        _key_pfx="cr", _min_ots=1,
+                    )
 
                     # ── Tabla detalle de Causa Raíz ───────────────────────────────
                     _n_cr_total = len(_df_cr_base)
@@ -10358,6 +10416,15 @@ elif _page == _NAV_PAGES[0]:
                                  "T. Estimado","Mín. 75%","Máx. 150%","T. Ejecución","% Ejecutado","Estado",
                                  "Diagnóstico"]
                     _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
+
+                    # ── Ranking por técnico (peso + cumplimiento individual) ─
+                    # Nota: se usa _df_te_p (filtrado por mes/semana) y _te_ok
+                    # (regla nueva ≥75% = cumple, sobretiempo cuenta como cumple).
+                    _render_ranking_tecnico(
+                        _df_te_p, "_te_ok",
+                        "👤 Ranking por técnico — Tiempo de Ejecución",
+                        _key_pfx="te", _min_ots=1,
+                    )
 
                     _n_te_total = len(_det_te_disp)
                     with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({_n_te_total:,} preventivos con estimado)", expanded=False):
@@ -10872,6 +10939,20 @@ elif _page == _NAV_PAGES[0]:
                                   if "es_lavadora" in _df_num_base.columns else int(_df_num_base["numeral_ok"].sum())
                     _n_no_aplica = int((~_df_num_base["es_lavadora"]).sum()) \
                                    if "es_lavadora" in _df_num_base.columns else 0
+
+                    # ── Ranking por técnico (peso + cumplimiento individual) ─
+                    # Solo evaluamos las OTs de lavadora/aspiradora (donde
+                    # el numeral realmente aplica); el resto es no_aplica=OK auto.
+                    if "es_lavadora" in _df_num_base.columns:
+                        _df_num_rk = _df_num_base[_df_num_base["es_lavadora"]].copy()
+                    else:
+                        _df_num_rk = _df_num_base.copy()
+                    _render_ranking_tecnico(
+                        _df_num_rk, "numeral_ok",
+                        "👤 Ranking por técnico — Registro de Numerales",
+                        _key_pfx="num", _min_ots=1,
+                    )
+
                     with st.expander(
                         f"📋 Detalle OTs — numerales ({_n_lav_ok:,} registrados · {_n_sin:,} sin numeral · {_n_no_aplica:,} no aplica)",
                         expanded=False,
