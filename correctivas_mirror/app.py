@@ -326,17 +326,41 @@ _k5.metric("🕒 En curso", f"{_n_encur:,}",
 # Distribución por fuente
 if _n_tot:
     _dist = _df["fuente"].fillna("(sin fuente)").value_counts()
-    _bar = '<div style="display:flex;gap:4px;margin-top:14px;height:34px;overflow:hidden;border-radius:6px;">'
+
+    # Barra visual con count + % inline
+    _bar = '<div style="display:flex;gap:4px;margin-top:14px;height:42px;overflow:hidden;border-radius:6px;">'
     for _f, _n in _dist.items():
         _meta = FUENTE_META.get(_f, ("❓", _f or "(sin fuente)", "#64748b", "#f1f5f9"))
         _pct = _n / _n_tot * 100
-        _bar += (f'<div style="flex:{_n};background:{_meta[2]};color:#fff;'
-                 f'display:flex;align-items:center;justify-content:center;'
-                 f'font-size:.75rem;font-weight:600;min-width:60px" '
-                 f'title="{_meta[1]}: {_n:,} ({_pct:.0f}%)">{_meta[0]} {_n:,}</div>')
+        _bar += (
+            f'<div style="flex:{_n};background:{_meta[2]};color:#fff;'
+            f'display:flex;flex-direction:column;align-items:center;'
+            f'justify-content:center;font-weight:600;min-width:110px;padding:0 6px;'
+            f'text-align:center;line-height:1.15" '
+            f'title="{_meta[1]}: {_n:,} · {_pct:.1f}%">'
+            f'<div style="font-size:.78rem">{_meta[0]} {_meta[1]}</div>'
+            f'<div style="font-size:.72rem;opacity:.9">{_n:,} · {_pct:.1f}%</div>'
+            f'</div>')
     _bar += "</div>"
     st.markdown(_bar, unsafe_allow_html=True)
-    st.caption("Distribución por fuente en el filtro actual · hover para %.")
+
+    # Resumen numérico agrupado (Robots vs Directa)
+    _n_robots = int(_df["fuente"].isin(
+        ["robot_esmax","robot_shell","robot_email"]).sum())
+    _n_directa = int((_df["fuente"] == "ot_directa").sum())
+    _pct_r = _n_robots / _n_tot * 100 if _n_tot else 0
+    _pct_d = _n_directa / _n_tot * 100 if _n_tot else 0
+
+    _resumen = (
+        '<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;'
+        'font-size:.85rem;color:#475569;">'
+        f'<div>🤖 <b>Robots</b>: {_n_robots:,} ({_pct_r:.1f}%)</div>'
+        f'<div>📞 <b>Directa Fracttal</b>: {_n_directa:,} ({_pct_d:.1f}%)</div>'
+        f'<div>📊 <b>Total</b>: {_n_tot:,}</div>'
+        '</div>'
+    )
+    st.markdown(_resumen, unsafe_allow_html=True)
+    st.caption("Distribución por canal de entrada en el filtro actual.")
 
 
 # ══════════════════════════════════════════════════════════════════════
