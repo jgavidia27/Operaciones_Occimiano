@@ -1565,10 +1565,13 @@ def score_llenado_por_tecnico(
     # ── % Cumplimiento coherente por dimensión (solo sobre OTs que aplican) ──
     # pct = ok / aplica × 100. Si no hay OTs que apliquen, dejar en NaN
     # para que la UI muestre '—' y no un 100% falso.
+    import numpy as _np
     for _dim in ("tiempo", "causa", "numeral"):
-        _num = grp[f"{_dim}_ok_count"]
-        _den = grp[f"{_dim}_aplica_count"]
-        grp[f"pct_{_dim}_ok"] = (_num / _den.replace(0, pd.NA) * 100).astype(float).round(1)
+        _num = grp[f"{_dim}_ok_count"].astype(float)
+        _den = grp[f"{_dim}_aplica_count"].astype(float)
+        # División segura: donde _den==0, resultado NaN
+        _pct = _np.where(_den > 0, _num / _den * 100, _np.nan)
+        grp[f"pct_{_dim}_ok"] = _np.round(_pct, 1)
 
     for c in ["score_promedio", "score_tiempo_prom", "score_causa_prom",
               "score_numeral_prom", "score_deteccion_prom",
