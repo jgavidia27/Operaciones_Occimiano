@@ -113,6 +113,12 @@ def fetch_subtareas_numeral(folio: str) -> list:
             "numeral_inicial":    None,
             "numeral_final":      None,
             "form_tiene_numeral": False,
+            # Flags: plantilla del formulario incluye estos campos operativos
+            # (Shell rollout 08-jun-2026). Necesarios para distinguir en el
+            # ranking "técnico no llenó" vs "plantilla vieja de Fracttal".
+            "form_tiene_bomba":       False,
+            "form_tiene_consumo":     False,
+            "form_tiene_tiempo":      False,
             "bomba_dosificadora":     None,
             "consumo_insumos":        None,
             "tiempo_fichas_seg":      None,
@@ -145,13 +151,21 @@ def fetch_subtareas_numeral(folio: str) -> list:
                 idx[kid]["numeral_inicial"] = val
             elif t == 5 and idx[kid]["numeral_final"] is None:
                 idx[kid]["numeral_final"] = val
-        elif not val_empty:
+        else:
+            # Marcamos que la plantilla incluye estos campos aunque el
+            # valor esté vacío (técnico no llenó vs plantilla vieja).
             if "BOMBA DOSIFICADORA" in desc:
-                idx[kid]["bomba_dosificadora"] = val
+                idx[kid]["form_tiene_bomba"] = True
+                if not val_empty:
+                    idx[kid]["bomba_dosificadora"] = val
             elif "CONSUMO DE INSUMOS" in desc:
-                idx[kid]["consumo_insumos"] = val
+                idx[kid]["form_tiene_consumo"] = True
+                if not val_empty:
+                    idx[kid]["consumo_insumos"] = val
             elif "TIEMPO FICHAS" in desc:
-                idx[kid]["tiempo_fichas_seg"] = val
+                idx[kid]["form_tiene_tiempo"] = True
+                if not val_empty:
+                    idx[kid]["tiempo_fichas_seg"] = val
 
     # 3) Filtrar: solo subtareas cuyo formulario tiene campos NUMERAL.
     #    Subtareas duplicadas del mismo equipo con plantilla sin numeral
@@ -197,6 +211,9 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "bomba_dosificadora":    r.get("bomba_dosificadora"),
             "consumo_insumos":       r.get("consumo_insumos"),
             "tiempo_fichas_seg":     r.get("tiempo_fichas_seg"),
+            "form_tiene_bomba":      r.get("form_tiene_bomba", False),
+            "form_tiene_consumo":    r.get("form_tiene_consumo", False),
+            "form_tiene_tiempo":     r.get("form_tiene_tiempo", False),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
             "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
             "updated_at":         datetime.now(timezone.utc).isoformat(),
@@ -212,6 +229,22 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             r = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
             if r.status_code in (200, 201, 204):
                 return len(payload), 0
+            # Fallback: si aún no se aplicó la migración form_tiene_*, quitar
+            # esas 3 columnas del payload y reintentar sin ellas (backward
+            # compat). Detectamos por el mensaje PGRST204 "column ... does
+            # not exist".
+            if r.status_code == 400 and "form_tiene_" in r.text:
+                for rec in payload:
+                    rec.pop("form_tiene_bomba", None)
+                    rec.pop("form_tiene_consumo", None)
+                    rec.pop("form_tiene_tiempo", None)
+                r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
+                if r2.status_code in (200, 201, 204):
+                    return len(payload), 0
+                if intento == 2:
+                    log(f"upsert {folio} (retry sin form_tiene_*) -> {r2.status_code}: {r2.text[:200]}", "ERR")
+                    return 0, len(payload)
+                continue
             if intento == 2:
                 # Usar ASCII en el log (Windows cp1252 explota con flechas Unicode)
                 log(f"upsert {folio} -> HTTP {r.status_code}: {r.text[:200]}", "ERR")
