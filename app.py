@@ -11186,6 +11186,13 @@ elif _page == _NAV_PAGES[0]:
                         "exactitud_pct", "bono_label",
                     ]].copy()
 
+                    # Orden por defecto: mejor a peor % Exactitud (desempata por
+                    # cantidad de OTs para que técnicos con más volumen queden
+                    # arriba en caso de empate en 100%).
+                    tec_disp = tec_disp.sort_values(
+                        ["exactitud_pct","ots_evaluadas"],
+                        ascending=[False, False]).reset_index(drop=True)
+
                     tec_disp.columns = [
                         "Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
                         "⏱ Tiempo OK", "🔍 Causa OK", "🔢 Numeral OK",
