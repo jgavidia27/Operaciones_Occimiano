@@ -5169,11 +5169,22 @@ elif _page == _NAV_PAGES[3]:
             # rellenos (OS-37958). Antes de esta fecha la plantilla Shell
             # no tenía esos campos, así que no tiene sentido mostrar
             # históricos que van a salir todos vacíos.
+            #
+            # ADEMÁS: solo mostramos OTs cuyo técnico realmente HAYA
+            # TRABAJADO (existe al menos 1 fila en numerales_subtarea con
+            # fecha_inicio/fin de subtarea). Las OTs "Por Iniciar" (nadie
+            # ha ido a la EDS) no aparecen porque no tiene sentido mostrar
+            # datos que aún no existen. El sync ya excluye task_status
+            # NO_STARTED, así que basta con filtrar por folios presentes.
             _shell_min_date = pd.Timestamp("2026-06-08", tz="UTC")
+            _folios_trabajados = set()
+            if not df_num_sub_eds.empty and "id_ot" in df_num_sub_eds.columns:
+                _folios_trabajados = set(df_num_sub_eds["id_ot"].astype(str).unique())
             _df_prev_all = (
                 df_wo_c[
                     (df_wo_c["maint_type"] == "Preventiva")
                     & (df_wo_c["creation_date"] >= _shell_min_date)
+                    & (df_wo_c["folio"].astype(str).isin(_folios_trabajados))
                 ]
                 .sort_values("creation_date", ascending=False)
                 .drop_duplicates(subset=["folio"], keep="first")
@@ -5184,14 +5195,15 @@ elif _page == _NAV_PAGES[3]:
                 'padding:8px 12px;border-radius:6px;margin-bottom:12px;'
                 'font-size:.82rem;color:#78350f">'
                 '⚠️ <b>Datos incompletos por plantilla Fracttal</b>: los campos '
-                '<i>bomba dosificadora, consumo insumos y tiempo fichas</i> empezaron a '
-                'registrarse el <b>08-jun-2026</b> (OS-37958). Sin embargo, una muestra '
-                'reciente arrojó que <b>~95% de las OTs Shell post-08-jun siguen '
-                'generándose con la plantilla vieja</b> sin esos campos — por eso salen '
-                'vacías aunque el técnico haya trabajado. Solo el ~5% son casos donde el '
-                'técnico no completó. <b>Acción requerida:</b> actualizar el plan de '
-                'mantención Shell en Fracttal para que las nuevas OTs se generen con la '
-                'plantilla completa.'
+                '<i>tipo de bomba, producción Lts/hr, consumo insumos y tiempo fichas</i> '
+                'empezaron a registrarse el <b>08-jun-2026</b> (OS-37958). Sin embargo, '
+                'una muestra arrojó que <b>~88% de las OTs Shell post-08-jun siguen '
+                'generándose con la plantilla vieja</b> sin esos campos. '
+                '<b>Acción requerida:</b> actualizar el plan de mantención Shell en '
+                'Fracttal para que las nuevas OTs se generen con la plantilla completa. '
+                '<br>ℹ️ Solo se muestran OTs donde el técnico ya <b>trabajó</b> en la '
+                'estación (con fecha inicio/fin de subtarea). Las OTs <i>Por Iniciar</i> '
+                'no aparecen porque aún no hay datos que registrar.'
                 '</div>',
                 unsafe_allow_html=True,
             )
