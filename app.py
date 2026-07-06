@@ -10217,22 +10217,32 @@ elif _page == _NAV_PAGES[0]:
                         # siempre tienen 1 activo por OT (la falla es por equipo),
                         # así que cada fila corresponde inequívocamente a un equipo.
                         # Las preventivas multi-subtarea no tienen causa raíz registrada.
+                        # Mapa código EDS → nombre (desde el maestro estaciones_servicio)
+                        _eds_nombre_map_cr = {}
+                        try:
+                            if not df_eds.empty and "eds_occim" in df_eds.columns and "nombre" in df_eds.columns:
+                                _eds_nombre_map_cr = dict(zip(
+                                    df_eds["eds_occim"].astype(str), df_eds["nombre"].astype(str)))
+                        except Exception:
+                            pass
                         if "equipment_code" in _det_cr.columns:
                             _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
                         if "eds_occim" in _det_cr.columns:
                             _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
+                            _det_cr["eds_nombre"] = _det_cr["eds_occim"].map(_eds_nombre_map_cr).fillna("—")
                         _det_cr = _det_cr.drop(
                             columns=["_causa_ok","es_correctiva"], errors="ignore"
                         ).rename(columns={
                             "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
+                            "eds_nombre":"Nombre EDS",
                             "tecnico":"Técnico","creation_date":"Fecha",
                             "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
                             "causa_clasif":"Clasificación",
                             "comentario_tecnico":"Comentario técnico / qué hizo",
                             "_diagnostico":"Diagnóstico del error"
                         }).sort_values("Fecha", ascending=False)
-                        # Orden final: OT - Equipo - EDS - resto, Comentario y Diagnóstico al final
-                        _orden_cr = ["OT","Equipo","EDS","Técnico","Fecha","Tipo","Causa Raíz",
+                        # Orden final: OT - Equipo - EDS - Nombre EDS - resto
+                        _orden_cr = ["OT","Equipo","EDS","Nombre EDS","Técnico","Fecha","Tipo","Causa Raíz",
                                      "Clasificación","Estado",
                                      "Comentario técnico / qué hizo","Diagnóstico del error"]
                         _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
@@ -10247,6 +10257,8 @@ elif _page == _NAV_PAGES[0]:
                                     help="Código del activo en Fracttal (ej. EQ-6249). En correctivas siempre hay 1 equipo por OT."),
                                 "EDS":           st.column_config.TextColumn(width=85,
                                     help="Código EDS Occimiano donde se realizó el MP/MC."),
+                                "Nombre EDS":    st.column_config.TextColumn(width=230,
+                                    help="Nombre / dirección de la estación."),
                                 "Técnico":       st.column_config.TextColumn(width=190),
                                 "Fecha":         st.column_config.TextColumn(width=100),
                                 "Tipo":          st.column_config.TextColumn(width=110),
@@ -10485,20 +10497,28 @@ elif _page == _NAV_PAGES[0]:
                                 f"registró {real_h} y se requerían {min_h} (faltaron {_fmt_hm(deficit)}).")
 
                     _det_te_disp["Diagnóstico"] = _det_te.apply(_diag_tiempo, axis=1).values
-                    # Normalizar EDS para display (Equipo se omite: una OT puede tener
-                    # subtareas con activos distintos; lo que evalúa el KPI es la OT completa).
+                    # Mapa código EDS → nombre (desde el maestro estaciones_servicio)
+                    _eds_nombre_map_te = {}
+                    try:
+                        if not df_eds.empty and "eds_occim" in df_eds.columns and "nombre" in df_eds.columns:
+                            _eds_nombre_map_te = dict(zip(
+                                df_eds["eds_occim"].astype(str), df_eds["nombre"].astype(str)))
+                    except Exception:
+                        pass
+                    # Normalizar EDS para display + inyectar nombre
                     if "eds_occim" in _det_te_disp.columns:
                         _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
+                        _det_te_disp["eds_nombre"] = _det_te_disp["eds_occim"].map(_eds_nombre_map_te).fillna("—")
                     _det_te_disp = _det_te_disp.drop(
                         columns=["estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
                                  "_pct_ej","_te_ok","_es_exceso"],
                         errors="ignore"
                     ).rename(columns={
-                        "folio":"OT","eds_occim":"EDS",
+                        "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
                         "tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
                     }).sort_values("Fecha", ascending=False)
-                    # Orden: OT - EDS - Técnico - resto, Diagnóstico al final
-                    _orden_te = ["OT","EDS","Técnico","Fecha","Tipo",
+                    # Orden: OT - EDS - Nombre EDS - Técnico - resto, Diagnóstico al final
+                    _orden_te = ["OT","EDS","Nombre EDS","Técnico","Fecha","Tipo",
                                  "T. Estimado","Mín. 75%","Máx. 150%","T. Ejecución","% Ejecutado","Estado",
                                  "Diagnóstico"]
                     _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
@@ -10523,6 +10543,8 @@ elif _page == _NAV_PAGES[0]:
                                 "OT":          st.column_config.TextColumn(width=110),
                                 "EDS":         st.column_config.TextColumn(width=85,
                                     help="Código EDS Occimiano donde se realizó el MP/MC."),
+                                "Nombre EDS":  st.column_config.TextColumn(width=240,
+                                    help="Nombre / dirección de la estación."),
                                 "Técnico":     st.column_config.TextColumn(width=190),
                                 "Fecha":       st.column_config.TextColumn(width=100),
                                 "Tipo":        st.column_config.TextColumn(width=200),
