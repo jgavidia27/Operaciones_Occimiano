@@ -2,21 +2,19 @@
 Correctivas Mirror — Espejo amigable de OTs correctivas de Supabase.
 ====================================================================
 
-Sitio web ligero, complementario al dashboard principal, para MONITOREAR
-en vivo lo que los 3 robots (Copec / Aramco-Esmax / Shell) están
-enviando a Fracttal + Supabase, además de las OTs directas.
+Vista en vivo de llamados correctivos, con:
+- v_llamados_sla como fuente base (misma vista que usa el dashboard
+  principal). Trae cumplimiento calculado, técnico, tiempo de respuesta,
+  zona, excepciones, etc.
+- llamados_correctivos aporta la columna `fuente` (robot_email /
+  robot_shell / robot_esmax / ot_directa) que la vista no expone.
 
-NO reemplaza al dashboard: es un espejo de lectura, más ameno.
-
-Datos: tabla `llamados_correctivos` de Supabase, desde 2026-05-01.
-Vistas: Feed cronológico (tarjetas) + Tabla enriquecida (filtros/export).
-
-Deploy: Streamlit Cloud → apuntar a correctivas_mirror/app.py.
-Secrets requeridos: SUPABASE_URL, SUPABASE_KEY.
+Es un espejo real de lo que ve el dashboard, en un formato más ameno
+(feed cronológico + tabla enriquecida).
 """
 
 import os
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
@@ -36,91 +34,132 @@ FECHA_CORTE = "2026-05-01"
 
 # Prioridad → color / label
 PRI_STYLE = {
-    "P1":  ("#dc2626", "#fee2e2", "P1 · Crítico"),
-    "P2":  ("#ea580c", "#ffedd5", "P2 · Alto"),
-    "P3":  ("#ca8a04", "#fef9c3", "P3 · Medio"),
-    "P4":  ("#0284c7", "#e0f2fe", "P4 · Bajo"),
-    "P5":  ("#64748b", "#f1f5f9", "P5 · Info"),
-    None:  ("#64748b", "#f1f5f9", "Sin prioridad"),
+    "P1": ("#dc2626", "#fee2e2", "P1 · Crítico"),
+    "P2": ("#ea580c", "#ffedd5", "P2 · Alto"),
+    "P3": ("#ca8a04", "#fef9c3", "P3 · Medio"),
+    "P4": ("#0284c7", "#e0f2fe", "P4 · Bajo"),
+    "P5": ("#64748b", "#f1f5f9", "P5 · Info"),
+    None: ("#64748b", "#f1f5f9", "Sin prioridad"),
 }
 
-# Fuente → icono + label + color
 FUENTE_META = {
-    "robot_esmax":  ("🤖", "Robot Aramco",  "#7c3aed", "#ede9fe"),
-    "robot_shell":  ("🤖", "Robot Shell",   "#c026d3", "#fae8ff"),
-    "robot_email":  ("🤖", "Robot Copec",   "#2563eb", "#dbeafe"),
-    "ot_directa":   ("📞", "Directa Fracttal", "#475569", "#f1f5f9"),
+    "robot_esmax": ("🤖", "Robot Aramco", "#7c3aed", "#ede9fe"),
+    "robot_shell": ("🤖", "Robot Shell",  "#c026d3", "#fae8ff"),
+    "robot_email": ("🤖", "Robot Copec",  "#2563eb", "#dbeafe"),
+    "ot_directa":  ("📞", "Directa Fracttal", "#475569", "#f1f5f9"),
 }
 
-CUMPL_STYLE = {
-    "CUMPLE":       ("✅", "#16a34a"),
-    "NO CUMPLE":    ("❌", "#dc2626"),
-    "EXCEPCIÓN":    ("⚪", "#0284c7"),
-    None:           ("⏳", "#64748b"),
-}
+# Estado derivado del cumplimiento + excepción
+def estado_ot(row):
+    if pd.notna(row.get("excepcion_motivo")) and str(row.get("excepcion_motivo") or "").strip():
+        return ("EXCEPCIÓN", "⚪", "#0284c7")
+    c = str(row.get("cumplimiento") or "").upper()
+    if c == "CUMPLE":     return ("CUMPLE",     "✅", "#16a34a")
+    if c == "NO CUMPLE":  return ("NO CUMPLE",  "❌", "#dc2626")
+    if c == "PENDIENTE":  return ("EN CURSO",   "🕒", "#f59e0b")
+    return ("SIN DATOS", "⏳", "#64748b")
 
 
 # ══════════════════════════════════════════════════════════════════════
 # Supabase client
 # ══════════════════════════════════════════════════════════════════════
 def _sb_config():
-    """Lee credenciales de secrets (deploy) o env vars (local)."""
     url = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
     key = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", ""))
     if not url or not key:
-        st.error(
-            "Faltan credenciales de Supabase. Configura los secrets "
-            "**SUPABASE_URL** y **SUPABASE_KEY** en Streamlit Cloud "
-            "(Settings → Secrets)."
-        )
+        st.error("Faltan credenciales de Supabase. Configura los secrets "
+                 "**SUPABASE_URL** y **SUPABASE_KEY** en Streamlit Cloud "
+                 "(Settings → Secrets).")
         st.stop()
     return url, key
 
 
+def _sb_get(path, params, timeout=25):
+    url, key = _sb_config()
+    r = requests.get(
+        f"{url}/rest/v1/{path}",
+        params=params,
+        headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if isinstance(data, dict) and "code" in data:
+        st.error(f"Error Supabase: {data.get('message')}")
+        st.stop()
+    return data
+
+
 @st.cache_data(ttl=300, show_spinner="Cargando llamados correctivos...")
 def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
-    """Trae todos los llamados desde `fecha_desde` (paginado)."""
-    url, key = _sb_config()
-    headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-    }
+    """Base: v_llamados_sla (vista ya enriquecida con cumplimiento,
+    horas, técnico, zona, excepciones). Cruza con llamados_correctivos
+    para inyectar la columna `fuente` que la vista no expone."""
+
+    # 1) Vista principal (misma que usa el dashboard)
     rows = []
-    page = 0
-    while True:
-        r = requests.get(
-            f"{url}/rest/v1/llamados_correctivos",
-            params={
-                "select": ("id,os_fracttal,n_aviso,cliente,eds_codigo,"
-                           "eds_nombre,fecha_llamado,prioridad,equipo,"
-                           "falla,tecnico,fecha_cierre,cumplimiento,"
-                           "horas_respuesta,fuente,umbral_horas,created_at"),
-                "fecha_llamado": f"gte.{fecha_desde}",
-                "order": "fecha_llamado.desc",
-                "limit": 1000,
-                "offset": page * 1000,
-            },
-            headers=headers,
-            timeout=25,
-        )
-        r.raise_for_status()
-        batch = r.json()
+    for page in range(30):   # tope 30k filas
+        batch = _sb_get("v_llamados_sla", {
+            "select": ("os_fracttal,n_llamado,cliente,eds_occim,eds_nombre,"
+                       "comuna,region,zona,fecha_llamado,hora_llamado,"
+                       "fecha_atencion,hora_fin,tecnico,tecnico_corto,"
+                       "equipo,equipo_senior,prioridad,tiempo_resp_horas,"
+                       "tiempo_resp_esp,cumplimiento,excepcion_motivo,"
+                       "estado_atencion,facturacion,tipo_tarea,"
+                       "codigo_activo,nombre_activo,fecha_creacion"),
+            "fecha_llamado": f"gte.{fecha_desde}",
+            "order": "fecha_llamado.desc",
+            "limit": 1000,
+            "offset": page * 1000,
+        })
         if not batch:
             break
         rows.extend(batch)
         if len(batch) < 1000:
             break
-        page += 1
-        if page > 30:   # tope de seguridad (30k filas)
-            break
+
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    df["fecha_llamado"] = pd.to_datetime(df["fecha_llamado"], errors="coerce", utc=True)
-    df["fecha_cierre"] = pd.to_datetime(df["fecha_cierre"], errors="coerce", utc=True)
-    df["fecha_llamado_local"] = df["fecha_llamado"].dt.tz_convert("America/Santiago")
-    df["fecha_cierre_local"] = df["fecha_cierre"].dt.tz_convert("America/Santiago")
+
+    # 2) Fuentes por OT
+    fuente_map = {}
+    lc = _sb_get("llamados_correctivos", {
+        "select": "os_fracttal,fuente",
+        "fecha_llamado": f"gte.{fecha_desde}",
+        "limit": 10000,
+    })
+    for r in lc:
+        if r.get("os_fracttal"):
+            fuente_map[r["os_fracttal"]] = r.get("fuente")
+    df["fuente"] = df["os_fracttal"].map(fuente_map)
+
+    # 3) Normalización
+    df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
+
+    # Fechas
+    def _ts(x):
+        if not x or str(x).strip() in ("", "None", "null"):
+            return pd.NaT
+        try:
+            t = pd.Timestamp(str(x))
+            return t.tz_convert(None) if t.tzinfo is not None else t
+        except Exception:
+            return pd.NaT
+    df["fecha_llamado"]  = df["fecha_llamado"].apply(_ts)
+    df["fecha_atencion"] = df["fecha_atencion"].apply(_ts)
+
+    # Numéricos seguros
+    df["tiempo_resp_horas"] = pd.to_numeric(df["tiempo_resp_horas"], errors="coerce")
+    df["tiempo_resp_esp"]   = pd.to_numeric(df["tiempo_resp_esp"],   errors="coerce")
+
+    # Técnico "amigable"
+    df["tecnico_disp"] = df["tecnico_corto"].fillna(df["tecnico"])
+
+    # Estado derivado
+    df[["estado_lbl","estado_ico","estado_fg"]] = df.apply(
+        lambda r: pd.Series(estado_ot(r)), axis=1)
+
     return df
 
 
@@ -129,41 +168,42 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-.block-container {padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1400px;}
-h1 {font-size: 1.7rem !important; margin-bottom: .3rem !important;}
-.hdr-sub {color: #64748b; font-size: .92rem; margin-bottom: 1rem;}
+.block-container {padding-top:1.5rem; padding-bottom:3rem; max-width:1400px;}
+h1 {font-size:1.7rem !important; margin-bottom:.3rem !important;}
+.hdr-sub {color:#64748b; font-size:.92rem; margin-bottom:1rem;}
 
 .card {
-    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
-    padding: 14px 16px; margin-bottom: 10px;
-    border-left: 4px solid var(--pri, #64748b);
-    transition: transform .1s ease, box-shadow .1s ease;
+    background:#fff; border:1px solid #e2e8f0; border-radius:10px;
+    padding:14px 16px; margin-bottom:10px;
+    border-left:4px solid var(--pri, #64748b);
+    transition: transform .1s, box-shadow .1s;
 }
 .card:hover {transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.06);}
-.card .top {display:flex; justify-content:space-between; align-items:flex-start; gap:12px;}
+.card .top {display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;}
 .card .os {font-weight:700; font-size:1.02rem; color:#0f172a;}
 .card .aviso {color:#64748b; font-weight:500; font-size:.78rem; margin-left:6px;}
 .card .eds {color:#334155; font-size:.88rem; margin-top:2px;}
 .card .cli {color:#64748b; font-size:.78rem; margin-top:2px;}
 .card .meta {color:#94a3b8; font-size:.72rem; margin-top:6px;}
-.card .falla {color:#334155; font-size:.82rem; margin-top:6px; font-style:italic;}
+.card .exc {background:#eff6ff; border-left:3px solid #0284c7; padding:4px 8px;
+            margin-top:6px; font-size:.75rem; color:#0369a1; border-radius:4px;}
 
 .badge {
-    display:inline-block; padding: 2px 8px; border-radius: 12px;
-    font-size: .68rem; font-weight: 700; margin-right: 4px;
-    letter-spacing: .02em;
+    display:inline-block; padding:2px 8px; border-radius:12px;
+    font-size:.68rem; font-weight:700; margin:1px 3px 1px 0;
+    letter-spacing:.02em; white-space:nowrap;
 }
 .badge.fuente {background: var(--f-bg); color: var(--f-fg);}
-.badge.pri {background: var(--p-bg); color: var(--p-fg); border: 1px solid var(--p-fg);}
-.badge.cumpl {background:#fff; color: var(--c-fg); border:1px solid var(--c-fg);}
+.badge.pri {background: var(--p-bg); color: var(--p-fg); border:1px solid var(--p-fg);}
+.badge.est {background:#fff; color: var(--e-fg); border:1px solid var(--e-fg);}
 
 .section-hdr {
-    font-weight: 700; color: #475569; font-size: .78rem;
-    text-transform: uppercase; letter-spacing: .05em;
-    margin: 18px 0 8px 0; padding-bottom: 4px;
-    border-bottom: 1px solid #e2e8f0;
+    font-weight:700; color:#475569; font-size:.78rem;
+    text-transform:uppercase; letter-spacing:.05em;
+    margin:18px 0 8px 0; padding-bottom:4px;
+    border-bottom:1px solid #e2e8f0;
 }
-[data-testid="stMetricValue"] {font-size: 1.6rem;}
+[data-testid="stMetricValue"] {font-size:1.6rem;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -173,20 +213,18 @@ h1 {font-size: 1.7rem !important; margin-bottom: .3rem !important;}
 # ══════════════════════════════════════════════════════════════════════
 st.markdown("# 📞 Correctivas · Espejo")
 st.markdown(
-    '<div class="hdr-sub">Vista en vivo de llamados correctivos desde Supabase · '
-    'Alimentado por robots Copec / Aramco / Shell + OTs directas · '
-    f'Datos desde <b>{FECHA_CORTE}</b> · Actualiza cada 5 min.</div>',
+    f'<div class="hdr-sub">Fuente: <code>v_llamados_sla</code> (misma vista que el dashboard principal) · '
+    f'Enriquecida con <code>fuente</code> desde <code>llamados_correctivos</code> · '
+    f'Datos desde <b>{FECHA_CORTE}</b> · Cache 5 min.</div>',
     unsafe_allow_html=True,
 )
 
-# Botón recargar
 _c1, _c2 = st.columns([6, 1])
 with _c2:
     if st.button("🔄 Recargar", use_container_width=True):
         cargar_llamados.clear()
         st.rerun()
 
-# Datos
 df = cargar_llamados(FECHA_CORTE)
 if df.empty:
     st.warning("No hay datos en Supabase para el período configurado.")
@@ -198,15 +236,15 @@ if df.empty:
 # ══════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
 
-_f1, _f2, _f3, _f4, _f5 = st.columns([1.3, 1.3, 1.1, 1.1, 2])
+_f1, _f2, _f3, _f4, _f5 = st.columns([1.3, 1.3, 1.1, 1.2, 2])
 
 with _f1:
-    _fuentes = sorted(df["fuente"].dropna().unique())
+    _fuentes = sorted([f for f in df["fuente"].dropna().unique() if f])
+    _fuentes_ext = _fuentes + (["(sin fuente)"] if df["fuente"].isna().any() else [])
     fuente_sel = st.multiselect(
-        "Fuente",
-        _fuentes,
-        default=_fuentes,
-        format_func=lambda f: f"{FUENTE_META.get(f, ('❓','?','',''))[0]} {FUENTE_META.get(f, ('','?','',''))[1]}",
+        "Fuente", _fuentes_ext, default=_fuentes_ext,
+        format_func=lambda f: f"{FUENTE_META.get(f, ('❓','?','',''))[0]} {FUENTE_META.get(f, ('','?','',''))[1]}"
+                              if f in FUENTE_META else f,
     )
 with _f2:
     _clientes = sorted(df["cliente"].dropna().unique())
@@ -215,60 +253,48 @@ with _f3:
     _prios = sorted(df["prioridad"].dropna().unique())
     pri_sel = st.multiselect("Prioridad", _prios, default=_prios)
 with _f4:
-    _cumpl_opts = ["CUMPLE", "NO CUMPLE", "EXCEPCIÓN", "Sin evaluar"]
-    cumpl_sel = st.multiselect("Cumplimiento", _cumpl_opts, default=_cumpl_opts)
+    _est_opts = ["CUMPLE", "NO CUMPLE", "EN CURSO", "EXCEPCIÓN", "SIN DATOS"]
+    est_sel = st.multiselect("Estado / SLA", _est_opts, default=_est_opts)
 with _f5:
     buscar = st.text_input(
         "Buscar",
-        placeholder="OS-XXXXX · Nº aviso · código EDS · nombre EDS · falla · técnico",
+        placeholder="OS-XXXXX · N° aviso · código EDS · nombre · falla · técnico · comuna",
         key="q",
     )
 
-_r1, _r2 = st.columns([1.5, 5])
+_r1, _r2 = st.columns([1.6, 5])
 with _r1:
-    _fecha_max = df["fecha_llamado_local"].max().date()
-    _fecha_min = df["fecha_llamado_local"].min().date()
-    fecha_rng = st.date_input(
-        "Rango de fechas",
-        (_fecha_min, _fecha_max),
-        min_value=_fecha_min,
-        max_value=_fecha_max,
-    )
+    _fmax = df["fecha_llamado"].max().date() if pd.notna(df["fecha_llamado"].max()) else datetime.today().date()
+    _fmin = df["fecha_llamado"].min().date() if pd.notna(df["fecha_llamado"].min()) else _fmax
+    fecha_rng = st.date_input("Rango de fechas", (_fmin, _fmax),
+                              min_value=_fmin, max_value=_fmax)
 
 # Aplicar filtros
 _df = df.copy()
 if fuente_sel:
-    _df = _df[_df["fuente"].isin(fuente_sel)]
+    _mask = _df["fuente"].isin([f for f in fuente_sel if f != "(sin fuente)"])
+    if "(sin fuente)" in fuente_sel:
+        _mask = _mask | _df["fuente"].isna()
+    _df = _df[_mask]
 if cliente_sel:
     _df = _df[_df["cliente"].isin(cliente_sel)]
 if pri_sel:
     _df = _df[_df["prioridad"].isin(pri_sel)]
-
-def _cumpl_bucket(v):
-    if v in ("CUMPLE", "NO CUMPLE", "EXCEPCIÓN"):
-        return v
-    return "Sin evaluar"
-_df["_cumpl_b"] = _df["cumplimiento"].apply(_cumpl_bucket)
-if cumpl_sel:
-    _df = _df[_df["_cumpl_b"].isin(cumpl_sel)]
-
+if est_sel:
+    _df = _df[_df["estado_lbl"].isin(est_sel)]
 if buscar and buscar.strip():
     q = buscar.strip().upper()
     _df = _df[
         _df["os_fracttal"].astype(str).str.upper().str.contains(q, na=False)
-        | _df["n_aviso"].astype(str).str.upper().str.contains(q, na=False)
-        | _df["eds_codigo"].astype(str).str.upper().str.contains(q, na=False)
+        | _df["n_llamado"].astype(str).str.upper().str.contains(q, na=False)
+        | _df["eds_occim"].astype(str).str.upper().str.contains(q, na=False)
         | _df["eds_nombre"].astype(str).str.upper().str.contains(q, na=False)
-        | _df["falla"].astype(str).str.upper().str.contains(q, na=False)
-        | _df["tecnico"].astype(str).str.upper().str.contains(q, na=False)
+        | _df["tecnico_disp"].astype(str).str.upper().str.contains(q, na=False)
+        | _df["comuna"].astype(str).str.upper().str.contains(q, na=False)
     ]
-
 if len(fecha_rng) == 2:
     d0, d1 = fecha_rng
-    _df = _df[
-        (_df["fecha_llamado_local"].dt.date >= d0)
-        & (_df["fecha_llamado_local"].dt.date <= d1)
-    ]
+    _df = _df[(_df["fecha_llamado"].dt.date >= d0) & (_df["fecha_llamado"].dt.date <= d1)]
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -276,15 +302,15 @@ if len(fecha_rng) == 2:
 # ══════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-hdr">Panorama</div>', unsafe_allow_html=True)
 
-_hoy = pd.Timestamp.now(tz="America/Santiago").date()
-_ayer = _hoy - timedelta(days=1)
+_hoy = pd.Timestamp.now(tz="America/Santiago").tz_localize(None).date()
 _semana = _hoy - timedelta(days=7)
 
 _n_tot = len(_df)
-_n_hoy = int((_df["fecha_llamado_local"].dt.date == _hoy).sum())
-_n_semana = int((_df["fecha_llamado_local"].dt.date >= _semana).sum())
-_n_cumple = int((_df["cumplimiento"] == "CUMPLE").sum())
-_n_nocump = int((_df["cumplimiento"] == "NO CUMPLE").sum())
+_n_hoy = int((_df["fecha_llamado"].dt.date == _hoy).sum())
+_n_semana = int((_df["fecha_llamado"].dt.date >= _semana).sum())
+_n_cumple = int((_df["estado_lbl"] == "CUMPLE").sum())
+_n_nocump = int((_df["estado_lbl"] == "NO CUMPLE").sum())
+_n_encur  = int((_df["estado_lbl"] == "EN CURSO").sum())
 _evaluadas = _n_cumple + _n_nocump
 _pct_cumpl = (_n_cumple / _evaluadas * 100) if _evaluadas else 0
 
@@ -293,175 +319,162 @@ _k1.metric("Total (filtrado)", f"{_n_tot:,}")
 _k2.metric("Hoy", f"{_n_hoy:,}")
 _k3.metric("Últimos 7 días", f"{_n_semana:,}")
 _k4.metric("Cumplimiento SLA", f"{_pct_cumpl:.1f}%",
-           delta=f"{_n_cumple:,} de {_evaluadas:,} evaluadas",
-           delta_color="off")
-_k5.metric("No cumplen",
-           f"{_n_nocump:,}",
-           delta="requieren revisión" if _n_nocump else "",
+           delta=f"{_n_cumple:,} de {_evaluadas:,}", delta_color="off")
+_k5.metric("🕒 En curso", f"{_n_encur:,}",
+           delta=f"{_n_nocump} no cumplen" if _n_nocump else "",
            delta_color="inverse" if _n_nocump else "off")
 
-# Distribución por fuente (mini-barra HTML)
+# Distribución por fuente
 if _n_tot:
-    _dist = _df["fuente"].value_counts()
-    _bar_html = '<div style="display:flex;gap:4px;margin-top:14px;height:34px;overflow:hidden;border-radius:6px;">'
+    _dist = _df["fuente"].fillna("(sin fuente)").value_counts()
+    _bar = '<div style="display:flex;gap:4px;margin-top:14px;height:34px;overflow:hidden;border-radius:6px;">'
     for _f, _n in _dist.items():
-        _meta = FUENTE_META.get(_f, ("❓", "?", "#64748b", "#f1f5f9"))
+        _meta = FUENTE_META.get(_f, ("❓", _f or "(sin fuente)", "#64748b", "#f1f5f9"))
         _pct = _n / _n_tot * 100
-        _bar_html += (
-            f'<div style="flex:{_n};background:{_meta[2]};color:#fff;'
-            f'display:flex;align-items:center;justify-content:center;'
-            f'font-size:.75rem;font-weight:600;min-width:60px" '
-            f'title="{_meta[1]}: {_n:,} ({_pct:.0f}%)">{_meta[0]} {_n:,}</div>'
-        )
-    _bar_html += "</div>"
-    st.markdown(_bar_html, unsafe_allow_html=True)
-    st.caption("Distribución por fuente en el filtro actual — hover para detalle.")
+        _bar += (f'<div style="flex:{_n};background:{_meta[2]};color:#fff;'
+                 f'display:flex;align-items:center;justify-content:center;'
+                 f'font-size:.75rem;font-weight:600;min-width:60px" '
+                 f'title="{_meta[1]}: {_n:,} ({_pct:.0f}%)">{_meta[0]} {_n:,}</div>')
+    _bar += "</div>"
+    st.markdown(_bar, unsafe_allow_html=True)
+    st.caption("Distribución por fuente en el filtro actual · hover para %.")
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Vistas: Feed / Tabla
+# Vistas
 # ══════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-hdr">Vista</div>', unsafe_allow_html=True)
 
-vista = st.radio(
-    "vista",
-    ["📰 Feed cronológico", "📋 Tabla enriquecida"],
-    horizontal=True,
-    label_visibility="collapsed",
-)
+vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida"],
+                 horizontal=True, label_visibility="collapsed")
+
 
 # ────────── Feed ──────────
 if vista == "📰 Feed cronológico":
-    _lim_col1, _lim_col2 = st.columns([1, 5])
-    with _lim_col1:
+    _c_lim, _ = st.columns([1, 5])
+    with _c_lim:
         _lim = st.selectbox("Mostrar", [50, 100, 250, 500, "Todo"], index=1, key="feed_lim")
-    _dff = _df.sort_values("fecha_llamado_local", ascending=False)
+    _dff = _df.sort_values("fecha_llamado", ascending=False)
     if _lim != "Todo":
         _dff = _dff.head(int(_lim))
 
-    st.caption(
-        f"Mostrando **{len(_dff):,}** de {_n_tot:,} llamados "
-        f"(orden: más recientes primero)."
-    )
+    st.caption(f"Mostrando **{len(_dff):,}** de {_n_tot:,} llamados (más recientes primero).")
 
     def _card(r):
-        _p = (r["prioridad"] or "").upper() or None
+        _p = str(r.get("prioridad") or "").upper() or None
         _p_fg, _p_bg, _p_lbl = PRI_STYLE.get(_p, PRI_STYLE[None])
+        _f = r.get("fuente")
         _f_ico, _f_lbl, _f_fg, _f_bg = FUENTE_META.get(
-            r["fuente"], ("❓", r["fuente"] or "?", "#64748b", "#f1f5f9")
-        )
-        _c_ico, _c_fg = CUMPL_STYLE.get(r["cumplimiento"], CUMPL_STYLE[None])
-        _c_lbl = r["cumplimiento"] or "Pendiente"
+            _f, ("❓", "(sin fuente)", "#64748b", "#f1f5f9"))
+        _e_lbl, _e_ico, _e_fg = r["estado_lbl"], r["estado_ico"], r["estado_fg"]
 
-        _fl = r["fecha_llamado_local"]
+        _fl = r["fecha_llamado"]
         _fl_s = _fl.strftime("%d/%m %H:%M") if pd.notna(_fl) else "—"
-
-        _fc = r["fecha_cierre_local"]
+        _fc = r["fecha_atencion"]
         _fc_s = ("cerrada " + _fc.strftime("%d/%m %H:%M")) if pd.notna(_fc) else "abierta"
 
-        _hr = pd.to_numeric(r.get("horas_respuesta"), errors="coerce")
+        _hr = r.get("tiempo_resp_horas")
+        _um = r.get("tiempo_resp_esp")
         _hr_s = ""
         if pd.notna(_hr):
-            _hr_s = f" · <b>{_hr:.1f}h</b> resp. / SLA {r.get('umbral_horas','?')}h"
+            _u = f"{int(_um)}h" if pd.notna(_um) else "?h"
+            _hr_s = f" · <b>{_hr:.1f}h</b> resp. / SLA {_u}"
+
+        _exc = r.get("excepcion_motivo")
+        _exc_html = ""
+        if pd.notna(_exc) and str(_exc).strip():
+            _exc_html = f'<div class="exc">⚪ <b>Excepción:</b> {_exc}</div>'
+
+        _tec = r.get("tecnico_disp") or "—"
+        _eq  = r.get("equipo") or "—"
+        _zn  = r.get("zona") or "—"
+        _cm  = r.get("comuna") or "—"
 
         return (
             f'<div class="card" style="--pri:{_p_fg}">'
             f'<div class="top">'
             f'<div>'
-            f'<span class="os">{r["os_fracttal"] or "—"}</span>'
-            f'<span class="aviso">· Aviso {r["n_aviso"] or "—"}</span>'
+            f'<span class="os">{r.get("os_fracttal") or "—"}</span>'
+            f'<span class="aviso">· Aviso {r.get("n_llamado") or "—"}</span>'
             f'</div>'
             f'<div>'
             f'<span class="badge fuente" style="--f-bg:{_f_bg};--f-fg:{_f_fg}">{_f_ico} {_f_lbl}</span>'
             f'<span class="badge pri" style="--p-bg:{_p_bg};--p-fg:{_p_fg}">{_p_lbl}</span>'
-            f'<span class="badge cumpl" style="--c-fg:{_c_fg}">{_c_ico} {_c_lbl}</span>'
+            f'<span class="badge est" style="--e-fg:{_e_fg}">{_e_ico} {_e_lbl}</span>'
             f'</div>'
             f'</div>'
-            f'<div class="eds">{r["eds_codigo"] or "—"} · {r["eds_nombre"] or "—"}</div>'
-            f'<div class="cli">{r["cliente"] or "—"} · {r["equipo"] or "—"} · Téc: {r["tecnico"] or "—"}</div>'
-            f'<div class="falla">"{r["falla"] or "sin descripción"}"</div>'
+            f'<div class="eds">{r.get("eds_occim") or "—"} · {r.get("eds_nombre") or "—"}</div>'
+            f'<div class="cli">{r.get("cliente") or "—"} · {_cm} ({_zn}) · Equipo: {_eq} · Téc: {_tec}</div>'
+            f'{_exc_html}'
             f'<div class="meta">📅 {_fl_s} · {_fc_s}{_hr_s}</div>'
             f'</div>'
         )
 
-    st.markdown(
-        "".join(_card(r) for _, r in _dff.iterrows()),
-        unsafe_allow_html=True,
-    )
+    st.markdown("".join(_card(r) for _, r in _dff.iterrows()), unsafe_allow_html=True)
 
 
 # ────────── Tabla ──────────
 else:
     _dft = _df.copy()
     _dft["Fuente"] = _dft["fuente"].map(
-        lambda f: f"{FUENTE_META.get(f, ('❓','?','',''))[0]} "
-                  f"{FUENTE_META.get(f, ('','?','',''))[1]}"
-    )
-    _dft["F. Llamado"] = _dft["fecha_llamado_local"].dt.strftime("%d/%m/%Y %H:%M")
-    _dft["F. Cierre"] = _dft["fecha_cierre_local"].dt.strftime("%d/%m/%Y %H:%M")
-    _dft["Horas resp."] = pd.to_numeric(_dft["horas_respuesta"], errors="coerce").round(2)
-    _dft["SLA (h)"] = pd.to_numeric(_dft["umbral_horas"], errors="coerce")
-    _dft["Cumplimiento"] = _dft["cumplimiento"].fillna("⏳ Pendiente")
+        lambda f: (f"{FUENTE_META.get(f, ('❓','?','',''))[0]} "
+                   f"{FUENTE_META.get(f, ('','?','',''))[1]}")
+                  if f in FUENTE_META else "❓ (sin fuente)")
+    _dft["Estado"] = _dft["estado_ico"] + " " + _dft["estado_lbl"]
+    _dft["F. Llamado"] = _dft["fecha_llamado"].dt.strftime("%d/%m/%Y %H:%M")
+    _dft["F. Cierre"]  = _dft["fecha_atencion"].dt.strftime("%d/%m/%Y %H:%M").fillna("—")
+    _dft["Horas resp."]= _dft["tiempo_resp_horas"].round(2)
+    _dft["SLA (h)"]    = _dft["tiempo_resp_esp"]
+    _dft["Excepción"]  = _dft["excepcion_motivo"].fillna("")
 
-    _cols = [
-        "os_fracttal", "n_aviso", "cliente", "eds_codigo", "eds_nombre",
-        "prioridad", "Fuente", "F. Llamado", "F. Cierre",
-        "Horas resp.", "SLA (h)", "Cumplimiento",
-        "equipo", "tecnico", "falla",
-    ]
-    _renames = {
-        "os_fracttal": "OS Fracttal",
-        "n_aviso": "N° Aviso",
-        "cliente": "Cliente",
-        "eds_codigo": "Cód. EDS",
-        "eds_nombre": "EDS",
-        "prioridad": "Prioridad",
-        "equipo": "Equipo",
-        "tecnico": "Técnico",
-        "falla": "Falla",
+    _cols = ["os_fracttal","n_llamado","cliente","eds_occim","eds_nombre",
+             "comuna","zona","prioridad","Fuente","Estado",
+             "F. Llamado","F. Cierre","Horas resp.","SLA (h)",
+             "equipo","tecnico_disp","Excepción","facturacion"]
+    _ren = {
+        "os_fracttal":"OS Fracttal", "n_llamado":"N° Aviso",
+        "cliente":"Cliente", "eds_occim":"Cód. EDS", "eds_nombre":"EDS",
+        "comuna":"Comuna", "zona":"Zona", "prioridad":"Prioridad",
+        "equipo":"Equipo", "tecnico_disp":"Técnico", "facturacion":"Facturación",
     }
-    _show = _dft[_cols].rename(columns=_renames).sort_values(
-        "F. Llamado", ascending=False
-    )
+    _show = _dft[_cols].rename(columns=_ren).sort_values("F. Llamado", ascending=False)
 
     st.dataframe(
-        _show,
-        hide_index=True,
-        use_container_width=True,
-        height=680,
+        _show, hide_index=True, use_container_width=True, height=680,
         column_config={
-            "OS Fracttal": st.column_config.TextColumn(width=110),
-            "N° Aviso":    st.column_config.TextColumn(width=90),
+            "OS Fracttal": st.column_config.TextColumn(width=105),
+            "N° Aviso":    st.column_config.TextColumn(width=85),
             "Cliente":     st.column_config.TextColumn(width=140),
-            "Cód. EDS":    st.column_config.TextColumn(width=90),
-            "EDS":         st.column_config.TextColumn(width=200),
-            "Prioridad":   st.column_config.TextColumn(width=75),
-            "Fuente":      st.column_config.TextColumn(width=150),
-            "F. Llamado":  st.column_config.TextColumn(width=130),
-            "F. Cierre":   st.column_config.TextColumn(width=130),
+            "Cód. EDS":    st.column_config.TextColumn(width=85),
+            "EDS":         st.column_config.TextColumn(width=180),
+            "Comuna":      st.column_config.TextColumn(width=105),
+            "Zona":        st.column_config.TextColumn(width=70),
+            "Prioridad":   st.column_config.TextColumn(width=70),
+            "Fuente":      st.column_config.TextColumn(width=140),
+            "Estado":      st.column_config.TextColumn(width=115),
+            "F. Llamado":  st.column_config.TextColumn(width=125),
+            "F. Cierre":   st.column_config.TextColumn(width=125),
             "Horas resp.": st.column_config.NumberColumn(width=90, format="%.2f"),
             "SLA (h)":     st.column_config.NumberColumn(width=70),
-            "Cumplimiento":st.column_config.TextColumn(width=115),
-            "Equipo":      st.column_config.TextColumn(width=90),
+            "Equipo":      st.column_config.TextColumn(width=85),
             "Técnico":     st.column_config.TextColumn(width=140),
-            "Falla":       st.column_config.TextColumn(width=280),
+            "Excepción":   st.column_config.TextColumn(width=200),
+            "Facturación": st.column_config.TextColumn(width=115),
         },
     )
 
-    # Export CSV
     _csv = _show.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
-        "⬇️ Descargar CSV (filtro actual)",
-        _csv,
+        "⬇️ Descargar CSV (filtro actual)", _csv,
         file_name=f"correctivas_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
     )
 
-# ══════════════════════════════════════════════════════════════════════
+
 # Footer
-# ══════════════════════════════════════════════════════════════════════
 st.divider()
 st.caption(
-    f"Fuente: Supabase · tabla `llamados_correctivos` desde {FECHA_CORTE} · "
-    f"Cache 5 min · Última consulta: {datetime.now().strftime('%H:%M:%S')}"
+    f"Fuente: Supabase · vista `v_llamados_sla` desde {FECHA_CORTE} · "
+    f"Fuente (robot/directa) desde `llamados_correctivos` · Cache 5 min · "
+    f"Última consulta: {datetime.now().strftime('%H:%M:%S')}"
 )
