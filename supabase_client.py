@@ -278,10 +278,27 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
             "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
             "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
             "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
-            "tiempo_fichas_seg,fecha_inicio_subtarea,fecha_fin_subtarea"
+            "tiempo_fichas_seg,lts_hr_produccion_final,"
+            "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
+            "form_tiene_produccion,"
+            "fecha_inicio_subtarea,fecha_fin_subtarea"
             "&order=id_ot.desc",
             limit=20_000,
         )
+        # Fallback si la migración lts_hr o form_tiene_produccion aún no
+        # está aplicada: reintentar sin esas columnas.
+        if not rows:
+            rows = _query(
+                "numerales_subtarea",
+                "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
+                "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
+                "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
+                "tiempo_fichas_seg,"
+                "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
+                "fecha_inicio_subtarea,fecha_fin_subtarea"
+                "&order=id_ot.desc",
+                limit=20_000,
+            )
     except Exception:
         return pd.DataFrame()
     if not rows:
