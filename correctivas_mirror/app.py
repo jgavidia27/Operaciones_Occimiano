@@ -133,6 +133,9 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
         if r.get("os_fracttal"):
             fuente_map[r["os_fracttal"]] = r.get("fuente")
     df["fuente"] = df["os_fracttal"].map(fuente_map)
+    # Sin match en llamados_correctivos => asumimos OT directa por Fracttal
+    # (los robots siempre registran en llamados_correctivos con su fuente).
+    df["fuente"] = df["fuente"].fillna("ot_directa")
 
     # 3) Normalización
     df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
@@ -240,9 +243,8 @@ _f1, _f2, _f3, _f4, _f5 = st.columns([1.3, 1.3, 1.1, 1.2, 2])
 
 with _f1:
     _fuentes = sorted([f for f in df["fuente"].dropna().unique() if f])
-    _fuentes_ext = _fuentes + (["(sin fuente)"] if df["fuente"].isna().any() else [])
     fuente_sel = st.multiselect(
-        "Fuente", _fuentes_ext, default=_fuentes_ext,
+        "Fuente", _fuentes, default=_fuentes,
         format_func=lambda f: f"{FUENTE_META.get(f, ('❓','?','',''))[0]} {FUENTE_META.get(f, ('','?','',''))[1]}"
                               if f in FUENTE_META else f,
     )
@@ -272,10 +274,7 @@ with _r1:
 # Aplicar filtros
 _df = df.copy()
 if fuente_sel:
-    _mask = _df["fuente"].isin([f for f in fuente_sel if f != "(sin fuente)"])
-    if "(sin fuente)" in fuente_sel:
-        _mask = _mask | _df["fuente"].isna()
-    _df = _df[_mask]
+    _df = _df[_df["fuente"].isin(fuente_sel)]
 if cliente_sel:
     _df = _df[_df["cliente"].isin(cliente_sel)]
 if pri_sel:
@@ -354,18 +353,35 @@ if vista == "📰 Feed cronológico":
     _c_lim, _ = st.columns([1, 5])
     with _c_lim:
         _lim = st.selectbox("Mostrar", [50, 100, 250, 500, "Todo"], index=1, key="feed_lim")
-    _dff = _df.sort_values("fecha_llamado", ascending=False)
+    # NaT al fondo, resto por fecha_llamado desc (última llegada primero)
+    _dff = _df.sort_values("fecha_llamado", ascending=False, na_position="last")
     if _lim != "Todo":
         _dff = _dff.head(int(_lim))
 
-    st.caption(f"Mostrando **{len(_dff):,}** de {_n_tot:,} llamados (más recientes primero).")
+    st.caption(f"Mostrando **{len(_dff):,}** de {_n_tot:,} llamados · "
+               "orden: más recientes primero.")
+
+    def _v(x, default="—"):
+        """Sanea NaN / None / '' para display."""
+        if x is None:
+            return default
+        if isinstance(x, float) and pd.isna(x):
+            return default
+        s = str(x).strip()
+        if not s or s.lower() in ("nan", "none", "null", "nat"):
+            return default
+        return s
 
     def _card(r):
-        _p = str(r.get("prioridad") or "").upper() or None
+        _p = _v(r.get("prioridad"), "").upper() or None
         _p_fg, _p_bg, _p_lbl = PRI_STYLE.get(_p, PRI_STYLE[None])
+
         _f = r.get("fuente")
-        _f_ico, _f_lbl, _f_fg, _f_bg = FUENTE_META.get(
-            _f, ("❓", "(sin fuente)", "#64748b", "#f1f5f9"))
+        if _f in FUENTE_META:
+            _f_ico, _f_lbl, _f_fg, _f_bg = FUENTE_META[_f]
+        else:
+            _f_ico, _f_lbl, _f_fg, _f_bg = ("📋", "Registro previo", "#64748b", "#f1f5f9")
+
         _e_lbl, _e_ico, _e_fg = r["estado_lbl"], r["estado_ico"], r["estado_fg"]
 
         _fl = r["fecha_llamado"]
@@ -385,17 +401,22 @@ if vista == "📰 Feed cronológico":
         if pd.notna(_exc) and str(_exc).strip():
             _exc_html = f'<div class="exc">⚪ <b>Excepción:</b> {_exc}</div>'
 
-        _tec = r.get("tecnico_disp") or "—"
-        _eq  = r.get("equipo") or "—"
-        _zn  = r.get("zona") or "—"
-        _cm  = r.get("comuna") or "—"
+        _os  = _v(r.get("os_fracttal"))
+        _av  = _v(r.get("n_llamado"))
+        _eds = _v(r.get("eds_occim"))
+        _nom = _v(r.get("eds_nombre"))
+        _cli = _v(r.get("cliente"))
+        _cm  = _v(r.get("comuna"))
+        _zn  = _v(r.get("zona"))
+        _eq  = _v(r.get("equipo"))
+        _tec = _v(r.get("tecnico_disp"))
 
         return (
             f'<div class="card" style="--pri:{_p_fg}">'
             f'<div class="top">'
             f'<div>'
-            f'<span class="os">{r.get("os_fracttal") or "—"}</span>'
-            f'<span class="aviso">· Aviso {r.get("n_llamado") or "—"}</span>'
+            f'<span class="os">{_os}</span>'
+            f'<span class="aviso">· Aviso {_av}</span>'
             f'</div>'
             f'<div>'
             f'<span class="badge fuente" style="--f-bg:{_f_bg};--f-fg:{_f_fg}">{_f_ico} {_f_lbl}</span>'
@@ -403,8 +424,8 @@ if vista == "📰 Feed cronológico":
             f'<span class="badge est" style="--e-fg:{_e_fg}">{_e_ico} {_e_lbl}</span>'
             f'</div>'
             f'</div>'
-            f'<div class="eds">{r.get("eds_occim") or "—"} · {r.get("eds_nombre") or "—"}</div>'
-            f'<div class="cli">{r.get("cliente") or "—"} · {_cm} ({_zn}) · Equipo: {_eq} · Téc: {_tec}</div>'
+            f'<div class="eds">{_eds} · {_nom}</div>'
+            f'<div class="cli">{_cli} · {_cm} ({_zn}) · Equipo: {_eq} · Téc: {_tec}</div>'
             f'{_exc_html}'
             f'<div class="meta">📅 {_fl_s} · {_fc_s}{_hr_s}</div>'
             f'</div>'
