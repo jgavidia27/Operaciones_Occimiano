@@ -9939,6 +9939,21 @@ elif _page == _NAV_PAGES[0]:
             _df_cr_base = df_kpi_raw[df_kpi_raw["es_correctiva"]].copy() \
                 if "es_correctiva" in df_kpi_raw.columns else df_kpi_raw.copy()
 
+            # Aplicar filtros de MES y SEMANA (bug fix: antes solo se filtraba
+            # el KPI/gráfico via _df_cr_periodo pero el detalle usaba el base
+            # con todo el año). Ahora _df_cr_base ya está filtrado por período.
+            if "mes" in _df_cr_base.columns:
+                _df_cr_base = _df_cr_base[
+                    _df_cr_base["mes"].astype(str).isin(set(_meses_prec_str))
+                ]
+            if _sem_prec != "Todas":
+                _sem_match_base = next((s for s in _sems_prec if s[0] == _sem_prec), None)
+                if _sem_match_base and "creation_date_local" in _df_cr_base.columns:
+                    _df_cr_base = _df_cr_base[
+                        (_df_cr_base["creation_date_local"] >= _sem_match_base[1]) &
+                        (_df_cr_base["creation_date_local"] <= _sem_match_base[2])
+                    ]
+
             if equipo_kpi != "Todos":
                 _grp_cr = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
                 _df_cr_base = _df_cr_base[_df_cr_base["equipo"] == _grp_cr]
