@@ -63,39 +63,40 @@ _BASURA_EST = {"ERROR DE INGRESO", "DUPLICADO", "Duplicidad", "PRUEBA ROBOT"}
 def estado_ot(row):
     # 1) Excepción SLA gana sobre todo
     if pd.notna(row.get("excepcion_motivo")) and str(row.get("excepcion_motivo") or "").strip():
-        return ("EXCEPCIÓN", "⚪", "#0284c7", "Eximida por operaciones")
+        return ("Excepción", "⚪", "#0284c7", "Eximida por operaciones")
     est = str(row.get("estado_atencion") or "").strip()
     cum = str(row.get("cumplimiento") or "").upper()
 
     # 2) Estados basura (filtrables aparte)
     if est in _BASURA_EST:
-        return ("DESCARTADA", "🚫", "#94a3b8", f"Estado Fracttal: {est}")
+        return ("Descartada", "🚫", "#94a3b8", f"Estado Fracttal: {est}")
 
     # 3) Sin atender: nadie la ha tomado en Fracttal
     if est == "Por Iniciar":
-        return ("SIN ATENDER", "🔴", "#dc2626", "Nadie la ha tomado en Fracttal")
+        return ("OT Pendiente - Sin atender", "🔴", "#dc2626",
+                "Nadie la ha tomado en Fracttal")
 
     # 4) En Progreso: técnico registró fecha_finalizacion pero la OT
     #    sigue abierta administrativamente. Combinamos con cumplimiento.
     if est == "En Progreso":
         if cum == "CUMPLE":
-            return ("TRABAJO HECHO", "🟢", "#16a34a",
+            return ("OT atendida - Cumple SLA (Pend. Cierre Fracttal)", "🟢", "#16a34a",
                     "Técnico terminó · pendiente cierre administrativo · SLA cumple")
         if cum == "NO CUMPLE":
-            return ("TRABAJO HECHO", "🟠", "#ea580c",
+            return ("OT atendida - No cumple SLA (Pend. Cierre Fracttal)", "🟠", "#ea580c",
                     "Técnico terminó · pendiente cierre administrativo · SLA excedido")
-        return ("EN TERRENO", "🟡", "#f59e0b",
+        return ("OT en terreno", "🟡", "#f59e0b",
                 "Técnico ya está en terreno")
 
     # 5) Finalizadas: cerrada por completo
     if est == "Finalizadas":
         if cum == "CUMPLE":
-            return ("CUMPLE", "✅", "#16a34a", "Cerrada · SLA cumplido")
+            return ("Finalizada - Cumple SLA", "✅", "#16a34a", "Cerrada · SLA cumplido")
         if cum == "NO CUMPLE":
-            return ("NO CUMPLE", "❌", "#dc2626", "Cerrada · SLA excedido")
+            return ("Finalizada - No cumple SLA", "❌", "#dc2626", "Cerrada · SLA excedido")
 
     # 6) Fallback
-    return ("SIN DATOS", "⏳", "#64748b", "Estado no clasificado")
+    return ("Sin datos", "⏳", "#64748b", "Estado no clasificado")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -311,11 +312,19 @@ with _f3:
     _prios = sorted(df["prioridad"].dropna().unique())
     pri_sel = st.multiselect("Prioridad", _prios, default=_prios)
 with _f4:
-    _est_opts = ["CUMPLE", "NO CUMPLE", "TRABAJO HECHO",
-                 "SIN ATENDER", "EN TERRENO", "EXCEPCIÓN",
-                 "DESCARTADA", "SIN DATOS"]
-    # Por defecto ocultamos DESCARTADA (basura de Fracttal)
-    _est_default = [e for e in _est_opts if e != "DESCARTADA"]
+    _est_opts = [
+        "Finalizada - Cumple SLA",
+        "Finalizada - No cumple SLA",
+        "OT atendida - Cumple SLA (Pend. Cierre Fracttal)",
+        "OT atendida - No cumple SLA (Pend. Cierre Fracttal)",
+        "OT en terreno",
+        "OT Pendiente - Sin atender",
+        "Excepción",
+        "Descartada",
+        "Sin datos",
+    ]
+    # Por defecto ocultamos Descartada (basura de Fracttal)
+    _est_default = [e for e in _est_opts if e != "Descartada"]
     est_sel = st.multiselect("Estado / SLA", _est_opts, default=_est_default)
 with _f5:
     buscar = st.text_input(
@@ -366,26 +375,30 @@ _semana = _hoy - timedelta(days=7)
 
 _n_tot = len(_df)
 _n_hoy = int((_df["fecha_llamado"].dt.date == _hoy).sum())
-_n_cumple = int((_df["estado_lbl"] == "CUMPLE").sum())
-_n_nocump = int((_df["estado_lbl"] == "NO CUMPLE").sum())
-_n_trab   = int((_df["estado_lbl"] == "TRABAJO HECHO").sum())
-_n_sinat  = int((_df["estado_lbl"] == "SIN ATENDER").sum())
-_n_terr   = int((_df["estado_lbl"] == "EN TERRENO").sum())
+_n_cumple = int((_df["estado_lbl"] == "Finalizada - Cumple SLA").sum())
+_n_nocump = int((_df["estado_lbl"] == "Finalizada - No cumple SLA").sum())
+_n_trab   = int(_df["estado_lbl"].isin([
+    "OT atendida - Cumple SLA (Pend. Cierre Fracttal)",
+    "OT atendida - No cumple SLA (Pend. Cierre Fracttal)",
+]).sum())
+_n_sinat  = int((_df["estado_lbl"] == "OT Pendiente - Sin atender").sum())
+_n_terr   = int((_df["estado_lbl"] == "OT en terreno").sum())
 _evaluadas = _n_cumple + _n_nocump
 _pct_cumpl = (_n_cumple / _evaluadas * 100) if _evaluadas else 0
 
 _k1, _k2, _k3, _k4, _k5 = st.columns(5)
 _k1.metric("Total (filtrado)", f"{_n_tot:,}",
            delta=f"{_n_hoy} hoy" if _n_hoy else "", delta_color="off")
-_k2.metric("✅ Cerradas cumple", f"{_n_cumple:,}",
+_k2.metric("✅ Finalizada · Cumple SLA", f"{_n_cumple:,}",
            delta=f"{_pct_cumpl:.1f}% del SLA evaluado", delta_color="off")
-_k3.metric("❌ Cerradas no cumple", f"{_n_nocump:,}",
+_k3.metric("❌ Finalizada · No cumple", f"{_n_nocump:,}",
            delta_color="inverse")
-_k4.metric("🟢 Trabajo hecho", f"{_n_trab:,}",
-           delta="pend. cierre admin", delta_color="off",
-           help="Técnico terminó pero la OT sigue abierta en Fracttal por trámite administrativo.")
-_k5.metric("🔴 Sin atender", f"{_n_sinat:,}",
-           delta=f"{_n_terr} en terreno" if _n_terr else "",
+_k4.metric("🟢 OT atendida", f"{_n_trab:,}",
+           delta="pend. cierre en Fracttal", delta_color="off",
+           help="Técnico terminó y registró fecha_finalizacion, pero la "
+                "OT sigue abierta en Fracttal por cierre administrativo.")
+_k5.metric("🔴 OT Pendiente", f"{_n_sinat:,}",
+           delta=f"{_n_terr} en terreno" if _n_terr else "sin atender",
            delta_color="inverse" if _n_sinat else "off",
            help="OTs que nadie ha tomado en Fracttal (estado 'Por Iniciar').")
 
