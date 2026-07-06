@@ -5256,6 +5256,114 @@ elif _page == _NAV_PAGES[3]:
                 else:
                     st.info("Sin registros para el filtro seleccionado.")
 
+                # ── Ranking de completitud de datos ────────────────────────
+                # Solo evaluamos LAVADORAS: los campos bomba_dosificadora,
+                # consumo_insumos y tiempo_fichas_seg solo aparecen en el
+                # formulario de lavadora. Aspiradoras/lavainterior no llevan
+                # esos campos así que no cuentan.
+                st.markdown(
+                    f'<div style="font-weight:700;font-size:0.95rem;margin:28px 0 6px 0;'
+                    f'color:{_t["text"]};">'
+                    f'🏆 Calidad de registro Shell — completitud del formulario</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "Se evalúan los 3 campos operativos clave del form Shell: "
+                    "**bomba dosificadora**, **consumo insumos**, **tiempo fichas**. "
+                    "Solo se cuentan las subtareas de **lavadora** desde el 2026-06-01 "
+                    "(los campos no existen en el form de aspiradora)."
+                )
+                _df_calidad = df_num_sub_eds[
+                    (df_num_sub_eds["tipo_activo"] == "lavadora")
+                ].copy()
+                # Join con df_wo_c para tener creation_date y technician
+                if not _df_calidad.empty and "folio" in df_wo_c.columns:
+                    _wo_meta = df_wo_c[["folio","creation_date","technician","eds_occim"]].drop_duplicates("folio")
+                    _df_calidad = _df_calidad.merge(
+                        _wo_meta.rename(columns={
+                            "folio":"id_ot","creation_date":"_cd",
+                            "technician":"_tec","eds_occim":"_eds"}),
+                        on="id_ot", how="left")
+                    _df_calidad = _df_calidad[
+                        _df_calidad["_cd"] >= pd.Timestamp("2026-06-01", tz="UTC")
+                    ]
+                if _df_calidad.empty:
+                    st.info("Sin datos suficientes para calcular ranking.")
+                else:
+                    _CAMPOS = ["bomba_dosificadora", "consumo_insumos", "tiempo_fichas_seg"]
+                    for _c in _CAMPOS:
+                        _df_calidad[f"_ok_{_c}"] = _df_calidad[_c].apply(
+                            lambda v: 1 if v not in (None, "") and str(v).strip().lower() not in ("nan","none","null") else 0
+                        )
+                    _df_calidad["_score"] = _df_calidad[[f"_ok_{c}" for c in _CAMPOS]].sum(axis=1)
+
+                    _rk_col1, _rk_col2 = st.columns(2)
+
+                    # ── Ranking por TÉCNICO ──
+                    with _rk_col1:
+                        st.markdown("**Técnicos — completitud promedio**")
+                        _tec_g = (_df_calidad.dropna(subset=["_tec"])
+                                  .groupby("_tec")
+                                  .agg(subtareas=("_score","count"),
+                                       score_total=("_score","sum"),
+                                       bomba=(f"_ok_bomba_dosificadora","sum"),
+                                       consumo=(f"_ok_consumo_insumos","sum"),
+                                       tiempo=(f"_ok_tiempo_fichas_seg","sum"))
+                                  .reset_index())
+                        _tec_g = _tec_g[_tec_g["subtareas"] >= 3]
+                        _tec_g["%"] = (_tec_g["score_total"] / (_tec_g["subtareas"] * 3) * 100).round(1)
+                        _tec_g["Bomba"] = (_tec_g["bomba"] / _tec_g["subtareas"] * 100).round(0).astype(int).astype(str) + "%"
+                        _tec_g["Consumo"] = (_tec_g["consumo"] / _tec_g["subtareas"] * 100).round(0).astype(int).astype(str) + "%"
+                        _tec_g["Tiempo"] = (_tec_g["tiempo"] / _tec_g["subtareas"] * 100).round(0).astype(int).astype(str) + "%"
+                        _tec_g = _tec_g.rename(columns={"_tec": "Técnico", "subtareas": "OTs"})
+                        _tec_g = _tec_g.sort_values("%", ascending=False)
+                        _show_df(
+                            _tec_g[["Técnico","OTs","%","Bomba","Consumo","Tiempo"]].reset_index(drop=True),
+                            use_container_width=True, hide_index=True, height=300,
+                            column_config={
+                                "Técnico": st.column_config.TextColumn(width=180),
+                                "OTs":     st.column_config.NumberColumn(width=55, format="%d"),
+                                "%":       st.column_config.ProgressColumn(width=100, format="%.1f%%", min_value=0, max_value=100),
+                                "Bomba":   st.column_config.TextColumn(width=70),
+                                "Consumo": st.column_config.TextColumn(width=75),
+                                "Tiempo":  st.column_config.TextColumn(width=70),
+                            })
+
+                    # ── Ranking por EDS ──
+                    with _rk_col2:
+                        st.markdown("**Estaciones — completitud promedio**")
+                        _eds_g = (_df_calidad.dropna(subset=["_eds"])
+                                  .groupby("_eds")
+                                  .agg(subtareas=("_score","count"),
+                                       score_total=("_score","sum"),
+                                       bomba=(f"_ok_bomba_dosificadora","sum"),
+                                       consumo=(f"_ok_consumo_insumos","sum"),
+                                       tiempo=(f"_ok_tiempo_fichas_seg","sum"))
+                                  .reset_index())
+                        _eds_g = _eds_g[_eds_g["subtareas"] >= 2]
+                        _eds_g["%"] = (_eds_g["score_total"] / (_eds_g["subtareas"] * 3) * 100).round(1)
+                        _eds_g["Nombre"] = _eds_g["_eds"].map(_eds_name_map).fillna("—")
+                        _eds_g = _eds_g.rename(columns={"_eds": "Cód. EDS", "subtareas": "OTs"})
+                        _eds_g = _eds_g.sort_values("%", ascending=False)
+                        _show_df(
+                            _eds_g[["Cód. EDS","Nombre","OTs","%"]].reset_index(drop=True),
+                            use_container_width=True, hide_index=True, height=300,
+                            column_config={
+                                "Cód. EDS": st.column_config.TextColumn(width=80),
+                                "Nombre":   st.column_config.TextColumn(width=180),
+                                "OTs":      st.column_config.NumberColumn(width=55, format="%d"),
+                                "%":        st.column_config.ProgressColumn(width=100, format="%.1f%%", min_value=0, max_value=100),
+                            })
+
+                    _total_lav = len(_df_calidad)
+                    _tot_score = int(_df_calidad["_score"].sum())
+                    _pct_global = _tot_score / (_total_lav * 3) * 100 if _total_lav else 0
+                    st.caption(
+                        f"📊 Global (todas las lavadoras Shell desde jun-26): "
+                        f"**{_total_lav:,} subtareas** · completitud promedio "
+                        f"**{_pct_global:.1f}%** ({_tot_score:,} de {_total_lav*3:,} celdas rellenas)."
+                    )
+
     # ════════════════════════════════════════════════════════════════════════
     # PESTAÑA: HISTORIAL DE NUMERALES (global, agrupado por EDS, con buscador)
     # ════════════════════════════════════════════════════════════════════════
