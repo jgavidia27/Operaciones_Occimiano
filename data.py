@@ -1600,13 +1600,14 @@ def score_llenado_por_tecnico(
     _MAX_PREC_TRM = 105_000  # 30% × $350.000 trimestral
     def _bono_prec(exactitud: float) -> tuple:
         m = _MAX_PREC_TRM
-        if exactitud >= 95: return (100, m,            f"{exactitud:.1f}% — ${m:,}/trim")
-        if exactitud >= 90: return ( 90, int(m*.90),   f"{exactitud:.1f}% — ${int(m*.90):,}/trim")
-        if exactitud >= 85: return ( 80, int(m*.80),   f"{exactitud:.1f}% — ${int(m*.80):,}/trim")
-        if exactitud >= 80: return ( 70, int(m*.70),   f"{exactitud:.1f}% — ${int(m*.70):,}/trim")
-        if exactitud >= 75: return ( 60, int(m*.60),   f"{exactitud:.1f}% — ${int(m*.60):,}/trim")
-        if exactitud >= 70: return ( 50, int(m*.50),   f"{exactitud:.1f}% — ${int(m*.50):,}/trim")
-        return (0, 0, f"{exactitud:.1f}% — $0")
+        _lbl = f"{exactitud:.1f}%"
+        if exactitud >= 95: return (100, m,            _lbl)
+        if exactitud >= 90: return ( 90, int(m*.90),   _lbl)
+        if exactitud >= 85: return ( 80, int(m*.80),   _lbl)
+        if exactitud >= 80: return ( 70, int(m*.70),   _lbl)
+        if exactitud >= 75: return ( 60, int(m*.60),   _lbl)
+        if exactitud >= 70: return ( 50, int(m*.50),   _lbl)
+        return (0, 0, _lbl)
 
     _bono_vals = grp["exactitud_pct"].apply(_bono_prec)
     grp["bono_pct"]     = _bono_vals.apply(lambda x: x[0])
