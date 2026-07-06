@@ -9430,18 +9430,33 @@ elif _page == _NAV_PAGES[0]:
                 df_tec_scores_rank.at[_si_r, "err_total_dim"]        = (
                     _wsum_r("err_tiempo") + _wsum_r("err_causa") + _wsum_r("err_numeral")
                 )
-                df_tec_scores_rank.at[_si_r, "tiempo_ok_count"]      = _tot_ots_r - _wsum_r("err_tiempo")
-                df_tec_scores_rank.at[_si_r, "causa_ok_count"]       = _tot_ots_r - _wsum_r("err_causa")
-                df_tec_scores_rank.at[_si_r, "numeral_ok_count"]     = _tot_ots_r - _wsum_r("err_numeral")
+                # Denominadores por dimensión (OTs donde aplica cada KPI)
+                _tiempo_apl_r  = _wsum_r("tiempo_aplica_count")
+                _causa_apl_r   = _wsum_r("causa_aplica_count")
+                _numeral_apl_r = _wsum_r("numeral_aplica_count")
+                # Numeradores (OTs que cumplen su dimensión)
+                _tiempo_ok_r   = _wsum_r("tiempo_ok_count")
+                _causa_ok_r    = _wsum_r("causa_ok_count")
+                _numeral_ok_r  = _wsum_r("numeral_ok_count")
+                df_tec_scores_rank.at[_si_r, "tiempo_aplica_count"]  = _tiempo_apl_r
+                df_tec_scores_rank.at[_si_r, "causa_aplica_count"]   = _causa_apl_r
+                df_tec_scores_rank.at[_si_r, "numeral_aplica_count"] = _numeral_apl_r
+                df_tec_scores_rank.at[_si_r, "tiempo_ok_count"]      = _tiempo_ok_r
+                df_tec_scores_rank.at[_si_r, "causa_ok_count"]       = _causa_ok_r
+                df_tec_scores_rank.at[_si_r, "numeral_ok_count"]     = _numeral_ok_r
                 df_tec_scores_rank.at[_si_r, "deteccion_ok_count"]   = _tot_ots_r - _wsum_r("err_deteccion")
                 df_tec_scores_rank.at[_si_r, "score_promedio"]       = _wavg_r("score_promedio")
                 df_tec_scores_rank.at[_si_r, "score_tiempo_prom"]    = _wavg_r("score_tiempo_prom")
                 df_tec_scores_rank.at[_si_r, "score_causa_prom"]     = _wavg_r("score_causa_prom")
                 df_tec_scores_rank.at[_si_r, "score_numeral_prom"]   = _wavg_r("score_numeral_prom")
                 df_tec_scores_rank.at[_si_r, "score_deteccion_prom"] = _wavg_r("score_deteccion_prom")
-                df_tec_scores_rank.at[_si_r, "pct_tiempo_ok"]        = _wavg_r("pct_tiempo_ok")
-                df_tec_scores_rank.at[_si_r, "pct_causa_ok"]         = _wavg_r("pct_causa_ok")
-                df_tec_scores_rank.at[_si_r, "pct_numeral_ok"]       = _wavg_r("pct_numeral_ok")
+                # % coherente con numerador/denominador reales del equipo
+                df_tec_scores_rank.at[_si_r, "pct_tiempo_ok"]  = round(
+                    (_tiempo_ok_r / _tiempo_apl_r * 100), 1) if _tiempo_apl_r else float("nan")
+                df_tec_scores_rank.at[_si_r, "pct_causa_ok"]   = round(
+                    (_causa_ok_r / _causa_apl_r * 100), 1) if _causa_apl_r else float("nan")
+                df_tec_scores_rank.at[_si_r, "pct_numeral_ok"] = round(
+                    (_numeral_ok_r / _numeral_apl_r * 100), 1) if _numeral_apl_r else float("nan")
                 df_tec_scores_rank.at[_si_r, "pct_deteccion_ok"]     = _wavg_r("pct_deteccion_ok")
                 _exactitud_r = round((1 - _n_err_r / _tot_ots_r) * 100, 1) if _tot_ots_r > 0 else 100.0
                 df_tec_scores_rank.at[_si_r, "exactitud_pct"]        = _exactitud_r
@@ -11027,6 +11042,10 @@ elif _page == _NAV_PAGES[0]:
                         "err_numeral":        lambda b: 0,
                         "err_deteccion":      lambda b: 0,
                         "ots_correctas":      lambda b: b["ots_evaluadas"] - b["n_errores"],
+                        # Denominadores por dimensión (fallback: total OTs si no hay dato)
+                        "tiempo_aplica_count":  lambda b: b["ots_evaluadas"],
+                        "causa_aplica_count":   lambda b: b["ots_evaluadas"],
+                        "numeral_aplica_count": lambda b: b["ots_evaluadas"],
                         "tiempo_ok_count":    lambda b: (b["ots_evaluadas"] * b["pct_tiempo_ok"]    / 100).round(0).astype(int),
                         "causa_ok_count":     lambda b: (b["ots_evaluadas"] * b["pct_causa_ok"]     / 100).round(0).astype(int),
                         "numeral_ok_count":   lambda b: (b["ots_evaluadas"] * b["pct_numeral_ok"]   / 100).round(0).astype(int),
@@ -11042,13 +11061,18 @@ elif _page == _NAV_PAGES[0]:
                             (1 - _tec_base["n_errores"] / _tec_base["ots_evaluadas"].clip(lower=1)) * 100
                         ).round(1)
 
-                    # Formato X/Y (Z%) por dimensión — tolerante a NaN
-                    def _fmt_dim(ok, total, pct):
+                    # Formato "X/Y (Z%)" por dimensión — usa el DENOMINADOR CORRECTO
+                    # (OTs donde aplica cada dimensión), no ots_evaluadas total.
+                    # Si el técnico no tiene ninguna OT que aplique esa dimensión,
+                    # se muestra "—" en vez de "0/0 (0.0%)".
+                    def _fmt_dim(ok, aplica, pct):
                         try:
-                            ok_i    = int(ok)    if pd.notna(ok)    else 0
-                            total_i = int(total) if pd.notna(total) else 0
-                            pct_f   = float(pct) if pd.notna(pct)   else 0.0
-                            return f"{ok_i}/{total_i} ({pct_f:.1f}%)"
+                            ap_i = int(aplica) if pd.notna(aplica) else 0
+                            if ap_i == 0:
+                                return "—"
+                            ok_i  = int(ok)   if pd.notna(ok)   else 0
+                            pct_f = float(pct) if pd.notna(pct) else 0.0
+                            return f"{ok_i}/{ap_i} ({pct_f:.1f}%)"
                         except (ValueError, TypeError):
                             return "—"
 
@@ -11059,21 +11083,21 @@ elif _page == _NAV_PAGES[0]:
                         for _c in ("col_tiempo", "col_causa", "col_numeral", "col_deteccion"):
                             _tec_base[_c] = pd.Series(dtype="object")
                     else:
-                        _tec_base["col_tiempo"]    = _tec_base.apply(lambda r: _fmt_dim(r["tiempo_ok_count"],    r["ots_evaluadas"], r["pct_tiempo_ok"]),    axis=1)
-                        _tec_base["col_causa"]     = _tec_base.apply(lambda r: _fmt_dim(r["causa_ok_count"],     r["ots_evaluadas"], r["pct_causa_ok"]),     axis=1)
-                        _tec_base["col_numeral"]   = _tec_base.apply(lambda r: _fmt_dim(r["numeral_ok_count"],   r["ots_evaluadas"], r["pct_numeral_ok"]),   axis=1)
+                        _tec_base["col_tiempo"]    = _tec_base.apply(lambda r: _fmt_dim(r["tiempo_ok_count"],  r.get("tiempo_aplica_count"),  r["pct_tiempo_ok"]),  axis=1)
+                        _tec_base["col_causa"]     = _tec_base.apply(lambda r: _fmt_dim(r["causa_ok_count"],   r.get("causa_aplica_count"),   r["pct_causa_ok"]),   axis=1)
+                        _tec_base["col_numeral"]   = _tec_base.apply(lambda r: _fmt_dim(r["numeral_ok_count"], r.get("numeral_aplica_count"), r["pct_numeral_ok"]), axis=1)
                         _tec_base["col_deteccion"] = _tec_base.apply(lambda r: _fmt_dim(r["deteccion_ok_count"], r["ots_evaluadas"], r["pct_deteccion_ok"]), axis=1)
 
                     st.markdown('<div class="section-header">📋 Resumen por técnico</div>',
                                 unsafe_allow_html=True)
                     tec_disp = _tec_base[[
-                        "tecnico", "ots_evaluadas", "ots_correctas", "n_errores", "err_total_dim",
+                        "tecnico", "ots_evaluadas", "ots_correctas", "n_errores",
                         "col_tiempo", "col_causa", "col_numeral",
                         "exactitud_pct", "bono_label",
                     ]].copy()
 
                     tec_disp.columns = [
-                        "Técnico", "OTs evaluadas", "OTs sin error", "OTs con error", "Errores individuales",
+                        "Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
                         "⏱ Tiempo OK", "🔍 Causa OK", "🔢 Numeral OK",
                         "Exactitud %", "Bono semanal",
                     ]
@@ -11086,11 +11110,12 @@ elif _page == _NAV_PAGES[0]:
                                 help="OTs donde los 3 componentes estuvieron correctos.", format="%d"),
                             "OTs con error":       st.column_config.NumberColumn(
                                 help="OTs con al menos 1 componente incorrecto — estas cuentan para el KPI.", format="%d"),
-                            "Errores individuales":st.column_config.NumberColumn(
-                                help="Suma de fallos por dimensión (una OT puede aportar hasta 3).", format="%d"),
-                            "⏱ Tiempo OK":         st.column_config.TextColumn(help="OTs con tiempo correcto / total (%)"),
-                            "🔍 Causa OK":          st.column_config.TextColumn(help="OTs con causa raíz válida / total (%)"),
-                            "🔢 Numeral OK":        st.column_config.TextColumn(help="OTs con numeral registrado / total (%)"),
+                            "⏱ Tiempo OK":         st.column_config.TextColumn(
+                                help="OTs Preventivas con tiempo ≥75% del estimado / total MP del técnico"),
+                            "🔍 Causa OK":          st.column_config.TextColumn(
+                                help="OTs Correctivas con causa raíz válida / total MC del técnico"),
+                            "🔢 Numeral OK":        st.column_config.TextColumn(
+                                help="OTs de lavadora/aspiradora con numeral registrado / total en esos equipos"),
                             "Exactitud %":         st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
                         },
                     )

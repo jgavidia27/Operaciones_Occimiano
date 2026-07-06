@@ -1511,6 +1511,25 @@ def score_llenado_por_tecnico(
     if df.empty:
         return pd.DataFrame()
 
+    # ── Columnas auxiliares para % coherentes por dimensión ─────────────────
+    # Cada dimensión aplica solo a un subconjunto de OTs:
+    #   Tiempo    → solo MP (correctivas no evalúan tiempo)
+    #   Causa raíz→ solo MC (preventivas no responden a falla)
+    #   Numeral   → solo lavadora/aspiradora (no aplica al resto)
+    # Se cuentan aparte "aplica" (denominador real) y "ok" (numerador)
+    # para que % Cumplimiento = ok / aplica × 100 sin distorsión.
+    df["_es_correctiva"] = df["es_correctiva"].fillna(False).astype(bool) \
+        if "es_correctiva" in df.columns else False
+    df["_es_lavadora"]   = df["es_lavadora"].fillna(False).astype(bool) \
+        if "es_lavadora" in df.columns else False
+
+    df["_tiempo_aplica"]   = ~df["_es_correctiva"]                          # MP
+    df["_tiempo_ok"]       = df["_tiempo_aplica"] & (df["score_tiempo"].fillna(0) >= 25)
+    df["_causa_aplica"]    = df["_es_correctiva"]                            # MC
+    df["_causa_ok_effective"] = df["_causa_aplica"] & df["causa_ok"].fillna(False)
+    df["_numeral_aplica"]  = df["_es_lavadora"]                             # lavadora/aspiradora
+    df["_numeral_ok_effective"] = df["_numeral_aplica"] & df["numeral_ok"].fillna(False)
+
     grp = df.groupby("tecnico").agg(
         cliente_principal=    ("client",          lambda x: x.mode().iloc[0] if len(x) > 0 else ""),
         ots_evaluadas=        ("folio",           "count"),
@@ -1520,10 +1539,14 @@ def score_llenado_por_tecnico(
         score_causa_prom=     ("score_causa",     "mean"),
         score_numeral_prom=   ("score_numeral",   "mean"),
         score_deteccion_prom= ("score_deteccion", "mean"),
-        # ── % cumplimiento por dimensión ──
-        pct_tiempo_ok=        ("score_tiempo",    lambda x: (x >= 25).mean() * 100),
-        pct_causa_ok=         ("causa_ok",        lambda x: x.mean() * 100),
-        pct_numeral_ok=       ("numeral_ok",      lambda x: x.mean() * 100),
+        # ── Denominadores por dimensión (OTs donde SÍ aplica) ──
+        tiempo_aplica_count=  ("_tiempo_aplica",  "sum"),
+        causa_aplica_count=   ("_causa_aplica",   "sum"),
+        numeral_aplica_count= ("_numeral_aplica", "sum"),
+        # ── Numeradores: OTs que aplican Y cumplen ──
+        tiempo_ok_count=      ("_tiempo_ok",           "sum"),
+        causa_ok_count=       ("_causa_ok_effective",  "sum"),
+        numeral_ok_count=     ("_numeral_ok_effective","sum"),
         pct_deteccion_ok=     ("deteccion_ok",    lambda x: x.mean() * 100),
         # ── Detalle causa raíz (solo correctivas) ──
         correctivas=          ("es_correctiva",   "sum"),
@@ -1539,20 +1562,26 @@ def score_llenado_por_tecnico(
         err_deteccion=        ("score_deteccion", lambda x: int((x < 25).sum())),  # informativo
     ).reset_index()
 
+    # ── % Cumplimiento coherente por dimensión (solo sobre OTs que aplican) ──
+    # pct = ok / aplica × 100. Si no hay OTs que apliquen, dejar en NaN
+    # para que la UI muestre '—' y no un 100% falso.
+    for _dim in ("tiempo", "causa", "numeral"):
+        _num = grp[f"{_dim}_ok_count"]
+        _den = grp[f"{_dim}_aplica_count"]
+        grp[f"pct_{_dim}_ok"] = (_num / _den.replace(0, pd.NA) * 100).astype(float).round(1)
+
     for c in ["score_promedio", "score_tiempo_prom", "score_causa_prom",
               "score_numeral_prom", "score_deteccion_prom",
               "pct_tiempo_ok", "pct_causa_ok", "pct_numeral_ok", "pct_deteccion_ok"]:
-        grp[c] = grp[c].round(1)
+        if c in grp.columns:
+            grp[c] = grp[c].round(1)
 
     # ── Métricas derivadas ─────────────────────────────────────────────────────
     # Y = suma de errores individuales por dimensión KPI (una OT puede contribuir hasta 3)
     grp["err_total_dim"]      = (grp["err_tiempo"] + grp["err_causa"] + grp["err_numeral"])
     # OTs sin ningún error
     grp["ots_correctas"]      = grp["ots_evaluadas"] - grp["n_errores"]
-    # Conteos OK por dimensión (para tabla de técnicos)
-    grp["tiempo_ok_count"]    = grp["ots_evaluadas"] - grp["err_tiempo"]
-    grp["causa_ok_count"]     = grp["ots_evaluadas"] - grp["err_causa"]
-    grp["numeral_ok_count"]   = grp["ots_evaluadas"] - grp["err_numeral"]
+    # Conteo deteccion (informativo) mantiene la fórmula antigua
     grp["deteccion_ok_count"] = grp["ots_evaluadas"] - grp["err_deteccion"]
 
     # ── Bono Precisión — escala porcentual (no penaliza por volumen) ─────────────
