@@ -24,7 +24,7 @@ import streamlit as st
 # Config
 # ══════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Correctivas · Espejo",
+    page_title="Panel de Llamados Correctivos · Operaciones Occimiano",
     page_icon="📞",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -271,7 +271,7 @@ h1 {font-size:1.7rem !important; margin-bottom:.3rem !important;}
 # ══════════════════════════════════════════════════════════════════════
 # Header
 # ══════════════════════════════════════════════════════════════════════
-st.markdown("# 📞 Correctivas · Espejo")
+st.markdown("# 📞 Panel de Llamados Correctivos — Operaciones Occimiano")
 st.markdown(
     f'<div class="hdr-sub">Fuente: <code>v_llamados_sla</code> (misma vista que el dashboard principal) · '
     f'Enriquecida con <code>fuente</code> desde <code>llamados_correctivos</code> · '
@@ -301,16 +301,16 @@ _f1, _f2, _f3, _f4, _f5 = st.columns([1.3, 1.3, 1.1, 1.2, 2])
 with _f1:
     _fuentes = sorted([f for f in df["fuente"].dropna().unique() if f])
     fuente_sel = st.multiselect(
-        "Fuente", _fuentes, default=_fuentes,
+        "Fuente", _fuentes, default=_fuentes, key="fuente_v2",
         format_func=lambda f: f"{FUENTE_META.get(f, ('❓','?','',''))[0]} {FUENTE_META.get(f, ('','?','',''))[1]}"
                               if f in FUENTE_META else f,
     )
 with _f2:
     _clientes = sorted(df["cliente"].dropna().unique())
-    cliente_sel = st.multiselect("Cliente", _clientes, default=_clientes)
+    cliente_sel = st.multiselect("Cliente", _clientes, default=_clientes, key="cliente_v2")
 with _f3:
     _prios = sorted(df["prioridad"].dropna().unique())
-    pri_sel = st.multiselect("Prioridad", _prios, default=_prios)
+    pri_sel = st.multiselect("Prioridad", _prios, default=_prios, key="pri_v2")
 with _f4:
     _est_opts = [
         "Finalizada - Cumple SLA",
@@ -325,7 +325,8 @@ with _f4:
     ]
     # Por defecto ocultamos Descartada (basura de Fracttal)
     _est_default = [e for e in _est_opts if e != "Descartada"]
-    est_sel = st.multiselect("Estado / SLA", _est_opts, default=_est_default)
+    est_sel = st.multiselect("Estado / SLA", _est_opts,
+                             default=_est_default, key="estado_v2")
 with _f5:
     buscar = st.text_input(
         "Buscar",
