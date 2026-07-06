@@ -9699,12 +9699,12 @@ elif _page == _NAV_PAGES[0]:
                     "_cumple":"✅ Cumple", "_no_cumple":"❌ No cumple",
                 })
                 _agg = _agg.sort_values(["% Cumplimiento","OTs"],
-                                        ascending=[True, False]).reset_index(drop=True)
+                                        ascending=[False, False]).reset_index(drop=True)
                 st.markdown(f'<div class="section-header">{_titulo}</div>',
                             unsafe_allow_html=True)
                 st.caption(
-                    f"Ranking ordenado por **% Cumplimiento ascendente** (los peores arriba "
-                    f"para priorizar acción). Total OTs evaluadas: **{_tot_global:,}**."
+                    f"Ranking ordenado de **mejor a peor** (los que más cumplen arriba). "
+                    f"Total OTs evaluadas: **{_tot_global:,}**."
                 )
                 st.dataframe(
                     _agg[["Técnico","OTs","✅ Cumple","❌ No cumple",
