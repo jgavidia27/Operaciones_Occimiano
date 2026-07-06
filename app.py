@@ -5322,7 +5322,8 @@ elif _page == _NAV_PAGES[3]:
                         ("Numeral aspiradora", "Actual"):              _rpval(_asp, "numeral_final"),
                         ("Fichas mantención", "Lavado"):               _rpval(_lav, "fichas_periodo"),
                         ("Fichas mantención", "Aspirado"):             _rpval(_asp, "fichas_periodo"),
-                        ("Insumos", "Bomba dosificadora"):             _rpval(_lav, "bomba_dosificadora"),
+                        ("Insumos", "Tipo de bomba"):                  _rpval(_lav, "bomba_dosificadora"),
+                        ("Insumos", "Producción Lts/hr"):              _rpval(_lav, "lts_hr_produccion_final"),
                         ("Insumos", "Consumo (%)"):                    _rpval(_lav, "consumo_insumos"),
                         # 'Tiempo fichas' solo existe en el form de lavadora
                         # (aspiradora no lo tiene, quedaba siempre vacío).

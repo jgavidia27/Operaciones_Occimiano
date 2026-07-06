@@ -119,9 +119,11 @@ def fetch_subtareas_numeral(folio: str) -> list:
             "form_tiene_bomba":       False,
             "form_tiene_consumo":     False,
             "form_tiene_tiempo":      False,
+            "form_tiene_produccion":  False,
             "bomba_dosificadora":     None,
             "consumo_insumos":        None,
             "tiempo_fichas_seg":      None,
+            "lts_hr_produccion_final": None,
             "fecha_inicio_subtarea":  s.get("initial_date"),
             "fecha_fin_subtarea":     s.get("final_date"),
         }
@@ -166,6 +168,13 @@ def fetch_subtareas_numeral(folio: str) -> list:
                 idx[kid]["form_tiene_tiempo"] = True
                 if not val_empty:
                     idx[kid]["tiempo_fichas_seg"] = val
+            elif "LT/HRS PRODUCCI" in desc and "FINAL" in desc:
+                # Ejemplo Fracttal: "LT/HRS PRODUCCIÓN FINAL" = "125"
+                # (Solo el FINAL; ignoramos LT/HRS PRODUCCIÓN INICIAL,
+                # LT/HRS DESCARGA INICIAL/FINAL — no son relevantes.)
+                idx[kid]["form_tiene_produccion"] = True
+                if not val_empty:
+                    idx[kid]["lts_hr_produccion_final"] = val
 
     # 3) Filtrar: solo subtareas cuyo formulario tiene campos NUMERAL.
     #    Subtareas duplicadas del mismo equipo con plantilla sin numeral
@@ -211,9 +220,11 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "bomba_dosificadora":    r.get("bomba_dosificadora"),
             "consumo_insumos":       r.get("consumo_insumos"),
             "tiempo_fichas_seg":     r.get("tiempo_fichas_seg"),
+            "lts_hr_produccion_final": r.get("lts_hr_produccion_final"),
             "form_tiene_bomba":      r.get("form_tiene_bomba", False),
             "form_tiene_consumo":    r.get("form_tiene_consumo", False),
             "form_tiene_tiempo":     r.get("form_tiene_tiempo", False),
+            "form_tiene_produccion": r.get("form_tiene_produccion", False),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
             "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
             "updated_at":         datetime.now(timezone.utc).isoformat(),
@@ -233,11 +244,13 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             # esas 3 columnas del payload y reintentar sin ellas (backward
             # compat). Detectamos por el mensaje PGRST204 "column ... does
             # not exist".
-            if r.status_code == 400 and "form_tiene_" in r.text:
+            if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text):
                 for rec in payload:
                     rec.pop("form_tiene_bomba", None)
                     rec.pop("form_tiene_consumo", None)
                     rec.pop("form_tiene_tiempo", None)
+                    rec.pop("form_tiene_produccion", None)
+                    rec.pop("lts_hr_produccion_final", None)
                 r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
                 if r2.status_code in (200, 201, 204):
                     return len(payload), 0
