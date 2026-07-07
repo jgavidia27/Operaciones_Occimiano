@@ -5362,6 +5362,39 @@ elif _page == _NAV_PAGES[3]:
                     if _av is not None:
                         _last_by_eds[(_e, "aspiradora")] = _av
 
+                # Helper de reclasificación bomba ↔ producción:
+                # muchas veces el técnico anotó la producción en el campo
+                # "Tipo de bomba" (ej. "3.00 l/h", "2 litros/hora", "20",
+                # "125"). Regla: si el valor de bomba se parece a un dato
+                # de flujo y "producción" está vacía → mueve a producción.
+                import re as _re_bomba
+                _UNIDADES_FLUJO = ("L/H", "LT/H", "LTS/H", "LITRO", "GPH", "GAL/H")
+                def _parece_produccion(v):
+                    if v is None: return False
+                    s = str(v).strip().upper()
+                    if not s or s in ("—", "-", "%", "NAN", "NONE", "NULL"):
+                        return False
+                    # Contiene unidad explícita de flujo
+                    if any(u in s for u in _UNIDADES_FLUJO):
+                        # Y tiene al menos un número
+                        if _re_bomba.search(r"\d", s):
+                            return True
+                    # Número puro (10, 125, 3.00) — típico valor de producción
+                    if _re_bomba.match(r"^\d+([.,]\d+)?$", s):
+                        return True
+                    return False
+
+                def _reclasificar(bomba_raw, prod_raw):
+                    """Devuelve (bomba_display, produccion_display) aplicando
+                    la reclasificación."""
+                    b = bomba_raw if bomba_raw not in (None, "") else None
+                    p = prod_raw  if prod_raw  not in (None, "") else None
+                    if b and _parece_produccion(b) and not p:
+                        # Mover bomba → producción; limpiar bomba
+                        return ("—", str(b).strip())
+                    return (b if b is not None else "—",
+                            p if p is not None else "—")
+
                 _reg_rows = []
                 for _, _ot in _df_prev_all.head(100).iterrows():
                     _fol = _ot["folio"]
@@ -5375,6 +5408,11 @@ elif _page == _NAV_PAGES[3]:
                     if _tec in ("", "nan", "None"):
                         _tec = "—"
                     _ec = str(_ot.get("eds_occim", "—"))
+
+                    # Reclasificación bomba ↔ producción
+                    _bomba_raw = _rpval(_lav, "bomba_dosificadora", default=None)
+                    _prod_raw  = _rpval(_lav, "lts_hr_produccion_final", default=None)
+                    _bomba_disp, _prod_disp = _reclasificar(_bomba_raw, _prod_raw)
 
                     _reg_rows.append({
                         ("Datos Estación", "Código EDS"):               _ec,
@@ -5391,8 +5429,8 @@ elif _page == _NAV_PAGES[3]:
                         ("Numeral aspiradora", "Actual"):              _rpval(_asp, "numeral_final"),
                         ("Fichas mantención", "Lavado"):               _rpval(_lav, "fichas_periodo"),
                         ("Fichas mantención", "Aspirado"):             _rpval(_asp, "fichas_periodo"),
-                        ("Insumos", "Tipo de bomba"):                  _rpval(_lav, "bomba_dosificadora"),
-                        ("Insumos", "Producción Lts/hr"):              _rpval(_lav, "lts_hr_produccion_final"),
+                        ("Insumos", "Tipo de bomba"):                  _bomba_disp,
+                        ("Insumos", "Producción Lts/hr"):              _prod_disp,
                         ("Insumos", "Consumo (%)"):                    _rpval(_lav, "consumo_insumos"),
                         # 'Tiempo fichas' solo existe en el form de lavadora
                         # (aspiradora no lo tiene, quedaba siempre vacío).
