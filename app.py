@@ -62,7 +62,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v27-clear-stale-cache-08jul"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v28-helpers-scope-fix"  # bump para invalidar disco al cambiar data.py
 
 
 def _filtro_ot_input(key: str, columna_ot: str = "OT") -> str:
@@ -9877,6 +9877,130 @@ elif _page == _NAV_PAGES[0]:
             _pt_tiempo = st.container()
             _pt_num    = st.container()
 
+            # ── Helpers de render (accesibles en TODAS las sub-vistas) ──
+            def _agrupar_por_periodo(df_in, col_ok: str):
+                """Devuelve DataFrame con columnas: bucket_lbl, ok, total, pct_ok, pct_err.
+                df_in debe traer "mes" y "creation_date_local". col_ok = nombre de bool col."""
+                if df_in.empty or col_ok not in df_in.columns:
+                    return pd.DataFrame()
+                df = df_in.copy()
+                # ¿1 solo mes seleccionado? → semanas; si no, meses.
+                un_mes = len(_meses_sel_raw) == 1
+                if un_mes:
+                    ym = _meses_sel_raw[0]
+                    _sems = _semanas_del_mes(ym)
+                    if "creation_date_local" not in df.columns:
+                        return pd.DataFrame()
+                    rows = []
+                    for lbl, ini, fin in _sems:
+                        m = ((df["creation_date_local"] >= ini) &
+                             (df["creation_date_local"] <= fin))
+                        sub = df[m]
+                        tot = len(sub)
+                        ok  = int(sub[col_ok].sum()) if tot else 0
+                        # Etiqueta compacta "S1\n07-13/06" para el eje
+                        n = lbl.split()[1]
+                        rango = lbl.split("(")[1].rstrip(")")
+                        rows.append(dict(bucket_lbl=f"S{n}<br>{rango}",
+                                         ok=ok, total=tot))
+                    g = pd.DataFrame(rows)
+                else:
+                    # Multi-mes: solo los meses que el usuario seleccionó
+                    df = df[df["mes"].astype(str).isin(set(_meses_prec_str))]
+                    if df.empty:
+                        return pd.DataFrame()
+                    g = (df.groupby("mes")
+                           .agg(total=(col_ok,"count"), ok=(col_ok,"sum"))
+                           .reset_index().sort_values("mes"))
+                    g["bucket_lbl"] = g["mes"].apply(_m2l)
+                # Excluir buckets sin datos (semanas futuras, meses sin OTs).
+                # Sin esto, una semana con total=0 aparece como "100% error" porque
+                # 100 - 0/1*100 = 100. Sólo mostrar buckets con al menos 1 OT.
+                g = g[g["total"] > 0].copy()
+                if g.empty:
+                    return g
+                g["pct_ok"]  = (g["ok"] / g["total"] * 100).round(1)
+                g["pct_err"] = (100 - g["pct_ok"]).round(1)
+                return g
+
+            # ── Builder de gráfico apilado (mismo diseño que Numerales) ────────
+            def _fig_apilada(g: pd.DataFrame, color_ok: str, label_ok: str,
+                             label_err: str, meta: float = None,
+                             titulo_y: str = "% OTs") -> "go.Figure":
+                """Barras apiladas verde (OK) + rojo (Error). %OK CENTRADO en barra
+                verde; %ERR fuera con flecha cuando la barra roja es pequeña.
+                Si la barra roja es >=10% pone el % adentro."""
+                fig = go.Figure()
+                # Texto para barra verde: % centrado + fracción debajo
+                txt_ok = g.apply(lambda r:
+                    f"<b>{r['pct_ok']:.1f}%</b><br><span style='font-size:10px;'>"
+                    f"{int(r['ok'])}/{int(r['total'])}</span>", axis=1).tolist()
+                fig.add_trace(go.Bar(
+                    x=g["bucket_lbl"], y=g["pct_ok"],
+                    name=label_ok, marker_color=color_ok, opacity=0.95,
+                    text=txt_ok, textposition="inside", insidetextanchor="middle",
+                    textfont=dict(size=14, color="#ffffff",
+                                  family="Inter, system-ui, sans-serif"),
+                    customdata=g[["ok","total"]].values,
+                    hovertemplate="%{x}<br>%{customdata[0]}/%{customdata[1]} OK"
+                                  "<br>%{y:.1f}%<extra></extra>",
+                ))
+                # Barra roja: solo texto adentro si hay espacio (≥10%); si no, anotación externa con flecha
+                txt_err_in = g["pct_err"].apply(
+                    lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
+                fig.add_trace(go.Bar(
+                    x=g["bucket_lbl"], y=g["pct_err"],
+                    name=label_err, marker_color="#ef4444", opacity=0.92,
+                    text=txt_err_in, textposition="inside", insidetextanchor="middle",
+                    textfont=dict(size=12, color="#ffffff"),
+                    customdata=g[["ok","total","pct_err"]].values,
+                    hovertemplate="%{x}<br>Error: %{customdata[2]:.1f}%<extra></extra>",
+                ))
+                # Flecha externa para errores pequeños (<10%)
+                for _, r in g.iterrows():
+                    if r["pct_err"] < 10 and r["pct_err"] > 0:
+                        fig.add_annotation(
+                            x=r["bucket_lbl"], y=100, ax=0, ay=-35,
+                            xref="x", yref="y", axref="pixel", ayref="pixel",
+                            showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+                            arrowcolor="#ef4444",
+                            text=f"<b style='color:#ef4444;'>{r['pct_err']:.1f}% error</b>",
+                            font=dict(size=11, color="#ef4444"),
+                            bgcolor="rgba(255,255,255,0.95)",
+                            bordercolor="#ef4444", borderwidth=1, borderpad=3,
+                        )
+                if meta is not None:
+                    fig.add_hline(y=meta, line_dash="dash", line_color=color_ok,
+                                  annotation_text=f"Meta {meta:.0f}%",
+                                  annotation_position="top left", line_width=1.5)
+                fig.update_layout(
+                    barmode="stack", height=320,
+                    margin=dict(t=40, b=30, l=10, r=20),
+                    yaxis=dict(range=[0, 115], ticksuffix="%", title=titulo_y),
+                    legend=dict(orientation="h", y=1.14, x=0), bargap=0.35,
+                )
+                _apply_plot_theme(fig)
+                return fig
+
+            # KPI card lateral (mismo diseño que el panel verde de Numerales)
+            def _kpi_card(pct: float, ok: int, total: int, label: str,
+                         meta_pct: float = 90.0) -> None:
+                color = ("#22c55e" if pct >= meta_pct else
+                         ("#f59e0b" if pct >= max(meta_pct - 20, 50) else "#ef4444"))
+                st.markdown(
+                    f'<div style="background:{_t["card"]};border:2px solid {color}33;'
+                    f'border-radius:10px;padding:20px;text-align:center;">'
+                    f'<div style="font-size:2.2rem;font-weight:800;color:{color};">'
+                    f'{pct:.1f}%</div>'
+                    f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
+                    f'{ok:,} / {total:,} OTs</div>'
+                    f'<div style="font-size:0.8rem;color:{_t["muted"]};">{label}</div>'
+                    f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
+                    f'Meta: ≥{meta_pct:.0f}%</div></div>',
+                    unsafe_allow_html=True
+                )
+
+
             if _prec_view == _V_RES:
                 with _pt_res:
                     st.markdown('<div class="section-header">📊 Desglose del puntaje por dimensión</div>',
@@ -10426,128 +10550,6 @@ elif _page == _NAV_PAGES[0]:
                     # ── Agrupador que respeta la selección de meses/semanas ────────────
                     # Regla: 1 mes seleccionado → desglose por semanas DENTRO de ese mes.
                     #        ≥2 meses (o "Todos") → solo esos meses agrupados.
-                    def _agrupar_por_periodo(df_in, col_ok: str):
-                        """Devuelve DataFrame con columnas: bucket_lbl, ok, total, pct_ok, pct_err.
-                        df_in debe traer "mes" y "creation_date_local". col_ok = nombre de bool col."""
-                        if df_in.empty or col_ok not in df_in.columns:
-                            return pd.DataFrame()
-                        df = df_in.copy()
-                        # ¿1 solo mes seleccionado? → semanas; si no, meses.
-                        un_mes = len(_meses_sel_raw) == 1
-                        if un_mes:
-                            ym = _meses_sel_raw[0]
-                            _sems = _semanas_del_mes(ym)
-                            if "creation_date_local" not in df.columns:
-                                return pd.DataFrame()
-                            rows = []
-                            for lbl, ini, fin in _sems:
-                                m = ((df["creation_date_local"] >= ini) &
-                                     (df["creation_date_local"] <= fin))
-                                sub = df[m]
-                                tot = len(sub)
-                                ok  = int(sub[col_ok].sum()) if tot else 0
-                                # Etiqueta compacta "S1\n07-13/06" para el eje
-                                n = lbl.split()[1]
-                                rango = lbl.split("(")[1].rstrip(")")
-                                rows.append(dict(bucket_lbl=f"S{n}<br>{rango}",
-                                                 ok=ok, total=tot))
-                            g = pd.DataFrame(rows)
-                        else:
-                            # Multi-mes: solo los meses que el usuario seleccionó
-                            df = df[df["mes"].astype(str).isin(set(_meses_prec_str))]
-                            if df.empty:
-                                return pd.DataFrame()
-                            g = (df.groupby("mes")
-                                   .agg(total=(col_ok,"count"), ok=(col_ok,"sum"))
-                                   .reset_index().sort_values("mes"))
-                            g["bucket_lbl"] = g["mes"].apply(_m2l)
-                        # Excluir buckets sin datos (semanas futuras, meses sin OTs).
-                        # Sin esto, una semana con total=0 aparece como "100% error" porque
-                        # 100 - 0/1*100 = 100. Sólo mostrar buckets con al menos 1 OT.
-                        g = g[g["total"] > 0].copy()
-                        if g.empty:
-                            return g
-                        g["pct_ok"]  = (g["ok"] / g["total"] * 100).round(1)
-                        g["pct_err"] = (100 - g["pct_ok"]).round(1)
-                        return g
-
-                    # ── Builder de gráfico apilado (mismo diseño que Numerales) ────────
-                    def _fig_apilada(g: pd.DataFrame, color_ok: str, label_ok: str,
-                                     label_err: str, meta: float = None,
-                                     titulo_y: str = "% OTs") -> "go.Figure":
-                        """Barras apiladas verde (OK) + rojo (Error). %OK CENTRADO en barra
-                        verde; %ERR fuera con flecha cuando la barra roja es pequeña.
-                        Si la barra roja es >=10% pone el % adentro."""
-                        fig = go.Figure()
-                        # Texto para barra verde: % centrado + fracción debajo
-                        txt_ok = g.apply(lambda r:
-                            f"<b>{r['pct_ok']:.1f}%</b><br><span style='font-size:10px;'>"
-                            f"{int(r['ok'])}/{int(r['total'])}</span>", axis=1).tolist()
-                        fig.add_trace(go.Bar(
-                            x=g["bucket_lbl"], y=g["pct_ok"],
-                            name=label_ok, marker_color=color_ok, opacity=0.95,
-                            text=txt_ok, textposition="inside", insidetextanchor="middle",
-                            textfont=dict(size=14, color="#ffffff",
-                                          family="Inter, system-ui, sans-serif"),
-                            customdata=g[["ok","total"]].values,
-                            hovertemplate="%{x}<br>%{customdata[0]}/%{customdata[1]} OK"
-                                          "<br>%{y:.1f}%<extra></extra>",
-                        ))
-                        # Barra roja: solo texto adentro si hay espacio (≥10%); si no, anotación externa con flecha
-                        txt_err_in = g["pct_err"].apply(
-                            lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
-                        fig.add_trace(go.Bar(
-                            x=g["bucket_lbl"], y=g["pct_err"],
-                            name=label_err, marker_color="#ef4444", opacity=0.92,
-                            text=txt_err_in, textposition="inside", insidetextanchor="middle",
-                            textfont=dict(size=12, color="#ffffff"),
-                            customdata=g[["ok","total","pct_err"]].values,
-                            hovertemplate="%{x}<br>Error: %{customdata[2]:.1f}%<extra></extra>",
-                        ))
-                        # Flecha externa para errores pequeños (<10%)
-                        for _, r in g.iterrows():
-                            if r["pct_err"] < 10 and r["pct_err"] > 0:
-                                fig.add_annotation(
-                                    x=r["bucket_lbl"], y=100, ax=0, ay=-35,
-                                    xref="x", yref="y", axref="pixel", ayref="pixel",
-                                    showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
-                                    arrowcolor="#ef4444",
-                                    text=f"<b style='color:#ef4444;'>{r['pct_err']:.1f}% error</b>",
-                                    font=dict(size=11, color="#ef4444"),
-                                    bgcolor="rgba(255,255,255,0.95)",
-                                    bordercolor="#ef4444", borderwidth=1, borderpad=3,
-                                )
-                        if meta is not None:
-                            fig.add_hline(y=meta, line_dash="dash", line_color=color_ok,
-                                          annotation_text=f"Meta {meta:.0f}%",
-                                          annotation_position="top left", line_width=1.5)
-                        fig.update_layout(
-                            barmode="stack", height=320,
-                            margin=dict(t=40, b=30, l=10, r=20),
-                            yaxis=dict(range=[0, 115], ticksuffix="%", title=titulo_y),
-                            legend=dict(orientation="h", y=1.14, x=0), bargap=0.35,
-                        )
-                        _apply_plot_theme(fig)
-                        return fig
-
-                    # KPI card lateral (mismo diseño que el panel verde de Numerales)
-                    def _kpi_card(pct: float, ok: int, total: int, label: str,
-                                 meta_pct: float = 90.0) -> None:
-                        color = ("#22c55e" if pct >= meta_pct else
-                                 ("#f59e0b" if pct >= max(meta_pct - 20, 50) else "#ef4444"))
-                        st.markdown(
-                            f'<div style="background:{_t["card"]};border:2px solid {color}33;'
-                            f'border-radius:10px;padding:20px;text-align:center;">'
-                            f'<div style="font-size:2.2rem;font-weight:800;color:{color};">'
-                            f'{pct:.1f}%</div>'
-                            f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
-                            f'{ok:,} / {total:,} OTs</div>'
-                            f'<div style="font-size:0.8rem;color:{_t["muted"]};">{label}</div>'
-                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
-                            f'Meta: ≥{meta_pct:.0f}%</div></div>',
-                            unsafe_allow_html=True
-                        )
-
                     # ── Gráfico Causa Raíz (diseño apilado igual que Numerales) ──────
                     _periodo_lbl_cr = ("por semanas" if len(_meses_sel_raw) == 1
                                        else "por mes seleccionado")
