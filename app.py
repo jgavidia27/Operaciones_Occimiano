@@ -13952,9 +13952,14 @@ elif _page == _NAV_PAGES[2]:
                 _df_show_pr["F. Ejecución"] = _df_show_pr["_finfr_dt"].fillna(
                     _df_show_pr["_freal_dt"])
                 for _c in ("F. Ejecución","F. Programada","Última mant."):
-                    _df_show_pr[_c] = pd.to_datetime(
-                        _df_show_pr[_c], errors="coerce"
-                    ).dt.strftime("%d/%m/%Y").fillna("—")
+                    # utc=True + tz_localize(None) para manejar mix
+                    # tz-aware/naive sin ValueError.
+                    _s = pd.to_datetime(_df_show_pr[_c], errors="coerce", utc=True)
+                    try:
+                        _s = _s.dt.tz_localize(None)
+                    except (AttributeError, TypeError):
+                        pass
+                    _df_show_pr[_c] = _s.dt.strftime("%d/%m/%Y").fillna("—")
                 _ord_est = {"⚠️ Vencida":0, "🕓 Pendiente":1, "✅ Realizada":2}
                 _df_show_pr = _df_show_pr.assign(
                     _o=_df_show_pr["Estado"].map(_ord_est).fillna(9)
