@@ -62,7 +62,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v30-kill-empty-containers"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v31-modalidad-column-num"  # bump para invalidar disco al cambiar data.py
 
 
 def _filtro_ot_input(key: str, columna_ot: str = "OT") -> str:
@@ -11520,6 +11520,17 @@ elif _page == _NAV_PAGES[0]:
                     _det_num["_n_fin"]    = _det_num.apply(lambda r: _fmt_numeral_ini_fin(r, "numeral_final"), axis=1)
                     _det_num["_fichas"]   = _det_num.apply(_fmt_fichas, axis=1)
 
+                    # Modalidad (Remoto vs Presencial) — clave para entender
+                    # por qué una MC sin numeral NO penaliza (regla remota).
+                    def _fmt_modalidad(row):
+                        m = str(row.get("modalidad_atencion","") or "").upper()
+                        if not m:
+                            return "—"
+                        if "REMOTA" in m or "REMOTO" in m:
+                            return "📞 Remoto"
+                        return "🚗 Presencial"
+                    _det_num["_modalidad"] = _det_num.apply(_fmt_modalidad, axis=1)
+
                     # Formatear fecha
                     _det_num_cd = pd.to_datetime(_det_num["creation_date"], errors="coerce")
                     _det_num_cd = _det_num_cd.dt.tz_convert(None) if _det_num_cd.dt.tz is not None else _det_num_cd
@@ -11554,7 +11565,7 @@ elif _page == _NAV_PAGES[0]:
                     # Construir df de display
                     _cols_num = [c for c in
                         ["folio","_equipo","tecnico","_fecha","client","station","maint_type",
-                         "_n_ini","_n_fin","_fichas","_estado","_comentario"]
+                         "_modalidad","_n_ini","_n_fin","_fichas","_estado","_comentario"]
                         if c in _det_num.columns]
                     _det_num_disp = _det_num[_cols_num].rename(columns={
                         "folio":      "OT",
@@ -11564,6 +11575,7 @@ elif _page == _NAV_PAGES[0]:
                         "client":     "Cliente",
                         "station":    "EDS",
                         "maint_type": "Tipo",
+                        "_modalidad": "Modalidad",
                         "_n_ini":     "N. Inicial",
                         "_n_fin":     "N. Final",
                         "_fichas":    "Fichas período",
@@ -11618,6 +11630,8 @@ elif _page == _NAV_PAGES[0]:
                                 "Cliente":       st.column_config.TextColumn(width=85),
                                 "EDS":           st.column_config.TextColumn(width=180),
                                 "Tipo":          st.column_config.TextColumn(width=130),
+                                "Modalidad":     st.column_config.TextColumn(width=110,
+                                    help="📞 Remoto = atendido a distancia (sin numeral esperado). 🚗 Presencial = técnico fue a la EDS."),
                                 "N. Inicial":    st.column_config.TextColumn(width=90,
                                     help="Lectura inicial del contador (TOMA DE NUMERAL INICIAL)."),
                                 "N. Final":      st.column_config.TextColumn(width=90,

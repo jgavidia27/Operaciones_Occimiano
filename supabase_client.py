@@ -308,7 +308,7 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
 
 # Versión del cache: bumpear para invalidar el disk-cache tras cambios en
 # duracion_estim_neta_seg / duracion_real_neta_seg del backend.
-_WO_CACHE_VERSION = "v4-es-correctiva-fix-08jul"
+_WO_CACHE_VERSION = "v5-modalidad-column"
 
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def load_work_orders_supabase(cache_v: str = _WO_CACHE_VERSION) -> list:
