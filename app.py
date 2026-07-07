@@ -13701,14 +13701,59 @@ elif _page == _NAV_PAGES[2]:
                     _dia_pr = st.selectbox("Día programado", _dias_pr, index=_idx_pr,
                         format_func=lambda d: f"{_DIA_FULL_PR[d.weekday()]} {d.strftime('%d/%m')}",
                         key="pr_dia_pick")
-                    _dd = _df_v[_df_v["_fprog_dt"].dt.date == _dia_pr]
+                    st.caption(
+                        "Muestra las MPs cuya fecha efectiva (planificada en Excel, "
+                        "tentativa Fracttal, o de ejecución real) cae en el día "
+                        "seleccionado. Cada tarjeta indica si la MP estaba "
+                        "**planificada este día** o **ejecutada este día** (aunque "
+                        "la planificación original fuese diferente)."
+                    )
+                    _dd = _df_v[_df_v["_fprog_dt"].dt.date == _dia_pr].copy()
+                    # Marcar si el día seleccionado coincide con la F. Programada
+                    # original del Excel (planificada para ese día) o si viene de
+                    # una ejecución real / fecha tentativa Fracttal.
+                    def _origen_dia(row, dia):
+                        _fp_excel = row.get("_fprog_dt_excel_orig")
+                        if pd.notna(_fp_excel) and _fp_excel.date() == dia:
+                            return "planif"
+                        return "ejec"
+                    # Recomputo la F. Programada original solo de Excel (para
+                    # distinguir de las que fueron rellenadas con Fracttal/real)
+                    _fpo = pd.to_datetime(_dd.get("F. Programada"), errors="coerce")
+                    if hasattr(_fpo, "dt") and _fpo.dt.tz is not None:
+                        _fpo = _fpo.dt.tz_convert(None)
+                    _dd["_fprog_dt_excel_orig"] = _fpo
+                    _dd["_origen_dia"] = _dd.apply(
+                        lambda r: _origen_dia(r, _dia_pr), axis=1)
+
                     _cols_html = ""
                     for _est in ["⚠️ Vencida","🕓 Pendiente","✅ Realizada"]:
                         _sub = _dd[_dd["Estado"] == _est]
                         if _sub.empty:
                             continue
                         _c, _bg, _ = _EST_PR[_est]
-                        _cards = "".join(_card_eds(r) for _, r in _sub.iterrows())
+                        _cards = ""
+                        for _, r in _sub.iterrows():
+                            _card_html = _card_eds(r)
+                            # Insertar badge planif/ejec justo después del código EDS
+                            if r["_origen_dia"] == "planif":
+                                _badge_dia = ('<span style="background:#dcfce7;color:#166534;'
+                                              'font-size:.6rem;font-weight:700;padding:1px 5px;'
+                                              'border-radius:4px;margin-left:4px">'
+                                              '📅 planificada este día</span>')
+                            else:
+                                _badge_dia = ('<span style="background:#fef3c7;color:#92400e;'
+                                              'font-size:.6rem;font-weight:700;padding:1px 5px;'
+                                              'border-radius:4px;margin-left:4px" '
+                                              'title="Ejecutada este día; la planificación original en Excel era otra semana o no se hizo aquí.">'
+                                              '⚡ ejecutada aquí</span>')
+                            # Insertar badge después del primer </div> del top
+                            _card_html = _card_html.replace(
+                                '</div><div class="eds"',
+                                _badge_dia + '</div><div class="eds"',
+                                1,
+                            )
+                            _cards += _card_html
                         _cols_html += (
                             f'<div style="background:#f1f5f9;border:1px solid #e2e8f0;'
                             f'border-radius:12px;padding:12px;min-width:230px;flex:1">'
@@ -13721,40 +13766,40 @@ elif _page == _NAV_PAGES[2]:
                                 f'align-items:flex-start">{_cols_html}</div>',
                                 unsafe_allow_html=True)
                 else:
-                    st.info("Sin MPs con **fecha exacta** en este filtro. La mayoría "
-                            "del Excel se planifica por semana (ver sección de abajo).")
-
-                # ── MPs programadas sin fecha exacta (agrupadas por semana) ──
-                if not _df_sinfec.empty:
-                    st.markdown(
-                        '<div style="margin-top:22px;padding:10px 14px;'
-                        'background:#fff7ed;border-left:4px solid #f59e0b;'
-                        'border-radius:6px;font-size:.85rem;color:#92400e">'
-                        '📅 <b>Sin día ni en Excel ni en Fracttal</b> — planificadas '
-                        'por semana en el Excel y aún sin OT creada en Fracttal.</div>',
-                        unsafe_allow_html=True)
-                    _sems_orden = ["Semana 1","Semana 2","Semana 3","Semana 4",
-                                   "Semana 5","Semana ?","Sin semana"]
-                    _sems_pres = [s for s in _sems_orden
-                                  if s in _df_sinfec["_sem_norm"].unique()]
-                    _cols_html2 = ""
-                    for _s in _sems_pres:
-                        _sub = _df_sinfec[_df_sinfec["_sem_norm"] == _s]
-                        _cards = "".join(_card_eds(r) for _, r in _sub.iterrows())
-                        _cols_html2 += (
-                            f'<div style="background:#fefce8;border:1px solid #fde68a;'
-                            f'border-radius:12px;padding:12px;min-width:240px;flex:1">'
-                            f'<div style="font-size:.8rem;font-weight:700;margin-bottom:10px;'
-                            f'color:#92400e;text-transform:uppercase">'
-                            f'{_s} <span style="background:#fff;border:1px solid #fde68a;'
-                            f'border-radius:20px;padding:1px 8px;font-size:.72rem;color:#78350f;'
-                            f'float:right">{len(_sub)}</span></div>{_cards}</div>')
-                    st.markdown(f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
-                                f'align-items:flex-start;margin-top:8px">{_cols_html2}</div>',
-                                unsafe_allow_html=True)
+                    st.info("Sin MPs con fecha exacta en este filtro. Cambia a "
+                            "vista **📊 Semana** para ver las planificadas por semana "
+                            "sin día específico.")
 
             # ═══════════ SEMANA ═══════════
             elif _vista_pr == "📊 Semana":
+                # Leyenda de colores (borde izquierdo de cada tarjeta)
+                st.markdown(
+                    '<div style="display:flex;gap:16px;flex-wrap:wrap;'
+                    'background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;'
+                    'padding:8px 14px;margin-bottom:10px;font-size:.8rem">'
+                    '<div style="display:flex;align-items:center;gap:6px">'
+                    '<span style="display:inline-block;width:12px;height:12px;'
+                    'background:#16a34a;border-radius:2px"></span>'
+                    '<b style="color:#166534">Realizada</b> — cerrada con fecha real'
+                    '</div>'
+                    '<div style="display:flex;align-items:center;gap:6px">'
+                    '<span style="display:inline-block;width:12px;height:12px;'
+                    'background:#0284c7;border-radius:2px"></span>'
+                    '<b style="color:#075985">Pendiente</b> — planificada, aún sin ejecutar'
+                    '</div>'
+                    '<div style="display:flex;align-items:center;gap:6px">'
+                    '<span style="display:inline-block;width:12px;height:12px;'
+                    'background:#dc2626;border-radius:2px"></span>'
+                    '<b style="color:#991b1b">Vencida</b> — fecha pasó y no se hizo'
+                    '</div>'
+                    '<div style="display:flex;align-items:center;gap:6px;color:#78350f">'
+                    '<span style="background:#fefce8;border:1px solid #fde68a;'
+                    'padding:1px 6px;border-radius:4px;font-size:.7rem;font-weight:700">'
+                    '📅 Sin día exacto</span> planificadas por semana sin día fijo'
+                    '</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
                 # Semana del MES (1..5) — más útil que la ISO week porque el Excel
                 # planifica en "1era/2da/3era/4ta/5ta semana" del mes.
                 def _wk_mes(d):
