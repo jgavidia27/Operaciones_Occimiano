@@ -801,6 +801,11 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "resources_hours", "resources_services",
         ])
 
+        # Tipo de mantenimiento (necesario para el bloque de duración).
+        # Se calcula aquí temprano; abajo se reusa en Causa raíz.
+        maint_type_raw = (wo.get("tasks_log_task_type_main") or "").strip().upper()
+        es_correctiva = "CORRECTIVA" in maint_type_raw
+
         # Duración real y estimada.
         # ══════════════════════════════════════════════════════════════
         # REGLA CRÍTICA (blindaje contra bug OS-38480/38481):
@@ -860,8 +865,8 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         # ── Causa raíz ────────────────────────────────────────────────────────
         raw_causa = (wo.get("causes_description") or "").strip()
         causa_clasif = classify_causa_raiz(raw_causa)
-        maint_type_raw = (wo.get("tasks_log_task_type_main") or "").strip().upper()
-        es_correctiva = "CORRECTIVA" in maint_type_raw
+        # maint_type_raw y es_correctiva ya calculados arriba (antes del
+        # bloque de duración). Se re-usan aquí para la lógica de causa.
 
         # Causa raíz aplica a AMBOS tipos (MC y MP).
         # MC: debe tener código Fracttal válido (01.x – 04.x) o keyword reconocida.
