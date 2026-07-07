@@ -9855,1755 +9855,1770 @@ elif _page == _NAV_PAGES[0]:
                     unsafe_allow_html=True,
                 )
 
-            # ── Sub-pestañas de Precisión Fracttal ────────────────────────
-            # Los KPIs globales y filtros quedan arriba (aplican a todas las
-            # sub-pestañas). Cada sub-tab agrupa su desglose para reducir
-            # el scroll y facilitar la navegación.
-            _pt_res, _pt_causa, _pt_tiempo, _pt_num = st.tabs([
-                "📌 Resumen General",
-                "🔍 Causa Raíz (MC y MP)",
-                "⏱ Tiempo de Ejecución (Preventivos)",
-                "🔢 Registro de Numerales",
-            ])
+            # ── Selector de vista (radio en lugar de sub-tabs) ────────────
+            # Antes usábamos st.tabs anidadas dentro de tab_prec, pero
+            # Streamlit tiene un bug con tabs anidadas + reruns donde el
+            # contenido de tabs vecinos (Resumen Bonos) se "cuela" bajo
+            # la tab activa. Usar radio + if garantiza que SOLO el bloque
+            # activo se ejecuta.
+            _V_RES    = "📌 Resumen General"
+            _V_CAUSA  = "🔍 Causa Raíz (MC y MP)"
+            _V_TIEMPO = "⏱ Tiempo de Ejecución (Preventivos)"
+            _V_NUM    = "🔢 Registro de Numerales"
+            _prec_view = st.radio(
+                "Vista Precisión",
+                [_V_RES, _V_CAUSA, _V_TIEMPO, _V_NUM],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="prec_view_selector",
+            )
+            _pt_res    = st.container()
+            _pt_causa  = st.container()
+            _pt_tiempo = st.container()
+            _pt_num    = st.container()
 
-            with _pt_res:
-                st.markdown('<div class="section-header">📊 Desglose del puntaje por dimensión</div>',
-                            unsafe_allow_html=True)
-                st.caption(
-                    f"Promedio mensual de **{total_ots_mes:,}** OTs  |  "
-                    f"Técnicos: **{total_tecnicos}**  |  Período: **{_mes_lbl_prec}**"
-                )
-
-                # Usar pct_* ya calculadas con el denominador correcto:
-                #   pct_tiempo  → solo preventivas (MC tienen 25 auto, no cuentan)
-                #   pct_causa   → solo correctivas (MP tienen 25 auto, no aplica)
-                #   pct_numeral → toda lavadora/aspiradora (MC+MP) — el formulario lo exige
-                dim_avg = {
-                    "⏱ Tiempo ejecución (25 pts)":   pct_tiempo  / 100 * 25,
-                    "🔍 Causa raíz (25 pts)":         pct_causa   / 100 * 25,
-                    "🔢 Numeral registrado (25 pts)": pct_numeral / 100 * 25,
-                }
-                dim_max = {k: 25 for k in dim_avg}
-                dim_colors = ["#f59e0b", "#3b82f6", "#22c55e"]
-
-                dim_df = pd.DataFrame([
-                    {
-                        "Dimensión": k,
-                        "Puntaje promedio": round(v, 1),
-                        "Máximo": dim_max[k],
-                        "% de máximo": round(v / dim_max[k] * 100, 1),
-                    }
-                    for k, v in dim_avg.items()
-                ])
-
-                _prec_sig = f"{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}_{_trim_prec}"
-                dc1, dc2 = st.columns([3, 2])
-                with dc1:
-                    _dim_k = f"_fig_prec_dim_{_current_theme}_{_prec_sig}"
-                    if _dim_k not in st.session_state:
-                        fig_dim = px.bar(
-                            dim_df, x="Puntaje promedio", y="Dimensión",
-                            orientation="h",
-                            color="Dimensión",
-                            color_discrete_sequence=dim_colors,
-                            text=dim_df["Puntaje promedio"].apply(lambda v: f"{v:.1f}"),
-                            labels={"Puntaje promedio": "Puntaje promedio (escala de cada dimensión)"},
-                        )
-                        fig_dim.update_traces(textposition="outside")
-                        fig_dim.update_layout(
-                            showlegend=False, height=200,
-                            margin=dict(t=10, b=10, l=10, r=60),
-                            xaxis=dict(range=[0, 40]),
-                            yaxis={"categoryorder": "array",
-                                   "categoryarray": list(reversed(list(dim_avg.keys())))},
-                        )
-                        _apply_plot_theme(fig_dim)
-                        st.session_state[_dim_k] = fig_dim
-                    st.plotly_chart(st.session_state[_dim_k], width="stretch")
-                with dc2:
-                    for row in dim_df.itertuples():
-                        pct = row._4  # % de máximo
-                        color = "#22c55e" if pct >= 99 else ("#f59e0b" if pct >= 90 else "#ef4444")
-                        st.markdown(
-                            f'<div style="margin-bottom:10px;">'
-                            f'<div style="display:flex;justify-content:space-between;'
-                            f'font-size:0.82rem;color:{_t["muted"]};margin-bottom:2px;">'
-                            f'<span>{row.Dimensión}</span>'
-                            f'<span style="color:{color};font-weight:700">{pct:.0f}%</span></div>'
-                            f'<div style="background:{_t["prog_bg"]};border-radius:4px;height:10px;">'
-                            f'<div style="background:{color};width:{min(pct,100):.0f}%;'
-                            f'height:10px;border-radius:4px;"></div></div></div>',
-                            unsafe_allow_html=True,
-                        )
-
-                # (Tarjetas de bono movidas arriba, justo bajo los filtros)
-
-                # ══════════════════════════════════════════════════════════════════
-                # SECCIÓN: CAUSA RAÍZ
-                # ══════════════════════════════════════════════════════════════════
-                st.divider()
-
-                if not df_tec_scores_rank.empty:
-                    _tec_base = df_tec_scores_rank[df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)].copy()
-
-                    # Guards para columnas nuevas (caches pre-migración)
-                    _guards = {
-                        "err_total_dim":      lambda b: b["n_errores"],
-                        "err_tiempo":         lambda b: 0,
-                        "err_causa":          lambda b: 0,
-                        "err_numeral":        lambda b: 0,
-                        "err_deteccion":      lambda b: 0,
-                        "ots_correctas":      lambda b: b["ots_evaluadas"] - b["n_errores"],
-                        # Denominadores por dimensión (fallback: total OTs si no hay dato)
-                        "tiempo_aplica_count":  lambda b: b["ots_evaluadas"],
-                        "causa_aplica_count":   lambda b: b["ots_evaluadas"],
-                        "numeral_aplica_count": lambda b: b["ots_evaluadas"],
-                        "tiempo_ok_count":    lambda b: (b["ots_evaluadas"] * b["pct_tiempo_ok"]    / 100).round(0).astype(int),
-                        "causa_ok_count":     lambda b: (b["ots_evaluadas"] * b["pct_causa_ok"]     / 100).round(0).astype(int),
-                        "numeral_ok_count":   lambda b: (b["ots_evaluadas"] * b["pct_numeral_ok"]   / 100).round(0).astype(int),
-                        "deteccion_ok_count": lambda b: (b["ots_evaluadas"] * b.get("pct_deteccion_ok", pd.Series(0, index=b.index)) / 100).round(0).astype(int),
-                        "pct_deteccion_ok":   lambda b: pd.Series(0.0, index=b.index),
-                    }
-                    for _cg, _fb in _guards.items():
-                        if _cg not in _tec_base.columns:
-                            try: _tec_base[_cg] = _fb(_tec_base)
-                            except Exception: _tec_base[_cg] = 0
-                    if "exactitud_pct" not in _tec_base.columns:
-                        _tec_base["exactitud_pct"] = (
-                            (1 - _tec_base["n_errores"] / _tec_base["ots_evaluadas"].clip(lower=1)) * 100
-                        ).round(1)
-
-                    # Formato "X/Y (Z%)" por dimensión — usa el DENOMINADOR CORRECTO
-                    # (OTs donde aplica cada dimensión), no ots_evaluadas total.
-                    # Si el técnico no tiene ninguna OT que aplique esa dimensión,
-                    # se muestra "—" en vez de "0/0 (0.0%)".
-                    def _fmt_dim(ok, aplica, pct):
-                        try:
-                            ap_i = int(aplica) if pd.notna(aplica) else 0
-                            if ap_i == 0:
-                                return "—"
-                            ok_i  = int(ok)   if pd.notna(ok)   else 0
-                            pct_f = float(pct) if pd.notna(pct) else 0.0
-                            return f"{ok_i}/{ap_i} ({pct_f:.1f}%)"
-                        except (ValueError, TypeError):
-                            return "—"
-
-                    # Si _tec_base quedó vacío (p.ej. técnico seleccionado no está
-                    # en TECNICOS_OCCIMIANO_FULL) creamos columnas vacías manualmente
-                    # para no romper el layout con apply sobre DataFrame vacío.
-                    if _tec_base.empty:
-                        for _c in ("col_tiempo", "col_causa", "col_numeral", "col_deteccion"):
-                            _tec_base[_c] = pd.Series(dtype="object")
-                    else:
-                        _tec_base["col_tiempo"]    = _tec_base.apply(lambda r: _fmt_dim(r["tiempo_ok_count"],  r.get("tiempo_aplica_count"),  r["pct_tiempo_ok"]),  axis=1)
-                        _tec_base["col_causa"]     = _tec_base.apply(lambda r: _fmt_dim(r["causa_ok_count"],   r.get("causa_aplica_count"),   r["pct_causa_ok"]),   axis=1)
-                        _tec_base["col_numeral"]   = _tec_base.apply(lambda r: _fmt_dim(r["numeral_ok_count"], r.get("numeral_aplica_count"), r["pct_numeral_ok"]), axis=1)
-                        _tec_base["col_deteccion"] = _tec_base.apply(lambda r: _fmt_dim(r["deteccion_ok_count"], r["ots_evaluadas"], r["pct_deteccion_ok"]), axis=1)
-
-                    st.markdown('<div class="section-header">📋 Resumen por técnico</div>',
+            if _prec_view == _V_RES:
+                with _pt_res:
+                    st.markdown('<div class="section-header">📊 Desglose del puntaje por dimensión</div>',
                                 unsafe_allow_html=True)
-                    tec_disp = _tec_base[[
-                        "tecnico", "ots_evaluadas", "ots_correctas", "n_errores",
-                        "col_tiempo", "col_causa", "col_numeral",
-                        "exactitud_pct", "bono_label",
-                    ]].copy()
-
-                    # Orden por defecto: mejor a peor % Exactitud (desempata por
-                    # cantidad de OTs para que técnicos con más volumen queden
-                    # arriba en caso de empate en 100%).
-                    tec_disp = tec_disp.sort_values(
-                        ["exactitud_pct","ots_evaluadas"],
-                        ascending=[False, False]).reset_index(drop=True)
-
-                    tec_disp.columns = [
-                        "Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
-                        "⏱ Tiempo OK", "🔍 Causa OK", "🔢 Numeral OK",
-                        "Exactitud %", "Bono semanal",
-                    ]
-
-                    _show_df(
-                        tec_disp, width="stretch", hide_index=True,
-                        column_config={
-                            "OTs evaluadas":       st.column_config.NumberColumn(format="%d"),
-                            "OTs sin error":       st.column_config.NumberColumn(
-                                help="OTs donde los 3 componentes estuvieron correctos.", format="%d"),
-                            "OTs con error":       st.column_config.NumberColumn(
-                                help="OTs con al menos 1 componente incorrecto — estas cuentan para el KPI.", format="%d"),
-                            "⏱ Tiempo OK":         st.column_config.TextColumn(
-                                help="OTs Preventivas con tiempo ≥75% del estimado / total MP del técnico"),
-                            "🔍 Causa OK":          st.column_config.TextColumn(
-                                help="OTs Correctivas con causa raíz válida / total MC del técnico"),
-                            "🔢 Numeral OK":        st.column_config.TextColumn(
-                                help="OTs de lavadora/aspiradora con numeral registrado / total en esos equipos"),
-                            "Exactitud %":         st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
-                        },
+                    st.caption(
+                        f"Promedio mensual de **{total_ots_mes:,}** OTs  |  "
+                        f"Técnicos: **{total_tecnicos}**  |  Período: **{_mes_lbl_prec}**"
                     )
 
-                # ── Evolución mensual (últimos 6 meses) ───────────────────────────────
-                st.divider()
-                st.markdown('<div class="section-header">📈 Evolución mensual del índice de llenado</div>',
-                            unsafe_allow_html=True)
+                    # Usar pct_* ya calculadas con el denominador correcto:
+                    #   pct_tiempo  → solo preventivas (MC tienen 25 auto, no cuentan)
+                    #   pct_causa   → solo correctivas (MP tienen 25 auto, no aplica)
+                    #   pct_numeral → toda lavadora/aspiradora (MC+MP) — el formulario lo exige
+                    dim_avg = {
+                        "⏱ Tiempo ejecución (25 pts)":   pct_tiempo  / 100 * 25,
+                        "🔍 Causa raíz (25 pts)":         pct_causa   / 100 * 25,
+                        "🔢 Numeral registrado (25 pts)": pct_numeral / 100 * 25,
+                    }
+                    dim_max = {k: 25 for k in dim_avg}
+                    dim_colors = ["#f59e0b", "#3b82f6", "#22c55e"]
 
-                ultimos_6 = meses_disp[:6]  # ya están ordenados desc
-                # Usar df_ot_all pre-computado: solo slice, sin recalcular scores
-                ot_hist = df_ot_all[df_ot_all["mes"].isin(ultimos_6)].copy()
-                if equipo_kpi != "Todos":
-                    _grp_kpi_h = _LABEL_TO_GRUPO.get(equipo_kpi)
-                    if _grp_kpi_h:
-                        ot_hist = ot_hist[ot_hist["equipo"] == _grp_kpi_h]
-                if tec_kpi_sel != "Todos":
-                    ot_hist = ot_hist[ot_hist["tecnico"] == tec_kpi_sel]
-                # df_ot_all ya trae columna "mes" — no hace falta recalcular
-                if not ot_hist.empty:
-                    trend = (
-                        ot_hist.groupby("mes")
-                        .agg(
-                            score_global= ("score_total",  "mean"),
-                            pct_tiempo=   ("score_tiempo", lambda x: (x >= 34).mean() * 100),
-                            pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
-                            pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
-                            ots=          ("folio",        "count"),
-                        )
-                        .reset_index()
-                        .sort_values("mes")
-                    )
-                    trend = trend.round(1)
-
-                    _trend_k = f"_fig_prec_trend_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
-                    if _trend_k not in st.session_state:
-                        fig_trend = px.line(
-                            trend, x="mes", y="score_global",
-                            markers=True, text="score_global",
-                            labels={"mes": "Mes", "score_global": "Score global (0-100)"},
-                            title="Score global de llenado por mes",
-                        )
-                        fig_trend.update_traces(
-                            textposition="top center",
-                            line_color="#3b82f6",
-                            marker=dict(size=8),
-                        )
-                        fig_trend.add_hline(y=100, line_dash="dash", line_color=_SCORE_COLOR["verde"],
-                                            annotation_text="Score perfecto (0 errores)")
-                        fig_trend.update_layout(
-                            yaxis=dict(range=[0, 105]),
-                            height=320,
-                            margin=dict(t=40, b=30),
-                        )
-                        _apply_plot_theme(fig_trend)
-                        st.session_state[_trend_k] = fig_trend
-                    st.plotly_chart(st.session_state[_trend_k], width="stretch")
-
-                # ── Drill-down: OTs individuales de un técnico ────────────────────────
-                st.divider()
-                st.markdown('<div class="section-header">🔍 Detalle de OTs por técnico</div>',
-                            unsafe_allow_html=True)
-                st.caption(
-                    "Selecciona uno o varios técnicos para ver el historial completo de sus OTs del periodo. "
-                    "Vacío = todos los técnicos del filtro actual (equipo seleccionado)."
-                )
-
-                if not df_tec_scores.empty:
-                    _tec_opts = df_tec_scores["tecnico"].tolist()
-                    tec_drill_list = st.multiselect(
-                        "Técnico(s)",
-                        _tec_opts,
-                        default=[],
-                        key="kpi_drill_tec",
-                        placeholder="Todos los técnicos del equipo",
-                    )
-                    if tec_drill_list:
-                        df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(tec_drill_list)].copy()
-                        _tec_drill_lbl = (", ".join(tec_drill_list) if len(tec_drill_list) <= 3
-                                          else f"{len(tec_drill_list)} técnicos seleccionados")
-                    else:
-                        # Sin selección explícita → todos los técnicos disponibles en df_ot_scores
-                        df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(_tec_opts)].copy()
-                        _tec_drill_lbl = f"Todos ({df_drill['tecnico'].nunique()} técnicos)"
-                    df_drill = df_drill.sort_values(["tecnico","score_total"], ascending=[True, True])
-
-                    if not df_drill.empty:
-                        avg_drill = df_drill["score_total"].mean()
-                        color_d, lbl_d = _score_level(avg_drill)
-                        st.markdown(
-                            f'<div style="background:{color_d}18;border-left:4px solid {color_d};'
-                            f'border-radius:8px;padding:10px 14px;margin-bottom:8px;">'
-                            f'<b style="color:{color_d}">{_tec_drill_lbl}</b> — '
-                            f'Score promedio: <b>{avg_drill:.1f}/100</b> &nbsp; {lbl_d} &nbsp; | &nbsp; '
-                            f'<b>{len(df_drill)}</b> OTs en {_mes_lbl_prec}</div>',
-                            unsafe_allow_html=True,
-                        )
-
-                        # ── Construir columnas de display una por una (sin riesgo de desajuste) ──
-
-                        drill_disp = df_drill.copy()
-
-                        # Scores por componente (con guard para cache viejo)
-                        _s = drill_disp["score_tiempo"]  if "score_tiempo"    in drill_disp.columns else pd.Series(0, index=drill_disp.index)
-                        _c = drill_disp["score_causa"]   if "score_causa"     in drill_disp.columns else pd.Series(0, index=drill_disp.index)
-                        _n = drill_disp["score_numeral"] if "score_numeral"   in drill_disp.columns else pd.Series(0, index=drill_disp.index)
-                        _d = drill_disp["score_deteccion"] if "score_deteccion" in drill_disp.columns else pd.Series(0, index=drill_disp.index)
-                        # KPI: solo 3 componentes (tiempo, causa, numeral) — Modalidad excluida
-                        _ok_bits = ((_s >= 25).astype(int) + (_c >= 25).astype(int) +
-                                    (_n >= 25).astype(int))
-
-                        # Columna 1: Cumple
-                        drill_disp["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 3 else "❌ Con error")
-
-                        # Columna 2: X/3
-                        drill_disp["_x4"] = _ok_bits.apply(
-                            lambda n: f"{n}/3 {'✅' if n == 3 else ('⚠️' if n >= 2 else '❌')}")
-
-                        # Columna 3: Tipo (title case)
-                        drill_disp["_tipo"] = drill_disp["maint_type"].fillna("").str.title()
-
-                        # Columna 3a: Tipo(s) de equipo del OT — icono + label.
-                        # Sirve para leer de un vistazo por qué el numeral aplica o no
-                        # (lavadora sí aplica; ablandador/bomba no; OT mixta muestra
-                        # todos los tipos separados por '+').
-                        _EQUIPO_TIPOS = [
-                            (r"HIDROLAVAD", "💦 Hidrolavadora"),
-                            (r"LAVAINT",    "🧼 Lavainteriores"),
-                            (r"LAVAD",      "🚿 Lavadora"),
-                            (r"ASPIRA",     "🧹 Aspiradora"),
-                            (r"ABLAND",     "💧 Ablandador"),
-                            (r"HIDROPACK",  "🛢️ Hidropack"),
-                            (r"BOMBA",      "⚙️ Bomba"),
-                            (r"TERMO",      "🔥 Termo"),
-                            (r"COMPRESOR",  "🌬️ Compresor"),
-                            (r"TWISTER",    "🌀 Twister"),
-                            (r"SKID",       "🛠️ Skid"),
-                        ]
-                        import re as _re_tipo
-                        def _fmt_tipo_equipo(nom: str) -> str:
-                            s = str(nom or "").upper()
-                            if not s or s == "—":
-                                return "—"
-                            tipos = []
-                            for pat, lbl in _EQUIPO_TIPOS:
-                                if _re_tipo.search(pat, s) and lbl not in tipos:
-                                    tipos.append(lbl)
-                            return " + ".join(tipos) if tipos else "🔧 Otro"
-                        _eq_src = (drill_disp["equipo_nombre"]
-                                   if "equipo_nombre" in drill_disp.columns
-                                   else pd.Series("", index=drill_disp.index))
-                        drill_disp["_tipo_equipo"] = _eq_src.fillna("").apply(_fmt_tipo_equipo)
-
-                        # Columna 3b: Modalidad de atención (informativa, no KPI).
-                        # Simplificamos '1.- ATENDIDO PRESENCIAL' → 'Presencial',
-                        # '2.- ATENDIDO VÍA REMOTA' → 'Remoto', etc.
-                        _MOD_MAP = {
-                            "1.- ATENDIDO PRESENCIAL": "🚗 Presencial",
-                            "2.- ATENDIDO VÍA REMOTA": "📞 Remoto",
-                            "2.- ATENDIDO VIA REMOTA": "📞 Remoto",
-                            "3.- ATENDIDO CON SU MP":  "🔧 Con MP",
-                            "4.- LLAMADO DUPLICADO":   "⚠️ Duplicado",
-                            "SIN CLASIFICAR":          "❔ Sin clasificar",
-                            "":                        "—",
+                    dim_df = pd.DataFrame([
+                        {
+                            "Dimensión": k,
+                            "Puntaje promedio": round(v, 1),
+                            "Máximo": dim_max[k],
+                            "% de máximo": round(v / dim_max[k] * 100, 1),
                         }
-                        _mod_src = (drill_disp["deteccion_raw"]
-                                    if "deteccion_raw" in drill_disp.columns
-                                    else pd.Series("", index=drill_disp.index))
-                        drill_disp["_modalidad"] = _mod_src.fillna("").apply(
-                            lambda v: _MOD_MAP.get(str(v).strip().upper(), str(v).strip().title() or "—")
-                        )
+                        for k, v in dim_avg.items()
+                    ])
 
-                        # Columna 4: ⏱ Tiempo — valor en minutos + ✅/❌
-                        _em = drill_disp["elapsed_min"] if "elapsed_min" in drill_disp.columns else pd.Series(0.0, index=drill_disp.index)
-                        drill_disp["_col_tiempo"] = drill_disp.apply(
-                            lambda r: f"{'✅' if _s[r.name] >= 25 else '❌'} {_em[r.name]:.0f} min",
-                            axis=1)
+                    _prec_sig = f"{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}_{_trim_prec}"
+                    dc1, dc2 = st.columns([3, 2])
+                    with dc1:
+                        _dim_k = f"_fig_prec_dim_{_current_theme}_{_prec_sig}"
+                        if _dim_k not in st.session_state:
+                            fig_dim = px.bar(
+                                dim_df, x="Puntaje promedio", y="Dimensión",
+                                orientation="h",
+                                color="Dimensión",
+                                color_discrete_sequence=dim_colors,
+                                text=dim_df["Puntaje promedio"].apply(lambda v: f"{v:.1f}"),
+                                labels={"Puntaje promedio": "Puntaje promedio (escala de cada dimensión)"},
+                            )
+                            fig_dim.update_traces(textposition="outside")
+                            fig_dim.update_layout(
+                                showlegend=False, height=200,
+                                margin=dict(t=10, b=10, l=10, r=60),
+                                xaxis=dict(range=[0, 40]),
+                                yaxis={"categoryorder": "array",
+                                       "categoryarray": list(reversed(list(dim_avg.keys())))},
+                            )
+                            _apply_plot_theme(fig_dim)
+                            st.session_state[_dim_k] = fig_dim
+                        st.plotly_chart(st.session_state[_dim_k], width="stretch")
+                    with dc2:
+                        for row in dim_df.itertuples():
+                            pct = row._4  # % de máximo
+                            color = "#22c55e" if pct >= 99 else ("#f59e0b" if pct >= 90 else "#ef4444")
+                            st.markdown(
+                                f'<div style="margin-bottom:10px;">'
+                                f'<div style="display:flex;justify-content:space-between;'
+                                f'font-size:0.82rem;color:{_t["muted"]};margin-bottom:2px;">'
+                                f'<span>{row.Dimensión}</span>'
+                                f'<span style="color:{color};font-weight:700">{pct:.0f}%</span></div>'
+                                f'<div style="background:{_t["prog_bg"]};border-radius:4px;height:10px;">'
+                                f'<div style="background:{color};width:{min(pct,100):.0f}%;'
+                                f'height:10px;border-radius:4px;"></div></div></div>',
+                                unsafe_allow_html=True,
+                            )
 
-                        # Columna 5: 🔍 Causa raíz — texto + ✅/❌
-                        def _fmt_causa(r):
-                            es_corr = r.get("es_correctiva", True)
-                            raw = str(r.get("causa_raiz_raw","") or "").strip()
-                            ok  = _c[r.name] >= 25
-                            if not es_corr:
-                                return "✅ Preventiva (no aplica)"
-                            if ok:
-                                return f"✅ {raw[:38]}" if raw else "✅ Registrada"
-                            # Descuido atribuible: no clasificó pero SÍ describió la falla
-                            if r.get("causa_sin_clasif_con_desglose", False):
-                                return "🔴 No clasificó (sí describió la falla)"
-                            return f"❌ {raw[:35]}" if raw else "❌ Sin causa"
-                        drill_disp["_col_causa"] = drill_disp.apply(_fmt_causa, axis=1)
+                    # (Tarjetas de bono movidas arriba, justo bajo los filtros)
 
-                        # Columna 6: 🔢 Numeral — calidad: no aplica / registrado / motivo del dato malo
-                        def _fmt_col_numeral(r):
-                            if not r.get("es_lavadora", True):
-                                return "🔵 No aplica"
-                            if r.get("numeral_ok", False):
-                                return "✅ Registrado"
-                            return NUMERAL_MOTIVO_LABEL.get(
-                                str(r.get("numeral_motivo", "") or ""), "❌ Dato inválido")
-                        drill_disp["_col_numeral"] = drill_disp.apply(
-                            _fmt_col_numeral,
-                            axis=1)
+                    # ══════════════════════════════════════════════════════════════════
+                    # SECCIÓN: CAUSA RAÍZ
+                    # ══════════════════════════════════════════════════════════════════
+                    st.divider()
 
-                        # Columna 7: 💬 Observación — descripción de qué falló (3 componentes KPI)
-                        _nombres_comp = {0: "Tiempo", 1: "Causa raíz", 2: "Numeral"}
-                        _scores_comp  = [_s, _c, _n]
-                        def _obs(r):
-                            fallos = [_nombres_comp[i] for i, sc in enumerate(_scores_comp)
-                                      if sc[r.name] < 25]
-                            if not fallos:
-                                return "✅ Registro perfecto"
-                            return "⚠️ No cumple: " + ", ".join(fallos)
-                        drill_disp["_obs"] = drill_disp.apply(_obs, axis=1)
+                    if not df_tec_scores_rank.empty:
+                        _tec_base = df_tec_scores_rank[df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)].copy()
 
-                        # Columna 8: Fecha cierre
-                        drill_disp["_fecha"] = pd.to_datetime(
-                            drill_disp["final_date"], errors="coerce"
-                        ).dt.strftime("%d/%m/%Y")
+                        # Guards para columnas nuevas (caches pre-migración)
+                        _guards = {
+                            "err_total_dim":      lambda b: b["n_errores"],
+                            "err_tiempo":         lambda b: 0,
+                            "err_causa":          lambda b: 0,
+                            "err_numeral":        lambda b: 0,
+                            "err_deteccion":      lambda b: 0,
+                            "ots_correctas":      lambda b: b["ots_evaluadas"] - b["n_errores"],
+                            # Denominadores por dimensión (fallback: total OTs si no hay dato)
+                            "tiempo_aplica_count":  lambda b: b["ots_evaluadas"],
+                            "causa_aplica_count":   lambda b: b["ots_evaluadas"],
+                            "numeral_aplica_count": lambda b: b["ots_evaluadas"],
+                            "tiempo_ok_count":    lambda b: (b["ots_evaluadas"] * b["pct_tiempo_ok"]    / 100).round(0).astype(int),
+                            "causa_ok_count":     lambda b: (b["ots_evaluadas"] * b["pct_causa_ok"]     / 100).round(0).astype(int),
+                            "numeral_ok_count":   lambda b: (b["ots_evaluadas"] * b["pct_numeral_ok"]   / 100).round(0).astype(int),
+                            "deteccion_ok_count": lambda b: (b["ots_evaluadas"] * b.get("pct_deteccion_ok", pd.Series(0, index=b.index)) / 100).round(0).astype(int),
+                            "pct_deteccion_ok":   lambda b: pd.Series(0.0, index=b.index),
+                        }
+                        for _cg, _fb in _guards.items():
+                            if _cg not in _tec_base.columns:
+                                try: _tec_base[_cg] = _fb(_tec_base)
+                                except Exception: _tec_base[_cg] = 0
+                        if "exactitud_pct" not in _tec_base.columns:
+                            _tec_base["exactitud_pct"] = (
+                                (1 - _tec_base["n_errores"] / _tec_base["ots_evaluadas"].clip(lower=1)) * 100
+                            ).round(1)
 
-                        # EDS y Técnico (para identificar la fila en vista multi-técnico)
-                        if "eds_occim" in drill_disp.columns:
-                            drill_disp["_eds"] = drill_disp["eds_occim"].fillna("").replace("", "—")
+                        # Formato "X/Y (Z%)" por dimensión — usa el DENOMINADOR CORRECTO
+                        # (OTs donde aplica cada dimensión), no ots_evaluadas total.
+                        # Si el técnico no tiene ninguna OT que aplique esa dimensión,
+                        # se muestra "—" en vez de "0/0 (0.0%)".
+                        def _fmt_dim(ok, aplica, pct):
+                            try:
+                                ap_i = int(aplica) if pd.notna(aplica) else 0
+                                if ap_i == 0:
+                                    return "—"
+                                ok_i  = int(ok)   if pd.notna(ok)   else 0
+                                pct_f = float(pct) if pd.notna(pct) else 0.0
+                                return f"{ok_i}/{ap_i} ({pct_f:.1f}%)"
+                            except (ValueError, TypeError):
+                                return "—"
+
+                        # Si _tec_base quedó vacío (p.ej. técnico seleccionado no está
+                        # en TECNICOS_OCCIMIANO_FULL) creamos columnas vacías manualmente
+                        # para no romper el layout con apply sobre DataFrame vacío.
+                        if _tec_base.empty:
+                            for _c in ("col_tiempo", "col_causa", "col_numeral", "col_deteccion"):
+                                _tec_base[_c] = pd.Series(dtype="object")
                         else:
-                            drill_disp["_eds"] = "—"
+                            _tec_base["col_tiempo"]    = _tec_base.apply(lambda r: _fmt_dim(r["tiempo_ok_count"],  r.get("tiempo_aplica_count"),  r["pct_tiempo_ok"]),  axis=1)
+                            _tec_base["col_causa"]     = _tec_base.apply(lambda r: _fmt_dim(r["causa_ok_count"],   r.get("causa_aplica_count"),   r["pct_causa_ok"]),   axis=1)
+                            _tec_base["col_numeral"]   = _tec_base.apply(lambda r: _fmt_dim(r["numeral_ok_count"], r.get("numeral_aplica_count"), r["pct_numeral_ok"]), axis=1)
+                            _tec_base["col_deteccion"] = _tec_base.apply(lambda r: _fmt_dim(r["deteccion_ok_count"], r["ots_evaluadas"], r["pct_deteccion_ok"]), axis=1)
 
-                        # Estado OT
-                        if "wo_status" in drill_disp.columns:
-                            drill_disp["_estado_ot"] = drill_disp["wo_status"].fillna("").replace("", "—")
-                        else:
-                            drill_disp["_estado_ot"] = "—"
-
-                        # Selección ordenada — Fecha primero (más reciente arriba),
-                        # luego Cumple, y Tipo Equipo justo antes de Numeral para
-                        # leer causalmente por qué aplica o no.
-                        drill_disp = drill_disp[[
-                            "_fecha", "_cumple", "_x4", "folio", "_eds", "tecnico", "station",
-                            "_tipo", "_modalidad", "_estado_ot", "score_total",
-                            "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
-                            "_obs",
+                        st.markdown('<div class="section-header">📋 Resumen por técnico</div>',
+                                    unsafe_allow_html=True)
+                        tec_disp = _tec_base[[
+                            "tecnico", "ots_evaluadas", "ots_correctas", "n_errores",
+                            "col_tiempo", "col_causa", "col_numeral",
+                            "exactitud_pct", "bono_label",
                         ]].copy()
 
-                        drill_disp.columns = [
-                            "Fecha", "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación",
-                            "Tipo", "Modalidad", "Estado", "Score",
-                            "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
-                            "💬 Observación",
+                        # Orden por defecto: mejor a peor % Exactitud (desempata por
+                        # cantidad de OTs para que técnicos con más volumen queden
+                        # arriba en caso de empate en 100%).
+                        tec_disp = tec_disp.sort_values(
+                            ["exactitud_pct","ots_evaluadas"],
+                            ascending=[False, False]).reset_index(drop=True)
+
+                        tec_disp.columns = [
+                            "Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
+                            "⏱ Tiempo OK", "🔍 Causa OK", "🔢 Numeral OK",
+                            "Exactitud %", "Bono semanal",
                         ]
 
-                        # Orden por Fecha desc: más recientes arriba (parseando dd/mm/yyyy)
-                        _fecha_ord = pd.to_datetime(drill_disp["Fecha"],
-                                                    format="%d/%m/%Y", errors="coerce")
-                        drill_disp = drill_disp.assign(_ord=_fecha_ord) \
-                                               .sort_values("_ord", ascending=False,
-                                                            na_position="last") \
-                                               .drop(columns="_ord")
-
-                        # Alertas rápidas
-                        _qt_criticas  = int((_s < 1).sum())
-                        _qt_rapidas   = int(((_s >= 1) & (_s < 25)).sum())
-                        _sin_causa    = int((_c == 0).sum())
-
-                        if _qt_criticas or _qt_rapidas:
-                            st.markdown(
-                                f'<div style="background:{_t["err_bg"]};border-left:4px solid #ef4444;'
-                                f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
-                                f'⚠️ Tiempo insuficiente: <b>{_qt_criticas} OTs</b> con tiempo mínimo · '
-                                f'<b>{_qt_rapidas} OTs</b> con tiempo parcial</div>',
-                                unsafe_allow_html=True,
-                            )
-                        if _sin_causa:
-                            st.markdown(
-                                f'<div style="background:{_t["orange_bg"]};border-left:4px solid #01798A;'
-                                f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
-                                f'📋 <b>{_sin_causa} correctiva(s) sin causa raíz</b> registrada</div>',
-                                unsafe_allow_html=True,
-                            )
-
                         _show_df(
-                            drill_disp,
-                            width="stretch",
-                            hide_index=True,
+                            tec_disp, width="stretch", hide_index=True,
                             column_config={
-                                "Cumple":           st.column_config.TextColumn(width=100,
-                                    help="✅ = 3/3 componentes OK · ❌ = ≥1 falló"),
-                                "X/3":              st.column_config.TextColumn(width=80,
-                                    help="Componentes correctos de los 3 del KPI"),
-                                "OT":               st.column_config.TextColumn(width=110),
-                                "EDS":              st.column_config.TextColumn(width=85,
-                                    help="Código EDS Occimiano."),
-                                "Técnico":          st.column_config.TextColumn(width=180),
-                                "Estación":         st.column_config.TextColumn(width=200),
-                                "Tipo":             st.column_config.TextColumn(width=110),
-                                "Modalidad":        st.column_config.TextColumn(width=140,
-                                    help="Método de detección de falla en Fracttal (informativo, no incide en el KPI). "
-                                         "Presencial = técnico fue a la EDS · Remoto = resuelto vía telefónica/remota · "
-                                         "Con MP = aprovechó una mantención preventiva."),
-                                "Estado":           st.column_config.TextColumn(width=110,
-                                    help="Estado de la OT en Fracttal."),
-                                "Score":            st.column_config.ProgressColumn(
-                                    min_value=0, max_value=75, format="%.1f"),
-                                "⏱ Tiempo":         st.column_config.TextColumn(width=110,
-                                    help="Minutos con Fracttal abierto. ✅ cumple ≥75% del estimado neto · MC no aplica (auto-25)."),
-                                "🔍 Causa raíz":    st.column_config.TextColumn(width=240,
-                                    help="Causa registrada por el técnico. Solo se evalúa en MC; MP siempre da 25 auto."),
-                                "🔧 Equipo":        st.column_config.TextColumn(width=170,
-                                    help="Tipo(s) de equipo del OT. El numeral SOLO aplica a Lavadora, Aspiradora, "
-                                         "Lavainteriores e Hidrolavadora. Ablandador/Bomba/Termo/etc. → 'No aplica'. "
-                                         "OTs con varios tipos se muestran separados por '+'."),
-                                "🔢 Numeral":       st.column_config.TextColumn(width=160,
-                                    help="Calidad del numeral en lavadora/aspiradora (MC+MP). Motivo del dato malo si no cumple."),
-                                "💬 Observación":   st.column_config.TextColumn(width=260,
-                                    help="Resumen de cumplimiento de la OT (3 componentes)"),
-                                "Fecha":            st.column_config.TextColumn(width=90),
+                                "OTs evaluadas":       st.column_config.NumberColumn(format="%d"),
+                                "OTs sin error":       st.column_config.NumberColumn(
+                                    help="OTs donde los 3 componentes estuvieron correctos.", format="%d"),
+                                "OTs con error":       st.column_config.NumberColumn(
+                                    help="OTs con al menos 1 componente incorrecto — estas cuentan para el KPI.", format="%d"),
+                                "⏱ Tiempo OK":         st.column_config.TextColumn(
+                                    help="OTs Preventivas con tiempo ≥75% del estimado / total MP del técnico"),
+                                "🔍 Causa OK":          st.column_config.TextColumn(
+                                    help="OTs Correctivas con causa raíz válida / total MC del técnico"),
+                                "🔢 Numeral OK":        st.column_config.TextColumn(
+                                    help="OTs de lavadora/aspiradora con numeral registrado / total en esos equipos"),
+                                "Exactitud %":         st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
                             },
                         )
 
-            with _pt_causa:
-                st.markdown('<div class="section-header">🔍  Causa Raíz — MC y MP</div>',
-                            unsafe_allow_html=True)
+                    # ── Evolución mensual (últimos 6 meses) ───────────────────────────────
+                    st.divider()
+                    st.markdown('<div class="section-header">📈 Evolución mensual del índice de llenado</div>',
+                                unsafe_allow_html=True)
 
-                # ── Leyenda expandible ────────────────────────────────────────────
-                with st.expander("📖  Leyenda de categorías válidas (F.N.A.O / F.A.O)", expanded=False):
-                    _leg1, _leg2 = st.columns(2)
-                    with _leg1:
-                        st.markdown("**🟢 F.N.A.O — Falla No Atribuible a Occimiano**")
-                        st.markdown("*Causas válidas (SI CORRESPONDE):*")
-                        st.markdown("""
-    - `01.1.- DAÑO CAUSADO POR CLIENTE`
-    - `01.2.- MAL USO U OMISION EDS` *(sin sal, llave cerrada, etc.)*
-    - `01.3.- FICHERO (MOJADO/DAÑADO)`
-    - `02.3.- FICHERO / FALLA PROGRAMACION`
-    - `02.4.- REPUESTOS /OTROS` *(solo si la falla proviene del concesionario)*
-    - `03.1.- DAÑOS EN ESTRUCTURAS/GASFITERÍA/OOCC`
-    """)
-                        st.markdown("*❌ No corresponde usar con F.N.A.O:*")
-                        st.markdown("""
-    - `01.4.- REPUESTOS (DESGASTE)/OTROS` → debe ir en F.A.O
-    - `01.5.- ERROR 01 ELECTRICO` → debe ir en F.A.O
-    - `01.6.- ERROR 03 AGUA` → debe ir en F.A.O
-    - `01.7.- OTROS`, `02.7.- OTROS` → dato vago, no aceptado
-    - `02.2.- BY PASS / MOTORES` → debe ir en F.A.O
-    - `02.5.- ERROR 01 ELECTRICO` → debe ir en F.A.O
-    - `02.6.- ERROR 03 AGUA` → debe ir en F.A.O
-    - Números (147, 148, 150…) → no corresponde, dato no claro
-    """)
-                    with _leg2:
-                        st.markdown("**🔴 F.A.O — Falla Atribuible a Occimiano**")
-                        st.markdown("*Causas válidas para F.A.O:*")
-                        st.markdown("""
-    - `01.4.- REPUESTOS (DESGASTE)/OTROS`
-    - `01.5.- ERROR 01 ELECTRICO`
-    - `01.6.- ERROR 03 AGUA`
-    - `02.2.- BY PASS / MOTORES`
-    - `02.5.- ERROR 01 ELECTRICO`
-    - `02.6.- ERROR 03 AGUA`
-    - `02.4.- REPUESTOS /OTROS` *(con falla comprobada)*
-    """)
-                        st.markdown("**⚫ Siempre se considera ERROR:**")
-                        st.markdown("""
-    - Campo **"Falla"** vacío o con `04.- SIN INFORMACION`
-    - Campo **"Causas de la Falla"** vacío o con `SIN CLASIFICAR`
-    - Causas con **solo números** (147, 148, 150, 160, etc.)
-    - Usar `01.7.- OTROS` o `02.7.- OTROS` sin especificar
-    """)
-
-                # ── Helpers de mes compartidos por Causa Raíz y Tiempo ──────────
-                import re as _re
-                _MN2 = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
-                        7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
-                def _m2l(ym):
-                    p = str(ym).split("-")
-                    return f"{_MN2.get(int(p[1]),p[1])} '{p[0][2:]}" if len(p)==2 else str(ym)
-
-                # ── Agrupador que respeta la selección de meses/semanas ────────────
-                # Regla: 1 mes seleccionado → desglose por semanas DENTRO de ese mes.
-                #        ≥2 meses (o "Todos") → solo esos meses agrupados.
-                def _agrupar_por_periodo(df_in, col_ok: str):
-                    """Devuelve DataFrame con columnas: bucket_lbl, ok, total, pct_ok, pct_err.
-                    df_in debe traer "mes" y "creation_date_local". col_ok = nombre de bool col."""
-                    if df_in.empty or col_ok not in df_in.columns:
-                        return pd.DataFrame()
-                    df = df_in.copy()
-                    # ¿1 solo mes seleccionado? → semanas; si no, meses.
-                    un_mes = len(_meses_sel_raw) == 1
-                    if un_mes:
-                        ym = _meses_sel_raw[0]
-                        _sems = _semanas_del_mes(ym)
-                        if "creation_date_local" not in df.columns:
-                            return pd.DataFrame()
-                        rows = []
-                        for lbl, ini, fin in _sems:
-                            m = ((df["creation_date_local"] >= ini) &
-                                 (df["creation_date_local"] <= fin))
-                            sub = df[m]
-                            tot = len(sub)
-                            ok  = int(sub[col_ok].sum()) if tot else 0
-                            # Etiqueta compacta "S1\n07-13/06" para el eje
-                            n = lbl.split()[1]
-                            rango = lbl.split("(")[1].rstrip(")")
-                            rows.append(dict(bucket_lbl=f"S{n}<br>{rango}",
-                                             ok=ok, total=tot))
-                        g = pd.DataFrame(rows)
-                    else:
-                        # Multi-mes: solo los meses que el usuario seleccionó
-                        df = df[df["mes"].astype(str).isin(set(_meses_prec_str))]
-                        if df.empty:
-                            return pd.DataFrame()
-                        g = (df.groupby("mes")
-                               .agg(total=(col_ok,"count"), ok=(col_ok,"sum"))
-                               .reset_index().sort_values("mes"))
-                        g["bucket_lbl"] = g["mes"].apply(_m2l)
-                    # Excluir buckets sin datos (semanas futuras, meses sin OTs).
-                    # Sin esto, una semana con total=0 aparece como "100% error" porque
-                    # 100 - 0/1*100 = 100. Sólo mostrar buckets con al menos 1 OT.
-                    g = g[g["total"] > 0].copy()
-                    if g.empty:
-                        return g
-                    g["pct_ok"]  = (g["ok"] / g["total"] * 100).round(1)
-                    g["pct_err"] = (100 - g["pct_ok"]).round(1)
-                    return g
-
-                # ── Builder de gráfico apilado (mismo diseño que Numerales) ────────
-                def _fig_apilada(g: pd.DataFrame, color_ok: str, label_ok: str,
-                                 label_err: str, meta: float = None,
-                                 titulo_y: str = "% OTs") -> "go.Figure":
-                    """Barras apiladas verde (OK) + rojo (Error). %OK CENTRADO en barra
-                    verde; %ERR fuera con flecha cuando la barra roja es pequeña.
-                    Si la barra roja es >=10% pone el % adentro."""
-                    fig = go.Figure()
-                    # Texto para barra verde: % centrado + fracción debajo
-                    txt_ok = g.apply(lambda r:
-                        f"<b>{r['pct_ok']:.1f}%</b><br><span style='font-size:10px;'>"
-                        f"{int(r['ok'])}/{int(r['total'])}</span>", axis=1).tolist()
-                    fig.add_trace(go.Bar(
-                        x=g["bucket_lbl"], y=g["pct_ok"],
-                        name=label_ok, marker_color=color_ok, opacity=0.95,
-                        text=txt_ok, textposition="inside", insidetextanchor="middle",
-                        textfont=dict(size=14, color="#ffffff",
-                                      family="Inter, system-ui, sans-serif"),
-                        customdata=g[["ok","total"]].values,
-                        hovertemplate="%{x}<br>%{customdata[0]}/%{customdata[1]} OK"
-                                      "<br>%{y:.1f}%<extra></extra>",
-                    ))
-                    # Barra roja: solo texto adentro si hay espacio (≥10%); si no, anotación externa con flecha
-                    txt_err_in = g["pct_err"].apply(
-                        lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
-                    fig.add_trace(go.Bar(
-                        x=g["bucket_lbl"], y=g["pct_err"],
-                        name=label_err, marker_color="#ef4444", opacity=0.92,
-                        text=txt_err_in, textposition="inside", insidetextanchor="middle",
-                        textfont=dict(size=12, color="#ffffff"),
-                        customdata=g[["ok","total","pct_err"]].values,
-                        hovertemplate="%{x}<br>Error: %{customdata[2]:.1f}%<extra></extra>",
-                    ))
-                    # Flecha externa para errores pequeños (<10%)
-                    for _, r in g.iterrows():
-                        if r["pct_err"] < 10 and r["pct_err"] > 0:
-                            fig.add_annotation(
-                                x=r["bucket_lbl"], y=100, ax=0, ay=-35,
-                                xref="x", yref="y", axref="pixel", ayref="pixel",
-                                showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
-                                arrowcolor="#ef4444",
-                                text=f"<b style='color:#ef4444;'>{r['pct_err']:.1f}% error</b>",
-                                font=dict(size=11, color="#ef4444"),
-                                bgcolor="rgba(255,255,255,0.95)",
-                                bordercolor="#ef4444", borderwidth=1, borderpad=3,
+                    ultimos_6 = meses_disp[:6]  # ya están ordenados desc
+                    # Usar df_ot_all pre-computado: solo slice, sin recalcular scores
+                    ot_hist = df_ot_all[df_ot_all["mes"].isin(ultimos_6)].copy()
+                    if equipo_kpi != "Todos":
+                        _grp_kpi_h = _LABEL_TO_GRUPO.get(equipo_kpi)
+                        if _grp_kpi_h:
+                            ot_hist = ot_hist[ot_hist["equipo"] == _grp_kpi_h]
+                    if tec_kpi_sel != "Todos":
+                        ot_hist = ot_hist[ot_hist["tecnico"] == tec_kpi_sel]
+                    # df_ot_all ya trae columna "mes" — no hace falta recalcular
+                    if not ot_hist.empty:
+                        trend = (
+                            ot_hist.groupby("mes")
+                            .agg(
+                                score_global= ("score_total",  "mean"),
+                                pct_tiempo=   ("score_tiempo", lambda x: (x >= 34).mean() * 100),
+                                pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
+                                pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
+                                ots=          ("folio",        "count"),
                             )
-                    if meta is not None:
-                        fig.add_hline(y=meta, line_dash="dash", line_color=color_ok,
-                                      annotation_text=f"Meta {meta:.0f}%",
-                                      annotation_position="top left", line_width=1.5)
-                    fig.update_layout(
-                        barmode="stack", height=320,
-                        margin=dict(t=40, b=30, l=10, r=20),
-                        yaxis=dict(range=[0, 115], ticksuffix="%", title=titulo_y),
-                        legend=dict(orientation="h", y=1.14, x=0), bargap=0.35,
+                            .reset_index()
+                            .sort_values("mes")
+                        )
+                        trend = trend.round(1)
+
+                        _trend_k = f"_fig_prec_trend_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
+                        if _trend_k not in st.session_state:
+                            fig_trend = px.line(
+                                trend, x="mes", y="score_global",
+                                markers=True, text="score_global",
+                                labels={"mes": "Mes", "score_global": "Score global (0-100)"},
+                                title="Score global de llenado por mes",
+                            )
+                            fig_trend.update_traces(
+                                textposition="top center",
+                                line_color="#3b82f6",
+                                marker=dict(size=8),
+                            )
+                            fig_trend.add_hline(y=100, line_dash="dash", line_color=_SCORE_COLOR["verde"],
+                                                annotation_text="Score perfecto (0 errores)")
+                            fig_trend.update_layout(
+                                yaxis=dict(range=[0, 105]),
+                                height=320,
+                                margin=dict(t=40, b=30),
+                            )
+                            _apply_plot_theme(fig_trend)
+                            st.session_state[_trend_k] = fig_trend
+                        st.plotly_chart(st.session_state[_trend_k], width="stretch")
+
+                    # ── Drill-down: OTs individuales de un técnico ────────────────────────
+                    st.divider()
+                    st.markdown('<div class="section-header">🔍 Detalle de OTs por técnico</div>',
+                                unsafe_allow_html=True)
+                    st.caption(
+                        "Selecciona uno o varios técnicos para ver el historial completo de sus OTs del periodo. "
+                        "Vacío = todos los técnicos del filtro actual (equipo seleccionado)."
                     )
-                    _apply_plot_theme(fig)
-                    return fig
 
-                # KPI card lateral (mismo diseño que el panel verde de Numerales)
-                def _kpi_card(pct: float, ok: int, total: int, label: str,
-                             meta_pct: float = 90.0) -> None:
-                    color = ("#22c55e" if pct >= meta_pct else
-                             ("#f59e0b" if pct >= max(meta_pct - 20, 50) else "#ef4444"))
-                    st.markdown(
-                        f'<div style="background:{_t["card"]};border:2px solid {color}33;'
-                        f'border-radius:10px;padding:20px;text-align:center;">'
-                        f'<div style="font-size:2.2rem;font-weight:800;color:{color};">'
-                        f'{pct:.1f}%</div>'
-                        f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
-                        f'{ok:,} / {total:,} OTs</div>'
-                        f'<div style="font-size:0.8rem;color:{_t["muted"]};">{label}</div>'
-                        f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
-                        f'Meta: ≥{meta_pct:.0f}%</div></div>',
-                        unsafe_allow_html=True
-                    )
+                    if not df_tec_scores.empty:
+                        _tec_opts = df_tec_scores["tecnico"].tolist()
+                        tec_drill_list = st.multiselect(
+                            "Técnico(s)",
+                            _tec_opts,
+                            default=[],
+                            key="kpi_drill_tec",
+                            placeholder="Todos los técnicos del equipo",
+                        )
+                        if tec_drill_list:
+                            df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(tec_drill_list)].copy()
+                            _tec_drill_lbl = (", ".join(tec_drill_list) if len(tec_drill_list) <= 3
+                                              else f"{len(tec_drill_list)} técnicos seleccionados")
+                        else:
+                            # Sin selección explícita → todos los técnicos disponibles en df_ot_scores
+                            df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(_tec_opts)].copy()
+                            _tec_drill_lbl = f"Todos ({df_drill['tecnico'].nunique()} técnicos)"
+                        df_drill = df_drill.sort_values(["tecnico","score_total"], ascending=[True, True])
 
-                # ── Gráfico Causa Raíz (diseño apilado igual que Numerales) ──────
-                _periodo_lbl_cr = ("por semanas" if len(_meses_sel_raw) == 1
-                                   else "por mes seleccionado")
-                st.markdown(f"**Evolución {_periodo_lbl_cr} — % correctivas con Causa Raíz correctamente llenada**")
+                        if not df_drill.empty:
+                            avg_drill = df_drill["score_total"].mean()
+                            color_d, lbl_d = _score_level(avg_drill)
+                            st.markdown(
+                                f'<div style="background:{color_d}18;border-left:4px solid {color_d};'
+                                f'border-radius:8px;padding:10px 14px;margin-bottom:8px;">'
+                                f'<b style="color:{color_d}">{_tec_drill_lbl}</b> — '
+                                f'Score promedio: <b>{avg_drill:.1f}/100</b> &nbsp; {lbl_d} &nbsp; | &nbsp; '
+                                f'<b>{len(df_drill)}</b> OTs en {_mes_lbl_prec}</div>',
+                                unsafe_allow_html=True,
+                            )
 
-                # Causa raíz solo aplica a correctivas. Las preventivas no responden
-                # a una falla, así que se excluyen del análisis y del KPI.
-                _df_cr_base = df_kpi_raw[df_kpi_raw["es_correctiva"]].copy() \
-                    if "es_correctiva" in df_kpi_raw.columns else df_kpi_raw.copy()
+                            # ── Construir columnas de display una por una (sin riesgo de desajuste) ──
 
-                # Aplicar filtros de MES y SEMANA (bug fix: antes solo se filtraba
-                # el KPI/gráfico via _df_cr_periodo pero el detalle usaba el base
-                # con todo el año). Ahora _df_cr_base ya está filtrado por período.
-                if "mes" in _df_cr_base.columns:
-                    _df_cr_base = _df_cr_base[
-                        _df_cr_base["mes"].astype(str).isin(set(_meses_prec_str))
-                    ]
-                if _sem_prec != "Todas":
-                    _sem_match_base = next((s for s in _sems_prec if s[0] == _sem_prec), None)
-                    if _sem_match_base and "creation_date_local" in _df_cr_base.columns:
-                        _df_cr_base = _df_cr_base[
-                            (_df_cr_base["creation_date_local"] >= _sem_match_base[1]) &
-                            (_df_cr_base["creation_date_local"] <= _sem_match_base[2])
-                        ]
+                            drill_disp = df_drill.copy()
 
-                if equipo_kpi != "Todos":
-                    _grp_cr = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
-                    _df_cr_base = _df_cr_base[_df_cr_base["equipo"] == _grp_cr]
-                if tec_kpi_sel != "Todos":
-                    _df_cr_base = _df_cr_base[_df_cr_base["tecnico"] == tec_kpi_sel]
+                            # Scores por componente (con guard para cache viejo)
+                            _s = drill_disp["score_tiempo"]  if "score_tiempo"    in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                            _c = drill_disp["score_causa"]   if "score_causa"     in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                            _n = drill_disp["score_numeral"] if "score_numeral"   in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                            _d = drill_disp["score_deteccion"] if "score_deteccion" in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                            # KPI: solo 3 componentes (tiempo, causa, numeral) — Modalidad excluida
+                            _ok_bits = ((_s >= 25).astype(int) + (_c >= 25).astype(int) +
+                                        (_n >= 25).astype(int))
 
-                if not _df_cr_base.empty and "causa_ok" in _df_cr_base.columns:
-                    _df_cr_base = _df_cr_base.copy()
-                    # Usar causa_ok ya calculada en data.py (MC: código Fracttal; MP: texto no vacío)
-                    _df_cr_base["_causa_ok"] = _df_cr_base["causa_ok"].fillna(False).astype(bool)
-                    # Subset al periodo seleccionado (para el KPI lateral y el gráfico)
-                    _df_cr_periodo = _df_cr_base[_df_cr_base["mes"].astype(str).isin(set(_meses_prec_str))].copy()
-                    if _sem_prec != "Todas":
-                        _sem_match_cr = next((s for s in _sems_prec if s[0] == _sem_prec), None)
-                        if _sem_match_cr and "creation_date_local" in _df_cr_periodo.columns:
-                            _df_cr_periodo = _df_cr_periodo[
-                                (_df_cr_periodo["creation_date_local"] >= _sem_match_cr[1]) &
-                                (_df_cr_periodo["creation_date_local"] <= _sem_match_cr[2])
+                            # Columna 1: Cumple
+                            drill_disp["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 3 else "❌ Con error")
+
+                            # Columna 2: X/3
+                            drill_disp["_x4"] = _ok_bits.apply(
+                                lambda n: f"{n}/3 {'✅' if n == 3 else ('⚠️' if n >= 2 else '❌')}")
+
+                            # Columna 3: Tipo (title case)
+                            drill_disp["_tipo"] = drill_disp["maint_type"].fillna("").str.title()
+
+                            # Columna 3a: Tipo(s) de equipo del OT — icono + label.
+                            # Sirve para leer de un vistazo por qué el numeral aplica o no
+                            # (lavadora sí aplica; ablandador/bomba no; OT mixta muestra
+                            # todos los tipos separados por '+').
+                            _EQUIPO_TIPOS = [
+                                (r"HIDROLAVAD", "💦 Hidrolavadora"),
+                                (r"LAVAINT",    "🧼 Lavainteriores"),
+                                (r"LAVAD",      "🚿 Lavadora"),
+                                (r"ASPIRA",     "🧹 Aspiradora"),
+                                (r"ABLAND",     "💧 Ablandador"),
+                                (r"HIDROPACK",  "🛢️ Hidropack"),
+                                (r"BOMBA",      "⚙️ Bomba"),
+                                (r"TERMO",      "🔥 Termo"),
+                                (r"COMPRESOR",  "🌬️ Compresor"),
+                                (r"TWISTER",    "🌀 Twister"),
+                                (r"SKID",       "🛠️ Skid"),
                             ]
-                    _cr_tot = len(_df_cr_periodo)
-                    _cr_ok  = int(_df_cr_periodo["_causa_ok"].sum()) if _cr_tot else 0
-                    _cr_pct = (_cr_ok / _cr_tot * 100) if _cr_tot else 0.0
+                            import re as _re_tipo
+                            def _fmt_tipo_equipo(nom: str) -> str:
+                                s = str(nom or "").upper()
+                                if not s or s == "—":
+                                    return "—"
+                                tipos = []
+                                for pat, lbl in _EQUIPO_TIPOS:
+                                    if _re_tipo.search(pat, s) and lbl not in tipos:
+                                        tipos.append(lbl)
+                                return " + ".join(tipos) if tipos else "🔧 Otro"
+                            _eq_src = (drill_disp["equipo_nombre"]
+                                       if "equipo_nombre" in drill_disp.columns
+                                       else pd.Series("", index=drill_disp.index))
+                            drill_disp["_tipo_equipo"] = _eq_src.fillna("").apply(_fmt_tipo_equipo)
 
-                    _g_cr = _agrupar_por_periodo(_df_cr_base, "_causa_ok")
+                            # Columna 3b: Modalidad de atención (informativa, no KPI).
+                            # Simplificamos '1.- ATENDIDO PRESENCIAL' → 'Presencial',
+                            # '2.- ATENDIDO VÍA REMOTA' → 'Remoto', etc.
+                            _MOD_MAP = {
+                                "1.- ATENDIDO PRESENCIAL": "🚗 Presencial",
+                                "2.- ATENDIDO VÍA REMOTA": "📞 Remoto",
+                                "2.- ATENDIDO VIA REMOTA": "📞 Remoto",
+                                "3.- ATENDIDO CON SU MP":  "🔧 Con MP",
+                                "4.- LLAMADO DUPLICADO":   "⚠️ Duplicado",
+                                "SIN CLASIFICAR":          "❔ Sin clasificar",
+                                "":                        "—",
+                            }
+                            _mod_src = (drill_disp["deteccion_raw"]
+                                        if "deteccion_raw" in drill_disp.columns
+                                        else pd.Series("", index=drill_disp.index))
+                            drill_disp["_modalidad"] = _mod_src.fillna("").apply(
+                                lambda v: _MOD_MAP.get(str(v).strip().upper(), str(v).strip().title() or "—")
+                            )
 
-                    cc1, cc2 = st.columns([1, 3])
-                    with cc1:
-                        _kpi_card(_cr_pct, _cr_ok, _cr_tot,
-                                  "con causa raíz correcta", meta_pct=80.0)
-                    with cc2:
-                        if not _g_cr.empty:
-                            _cr_sig = (f"_fig_cr_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
-                                       f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
-                            if _cr_sig not in st.session_state:
-                                st.session_state[_cr_sig] = _fig_apilada(
-                                    _g_cr, color_ok="#22c55e",
-                                    label_ok="Causa correcta", label_err="Sin causa / Vaga",
-                                    meta=80.0, titulo_y="% correctivas",
+                            # Columna 4: ⏱ Tiempo — valor en minutos + ✅/❌
+                            _em = drill_disp["elapsed_min"] if "elapsed_min" in drill_disp.columns else pd.Series(0.0, index=drill_disp.index)
+                            drill_disp["_col_tiempo"] = drill_disp.apply(
+                                lambda r: f"{'✅' if _s[r.name] >= 25 else '❌'} {_em[r.name]:.0f} min",
+                                axis=1)
+
+                            # Columna 5: 🔍 Causa raíz — texto + ✅/❌
+                            def _fmt_causa(r):
+                                es_corr = r.get("es_correctiva", True)
+                                raw = str(r.get("causa_raiz_raw","") or "").strip()
+                                ok  = _c[r.name] >= 25
+                                if not es_corr:
+                                    return "✅ Preventiva (no aplica)"
+                                if ok:
+                                    return f"✅ {raw[:38]}" if raw else "✅ Registrada"
+                                # Descuido atribuible: no clasificó pero SÍ describió la falla
+                                if r.get("causa_sin_clasif_con_desglose", False):
+                                    return "🔴 No clasificó (sí describió la falla)"
+                                return f"❌ {raw[:35]}" if raw else "❌ Sin causa"
+                            drill_disp["_col_causa"] = drill_disp.apply(_fmt_causa, axis=1)
+
+                            # Columna 6: 🔢 Numeral — calidad: no aplica / registrado / motivo del dato malo
+                            def _fmt_col_numeral(r):
+                                if not r.get("es_lavadora", True):
+                                    return "🔵 No aplica"
+                                if r.get("numeral_ok", False):
+                                    return "✅ Registrado"
+                                return NUMERAL_MOTIVO_LABEL.get(
+                                    str(r.get("numeral_motivo", "") or ""), "❌ Dato inválido")
+                            drill_disp["_col_numeral"] = drill_disp.apply(
+                                _fmt_col_numeral,
+                                axis=1)
+
+                            # Columna 7: 💬 Observación — descripción de qué falló (3 componentes KPI)
+                            _nombres_comp = {0: "Tiempo", 1: "Causa raíz", 2: "Numeral"}
+                            _scores_comp  = [_s, _c, _n]
+                            def _obs(r):
+                                fallos = [_nombres_comp[i] for i, sc in enumerate(_scores_comp)
+                                          if sc[r.name] < 25]
+                                if not fallos:
+                                    return "✅ Registro perfecto"
+                                return "⚠️ No cumple: " + ", ".join(fallos)
+                            drill_disp["_obs"] = drill_disp.apply(_obs, axis=1)
+
+                            # Columna 8: Fecha cierre
+                            drill_disp["_fecha"] = pd.to_datetime(
+                                drill_disp["final_date"], errors="coerce"
+                            ).dt.strftime("%d/%m/%Y")
+
+                            # EDS y Técnico (para identificar la fila en vista multi-técnico)
+                            if "eds_occim" in drill_disp.columns:
+                                drill_disp["_eds"] = drill_disp["eds_occim"].fillna("").replace("", "—")
+                            else:
+                                drill_disp["_eds"] = "—"
+
+                            # Estado OT
+                            if "wo_status" in drill_disp.columns:
+                                drill_disp["_estado_ot"] = drill_disp["wo_status"].fillna("").replace("", "—")
+                            else:
+                                drill_disp["_estado_ot"] = "—"
+
+                            # Selección ordenada — Fecha primero (más reciente arriba),
+                            # luego Cumple, y Tipo Equipo justo antes de Numeral para
+                            # leer causalmente por qué aplica o no.
+                            drill_disp = drill_disp[[
+                                "_fecha", "_cumple", "_x4", "folio", "_eds", "tecnico", "station",
+                                "_tipo", "_modalidad", "_estado_ot", "score_total",
+                                "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
+                                "_obs",
+                            ]].copy()
+
+                            drill_disp.columns = [
+                                "Fecha", "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación",
+                                "Tipo", "Modalidad", "Estado", "Score",
+                                "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
+                                "💬 Observación",
+                            ]
+
+                            # Orden por Fecha desc: más recientes arriba (parseando dd/mm/yyyy)
+                            _fecha_ord = pd.to_datetime(drill_disp["Fecha"],
+                                                        format="%d/%m/%Y", errors="coerce")
+                            drill_disp = drill_disp.assign(_ord=_fecha_ord) \
+                                                   .sort_values("_ord", ascending=False,
+                                                                na_position="last") \
+                                                   .drop(columns="_ord")
+
+                            # Alertas rápidas
+                            _qt_criticas  = int((_s < 1).sum())
+                            _qt_rapidas   = int(((_s >= 1) & (_s < 25)).sum())
+                            _sin_causa    = int((_c == 0).sum())
+
+                            if _qt_criticas or _qt_rapidas:
+                                st.markdown(
+                                    f'<div style="background:{_t["err_bg"]};border-left:4px solid #ef4444;'
+                                    f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
+                                    f'⚠️ Tiempo insuficiente: <b>{_qt_criticas} OTs</b> con tiempo mínimo · '
+                                    f'<b>{_qt_rapidas} OTs</b> con tiempo parcial</div>',
+                                    unsafe_allow_html=True,
                                 )
-                            st.plotly_chart(st.session_state[_cr_sig], width="stretch")
+                            if _sin_causa:
+                                st.markdown(
+                                    f'<div style="background:{_t["orange_bg"]};border-left:4px solid #01798A;'
+                                    f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
+                                    f'📋 <b>{_sin_causa} correctiva(s) sin causa raíz</b> registrada</div>',
+                                    unsafe_allow_html=True,
+                                )
 
-                    # ── Ranking por técnico (peso + cumplimiento individual) ─
-                    _render_ranking_tecnico(
-                        _df_cr_base, "_causa_ok",
-                        "👤 Ranking por técnico — Causa Raíz",
-                        _key_pfx="cr", _min_ots=1,
-                    )
+                            _show_df(
+                                drill_disp,
+                                width="stretch",
+                                hide_index=True,
+                                column_config={
+                                    "Cumple":           st.column_config.TextColumn(width=100,
+                                        help="✅ = 3/3 componentes OK · ❌ = ≥1 falló"),
+                                    "X/3":              st.column_config.TextColumn(width=80,
+                                        help="Componentes correctos de los 3 del KPI"),
+                                    "OT":               st.column_config.TextColumn(width=110),
+                                    "EDS":              st.column_config.TextColumn(width=85,
+                                        help="Código EDS Occimiano."),
+                                    "Técnico":          st.column_config.TextColumn(width=180),
+                                    "Estación":         st.column_config.TextColumn(width=200),
+                                    "Tipo":             st.column_config.TextColumn(width=110),
+                                    "Modalidad":        st.column_config.TextColumn(width=140,
+                                        help="Método de detección de falla en Fracttal (informativo, no incide en el KPI). "
+                                             "Presencial = técnico fue a la EDS · Remoto = resuelto vía telefónica/remota · "
+                                             "Con MP = aprovechó una mantención preventiva."),
+                                    "Estado":           st.column_config.TextColumn(width=110,
+                                        help="Estado de la OT en Fracttal."),
+                                    "Score":            st.column_config.ProgressColumn(
+                                        min_value=0, max_value=75, format="%.1f"),
+                                    "⏱ Tiempo":         st.column_config.TextColumn(width=110,
+                                        help="Minutos con Fracttal abierto. ✅ cumple ≥75% del estimado neto · MC no aplica (auto-25)."),
+                                    "🔍 Causa raíz":    st.column_config.TextColumn(width=240,
+                                        help="Causa registrada por el técnico. Solo se evalúa en MC; MP siempre da 25 auto."),
+                                    "🔧 Equipo":        st.column_config.TextColumn(width=170,
+                                        help="Tipo(s) de equipo del OT. El numeral SOLO aplica a Lavadora, Aspiradora, "
+                                             "Lavainteriores e Hidrolavadora. Ablandador/Bomba/Termo/etc. → 'No aplica'. "
+                                             "OTs con varios tipos se muestran separados por '+'."),
+                                    "🔢 Numeral":       st.column_config.TextColumn(width=160,
+                                        help="Calidad del numeral en lavadora/aspiradora (MC+MP). Motivo del dato malo si no cumple."),
+                                    "💬 Observación":   st.column_config.TextColumn(width=260,
+                                        help="Resumen de cumplimiento de la OT (3 componentes)"),
+                                    "Fecha":            st.column_config.TextColumn(width=90),
+                                },
+                            )
 
-                    # ── Tabla detalle de Causa Raíz ───────────────────────────────
-                    _n_cr_total = len(_df_cr_base)
-                    with st.expander(f"📋 Detalle de OTs — Causa Raíz ({_n_cr_total:,} correctivas)", expanded=False):
-                        _filtro_cr = _filtro_ot_input("kpi_filtro_ot_causa")
-                        _det_cr = _df_cr_base[[c for c in
-                            ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
-                             "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok",
-                             "es_correctiva"]
-                            if c in _df_cr_base.columns]].copy()
-                        _det_cr["creation_date"] = pd.to_datetime(_det_cr["creation_date"], errors="coerce")\
-                            .dt.tz_convert(None).dt.strftime("%d/%m/%Y")
-                        _det_cr["Estado"] = _det_cr["_causa_ok"].apply(
-                            lambda v: "✅ Correcto" if v else "❌ Error")
+            if _prec_view == _V_CAUSA:
+                with _pt_causa:
+                    st.markdown('<div class="section-header">🔍  Causa Raíz — MC y MP</div>',
+                                unsafe_allow_html=True)
 
-                        # Diagnóstico breve del error de llenado (solo cuando _causa_ok=False)
-                        # Explica por qué se imputa el error; vacío cuando está correcto.
-                        import re as _re_diag
-                        _DIAG_PREFIJO = _re_diag.compile(r"^0[1-4]\.\d", _re_diag.IGNORECASE)
-                        def _diagnostico_causa(row) -> str:
-                            if bool(row.get("_causa_ok", False)):
+                    # ── Leyenda expandible ────────────────────────────────────────────
+                    with st.expander("📖  Leyenda de categorías válidas (F.N.A.O / F.A.O)", expanded=False):
+                        _leg1, _leg2 = st.columns(2)
+                        with _leg1:
+                            st.markdown("**🟢 F.N.A.O — Falla No Atribuible a Occimiano**")
+                            st.markdown("*Causas válidas (SI CORRESPONDE):*")
+                            st.markdown("""
+        - `01.1.- DAÑO CAUSADO POR CLIENTE`
+        - `01.2.- MAL USO U OMISION EDS` *(sin sal, llave cerrada, etc.)*
+        - `01.3.- FICHERO (MOJADO/DAÑADO)`
+        - `02.3.- FICHERO / FALLA PROGRAMACION`
+        - `02.4.- REPUESTOS /OTROS` *(solo si la falla proviene del concesionario)*
+        - `03.1.- DAÑOS EN ESTRUCTURAS/GASFITERÍA/OOCC`
+        """)
+                            st.markdown("*❌ No corresponde usar con F.N.A.O:*")
+                            st.markdown("""
+        - `01.4.- REPUESTOS (DESGASTE)/OTROS` → debe ir en F.A.O
+        - `01.5.- ERROR 01 ELECTRICO` → debe ir en F.A.O
+        - `01.6.- ERROR 03 AGUA` → debe ir en F.A.O
+        - `01.7.- OTROS`, `02.7.- OTROS` → dato vago, no aceptado
+        - `02.2.- BY PASS / MOTORES` → debe ir en F.A.O
+        - `02.5.- ERROR 01 ELECTRICO` → debe ir en F.A.O
+        - `02.6.- ERROR 03 AGUA` → debe ir en F.A.O
+        - Números (147, 148, 150…) → no corresponde, dato no claro
+        """)
+                        with _leg2:
+                            st.markdown("**🔴 F.A.O — Falla Atribuible a Occimiano**")
+                            st.markdown("*Causas válidas para F.A.O:*")
+                            st.markdown("""
+        - `01.4.- REPUESTOS (DESGASTE)/OTROS`
+        - `01.5.- ERROR 01 ELECTRICO`
+        - `01.6.- ERROR 03 AGUA`
+        - `02.2.- BY PASS / MOTORES`
+        - `02.5.- ERROR 01 ELECTRICO`
+        - `02.6.- ERROR 03 AGUA`
+        - `02.4.- REPUESTOS /OTROS` *(con falla comprobada)*
+        """)
+                            st.markdown("**⚫ Siempre se considera ERROR:**")
+                            st.markdown("""
+        - Campo **"Falla"** vacío o con `04.- SIN INFORMACION`
+        - Campo **"Causas de la Falla"** vacío o con `SIN CLASIFICAR`
+        - Causas con **solo números** (147, 148, 150, 160, etc.)
+        - Usar `01.7.- OTROS` o `02.7.- OTROS` sin especificar
+        """)
+
+                    # ── Helpers de mes compartidos por Causa Raíz y Tiempo ──────────
+                    import re as _re
+                    _MN2 = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
+                            7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
+                    def _m2l(ym):
+                        p = str(ym).split("-")
+                        return f"{_MN2.get(int(p[1]),p[1])} '{p[0][2:]}" if len(p)==2 else str(ym)
+
+                    # ── Agrupador que respeta la selección de meses/semanas ────────────
+                    # Regla: 1 mes seleccionado → desglose por semanas DENTRO de ese mes.
+                    #        ≥2 meses (o "Todos") → solo esos meses agrupados.
+                    def _agrupar_por_periodo(df_in, col_ok: str):
+                        """Devuelve DataFrame con columnas: bucket_lbl, ok, total, pct_ok, pct_err.
+                        df_in debe traer "mes" y "creation_date_local". col_ok = nombre de bool col."""
+                        if df_in.empty or col_ok not in df_in.columns:
+                            return pd.DataFrame()
+                        df = df_in.copy()
+                        # ¿1 solo mes seleccionado? → semanas; si no, meses.
+                        un_mes = len(_meses_sel_raw) == 1
+                        if un_mes:
+                            ym = _meses_sel_raw[0]
+                            _sems = _semanas_del_mes(ym)
+                            if "creation_date_local" not in df.columns:
+                                return pd.DataFrame()
+                            rows = []
+                            for lbl, ini, fin in _sems:
+                                m = ((df["creation_date_local"] >= ini) &
+                                     (df["creation_date_local"] <= fin))
+                                sub = df[m]
+                                tot = len(sub)
+                                ok  = int(sub[col_ok].sum()) if tot else 0
+                                # Etiqueta compacta "S1\n07-13/06" para el eje
+                                n = lbl.split()[1]
+                                rango = lbl.split("(")[1].rstrip(")")
+                                rows.append(dict(bucket_lbl=f"S{n}<br>{rango}",
+                                                 ok=ok, total=tot))
+                            g = pd.DataFrame(rows)
+                        else:
+                            # Multi-mes: solo los meses que el usuario seleccionó
+                            df = df[df["mes"].astype(str).isin(set(_meses_prec_str))]
+                            if df.empty:
+                                return pd.DataFrame()
+                            g = (df.groupby("mes")
+                                   .agg(total=(col_ok,"count"), ok=(col_ok,"sum"))
+                                   .reset_index().sort_values("mes"))
+                            g["bucket_lbl"] = g["mes"].apply(_m2l)
+                        # Excluir buckets sin datos (semanas futuras, meses sin OTs).
+                        # Sin esto, una semana con total=0 aparece como "100% error" porque
+                        # 100 - 0/1*100 = 100. Sólo mostrar buckets con al menos 1 OT.
+                        g = g[g["total"] > 0].copy()
+                        if g.empty:
+                            return g
+                        g["pct_ok"]  = (g["ok"] / g["total"] * 100).round(1)
+                        g["pct_err"] = (100 - g["pct_ok"]).round(1)
+                        return g
+
+                    # ── Builder de gráfico apilado (mismo diseño que Numerales) ────────
+                    def _fig_apilada(g: pd.DataFrame, color_ok: str, label_ok: str,
+                                     label_err: str, meta: float = None,
+                                     titulo_y: str = "% OTs") -> "go.Figure":
+                        """Barras apiladas verde (OK) + rojo (Error). %OK CENTRADO en barra
+                        verde; %ERR fuera con flecha cuando la barra roja es pequeña.
+                        Si la barra roja es >=10% pone el % adentro."""
+                        fig = go.Figure()
+                        # Texto para barra verde: % centrado + fracción debajo
+                        txt_ok = g.apply(lambda r:
+                            f"<b>{r['pct_ok']:.1f}%</b><br><span style='font-size:10px;'>"
+                            f"{int(r['ok'])}/{int(r['total'])}</span>", axis=1).tolist()
+                        fig.add_trace(go.Bar(
+                            x=g["bucket_lbl"], y=g["pct_ok"],
+                            name=label_ok, marker_color=color_ok, opacity=0.95,
+                            text=txt_ok, textposition="inside", insidetextanchor="middle",
+                            textfont=dict(size=14, color="#ffffff",
+                                          family="Inter, system-ui, sans-serif"),
+                            customdata=g[["ok","total"]].values,
+                            hovertemplate="%{x}<br>%{customdata[0]}/%{customdata[1]} OK"
+                                          "<br>%{y:.1f}%<extra></extra>",
+                        ))
+                        # Barra roja: solo texto adentro si hay espacio (≥10%); si no, anotación externa con flecha
+                        txt_err_in = g["pct_err"].apply(
+                            lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
+                        fig.add_trace(go.Bar(
+                            x=g["bucket_lbl"], y=g["pct_err"],
+                            name=label_err, marker_color="#ef4444", opacity=0.92,
+                            text=txt_err_in, textposition="inside", insidetextanchor="middle",
+                            textfont=dict(size=12, color="#ffffff"),
+                            customdata=g[["ok","total","pct_err"]].values,
+                            hovertemplate="%{x}<br>Error: %{customdata[2]:.1f}%<extra></extra>",
+                        ))
+                        # Flecha externa para errores pequeños (<10%)
+                        for _, r in g.iterrows():
+                            if r["pct_err"] < 10 and r["pct_err"] > 0:
+                                fig.add_annotation(
+                                    x=r["bucket_lbl"], y=100, ax=0, ay=-35,
+                                    xref="x", yref="y", axref="pixel", ayref="pixel",
+                                    showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+                                    arrowcolor="#ef4444",
+                                    text=f"<b style='color:#ef4444;'>{r['pct_err']:.1f}% error</b>",
+                                    font=dict(size=11, color="#ef4444"),
+                                    bgcolor="rgba(255,255,255,0.95)",
+                                    bordercolor="#ef4444", borderwidth=1, borderpad=3,
+                                )
+                        if meta is not None:
+                            fig.add_hline(y=meta, line_dash="dash", line_color=color_ok,
+                                          annotation_text=f"Meta {meta:.0f}%",
+                                          annotation_position="top left", line_width=1.5)
+                        fig.update_layout(
+                            barmode="stack", height=320,
+                            margin=dict(t=40, b=30, l=10, r=20),
+                            yaxis=dict(range=[0, 115], ticksuffix="%", title=titulo_y),
+                            legend=dict(orientation="h", y=1.14, x=0), bargap=0.35,
+                        )
+                        _apply_plot_theme(fig)
+                        return fig
+
+                    # KPI card lateral (mismo diseño que el panel verde de Numerales)
+                    def _kpi_card(pct: float, ok: int, total: int, label: str,
+                                 meta_pct: float = 90.0) -> None:
+                        color = ("#22c55e" if pct >= meta_pct else
+                                 ("#f59e0b" if pct >= max(meta_pct - 20, 50) else "#ef4444"))
+                        st.markdown(
+                            f'<div style="background:{_t["card"]};border:2px solid {color}33;'
+                            f'border-radius:10px;padding:20px;text-align:center;">'
+                            f'<div style="font-size:2.2rem;font-weight:800;color:{color};">'
+                            f'{pct:.1f}%</div>'
+                            f'<div style="font-size:0.85rem;color:{_t["muted"]};margin-top:4px;">'
+                            f'{ok:,} / {total:,} OTs</div>'
+                            f'<div style="font-size:0.8rem;color:{_t["muted"]};">{label}</div>'
+                            f'<div style="font-size:0.75rem;color:{_t["muted"]};margin-top:8px;">'
+                            f'Meta: ≥{meta_pct:.0f}%</div></div>',
+                            unsafe_allow_html=True
+                        )
+
+                    # ── Gráfico Causa Raíz (diseño apilado igual que Numerales) ──────
+                    _periodo_lbl_cr = ("por semanas" if len(_meses_sel_raw) == 1
+                                       else "por mes seleccionado")
+                    st.markdown(f"**Evolución {_periodo_lbl_cr} — % correctivas con Causa Raíz correctamente llenada**")
+
+                    # Causa raíz solo aplica a correctivas. Las preventivas no responden
+                    # a una falla, así que se excluyen del análisis y del KPI.
+                    _df_cr_base = df_kpi_raw[df_kpi_raw["es_correctiva"]].copy() \
+                        if "es_correctiva" in df_kpi_raw.columns else df_kpi_raw.copy()
+
+                    # Aplicar filtros de MES y SEMANA (bug fix: antes solo se filtraba
+                    # el KPI/gráfico via _df_cr_periodo pero el detalle usaba el base
+                    # con todo el año). Ahora _df_cr_base ya está filtrado por período.
+                    if "mes" in _df_cr_base.columns:
+                        _df_cr_base = _df_cr_base[
+                            _df_cr_base["mes"].astype(str).isin(set(_meses_prec_str))
+                        ]
+                    if _sem_prec != "Todas":
+                        _sem_match_base = next((s for s in _sems_prec if s[0] == _sem_prec), None)
+                        if _sem_match_base and "creation_date_local" in _df_cr_base.columns:
+                            _df_cr_base = _df_cr_base[
+                                (_df_cr_base["creation_date_local"] >= _sem_match_base[1]) &
+                                (_df_cr_base["creation_date_local"] <= _sem_match_base[2])
+                            ]
+
+                    if equipo_kpi != "Todos":
+                        _grp_cr = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
+                        _df_cr_base = _df_cr_base[_df_cr_base["equipo"] == _grp_cr]
+                    if tec_kpi_sel != "Todos":
+                        _df_cr_base = _df_cr_base[_df_cr_base["tecnico"] == tec_kpi_sel]
+
+                    if not _df_cr_base.empty and "causa_ok" in _df_cr_base.columns:
+                        _df_cr_base = _df_cr_base.copy()
+                        # Usar causa_ok ya calculada en data.py (MC: código Fracttal; MP: texto no vacío)
+                        _df_cr_base["_causa_ok"] = _df_cr_base["causa_ok"].fillna(False).astype(bool)
+                        # Subset al periodo seleccionado (para el KPI lateral y el gráfico)
+                        _df_cr_periodo = _df_cr_base[_df_cr_base["mes"].astype(str).isin(set(_meses_prec_str))].copy()
+                        if _sem_prec != "Todas":
+                            _sem_match_cr = next((s for s in _sems_prec if s[0] == _sem_prec), None)
+                            if _sem_match_cr and "creation_date_local" in _df_cr_periodo.columns:
+                                _df_cr_periodo = _df_cr_periodo[
+                                    (_df_cr_periodo["creation_date_local"] >= _sem_match_cr[1]) &
+                                    (_df_cr_periodo["creation_date_local"] <= _sem_match_cr[2])
+                                ]
+                        _cr_tot = len(_df_cr_periodo)
+                        _cr_ok  = int(_df_cr_periodo["_causa_ok"].sum()) if _cr_tot else 0
+                        _cr_pct = (_cr_ok / _cr_tot * 100) if _cr_tot else 0.0
+
+                        _g_cr = _agrupar_por_periodo(_df_cr_base, "_causa_ok")
+
+                        cc1, cc2 = st.columns([1, 3])
+                        with cc1:
+                            _kpi_card(_cr_pct, _cr_ok, _cr_tot,
+                                      "con causa raíz correcta", meta_pct=80.0)
+                        with cc2:
+                            if not _g_cr.empty:
+                                _cr_sig = (f"_fig_cr_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
+                                           f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
+                                if _cr_sig not in st.session_state:
+                                    st.session_state[_cr_sig] = _fig_apilada(
+                                        _g_cr, color_ok="#22c55e",
+                                        label_ok="Causa correcta", label_err="Sin causa / Vaga",
+                                        meta=80.0, titulo_y="% correctivas",
+                                    )
+                                st.plotly_chart(st.session_state[_cr_sig], width="stretch")
+
+                        # ── Ranking por técnico (peso + cumplimiento individual) ─
+                        _render_ranking_tecnico(
+                            _df_cr_base, "_causa_ok",
+                            "👤 Ranking por técnico — Causa Raíz",
+                            _key_pfx="cr", _min_ots=1,
+                        )
+
+                        # ── Tabla detalle de Causa Raíz ───────────────────────────────
+                        _n_cr_total = len(_df_cr_base)
+                        with st.expander(f"📋 Detalle de OTs — Causa Raíz ({_n_cr_total:,} correctivas)", expanded=False):
+                            _filtro_cr = _filtro_ot_input("kpi_filtro_ot_causa")
+                            _det_cr = _df_cr_base[[c for c in
+                                ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
+                                 "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok",
+                                 "es_correctiva"]
+                                if c in _df_cr_base.columns]].copy()
+                            _det_cr["creation_date"] = pd.to_datetime(_det_cr["creation_date"], errors="coerce")\
+                                .dt.tz_convert(None).dt.strftime("%d/%m/%Y")
+                            _det_cr["Estado"] = _det_cr["_causa_ok"].apply(
+                                lambda v: "✅ Correcto" if v else "❌ Error")
+
+                            # Diagnóstico breve del error de llenado (solo cuando _causa_ok=False)
+                            # Explica por qué se imputa el error; vacío cuando está correcto.
+                            import re as _re_diag
+                            _DIAG_PREFIJO = _re_diag.compile(r"^0[1-4]\.\d", _re_diag.IGNORECASE)
+                            def _diagnostico_causa(row) -> str:
+                                if bool(row.get("_causa_ok", False)):
+                                    return ""
+                                causa = str(row.get("causa_raiz_raw","") or "").strip()
+                                com   = str(row.get("comentario_tecnico","") or "").strip()
+                                com   = "" if com in ("—", "-") else com
+                                es_mc = bool(row.get("es_correctiva", True))
+                                tiene_com = bool(com) and len(com) > 5
+                                causa_vacia = (not causa) or causa.upper() in ("SIN CLASIFICAR","N/A","NA")
+                                # Caso PM: el form exige cualquier texto, igual quedó vacío
+                                if not es_mc:
+                                    if causa_vacia:
+                                        return ("Preventiva sin observación de causa — el técnico cerró el form "
+                                                "sin documentar qué encontró.")
+                                    return "Causa de preventiva no clasificable."
+                                # Caso MC
+                                if causa_vacia and tiene_com:
+                                    return ("Describió la falla en texto libre pero NO seleccionó la "
+                                            "clasificación Fracttal — descuido de llenado.")
+                                if causa_vacia and not tiene_com:
+                                    return ("No documentó NADA: ni clasificación Fracttal ni desglose en "
+                                            "texto libre.")
+                                # Tiene texto en la causa pero no clasifica → código no es Fracttal válido
+                                if not _DIAG_PREFIJO.match(causa):
+                                    return (f"Valor en causa ('{causa[:40]}') no es código Fracttal válido "
+                                            "(01.x–04.x).")
+                                # Código tipo "OTROS" sin keyword reconocible
+                                if "OTROS" in causa.upper():
+                                    extra = " El comentario aclara el detalle." if tiene_com else " Sin comentario que aclare."
+                                    return f"Código '{causa[:30]}' demasiado genérico.{extra}"
+                                return "Clasificación no reconocida como técnico/cliente."
+
+                            _det_cr["_diagnostico"] = _det_cr.apply(_diagnostico_causa, axis=1)
+                            # Simplificar tipo: cualquier variante de preventiva (mensual, trimestral,
+                            # por horas, etc.) → "PREVENTIVA". En esta tabla no aporta el subtipo.
+                            if "maint_type" in _det_cr.columns:
+                                _det_cr["maint_type"] = _det_cr["maint_type"].astype(str).str.upper().apply(
+                                    lambda t: "PREVENTIVA" if "PREVENTIVA" in t or "INSPECC" in t
+                                              else ("CORRECTIVA" if "CORRECTIVA" in t else t.title()))
+                            # Comentario del técnico (texto libre del PDF) — explica el "OTROS" / "SIN CLASIFICAR"
+                            if "comentario_tecnico" in _det_cr.columns:
+                                _det_cr["comentario_tecnico"] = (
+                                    _det_cr["comentario_tecnico"].fillna("").apply(_strip_comentario_headers))
+                            # Causa raíz: SÍ mostrar Equipo. En Fracttal las correctivas
+                            # siempre tienen 1 activo por OT (la falla es por equipo),
+                            # así que cada fila corresponde inequívocamente a un equipo.
+                            # Las preventivas multi-subtarea no tienen causa raíz registrada.
+                            # Mapa código EDS → nombre (desde el maestro estaciones_servicio)
+                            _eds_nombre_map_cr = {}
+                            try:
+                                if not df_eds.empty and "eds_occim" in df_eds.columns and "nombre" in df_eds.columns:
+                                    _eds_nombre_map_cr = dict(zip(
+                                        df_eds["eds_occim"].astype(str), df_eds["nombre"].astype(str)))
+                            except Exception:
+                                pass
+                            if "equipment_code" in _det_cr.columns:
+                                _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
+                            if "eds_occim" in _det_cr.columns:
+                                _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
+                                _det_cr["eds_nombre"] = _det_cr["eds_occim"].map(_eds_nombre_map_cr).fillna("—")
+                            _det_cr = _det_cr.drop(
+                                columns=["_causa_ok","es_correctiva"], errors="ignore"
+                            ).rename(columns={
+                                "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
+                                "eds_nombre":"Nombre EDS",
+                                "tecnico":"Técnico","creation_date":"Fecha",
+                                "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
+                                "causa_clasif":"Clasificación",
+                                "comentario_tecnico":"Comentario técnico / qué hizo",
+                                "_diagnostico":"Diagnóstico del error"
+                            }).sort_values("Fecha", ascending=False)
+                            # Orden final: OT - Equipo - EDS - Nombre EDS - resto
+                            _orden_cr = ["OT","Equipo","EDS","Nombre EDS","Técnico","Fecha","Tipo","Causa Raíz",
+                                         "Clasificación","Estado",
+                                         "Comentario técnico / qué hizo","Diagnóstico del error"]
+                            _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
+                            # Filtro por OT (si el usuario escribió algo)
+                            _det_cr = _aplicar_filtro_ot(_det_cr, _filtro_cr, col="OT")
+                            if _filtro_cr:
+                                st.caption(f"Mostrando **{len(_det_cr):,}** de {_n_cr_total:,} OTs (filtro: `{_filtro_cr}`).")
+                            _show_df(_det_cr, hide_index=True, width="stretch",
+                                column_config={
+                                    "OT":            st.column_config.TextColumn(width=110),
+                                    "Equipo":        st.column_config.TextColumn(width=95,
+                                        help="Código del activo en Fracttal (ej. EQ-6249). En correctivas siempre hay 1 equipo por OT."),
+                                    "EDS":           st.column_config.TextColumn(width=85,
+                                        help="Código EDS Occimiano donde se realizó el MP/MC."),
+                                    "Nombre EDS":    st.column_config.TextColumn(width=230,
+                                        help="Nombre / dirección de la estación."),
+                                    "Técnico":       st.column_config.TextColumn(width=190),
+                                    "Fecha":         st.column_config.TextColumn(width=100),
+                                    "Tipo":          st.column_config.TextColumn(width=110),
+                                    "Causa Raíz":    st.column_config.TextColumn(width=220),
+                                    "Clasificación": st.column_config.TextColumn(width=110),
+                                    "Comentario técnico / qué hizo": st.column_config.TextColumn(width=340,
+                                        help="Texto libre del técnico en Fracttal (falla encontrada, trabajo realizado, observaciones). Explica el 'OTROS'/'SIN CLASIFICAR' o lo deja en evidencia si está vacío."),
+                                    "Diagnóstico del error": st.column_config.TextColumn(width=320,
+                                        help="Razón por la que el KPI imputa el error: qué llenó mal o qué omitió. Vacío si la fila está correcta."),
+                                    "Estado":        st.column_config.TextColumn(width=110),
+                                })
+                    else:
+                        st.info("Sin datos de OTs correctivas para el filtro actual.")
+
+                    # ══════════════════════════════════════════════════════════════════
+                    # SECCIÓN: TIEMPO DE EJECUCIÓN
+                    # ══════════════════════════════════════════════════════════════════
+                    st.divider()
+
+            if _prec_view == _V_TIEMPO:
+                with _pt_tiempo:
+                    st.markdown('<div class="section-header">⏱  Tiempo de Ejecución — Preventivos</div>',
+                                unsafe_allow_html=True)
+
+                    # ── Guardia de integridad: OTs preventivas 2026 sin sync ─────────
+                    # Detecta preventivas cuya `duracion_estim_neta_seg` está en NULL
+                    # (nunca fueron procesadas por sync_estim_neta.py). Estas NO
+                    # aparecen en el KPI de tiempo (estimated_sec=0 no evaluable)
+                    # pero conviene alertar para que el operador corra el sync.
+                    try:
+                        from supabase_client import _query as _sq_int
+                        _rows_pend = _sq_int(
+                            "ordenes_trabajo",
+                            "select=id_ot,fecha_creacion,estado&tipo_tarea=ilike.*PREVENTIVA*"
+                            "&fecha_creacion=gte.2026-01-01"
+                            "&duracion_estim_neta_seg=is.null"
+                            "&estado=not.in.(ERROR%20DE%20INGRESO,DUPLICADO,Duplicidad,"
+                            "DE%20PRUEBA,PRUEBA%20ROBOT,Cancelado,Canceladas,Cancelada)",
+                            limit=5000,
+                        )
+                        _n_pend_est = len(_rows_pend)
+                    except Exception:
+                        _n_pend_est = 0
+                        _rows_pend = []
+                    if _n_pend_est > 0:
+                        _muestra = ", ".join(r["id_ot"] for r in _rows_pend[:5])
+                        _extra = f" (+{_n_pend_est-5} más)" if _n_pend_est > 5 else ""
+                        st.warning(
+                            f"⚠️ **{_n_pend_est} OT{'s' if _n_pend_est != 1 else ''} preventiva{'s' if _n_pend_est != 1 else ''}** "
+                            f"sin `duracion_estim_neta_seg` en Supabase — no evalúan en este KPI. "
+                            f"Correr `python sync_estim_neta.py --modo incremental` para poblarlas. "
+                            f"Muestra: {_muestra}{_extra}."
+                        )
+
+                    # ── Leyenda expandible ────────────────────────────────────────────
+                    with st.expander("📖  Regla de cumplimiento de tiempo (piso 75% del estimado)", expanded=False):
+                        st.markdown("""
+        **¿Cómo funciona?**
+
+        Cada mantenimiento preventivo tiene una **duración estimada** (programada en Fracttal).
+        La duración estimada se toma **solo de la subtarea LAVADORA** (no se suman bomba,
+        ablandador, lavatapices ni cambio de aceite — esos son actividades aparte).
+        El técnico debe ejecutar la tarea al menos por el **75% del tiempo estimado de la lavadora**.
+
+        - **Piso: 75% del tiempo estimado** — si se ejecuta más rápido, es sospecha de quick-tick.
+        - **Sin techo (informativo)** — si se ejecuta más lento del 150%, se marca como
+          🟣 **Sobretiempo**, pero **CUMPLE**. El técnico puede justificadamente tardar más
+          (falla adicional, revisión profunda, etc.). El dato queda registrado para monitoreo,
+          no penaliza el KPI.
+
+        Ejemplo con MP de **1:30 h (90 min)** estimados (lavadora):
+
+        | Duración estimada | Mínimo (75%) | Ejemplo | Resultado |
+        |---|---|---|---|
+        | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 1:20 (80 min) | ✅ Cumple |
+        | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 0:30 (30 min) | ❌ No cumple (déficit) |
+        | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 2:30 (150 min) | ✅ Cumple 🟣 Sobretiempo |
+        | 00:40 (40 min) | 00:30 (30 min) | Ejecutó 32 min | ✅ Cumple |
+        | 01:00 (60 min) | 00:45 (45 min) | Ejecutó 50 min | ✅ Cumple |
+
+        **¿Qué se mide?**
+        - **Tiempo efectivo** = `max(tasks_duration, tiempo real por fechas OT)`
+        - **Duración estimada** = SOLO de la subtarea LAVADORA (fuente: `duracion_estim_neta_seg`)
+        - Si `Tiempo Efectivo ≥ 75% × Estimada` → **✅ CUMPLE**
+        - Si `Tiempo Efectivo < 75% × Estimada` → **❌ NO CUMPLE**
+        - Si además `Tiempo Efectivo > 150% × Estimada` → **✅ CUMPLE + 🟣 Sobretiempo** (informativo)
+        - Si no hay duración estimada → **Sin datos** (no penaliza)
+
+        **¿Por qué solo lavadora?**
+        Fracttal duplica en cada subtarea el tiempo total de la OT, entonces sumar todo
+        inflaba el estimado a 3-4 horas cuando en realidad la lavadora sola tarda 1-1:30 h.
+        El indicador mide la calidad del trabajo del técnico sobre el equipo principal.
+
+        **¿Por qué sin techo?**
+        Un técnico que tarda más NO es un problema de calidad. Puede tener causas legítimas
+        (falla adicional que atiende en el momento, revisión profunda). Se marca para
+        monitoreo pero no penaliza.
+
+        **¿Por qué usar max(tasks_duration, elapsed)?**
+        Si el técnico no llenó el campo de duración de tareas pero tuvo el OT abierto 90 min,
+        esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
+        """)
+
+                    # ── Gráfico Tiempo de Ejecución (diseño apilado igual que Numerales) ─
+                    _periodo_lbl_te = ("por semanas" if len(_meses_sel_raw) == 1
+                                       else "por mes seleccionado")
+                    st.markdown(f"**Evolución {_periodo_lbl_te} — % preventivos con tiempo de ejecución correcto**")
+
+                    _df_te_base = df_kpi_raw[df_kpi_raw["maint_type"] != "CORRECTIVA"].copy() \
+                                  if "maint_type" in df_kpi_raw.columns else df_kpi_raw.copy()
+
+                    # Aplicar filtros de equipo/técnico
+                    if equipo_kpi != "Todos":
+                        _grp_te = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
+                        _df_te_base = _df_te_base[_df_te_base["equipo"] == _grp_te]
+                    if tec_kpi_sel != "Todos":
+                        _df_te_base = _df_te_base[_df_te_base["tecnico"] == tec_kpi_sel]
+
+                    if not _df_te_base.empty and "estimated_sec" in _df_te_base.columns:
+                        # Solo OTs con duración estimada > 0
+                        _df_te = _df_te_base[_df_te_base["estimated_sec"] > 0].copy()
+                        # Tiempo efectivo = max(tasks_duration, elapsed real por fechas).
+                        # Si el técnico no llenó tasks_duration (=0) pero el OT estuvo abierto
+                        # N minutos, ese tiempo cuenta. Consistente con _score_tiempo en data.py.
+                        _df_te["_effective_sec"] = _df_te[["duration_sec","elapsed_sec"]].fillna(0).max(axis=1)
+                        # Regla operativa validada con Ops (06-jul-2026):
+                        #   ≥ 75%  del estimado → CUMPLE (verde)
+                        #   < 75%  del estimado → NO CUMPLE (posible quick-tick,
+                        #                          trabajo incompleto)
+                        #   > 150% del estimado → CUMPLE + marca SOBRETIEMPO
+                        #                          (informativo; se registra pero
+                        #                          no penaliza. El técnico puede
+                        #                          justificadamente tardar más.)
+                        _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75
+                        _df_te["_te_sobretiempo"] = (
+                            _df_te["_effective_sec"] > _df_te["estimated_sec"] * 1.50
+                        )
+                        # Una OT con múltiples equipos genera filas duplicadas con los
+                        # mismos tiempos neta; mantener solo una fila por OT.
+                        _df_te = _df_te.drop_duplicates(subset="folio", keep="first")
+
+                        # KPI del periodo seleccionado
+                        _df_te_periodo = _df_te[_df_te["mes"].astype(str).isin(set(_meses_prec_str))].copy()
+                        if _sem_prec != "Todas":
+                            _sem_match_te2 = next((s for s in _sems_prec if s[0] == _sem_prec), None)
+                            if _sem_match_te2 and "creation_date_local" in _df_te_periodo.columns:
+                                _df_te_periodo = _df_te_periodo[
+                                    (_df_te_periodo["creation_date_local"] >= _sem_match_te2[1]) &
+                                    (_df_te_periodo["creation_date_local"] <= _sem_match_te2[2])
+                                ]
+                        _te_tot = len(_df_te_periodo)
+                        _te_ok  = int(_df_te_periodo["_te_ok"].sum()) if _te_tot else 0
+                        _te_pct = (_te_ok / _te_tot * 100) if _te_tot else 0.0
+
+                        _g_te = _agrupar_por_periodo(_df_te, "_te_ok")
+
+                        tc1, tc2 = st.columns([1, 3])
+                        with tc1:
+                            _kpi_card(_te_pct, _te_ok, _te_tot,
+                                      "preventivos con tiempo OK (75%–150%)", meta_pct=75.0)
+                        with tc2:
+                            if not _g_te.empty:
+                                _te_sig = (f"_fig_te_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
+                                           f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
+                                if _te_sig not in st.session_state:
+                                    st.session_state[_te_sig] = _fig_apilada(
+                                        _g_te, color_ok="#3b82f6",
+                                        label_ok="Tiempo correcto (≥75%)",
+                                        label_err="Tiempo insuficiente",
+                                        meta=75.0, titulo_y="% preventivos",
+                                    )
+                                st.plotly_chart(st.session_state[_te_sig], width="stretch")
+
+                        # ── Filtro de periodo para tablas y gráficos de dona/barras ──
+                        # (el gráfico de evolución mensual siempre muestra todos los meses)
+                        _df_te_p = _df_te[_df_te["mes"].astype(str).isin(set(_meses_prec_str))].copy()
+                        if _sem_prec != "Todas":
+                            _sem_match_te = next((s for s in _sems_prec if s[0] == _sem_prec), None)
+                            if _sem_match_te and "creation_date_local" in _df_te_p.columns:
+                                _df_te_p = _df_te_p[
+                                    (_df_te_p["creation_date_local"] >= _sem_match_te[1]) &
+                                    (_df_te_p["creation_date_local"] <= _sem_match_te[2])
+                                ]
+
+                        # ── Tabla detalle de Tiempo de Ejecución ─────────────────────
+                        def _fmt_seg(s):
+                            if pd.isna(s) or s == 0: return "—"
+                            s = int(s); h, m = s//3600, (s%3600)//60
+                            return f"{h:02d}:{m:02d}"
+
+                        _det_te = _df_te_p.copy()
+                        _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.75).round(0)
+                        _det_te["_maximo_sec"] = (_det_te["estimated_sec"] * 1.50).round(0)
+                        _det_te["_pct_ej"]     = (_det_te["_effective_sec"] / _det_te["estimated_sec"] * 100).round(1)
+                        _det_te["_es_exceso"]  = _det_te["_effective_sec"] > _det_te["_maximo_sec"]
+                        _det_te_cd = pd.to_datetime(_det_te["creation_date"], errors="coerce")
+                        _det_te_cd = _det_te_cd.dt.tz_convert(None) if _det_te_cd.dt.tz is not None else _det_te_cd
+                        _det_te["creation_date"] = _det_te_cd.dt.strftime("%d/%m/%Y")
+
+                        _det_te_disp = _det_te[[c for c in
+                            ["folio","eds_occim","tecnico","creation_date","maint_type",
+                             "estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
+                             "_pct_ej","_te_ok","_es_exceso"]
+                            if c in _det_te.columns]].copy()
+                        _det_te_disp["T. Estimado"]   = _det_te_disp["estimated_sec"].apply(_fmt_seg)
+                        _det_te_disp["Mín. 75%"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
+                        _det_te_disp["Máx. 150%"]      = _det_te_disp["_maximo_sec"].apply(_fmt_seg)
+                        _det_te_disp["T. Ejecución"]   = _det_te_disp["_effective_sec"].apply(_fmt_seg)
+                        _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
+                        def _estado_lbl(r):
+                            # Regla operativa (validada Ops 06-jul-2026):
+                            #   ≥75%  → CUMPLE (verde)
+                            #   >150% → CUMPLE + marca 🟣 Sobretiempo (informativo, NO penaliza)
+                            #   <75%  → NO CUMPLE
+                            if bool(r.get("_te_ok", False)):
+                                if bool(r.get("_es_exceso", False)):
+                                    return "✅ Cumple · 🟣 Sobretiempo"
+                                return "✅ Cumple"
+                            return "❌ No cumple"
+                        _det_te_disp["Estado"] = _det_te_disp.apply(_estado_lbl, axis=1)
+
+                        # Diagnóstico:
+                        # - No cumple (déficit <75%): explica por qué.
+                        # - Sobretiempo (>150% pero cumple): registro informativo.
+                        # - Cumple normal (75-150%): vacío.
+                        def _fmt_hm(seg):
+                            if seg is None or pd.isna(seg) or seg <= 0: return "0min"
+                            seg = int(seg); h, m = seg//3600, (seg%3600)//60
+                            return f"{h}h{m:02d}min" if h else f"{m}min"
+
+                        def _diag_tiempo(r):
+                            estim = int(r.get("estimated_sec") or 0)
+                            real  = int(r.get("_effective_sec") or 0)
+                            minimo = int(r.get("_minimo_sec") or 0)
+                            maximo = int(r.get("_maximo_sec") or 0)
+                            pct = float(r.get("_pct_ej") or 0.0)
+                            estim_h = _fmt_hm(estim)
+                            real_h  = _fmt_hm(real)
+                            min_h   = _fmt_hm(minimo)
+                            max_h   = _fmt_hm(maximo)
+                            # ── SOBRETIEMPO (cumple, informativo) ───────────────────
+                            if bool(r.get("_te_ok", False)) and bool(r.get("_es_exceso", False)):
+                                exceso = real - maximo
+                                return (f"Sobretiempo (informativo, no penaliza): {real_h} ejecutado "
+                                        f"supera el tope de referencia {max_h} (150% de {estim_h}) "
+                                        f"por {_fmt_hm(exceso)}. La OT CUMPLE — puede haber tenido "
+                                        f"causa legítima (falla adicional, revisión profunda).")
+                            # Si cumple sin sobretiempo, vacío
+                            if bool(r.get("_te_ok", False)):
                                 return ""
-                            causa = str(row.get("causa_raiz_raw","") or "").strip()
-                            com   = str(row.get("comentario_tecnico","") or "").strip()
-                            com   = "" if com in ("—", "-") else com
-                            es_mc = bool(row.get("es_correctiva", True))
-                            tiene_com = bool(com) and len(com) > 5
-                            causa_vacia = (not causa) or causa.upper() in ("SIN CLASIFICAR","N/A","NA")
-                            # Caso PM: el form exige cualquier texto, igual quedó vacío
-                            if not es_mc:
-                                if causa_vacia:
-                                    return ("Preventiva sin observación de causa — el técnico cerró el form "
-                                            "sin documentar qué encontró.")
-                                return "Causa de preventiva no clasificable."
-                            # Caso MC
-                            if causa_vacia and tiene_com:
-                                return ("Describió la falla en texto libre pero NO seleccionó la "
-                                        "clasificación Fracttal — descuido de llenado.")
-                            if causa_vacia and not tiene_com:
-                                return ("No documentó NADA: ni clasificación Fracttal ni desglose en "
-                                        "texto libre.")
-                            # Tiene texto en la causa pero no clasifica → código no es Fracttal válido
-                            if not _DIAG_PREFIJO.match(causa):
-                                return (f"Valor en causa ('{causa[:40]}') no es código Fracttal válido "
-                                        "(01.x–04.x).")
-                            # Código tipo "OTROS" sin keyword reconocible
-                            if "OTROS" in causa.upper():
-                                extra = " El comentario aclara el detalle." if tiene_com else " Sin comentario que aclare."
-                                return f"Código '{causa[:30]}' demasiado genérico.{extra}"
-                            return "Clasificación no reconocida como técnico/cliente."
+                            # ── DÉFICIT (<75% del estimado) ─────────────────────────
+                            deficit = minimo - real
+                            if real == 0:
+                                return (f"Sin registro de tiempo: el técnico no documentó duración alguna. "
+                                        f"Estimado {estim_h}, mínimo aceptable {min_h}.")
+                            if pct < 5:
+                                return (f"Tiempo absurdo: registró {real_h} cuando el estimado era {estim_h} "
+                                        f"(mínimo {min_h}). Imposible ejecutar una preventiva en ese plazo.")
+                            if pct < 20:
+                                return (f"Tiempo injustificado: {real_h} es <20% del estimado ({estim_h}). "
+                                        f"Quick-tick probable — debió ser al menos {min_h}.")
+                            if pct < 50:
+                                return (f"Muy por debajo del mínimo: {real_h} ejecutado vs {min_h} requerido "
+                                        f"(75% de {estim_h}). Déficit de {_fmt_hm(deficit)}.")
+                            # 50-75% → cerca pero no llega
+                            return (f"El acumulado del tiempo no cumple ni siquiera el 75% mínimo de {estim_h}: "
+                                    f"registró {real_h} y se requerían {min_h} (faltaron {_fmt_hm(deficit)}).")
 
-                        _det_cr["_diagnostico"] = _det_cr.apply(_diagnostico_causa, axis=1)
-                        # Simplificar tipo: cualquier variante de preventiva (mensual, trimestral,
-                        # por horas, etc.) → "PREVENTIVA". En esta tabla no aporta el subtipo.
-                        if "maint_type" in _det_cr.columns:
-                            _det_cr["maint_type"] = _det_cr["maint_type"].astype(str).str.upper().apply(
-                                lambda t: "PREVENTIVA" if "PREVENTIVA" in t or "INSPECC" in t
-                                          else ("CORRECTIVA" if "CORRECTIVA" in t else t.title()))
-                        # Comentario del técnico (texto libre del PDF) — explica el "OTROS" / "SIN CLASIFICAR"
-                        if "comentario_tecnico" in _det_cr.columns:
-                            _det_cr["comentario_tecnico"] = (
-                                _det_cr["comentario_tecnico"].fillna("").apply(_strip_comentario_headers))
-                        # Causa raíz: SÍ mostrar Equipo. En Fracttal las correctivas
-                        # siempre tienen 1 activo por OT (la falla es por equipo),
-                        # así que cada fila corresponde inequívocamente a un equipo.
-                        # Las preventivas multi-subtarea no tienen causa raíz registrada.
+                        _det_te_disp["Diagnóstico"] = _det_te.apply(_diag_tiempo, axis=1).values
                         # Mapa código EDS → nombre (desde el maestro estaciones_servicio)
-                        _eds_nombre_map_cr = {}
+                        _eds_nombre_map_te = {}
                         try:
                             if not df_eds.empty and "eds_occim" in df_eds.columns and "nombre" in df_eds.columns:
-                                _eds_nombre_map_cr = dict(zip(
+                                _eds_nombre_map_te = dict(zip(
                                     df_eds["eds_occim"].astype(str), df_eds["nombre"].astype(str)))
                         except Exception:
                             pass
-                        if "equipment_code" in _det_cr.columns:
-                            _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
-                        if "eds_occim" in _det_cr.columns:
-                            _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
-                            _det_cr["eds_nombre"] = _det_cr["eds_occim"].map(_eds_nombre_map_cr).fillna("—")
-                        _det_cr = _det_cr.drop(
-                            columns=["_causa_ok","es_correctiva"], errors="ignore"
+                        # Normalizar EDS para display + inyectar nombre
+                        if "eds_occim" in _det_te_disp.columns:
+                            _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
+                            _det_te_disp["eds_nombre"] = _det_te_disp["eds_occim"].map(_eds_nombre_map_te).fillna("—")
+                        _det_te_disp = _det_te_disp.drop(
+                            columns=["estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
+                                     "_pct_ej","_te_ok","_es_exceso"],
+                            errors="ignore"
                         ).rename(columns={
-                            "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
-                            "eds_nombre":"Nombre EDS",
-                            "tecnico":"Técnico","creation_date":"Fecha",
-                            "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
-                            "causa_clasif":"Clasificación",
-                            "comentario_tecnico":"Comentario técnico / qué hizo",
-                            "_diagnostico":"Diagnóstico del error"
+                            "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
+                            "tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
                         }).sort_values("Fecha", ascending=False)
-                        # Orden final: OT - Equipo - EDS - Nombre EDS - resto
-                        _orden_cr = ["OT","Equipo","EDS","Nombre EDS","Técnico","Fecha","Tipo","Causa Raíz",
-                                     "Clasificación","Estado",
-                                     "Comentario técnico / qué hizo","Diagnóstico del error"]
-                        _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
-                        # Filtro por OT (si el usuario escribió algo)
-                        _det_cr = _aplicar_filtro_ot(_det_cr, _filtro_cr, col="OT")
-                        if _filtro_cr:
-                            st.caption(f"Mostrando **{len(_det_cr):,}** de {_n_cr_total:,} OTs (filtro: `{_filtro_cr}`).")
-                        _show_df(_det_cr, hide_index=True, width="stretch",
-                            column_config={
-                                "OT":            st.column_config.TextColumn(width=110),
-                                "Equipo":        st.column_config.TextColumn(width=95,
-                                    help="Código del activo en Fracttal (ej. EQ-6249). En correctivas siempre hay 1 equipo por OT."),
-                                "EDS":           st.column_config.TextColumn(width=85,
-                                    help="Código EDS Occimiano donde se realizó el MP/MC."),
-                                "Nombre EDS":    st.column_config.TextColumn(width=230,
-                                    help="Nombre / dirección de la estación."),
-                                "Técnico":       st.column_config.TextColumn(width=190),
-                                "Fecha":         st.column_config.TextColumn(width=100),
-                                "Tipo":          st.column_config.TextColumn(width=110),
-                                "Causa Raíz":    st.column_config.TextColumn(width=220),
-                                "Clasificación": st.column_config.TextColumn(width=110),
-                                "Comentario técnico / qué hizo": st.column_config.TextColumn(width=340,
-                                    help="Texto libre del técnico en Fracttal (falla encontrada, trabajo realizado, observaciones). Explica el 'OTROS'/'SIN CLASIFICAR' o lo deja en evidencia si está vacío."),
-                                "Diagnóstico del error": st.column_config.TextColumn(width=320,
-                                    help="Razón por la que el KPI imputa el error: qué llenó mal o qué omitió. Vacío si la fila está correcta."),
-                                "Estado":        st.column_config.TextColumn(width=110),
-                            })
-                else:
-                    st.info("Sin datos de OTs correctivas para el filtro actual.")
+                        # Orden: OT - EDS - Nombre EDS - Técnico - resto, Diagnóstico al final
+                        _orden_te = ["OT","EDS","Nombre EDS","Técnico","Fecha","Tipo",
+                                     "T. Estimado","Mín. 75%","Máx. 150%","T. Ejecución","% Ejecutado","Estado",
+                                     "Diagnóstico"]
+                        _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
-                # ══════════════════════════════════════════════════════════════════
-                # SECCIÓN: TIEMPO DE EJECUCIÓN
-                # ══════════════════════════════════════════════════════════════════
-                st.divider()
-
-            with _pt_tiempo:
-                st.markdown('<div class="section-header">⏱  Tiempo de Ejecución — Preventivos</div>',
-                            unsafe_allow_html=True)
-
-                # ── Guardia de integridad: OTs preventivas 2026 sin sync ─────────
-                # Detecta preventivas cuya `duracion_estim_neta_seg` está en NULL
-                # (nunca fueron procesadas por sync_estim_neta.py). Estas NO
-                # aparecen en el KPI de tiempo (estimated_sec=0 no evaluable)
-                # pero conviene alertar para que el operador corra el sync.
-                try:
-                    from supabase_client import _query as _sq_int
-                    _rows_pend = _sq_int(
-                        "ordenes_trabajo",
-                        "select=id_ot,fecha_creacion,estado&tipo_tarea=ilike.*PREVENTIVA*"
-                        "&fecha_creacion=gte.2026-01-01"
-                        "&duracion_estim_neta_seg=is.null"
-                        "&estado=not.in.(ERROR%20DE%20INGRESO,DUPLICADO,Duplicidad,"
-                        "DE%20PRUEBA,PRUEBA%20ROBOT,Cancelado,Canceladas,Cancelada)",
-                        limit=5000,
-                    )
-                    _n_pend_est = len(_rows_pend)
-                except Exception:
-                    _n_pend_est = 0
-                    _rows_pend = []
-                if _n_pend_est > 0:
-                    _muestra = ", ".join(r["id_ot"] for r in _rows_pend[:5])
-                    _extra = f" (+{_n_pend_est-5} más)" if _n_pend_est > 5 else ""
-                    st.warning(
-                        f"⚠️ **{_n_pend_est} OT{'s' if _n_pend_est != 1 else ''} preventiva{'s' if _n_pend_est != 1 else ''}** "
-                        f"sin `duracion_estim_neta_seg` en Supabase — no evalúan en este KPI. "
-                        f"Correr `python sync_estim_neta.py --modo incremental` para poblarlas. "
-                        f"Muestra: {_muestra}{_extra}."
-                    )
-
-                # ── Leyenda expandible ────────────────────────────────────────────
-                with st.expander("📖  Regla de cumplimiento de tiempo (piso 75% del estimado)", expanded=False):
-                    st.markdown("""
-    **¿Cómo funciona?**
-
-    Cada mantenimiento preventivo tiene una **duración estimada** (programada en Fracttal).
-    La duración estimada se toma **solo de la subtarea LAVADORA** (no se suman bomba,
-    ablandador, lavatapices ni cambio de aceite — esos son actividades aparte).
-    El técnico debe ejecutar la tarea al menos por el **75% del tiempo estimado de la lavadora**.
-
-    - **Piso: 75% del tiempo estimado** — si se ejecuta más rápido, es sospecha de quick-tick.
-    - **Sin techo (informativo)** — si se ejecuta más lento del 150%, se marca como
-      🟣 **Sobretiempo**, pero **CUMPLE**. El técnico puede justificadamente tardar más
-      (falla adicional, revisión profunda, etc.). El dato queda registrado para monitoreo,
-      no penaliza el KPI.
-
-    Ejemplo con MP de **1:30 h (90 min)** estimados (lavadora):
-
-    | Duración estimada | Mínimo (75%) | Ejemplo | Resultado |
-    |---|---|---|---|
-    | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 1:20 (80 min) | ✅ Cumple |
-    | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 0:30 (30 min) | ❌ No cumple (déficit) |
-    | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 2:30 (150 min) | ✅ Cumple 🟣 Sobretiempo |
-    | 00:40 (40 min) | 00:30 (30 min) | Ejecutó 32 min | ✅ Cumple |
-    | 01:00 (60 min) | 00:45 (45 min) | Ejecutó 50 min | ✅ Cumple |
-
-    **¿Qué se mide?**
-    - **Tiempo efectivo** = `max(tasks_duration, tiempo real por fechas OT)`
-    - **Duración estimada** = SOLO de la subtarea LAVADORA (fuente: `duracion_estim_neta_seg`)
-    - Si `Tiempo Efectivo ≥ 75% × Estimada` → **✅ CUMPLE**
-    - Si `Tiempo Efectivo < 75% × Estimada` → **❌ NO CUMPLE**
-    - Si además `Tiempo Efectivo > 150% × Estimada` → **✅ CUMPLE + 🟣 Sobretiempo** (informativo)
-    - Si no hay duración estimada → **Sin datos** (no penaliza)
-
-    **¿Por qué solo lavadora?**
-    Fracttal duplica en cada subtarea el tiempo total de la OT, entonces sumar todo
-    inflaba el estimado a 3-4 horas cuando en realidad la lavadora sola tarda 1-1:30 h.
-    El indicador mide la calidad del trabajo del técnico sobre el equipo principal.
-
-    **¿Por qué sin techo?**
-    Un técnico que tarda más NO es un problema de calidad. Puede tener causas legítimas
-    (falla adicional que atiende en el momento, revisión profunda). Se marca para
-    monitoreo pero no penaliza.
-
-    **¿Por qué usar max(tasks_duration, elapsed)?**
-    Si el técnico no llenó el campo de duración de tareas pero tuvo el OT abierto 90 min,
-    esos 90 min cuentan como tiempo real. Evita penalizar por campos sin llenar.
-    """)
-
-                # ── Gráfico Tiempo de Ejecución (diseño apilado igual que Numerales) ─
-                _periodo_lbl_te = ("por semanas" if len(_meses_sel_raw) == 1
-                                   else "por mes seleccionado")
-                st.markdown(f"**Evolución {_periodo_lbl_te} — % preventivos con tiempo de ejecución correcto**")
-
-                _df_te_base = df_kpi_raw[df_kpi_raw["maint_type"] != "CORRECTIVA"].copy() \
-                              if "maint_type" in df_kpi_raw.columns else df_kpi_raw.copy()
-
-                # Aplicar filtros de equipo/técnico
-                if equipo_kpi != "Todos":
-                    _grp_te = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
-                    _df_te_base = _df_te_base[_df_te_base["equipo"] == _grp_te]
-                if tec_kpi_sel != "Todos":
-                    _df_te_base = _df_te_base[_df_te_base["tecnico"] == tec_kpi_sel]
-
-                if not _df_te_base.empty and "estimated_sec" in _df_te_base.columns:
-                    # Solo OTs con duración estimada > 0
-                    _df_te = _df_te_base[_df_te_base["estimated_sec"] > 0].copy()
-                    # Tiempo efectivo = max(tasks_duration, elapsed real por fechas).
-                    # Si el técnico no llenó tasks_duration (=0) pero el OT estuvo abierto
-                    # N minutos, ese tiempo cuenta. Consistente con _score_tiempo en data.py.
-                    _df_te["_effective_sec"] = _df_te[["duration_sec","elapsed_sec"]].fillna(0).max(axis=1)
-                    # Regla operativa validada con Ops (06-jul-2026):
-                    #   ≥ 75%  del estimado → CUMPLE (verde)
-                    #   < 75%  del estimado → NO CUMPLE (posible quick-tick,
-                    #                          trabajo incompleto)
-                    #   > 150% del estimado → CUMPLE + marca SOBRETIEMPO
-                    #                          (informativo; se registra pero
-                    #                          no penaliza. El técnico puede
-                    #                          justificadamente tardar más.)
-                    _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75
-                    _df_te["_te_sobretiempo"] = (
-                        _df_te["_effective_sec"] > _df_te["estimated_sec"] * 1.50
-                    )
-                    # Una OT con múltiples equipos genera filas duplicadas con los
-                    # mismos tiempos neta; mantener solo una fila por OT.
-                    _df_te = _df_te.drop_duplicates(subset="folio", keep="first")
-
-                    # KPI del periodo seleccionado
-                    _df_te_periodo = _df_te[_df_te["mes"].astype(str).isin(set(_meses_prec_str))].copy()
-                    if _sem_prec != "Todas":
-                        _sem_match_te2 = next((s for s in _sems_prec if s[0] == _sem_prec), None)
-                        if _sem_match_te2 and "creation_date_local" in _df_te_periodo.columns:
-                            _df_te_periodo = _df_te_periodo[
-                                (_df_te_periodo["creation_date_local"] >= _sem_match_te2[1]) &
-                                (_df_te_periodo["creation_date_local"] <= _sem_match_te2[2])
-                            ]
-                    _te_tot = len(_df_te_periodo)
-                    _te_ok  = int(_df_te_periodo["_te_ok"].sum()) if _te_tot else 0
-                    _te_pct = (_te_ok / _te_tot * 100) if _te_tot else 0.0
-
-                    _g_te = _agrupar_por_periodo(_df_te, "_te_ok")
-
-                    tc1, tc2 = st.columns([1, 3])
-                    with tc1:
-                        _kpi_card(_te_pct, _te_ok, _te_tot,
-                                  "preventivos con tiempo OK (75%–150%)", meta_pct=75.0)
-                    with tc2:
-                        if not _g_te.empty:
-                            _te_sig = (f"_fig_te_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
-                                       f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
-                            if _te_sig not in st.session_state:
-                                st.session_state[_te_sig] = _fig_apilada(
-                                    _g_te, color_ok="#3b82f6",
-                                    label_ok="Tiempo correcto (≥75%)",
-                                    label_err="Tiempo insuficiente",
-                                    meta=75.0, titulo_y="% preventivos",
-                                )
-                            st.plotly_chart(st.session_state[_te_sig], width="stretch")
-
-                    # ── Filtro de periodo para tablas y gráficos de dona/barras ──
-                    # (el gráfico de evolución mensual siempre muestra todos los meses)
-                    _df_te_p = _df_te[_df_te["mes"].astype(str).isin(set(_meses_prec_str))].copy()
-                    if _sem_prec != "Todas":
-                        _sem_match_te = next((s for s in _sems_prec if s[0] == _sem_prec), None)
-                        if _sem_match_te and "creation_date_local" in _df_te_p.columns:
-                            _df_te_p = _df_te_p[
-                                (_df_te_p["creation_date_local"] >= _sem_match_te[1]) &
-                                (_df_te_p["creation_date_local"] <= _sem_match_te[2])
-                            ]
-
-                    # ── Tabla detalle de Tiempo de Ejecución ─────────────────────
-                    def _fmt_seg(s):
-                        if pd.isna(s) or s == 0: return "—"
-                        s = int(s); h, m = s//3600, (s%3600)//60
-                        return f"{h:02d}:{m:02d}"
-
-                    _det_te = _df_te_p.copy()
-                    _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.75).round(0)
-                    _det_te["_maximo_sec"] = (_det_te["estimated_sec"] * 1.50).round(0)
-                    _det_te["_pct_ej"]     = (_det_te["_effective_sec"] / _det_te["estimated_sec"] * 100).round(1)
-                    _det_te["_es_exceso"]  = _det_te["_effective_sec"] > _det_te["_maximo_sec"]
-                    _det_te_cd = pd.to_datetime(_det_te["creation_date"], errors="coerce")
-                    _det_te_cd = _det_te_cd.dt.tz_convert(None) if _det_te_cd.dt.tz is not None else _det_te_cd
-                    _det_te["creation_date"] = _det_te_cd.dt.strftime("%d/%m/%Y")
-
-                    _det_te_disp = _det_te[[c for c in
-                        ["folio","eds_occim","tecnico","creation_date","maint_type",
-                         "estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
-                         "_pct_ej","_te_ok","_es_exceso"]
-                        if c in _det_te.columns]].copy()
-                    _det_te_disp["T. Estimado"]   = _det_te_disp["estimated_sec"].apply(_fmt_seg)
-                    _det_te_disp["Mín. 75%"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
-                    _det_te_disp["Máx. 150%"]      = _det_te_disp["_maximo_sec"].apply(_fmt_seg)
-                    _det_te_disp["T. Ejecución"]   = _det_te_disp["_effective_sec"].apply(_fmt_seg)
-                    _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
-                    def _estado_lbl(r):
-                        # Regla operativa (validada Ops 06-jul-2026):
-                        #   ≥75%  → CUMPLE (verde)
-                        #   >150% → CUMPLE + marca 🟣 Sobretiempo (informativo, NO penaliza)
-                        #   <75%  → NO CUMPLE
-                        if bool(r.get("_te_ok", False)):
-                            if bool(r.get("_es_exceso", False)):
-                                return "✅ Cumple · 🟣 Sobretiempo"
-                            return "✅ Cumple"
-                        return "❌ No cumple"
-                    _det_te_disp["Estado"] = _det_te_disp.apply(_estado_lbl, axis=1)
-
-                    # Diagnóstico:
-                    # - No cumple (déficit <75%): explica por qué.
-                    # - Sobretiempo (>150% pero cumple): registro informativo.
-                    # - Cumple normal (75-150%): vacío.
-                    def _fmt_hm(seg):
-                        if seg is None or pd.isna(seg) or seg <= 0: return "0min"
-                        seg = int(seg); h, m = seg//3600, (seg%3600)//60
-                        return f"{h}h{m:02d}min" if h else f"{m}min"
-
-                    def _diag_tiempo(r):
-                        estim = int(r.get("estimated_sec") or 0)
-                        real  = int(r.get("_effective_sec") or 0)
-                        minimo = int(r.get("_minimo_sec") or 0)
-                        maximo = int(r.get("_maximo_sec") or 0)
-                        pct = float(r.get("_pct_ej") or 0.0)
-                        estim_h = _fmt_hm(estim)
-                        real_h  = _fmt_hm(real)
-                        min_h   = _fmt_hm(minimo)
-                        max_h   = _fmt_hm(maximo)
-                        # ── SOBRETIEMPO (cumple, informativo) ───────────────────
-                        if bool(r.get("_te_ok", False)) and bool(r.get("_es_exceso", False)):
-                            exceso = real - maximo
-                            return (f"Sobretiempo (informativo, no penaliza): {real_h} ejecutado "
-                                    f"supera el tope de referencia {max_h} (150% de {estim_h}) "
-                                    f"por {_fmt_hm(exceso)}. La OT CUMPLE — puede haber tenido "
-                                    f"causa legítima (falla adicional, revisión profunda).")
-                        # Si cumple sin sobretiempo, vacío
-                        if bool(r.get("_te_ok", False)):
-                            return ""
-                        # ── DÉFICIT (<75% del estimado) ─────────────────────────
-                        deficit = minimo - real
-                        if real == 0:
-                            return (f"Sin registro de tiempo: el técnico no documentó duración alguna. "
-                                    f"Estimado {estim_h}, mínimo aceptable {min_h}.")
-                        if pct < 5:
-                            return (f"Tiempo absurdo: registró {real_h} cuando el estimado era {estim_h} "
-                                    f"(mínimo {min_h}). Imposible ejecutar una preventiva en ese plazo.")
-                        if pct < 20:
-                            return (f"Tiempo injustificado: {real_h} es <20% del estimado ({estim_h}). "
-                                    f"Quick-tick probable — debió ser al menos {min_h}.")
-                        if pct < 50:
-                            return (f"Muy por debajo del mínimo: {real_h} ejecutado vs {min_h} requerido "
-                                    f"(75% de {estim_h}). Déficit de {_fmt_hm(deficit)}.")
-                        # 50-75% → cerca pero no llega
-                        return (f"El acumulado del tiempo no cumple ni siquiera el 75% mínimo de {estim_h}: "
-                                f"registró {real_h} y se requerían {min_h} (faltaron {_fmt_hm(deficit)}).")
-
-                    _det_te_disp["Diagnóstico"] = _det_te.apply(_diag_tiempo, axis=1).values
-                    # Mapa código EDS → nombre (desde el maestro estaciones_servicio)
-                    _eds_nombre_map_te = {}
-                    try:
-                        if not df_eds.empty and "eds_occim" in df_eds.columns and "nombre" in df_eds.columns:
-                            _eds_nombre_map_te = dict(zip(
-                                df_eds["eds_occim"].astype(str), df_eds["nombre"].astype(str)))
-                    except Exception:
-                        pass
-                    # Normalizar EDS para display + inyectar nombre
-                    if "eds_occim" in _det_te_disp.columns:
-                        _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
-                        _det_te_disp["eds_nombre"] = _det_te_disp["eds_occim"].map(_eds_nombre_map_te).fillna("—")
-                    _det_te_disp = _det_te_disp.drop(
-                        columns=["estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
-                                 "_pct_ej","_te_ok","_es_exceso"],
-                        errors="ignore"
-                    ).rename(columns={
-                        "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
-                        "tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
-                    }).sort_values("Fecha", ascending=False)
-                    # Orden: OT - EDS - Nombre EDS - Técnico - resto, Diagnóstico al final
-                    _orden_te = ["OT","EDS","Nombre EDS","Técnico","Fecha","Tipo",
-                                 "T. Estimado","Mín. 75%","Máx. 150%","T. Ejecución","% Ejecutado","Estado",
-                                 "Diagnóstico"]
-                    _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
-
-                    # ── Ranking por técnico (peso + cumplimiento individual) ─
-                    # Nota: se usa _df_te_p (filtrado por mes/semana) y _te_ok
-                    # (regla nueva ≥75% = cumple, sobretiempo cuenta como cumple).
-                    _render_ranking_tecnico(
-                        _df_te_p, "_te_ok",
-                        "👤 Ranking por técnico — Tiempo de Ejecución",
-                        _key_pfx="te", _min_ots=1,
-                    )
-
-                    _n_te_total = len(_det_te_disp)
-                    with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({_n_te_total:,} preventivos con estimado)", expanded=False):
-                        _filtro_te = _filtro_ot_input("kpi_filtro_ot_tiempo")
-                        _det_te_disp = _aplicar_filtro_ot(_det_te_disp, _filtro_te, col="OT")
-                        if _filtro_te:
-                            st.caption(f"Mostrando **{len(_det_te_disp):,}** de {_n_te_total:,} OTs (filtro: `{_filtro_te}`).")
-                        _show_df(_det_te_disp, hide_index=True, width="stretch",
-                            column_config={
-                                "OT":          st.column_config.TextColumn(width=110),
-                                "EDS":         st.column_config.TextColumn(width=85,
-                                    help="Código EDS Occimiano donde se realizó el MP/MC."),
-                                "Nombre EDS":  st.column_config.TextColumn(width=240,
-                                    help="Nombre / dirección de la estación."),
-                                "Técnico":     st.column_config.TextColumn(width=190),
-                                "Fecha":       st.column_config.TextColumn(width=100),
-                                "Tipo":        st.column_config.TextColumn(width=200),
-                                "T. Estimado": st.column_config.TextColumn(width=100,
-                                    help="Duración programada en Fracttal (HH:MM)"),
-                                "Mín. 75%":    st.column_config.TextColumn(width=90,
-                                    help="Tiempo mínimo aceptable = 75% del estimado"),
-                                "Máx. 150%":   st.column_config.TextColumn(width=90,
-                                    help="Umbral de referencia = 150% del estimado. Superarlo se marca como 🟣 Sobretiempo (informativo, NO penaliza)."),
-                                "T. Ejecución":st.column_config.TextColumn(width=110,
-                                    help="Tiempo efectivo = max(tiempo tareas, tiempo real por fechas)"),
-                                "% Ejecutado": st.column_config.ProgressColumn(
-                                    label="% Ejecutado", min_value=0, max_value=250, format="%.1f%%",
-                                    help="T.Efectivo / T.Estimado × 100. Cumple si es ≥ 75%. Sobre 150% es informativo (cumple)."),
-                                "Estado":      st.column_config.TextColumn(width=180),
-                                "Diagnóstico": st.column_config.TextColumn(width=380,
-                                    help="Razón concreta cuando NO cumple, o marca de sobretiempo informativo cuando cumple pero superó 150%. Vacío cuando cumple normalmente."),
-                            })
-
-                    # ── Subsección: OTs con tiempo fuera de rango ────
-                    st.markdown("---")
-                    st.markdown("**⚠️ OTs con tiempo de ejecución atípico (déficit < 75% o sobretiempo > 150%)**")
-                    st.caption(
-                        "Barras apiladas por equipo (o por técnico si filtras). "
-                        "**Verde** = cumplen (≥75%) · "
-                        "**Amarillo** = déficit parcial (20–75% → no cumple) · "
-                        "**Rojo** = déficit absurdo (< 20% → no cumple) · "
-                        "**Morado** = sobretiempo (> 150% → informativo, CUMPLE igual)"
-                    )
-
-                    # Segmentos sobre el total de preventivos con estimado:
-                    #   _ok_normal    = ≥75% y ≤150%  (verde, cumple)
-                    #   _exceso       = >150%          (púrpura, cumple con sobretiempo)
-                    #   _just_fail    = 20-75%         (amarillo, no cumple)
-                    #   _absurdo      = <20%           (rojo, no cumple)
-                    # Nota: _te_ok es True para ok_normal + exceso (>= 75% sin techo).
-                    _df_te_p["_exceso"]    = _df_te_p["_effective_sec"] > _df_te_p["estimated_sec"] * 1.50
-                    _df_te_p["_ok_normal"] = _df_te_p["_te_ok"] & (~_df_te_p["_exceso"])
-                    _df_te_p["_absurdo"]   = (
-                        (~_df_te_p["_te_ok"]) &
-                        (_df_te_p["_effective_sec"] < _df_te_p["estimated_sec"] * 0.20)
-                    )
-                    _df_te_p["_just_fail"] = (~_df_te_p["_te_ok"]) & (~_df_te_p["_absurdo"])
-
-                    # Determinar agrupación según filtros
-                    if tec_kpi_sel != "Todos":
-                        _grp_col = "tecnico"
-                    elif equipo_kpi != "Todos":
-                        _grp_col = "tecnico"
-                    else:
-                        _grp_col = "equipo"
-
-                    _te_grp = (
-                        _df_te_p.groupby(_grp_col)
-                        .agg(
-                            ok=("_ok_normal", "sum"),
-                            just_fail=("_just_fail", "sum"),
-                            absurdo=("_absurdo",  "sum"),
-                            exceso=("_exceso",   "sum"),
-                            total=("_te_ok",  "count"),
+                        # ── Ranking por técnico (peso + cumplimiento individual) ─
+                        # Nota: se usa _df_te_p (filtrado por mes/semana) y _te_ok
+                        # (regla nueva ≥75% = cumple, sobretiempo cuenta como cumple).
+                        _render_ranking_tecnico(
+                            _df_te_p, "_te_ok",
+                            "👤 Ranking por técnico — Tiempo de Ejecución",
+                            _key_pfx="te", _min_ots=1,
                         )
-                        .reset_index()
-                    )
-                    _te_grp["pct_ok"]      = (_te_grp["ok"]        / _te_grp["total"] * 100).round(1)
-                    _te_grp["pct_just"]    = (_te_grp["just_fail"]  / _te_grp["total"] * 100).round(1)
-                    _te_grp["pct_absurdo"] = (_te_grp["absurdo"]    / _te_grp["total"] * 100).round(1)
-                    _te_grp["pct_exceso"]  = (_te_grp["exceso"]     / _te_grp["total"] * 100).round(1)
 
-                    if _grp_col == "equipo":
-                        _grp_order = {k: i for i, k in enumerate(GRUPOS_TERRENO)}
-                        _te_grp["_order"] = _te_grp["equipo"].map(_grp_order).fillna(99)
-                        _te_grp["_label"] = _te_grp["equipo"].map(_EQUIPO_LABEL).fillna(_te_grp["equipo"])
-                        _te_grp = _te_grp.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
-                    else:
-                        _te_grp["_label"] = _te_grp["tecnico"]
-                        # 'Problemas' = solo los que realmente NO cumplen (absurdo + déficit).
-                        # El sobretiempo (>150%) CUMPLE y no es problema.
-                        _te_grp["_problemas"] = _te_grp["absurdo"] + _te_grp["just_fail"]
-                        _te_grp = _te_grp.sort_values("_problemas", ascending=False).drop(columns=["_problemas"]).reset_index(drop=True)
-
-                    _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}"
-                    if _abs_sig not in st.session_state:
-                        _use_donut = (equipo_kpi == "Todos" and tec_kpi_sel == "Todos")
-
-                        if _use_donut:
-                            # ── Dos donas: vista general todos los equipos ───────────
-                            # ok = normal (75-150%) · exceso (>150%, CUMPLE + sobretiempo)
-                            # no cumple = just_fail (20-75%) + absurdo (<20%)
-                            _n_ok_normal = int(_te_grp["ok"].sum())
-                            _n_ex_d      = int(_te_grp["exceso"].sum())
-                            _n_jd        = int(_te_grp["just_fail"].sum())
-                            _n_abd       = int(_te_grp["absurdo"].sum())
-                            _n_ok_total  = _n_ok_normal + _n_ex_d       # todos los que cumplen
-                            _n_no_cumple = _n_jd + _n_abd               # solo déficit
-                            _n_total_d   = _n_ok_total + _n_no_cumple
-
-                            _n_atipicos = _n_ex_d + _n_jd + _n_abd  # todo lo fuera de 75-150%
-                            _fig_abs = make_subplots(
-                                rows=1, cols=2,
-                                specs=[[{"type": "domain"}, {"type": "domain"}]],
-                                subplot_titles=[
-                                    "Cumplimiento general",
-                                    "OTs fuera de rango normal (75–150%)",
-                                ],
-                            )
-                            # Dona 1: cumple total (normal + sobretiempo) vs no cumple
-                            # Rojo (#dc2626) para no cumplen — distinto del naranja
-                            # de 'Déficit' en la dona 2 (evita confusión visual).
-                            _fig_abs.add_trace(go.Pie(
-                                labels=["Cumplen (≥75%)", "No cumplen (<75%)"],
-                                values=[_n_ok_total, _n_no_cumple],
-                                hole=0.52,
-                                marker=dict(colors=["#22c55e", "#dc2626"],
-                                            line=dict(color="#ffffff", width=2)),
-                                textinfo="percent+value",
-                                texttemplate="%{percent:.1%}<br>%{value:,} OTs",
-                                hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%}<extra></extra>",
-                                direction="clockwise",
-                                sort=False,
-                            ), row=1, col=1)
-                            # Dona 2: SOLO los atípicos (fuera de 75-150%). Incluye:
-                            #   • ✅ Sobretiempo (>150%): cumple pero excede — monitoreo.
-                            #   • ❌ Déficit (20-75%): no cumple.
-                            #   • ❌ Injustificado (<20%): no cumple.
-                            # Excluye Cumple normal (mayoría) para destacar solo las
-                            # anomalías que ameritan revisión.
-                            if _n_atipicos > 0:
-                                _fig_abs.add_trace(go.Pie(
-                                    labels=[
-                                        "✅ Sobretiempo (>150%) - cumple igual",
-                                        "❌ Déficit (20–75%)",
-                                        "❌ Injustificado (<20%)",
-                                    ],
-                                    values=[_n_ex_d, _n_jd, _n_abd],
-                                    hole=0.52,
-                                    marker=dict(colors=["#8b5cf6", "#f59e0b", "#ef4444"],
-                                                line=dict(color="#ffffff", width=2)),
-                                    textinfo="percent+value",
-                                    texttemplate="%{percent:.1%}<br>%{value:,} OTs",
-                                    hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%} del atípico<extra></extra>",
-                                    direction="clockwise",
-                                    sort=False,
-                                ), row=1, col=2)
-                            _fig_abs.update_layout(
-                                height=360,
-                                margin=dict(t=40, b=10, l=10, r=10),
-                                showlegend=True,
-                                legend=dict(orientation="h", y=-0.05, x=0.5,
-                                            xanchor="center", font=dict(size=11)),
-                                annotations=[
-                                    dict(text=f"<b>{_n_total_d:,}</b><br>OTs",
-                                         x=0.19, y=0.5, showarrow=False,
-                                         font=dict(size=16)),
-                                    dict(text=f"<b>{_n_atipicos:,}</b><br>atípicas",
-                                         x=0.81, y=0.5, showarrow=False,
-                                         font=dict(size=14)),
-                                ],
-                            )
-                        else:
-                            # ── Barras apiladas: vista por técnico dentro del equipo ──
-                            _x_lbl = _te_grp["_label"].tolist()
-                            _fig_abs = go.Figure()
-                            _fig_abs.add_trace(go.Bar(
-                                name="✅ Cumple normal (75–150%)",
-                                x=_x_lbl,
-                                y=_te_grp["ok"].tolist(),
-                                marker_color="#22c55e",
-                                text=[f"{int(v):,}<br>{p:.1f}%"
-                                      for v, p in zip(_te_grp["ok"], _te_grp["pct_ok"])],
-                                textposition="inside",
-                                textfont=dict(size=11, color="#ffffff"),
-                            ))
-                            _fig_abs.add_trace(go.Bar(
-                                name="✅ Cumple · 🟣 Sobretiempo (>150%)",
-                                x=_x_lbl,
-                                y=_te_grp["exceso"].tolist(),
-                                marker_color="#8b5cf6",
-                                text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
-                                      for v, p in zip(_te_grp["exceso"], _te_grp["pct_exceso"])],
-                                textposition="inside",
-                                textfont=dict(size=11, color="#ffffff"),
-                            ))
-                            _fig_abs.add_trace(go.Bar(
-                                name="❌ Déficit (20–75%)",
-                                x=_x_lbl,
-                                y=_te_grp["just_fail"].tolist(),
-                                marker_color="#f59e0b",
-                                text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
-                                      for v, p in zip(_te_grp["just_fail"], _te_grp["pct_just"])],
-                                textposition="inside",
-                                textfont=dict(size=11, color="#ffffff"),
-                            ))
-                            _fig_abs.add_trace(go.Bar(
-                                name="❌ Injustificado (<20%)",
-                                x=_x_lbl,
-                                y=_te_grp["absurdo"].tolist(),
-                                marker_color="#ef4444",
-                                text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
-                                      for v, p in zip(_te_grp["absurdo"], _te_grp["pct_absurdo"])],
-                                textposition="inside",
-                                textfont=dict(size=11, color="#ffffff"),
-                            ))
-                            _fig_abs.update_layout(
-                                barmode="stack",
-                                height=340,
-                                margin=dict(t=30, b=20, l=10, r=20),
-                                showlegend=True,
-                                legend=dict(orientation="h", y=1.1, x=0),
-                                yaxis=dict(title="OTs preventivas", tickformat="d"),
-                                xaxis=dict(title=""),
-                                bargap=0.35,
-                            )
-
-                        _apply_plot_theme(_fig_abs)
-                        st.session_state[_abs_sig] = _fig_abs
-                    st.plotly_chart(st.session_state[_abs_sig], width="stretch")
-
-                    # ── Mapa EDS → Nombre (para enriquecer las 2 tablas siguientes) ──
-                    _eds_nombre_map_prec = {}
-                    if "df_eds" in globals() or "df_eds" in locals():
-                        try:
-                            _src = df_eds
-                            if not _src.empty and "eds_occim" in _src.columns and "nombre" in _src.columns:
-                                _eds_nombre_map_prec = dict(zip(
-                                    _src["eds_occim"].astype(str), _src["nombre"].astype(str)))
-                        except Exception:
-                            pass
-
-                    # ── Tabla detalle de OTs injustificadas ──────────────────────────
-                    _df_abs_only = _df_te_p[_df_te_p["_absurdo"]].copy()
-                    _n_absurdo   = len(_df_abs_only)
-
-                    if not _df_abs_only.empty:
-                        _df_abs_only["_pct_ej_abs"] = (
-                            _df_abs_only["_effective_sec"] / _df_abs_only["estimated_sec"] * 100
-                        ).round(1)
-                        _det_abs = _df_abs_only.copy()
-                        _det_abs_cd = pd.to_datetime(_det_abs["creation_date"], errors="coerce")
-                        _det_abs_cd = _det_abs_cd.dt.tz_convert(None) if _det_abs_cd.dt.tz is not None else _det_abs_cd
-                        _det_abs["creation_date"] = _det_abs_cd.dt.strftime("%d/%m/%Y")
-                        _det_abs["T. Estimado"]  = _det_abs["estimated_sec"].apply(_fmt_seg)
-                        _det_abs["T. Ejecución"] = _det_abs["_effective_sec"].apply(_fmt_seg)
-                        _det_abs["% Ejecutado"]  = _det_abs["_pct_ej_abs"]
-                        if "eds_occim" in _det_abs.columns:
-                            _det_abs["eds_occim"] = _det_abs["eds_occim"].fillna("").replace("", "—")
-                            _det_abs["eds_nombre"] = _det_abs["eds_occim"].map(_eds_nombre_map_prec).fillna("—")
-                        _det_abs_disp = _det_abs[[c for c in
-                            ["folio","eds_occim","eds_nombre","tecnico","creation_date","maint_type",
-                             "T. Estimado","T. Ejecución","% Ejecutado"]
-                            if c in _det_abs.columns]].rename(columns={
-                                "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
-                                "tecnico":"Técnico",
-                                "creation_date":"Fecha","maint_type":"Tipo",
-                            }).sort_values("Fecha", ascending=False)
-
-                        with st.expander(
-                            f"📋 Detalle OTs con tiempo injustificado ({_n_absurdo:,} OTs)", expanded=False
-                        ):
-                            _filtro_abs = _filtro_ot_input("kpi_filtro_ot_injust")
-                            _det_abs_disp = _aplicar_filtro_ot(_det_abs_disp, _filtro_abs, col="OT")
-                            if _filtro_abs:
-                                st.caption(f"Mostrando **{len(_det_abs_disp):,}** de {_n_absurdo:,} OTs (filtro: `{_filtro_abs}`).")
-                            _show_df(_det_abs_disp, hide_index=True, width="stretch",
+                        _n_te_total = len(_det_te_disp)
+                        with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({_n_te_total:,} preventivos con estimado)", expanded=False):
+                            _filtro_te = _filtro_ot_input("kpi_filtro_ot_tiempo")
+                            _det_te_disp = _aplicar_filtro_ot(_det_te_disp, _filtro_te, col="OT")
+                            if _filtro_te:
+                                st.caption(f"Mostrando **{len(_det_te_disp):,}** de {_n_te_total:,} OTs (filtro: `{_filtro_te}`).")
+                            _show_df(_det_te_disp, hide_index=True, width="stretch",
                                 column_config={
                                     "OT":          st.column_config.TextColumn(width=110),
                                     "EDS":         st.column_config.TextColumn(width=85,
-                                        help="Código EDS Occimiano donde se realizó el MP."),
+                                        help="Código EDS Occimiano donde se realizó el MP/MC."),
                                     "Nombre EDS":  st.column_config.TextColumn(width=240,
                                         help="Nombre / dirección de la estación."),
                                     "Técnico":     st.column_config.TextColumn(width=190),
                                     "Fecha":       st.column_config.TextColumn(width=100),
                                     "Tipo":        st.column_config.TextColumn(width=200),
-                                    "T. Estimado": st.column_config.TextColumn(width=100),
-                                    "T. Ejecución":st.column_config.TextColumn(width=110),
+                                    "T. Estimado": st.column_config.TextColumn(width=100,
+                                        help="Duración programada en Fracttal (HH:MM)"),
+                                    "Mín. 75%":    st.column_config.TextColumn(width=90,
+                                        help="Tiempo mínimo aceptable = 75% del estimado"),
+                                    "Máx. 150%":   st.column_config.TextColumn(width=90,
+                                        help="Umbral de referencia = 150% del estimado. Superarlo se marca como 🟣 Sobretiempo (informativo, NO penaliza)."),
+                                    "T. Ejecución":st.column_config.TextColumn(width=110,
+                                        help="Tiempo efectivo = max(tiempo tareas, tiempo real por fechas)"),
                                     "% Ejecutado": st.column_config.ProgressColumn(
-                                        min_value=0, max_value=50, format="%.1f%%",
-                                        help="Todos en esta tabla están por debajo del 20% del estimado."),
-                                })
-                    else:
-                        st.success("✅ No hay preventivos con tiempo inferior al 20% del estimado en este período.")
-
-                    # ── Tabla detalle de OTs con EXCESO (> 150% del estimado) ────
-                    _df_ex_only = _df_te_p[_df_te_p["_exceso"]].copy()
-                    _n_exceso   = len(_df_ex_only)
-                    if not _df_ex_only.empty:
-                        _df_ex_only["_pct_ej_ex"] = (
-                            _df_ex_only["_effective_sec"] / _df_ex_only["estimated_sec"] * 100
-                        ).round(1)
-                        _det_ex = _df_ex_only.copy()
-                        _det_ex_cd = pd.to_datetime(_det_ex["creation_date"], errors="coerce")
-                        _det_ex_cd = _det_ex_cd.dt.tz_convert(None) if _det_ex_cd.dt.tz is not None else _det_ex_cd
-                        _det_ex["creation_date"] = _det_ex_cd.dt.strftime("%d/%m/%Y")
-                        _det_ex["T. Estimado"]  = _det_ex["estimated_sec"].apply(_fmt_seg)
-                        _det_ex["T. Máximo"]    = (_det_ex["estimated_sec"] * 1.50).apply(_fmt_seg)
-                        _det_ex["T. Ejecución"] = _det_ex["_effective_sec"].apply(_fmt_seg)
-                        _det_ex["% Ejecutado"]  = _det_ex["_pct_ej_ex"]
-                        if "eds_occim" in _det_ex.columns:
-                            _det_ex["eds_occim"] = _det_ex["eds_occim"].fillna("").replace("", "—")
-                            _det_ex["eds_nombre"] = _det_ex["eds_occim"].map(_eds_nombre_map_prec).fillna("—")
-                        _det_ex_disp = _det_ex[[c for c in
-                            ["folio","eds_occim","eds_nombre","tecnico","creation_date","maint_type",
-                             "T. Estimado","T. Máximo","T. Ejecución","% Ejecutado"]
-                            if c in _det_ex.columns]].rename(columns={
-                                "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
-                                "tecnico":"Técnico",
-                                "creation_date":"Fecha","maint_type":"Tipo",
-                            }).sort_values("% Ejecutado", ascending=False)
-
-                        with st.expander(
-                            f"🟣 Detalle OTs con exceso de tiempo — >150% ({_n_exceso:,} OTs)", expanded=False
-                        ):
-                            _filtro_ex = _filtro_ot_input("kpi_filtro_ot_exceso")
-                            _det_ex_disp = _aplicar_filtro_ot(_det_ex_disp, _filtro_ex, col="OT")
-                            if _filtro_ex:
-                                st.caption(f"Mostrando **{len(_det_ex_disp):,}** de {_n_exceso:,} OTs (filtro: `{_filtro_ex}`).")
-                            _pct_max = max(250, int(_det_ex_disp["% Ejecutado"].max()) + 20) if not _det_ex_disp.empty else 300
-                            _show_df(_det_ex_disp, hide_index=True, width="stretch",
-                                column_config={
-                                    "OT":          st.column_config.TextColumn(width=110),
-                                    "EDS":         st.column_config.TextColumn(width=85),
-                                    "Nombre EDS":  st.column_config.TextColumn(width=240,
-                                        help="Nombre / dirección de la estación."),
-                                    "Técnico":     st.column_config.TextColumn(width=190),
-                                    "Fecha":       st.column_config.TextColumn(width=100),
-                                    "Tipo":        st.column_config.TextColumn(width=200),
-                                    "T. Estimado": st.column_config.TextColumn(width=100),
-                                    "T. Máximo":   st.column_config.TextColumn(width=100,
-                                        help="Tope aceptable = 150% del estimado."),
-                                    "T. Ejecución":st.column_config.TextColumn(width=110),
-                                    "% Ejecutado": st.column_config.ProgressColumn(
-                                        min_value=150, max_value=_pct_max, format="%.1f%%",
-                                        help="Todos en esta tabla superan el 150% del estimado."),
+                                        label="% Ejecutado", min_value=0, max_value=250, format="%.1f%%",
+                                        help="T.Efectivo / T.Estimado × 100. Cumple si es ≥ 75%. Sobre 150% es informativo (cumple)."),
+                                    "Estado":      st.column_config.TextColumn(width=180),
+                                    "Diagnóstico": st.column_config.TextColumn(width=380,
+                                        help="Razón concreta cuando NO cumple, o marca de sobretiempo informativo cuando cumple pero superó 150%. Vacío cuando cumple normalmente."),
                                 })
 
-                else:
-                    st.info("Sin datos de duración estimada disponibles para el filtro actual.")
+                        # ── Subsección: OTs con tiempo fuera de rango ────
+                        st.markdown("---")
+                        st.markdown("**⚠️ OTs con tiempo de ejecución atípico (déficit < 75% o sobretiempo > 150%)**")
+                        st.caption(
+                            "Barras apiladas por equipo (o por técnico si filtras). "
+                            "**Verde** = cumplen (≥75%) · "
+                            "**Amarillo** = déficit parcial (20–75% → no cumple) · "
+                            "**Rojo** = déficit absurdo (< 20% → no cumple) · "
+                            "**Morado** = sobretiempo (> 150% → informativo, CUMPLE igual)"
+                        )
 
-                # ══════════════════════════════════════════════════════════════════
-                # SECCIÓN: REGISTRO DE NUMERALES
-                # ══════════════════════════════════════════════════════════════════
-                st.divider()
+                        # Segmentos sobre el total de preventivos con estimado:
+                        #   _ok_normal    = ≥75% y ≤150%  (verde, cumple)
+                        #   _exceso       = >150%          (púrpura, cumple con sobretiempo)
+                        #   _just_fail    = 20-75%         (amarillo, no cumple)
+                        #   _absurdo      = <20%           (rojo, no cumple)
+                        # Nota: _te_ok es True para ok_normal + exceso (>= 75% sin techo).
+                        _df_te_p["_exceso"]    = _df_te_p["_effective_sec"] > _df_te_p["estimated_sec"] * 1.50
+                        _df_te_p["_ok_normal"] = _df_te_p["_te_ok"] & (~_df_te_p["_exceso"])
+                        _df_te_p["_absurdo"]   = (
+                            (~_df_te_p["_te_ok"]) &
+                            (_df_te_p["_effective_sec"] < _df_te_p["estimated_sec"] * 0.20)
+                        )
+                        _df_te_p["_just_fail"] = (~_df_te_p["_te_ok"]) & (~_df_te_p["_absurdo"])
 
-            with _pt_num:
-                st.markdown('<div class="section-header">🔢  Registro de Numerales — OTs con número de ficha</div>',
-                            unsafe_allow_html=True)
-                st.caption(
-                    "Aplica a **lavadoras y aspiradoras** en MC y MP. El formulario Fracttal "
-                    "exige el numeral en ambos tipos, así que un valor faltante o basura "
-                    "penaliza igual sea correctiva o preventiva."
-                )
+                        # Determinar agrupación según filtros
+                        if tec_kpi_sel != "Todos":
+                            _grp_col = "tecnico"
+                        elif equipo_kpi != "Todos":
+                            _grp_col = "tecnico"
+                        else:
+                            _grp_col = "equipo"
 
-                # Numeral aplica a TODA lavadora/aspiradora (MC + MP) — se incluyen
-                # correctivas y preventivas. Los equipos no-lavadora aportan score=25
-                # auto (no_aplica), igual no distorsionan el indicador.
-                _df_num_base = df_ot_scores.copy()
-                if not _df_num_base.empty:
-                    _num_ok  = int(_df_num_base["numeral_ok"].sum())
-                    _num_tot = len(_df_num_base)
-                    _num_pct = _num_ok / _num_tot * 100 if _num_tot > 0 else 0.0
+                        _te_grp = (
+                            _df_te_p.groupby(_grp_col)
+                            .agg(
+                                ok=("_ok_normal", "sum"),
+                                just_fail=("_just_fail", "sum"),
+                                absurdo=("_absurdo",  "sum"),
+                                exceso=("_exceso",   "sum"),
+                                total=("_te_ok",  "count"),
+                            )
+                            .reset_index()
+                        )
+                        _te_grp["pct_ok"]      = (_te_grp["ok"]        / _te_grp["total"] * 100).round(1)
+                        _te_grp["pct_just"]    = (_te_grp["just_fail"]  / _te_grp["total"] * 100).round(1)
+                        _te_grp["pct_absurdo"] = (_te_grp["absurdo"]    / _te_grp["total"] * 100).round(1)
+                        _te_grp["pct_exceso"]  = (_te_grp["exceso"]     / _te_grp["total"] * 100).round(1)
 
-                    # ── Evolución (respeta selección: semanas si 1 mes, meses si varios) ─
-                    # Incluye MC + MP (el numeral aplica a ambos en lavadora/aspiradora).
-                    _df_num_hist = df_ot_all.copy()
-                    if equipo_kpi != "Todos":
-                        _grp_num = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
-                        _df_num_hist = _df_num_hist[_df_num_hist["equipo"] == _grp_num]
-                    if tec_kpi_sel != "Todos":
-                        _df_num_hist = _df_num_hist[_df_num_hist["tecnico"] == tec_kpi_sel]
+                        if _grp_col == "equipo":
+                            _grp_order = {k: i for i, k in enumerate(GRUPOS_TERRENO)}
+                            _te_grp["_order"] = _te_grp["equipo"].map(_grp_order).fillna(99)
+                            _te_grp["_label"] = _te_grp["equipo"].map(_EQUIPO_LABEL).fillna(_te_grp["equipo"])
+                            _te_grp = _te_grp.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
+                        else:
+                            _te_grp["_label"] = _te_grp["tecnico"]
+                            # 'Problemas' = solo los que realmente NO cumplen (absurdo + déficit).
+                            # El sobretiempo (>150%) CUMPLE y no es problema.
+                            _te_grp["_problemas"] = _te_grp["absurdo"] + _te_grp["just_fail"]
+                            _te_grp = _te_grp.sort_values("_problemas", ascending=False).drop(columns=["_problemas"]).reset_index(drop=True)
 
-                    # _agrupar_por_periodo aplica la regla: 1 mes → semanas; varios → meses.
-                    _g_num = _agrupar_por_periodo(_df_num_hist, "numeral_ok")
+                        _abs_sig = f"_fig_abs_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}"
+                        if _abs_sig not in st.session_state:
+                            _use_donut = (equipo_kpi == "Todos" and tec_kpi_sel == "Todos")
 
-                    _periodo_lbl_num = ("por semanas" if len(_meses_sel_raw) == 1
-                                        else "por mes seleccionado")
+                            if _use_donut:
+                                # ── Dos donas: vista general todos los equipos ───────────
+                                # ok = normal (75-150%) · exceso (>150%, CUMPLE + sobretiempo)
+                                # no cumple = just_fail (20-75%) + absurdo (<20%)
+                                _n_ok_normal = int(_te_grp["ok"].sum())
+                                _n_ex_d      = int(_te_grp["exceso"].sum())
+                                _n_jd        = int(_te_grp["just_fail"].sum())
+                                _n_abd       = int(_te_grp["absurdo"].sum())
+                                _n_ok_total  = _n_ok_normal + _n_ex_d       # todos los que cumplen
+                                _n_no_cumple = _n_jd + _n_abd               # solo déficit
+                                _n_total_d   = _n_ok_total + _n_no_cumple
 
-                    nc1, nc2 = st.columns([1, 3])
-                    with nc1:
-                        _kpi_card(_num_pct, _num_ok, _num_tot,
-                                  "con numeral registrado", meta_pct=90.0)
-                    with nc2:
-                        if not _g_num.empty:
-                            _num_sig = (f"_fig_num_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
-                                        f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
-                            if _num_sig not in st.session_state:
-                                st.session_state[_num_sig] = _fig_apilada(
-                                    _g_num, color_ok="#22c55e",
-                                    label_ok="Registró numeral", label_err="Sin numeral",
-                                    meta=90.0, titulo_y="% OTs",
+                                _n_atipicos = _n_ex_d + _n_jd + _n_abd  # todo lo fuera de 75-150%
+                                _fig_abs = make_subplots(
+                                    rows=1, cols=2,
+                                    specs=[[{"type": "domain"}, {"type": "domain"}]],
+                                    subplot_titles=[
+                                        "Cumplimiento general",
+                                        "OTs fuera de rango normal (75–150%)",
+                                    ],
                                 )
-                            st.plotly_chart(st.session_state[_num_sig], width="stretch")
+                                # Dona 1: cumple total (normal + sobretiempo) vs no cumple
+                                # Rojo (#dc2626) para no cumplen — distinto del naranja
+                                # de 'Déficit' en la dona 2 (evita confusión visual).
+                                _fig_abs.add_trace(go.Pie(
+                                    labels=["Cumplen (≥75%)", "No cumplen (<75%)"],
+                                    values=[_n_ok_total, _n_no_cumple],
+                                    hole=0.52,
+                                    marker=dict(colors=["#22c55e", "#dc2626"],
+                                                line=dict(color="#ffffff", width=2)),
+                                    textinfo="percent+value",
+                                    texttemplate="%{percent:.1%}<br>%{value:,} OTs",
+                                    hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%}<extra></extra>",
+                                    direction="clockwise",
+                                    sort=False,
+                                ), row=1, col=1)
+                                # Dona 2: SOLO los atípicos (fuera de 75-150%). Incluye:
+                                #   • ✅ Sobretiempo (>150%): cumple pero excede — monitoreo.
+                                #   • ❌ Déficit (20-75%): no cumple.
+                                #   • ❌ Injustificado (<20%): no cumple.
+                                # Excluye Cumple normal (mayoría) para destacar solo las
+                                # anomalías que ameritan revisión.
+                                if _n_atipicos > 0:
+                                    _fig_abs.add_trace(go.Pie(
+                                        labels=[
+                                            "✅ Sobretiempo (>150%) - cumple igual",
+                                            "❌ Déficit (20–75%)",
+                                            "❌ Injustificado (<20%)",
+                                        ],
+                                        values=[_n_ex_d, _n_jd, _n_abd],
+                                        hole=0.52,
+                                        marker=dict(colors=["#8b5cf6", "#f59e0b", "#ef4444"],
+                                                    line=dict(color="#ffffff", width=2)),
+                                        textinfo="percent+value",
+                                        texttemplate="%{percent:.1%}<br>%{value:,} OTs",
+                                        hovertemplate="%{label}<br>%{value:,} OTs — %{percent:.1%} del atípico<extra></extra>",
+                                        direction="clockwise",
+                                        sort=False,
+                                    ), row=1, col=2)
+                                _fig_abs.update_layout(
+                                    height=360,
+                                    margin=dict(t=40, b=10, l=10, r=10),
+                                    showlegend=True,
+                                    legend=dict(orientation="h", y=-0.05, x=0.5,
+                                                xanchor="center", font=dict(size=11)),
+                                    annotations=[
+                                        dict(text=f"<b>{_n_total_d:,}</b><br>OTs",
+                                             x=0.19, y=0.5, showarrow=False,
+                                             font=dict(size=16)),
+                                        dict(text=f"<b>{_n_atipicos:,}</b><br>atípicas",
+                                             x=0.81, y=0.5, showarrow=False,
+                                             font=dict(size=14)),
+                                    ],
+                                )
+                            else:
+                                # ── Barras apiladas: vista por técnico dentro del equipo ──
+                                _x_lbl = _te_grp["_label"].tolist()
+                                _fig_abs = go.Figure()
+                                _fig_abs.add_trace(go.Bar(
+                                    name="✅ Cumple normal (75–150%)",
+                                    x=_x_lbl,
+                                    y=_te_grp["ok"].tolist(),
+                                    marker_color="#22c55e",
+                                    text=[f"{int(v):,}<br>{p:.1f}%"
+                                          for v, p in zip(_te_grp["ok"], _te_grp["pct_ok"])],
+                                    textposition="inside",
+                                    textfont=dict(size=11, color="#ffffff"),
+                                ))
+                                _fig_abs.add_trace(go.Bar(
+                                    name="✅ Cumple · 🟣 Sobretiempo (>150%)",
+                                    x=_x_lbl,
+                                    y=_te_grp["exceso"].tolist(),
+                                    marker_color="#8b5cf6",
+                                    text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                                          for v, p in zip(_te_grp["exceso"], _te_grp["pct_exceso"])],
+                                    textposition="inside",
+                                    textfont=dict(size=11, color="#ffffff"),
+                                ))
+                                _fig_abs.add_trace(go.Bar(
+                                    name="❌ Déficit (20–75%)",
+                                    x=_x_lbl,
+                                    y=_te_grp["just_fail"].tolist(),
+                                    marker_color="#f59e0b",
+                                    text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                                          for v, p in zip(_te_grp["just_fail"], _te_grp["pct_just"])],
+                                    textposition="inside",
+                                    textfont=dict(size=11, color="#ffffff"),
+                                ))
+                                _fig_abs.add_trace(go.Bar(
+                                    name="❌ Injustificado (<20%)",
+                                    x=_x_lbl,
+                                    y=_te_grp["absurdo"].tolist(),
+                                    marker_color="#ef4444",
+                                    text=[f"{int(v):,}<br>{p:.1f}%" if v > 0 else ""
+                                          for v, p in zip(_te_grp["absurdo"], _te_grp["pct_absurdo"])],
+                                    textposition="inside",
+                                    textfont=dict(size=11, color="#ffffff"),
+                                ))
+                                _fig_abs.update_layout(
+                                    barmode="stack",
+                                    height=340,
+                                    margin=dict(t=30, b=20, l=10, r=20),
+                                    showlegend=True,
+                                    legend=dict(orientation="h", y=1.1, x=0),
+                                    yaxis=dict(title="OTs preventivas", tickformat="d"),
+                                    xaxis=dict(title=""),
+                                    bargap=0.35,
+                                )
 
-                    # ── Tabla detalle OTs numerales (cumple + no cumple) ──────────
-                    # Si tenemos el desglose por subtarea (numerales_subtarea), una
-                    # OT con varios activos se EXPANDE: 1 fila por (OT, activo) con
-                    # su numeral propio y motivo individual. La OT entera se considera
-                    # mala si CUALQUIER subtarea falla.
-                    _det_num = _df_num_base.copy()
-                    if df_num_sub is not None and not df_num_sub.empty:
-                        _sub = df_num_sub.copy()
-                        # Solo subtareas en activos donde aplica numeral
-                        _sub = _sub[_sub["tipo_activo"].isin(("lavadora","aspiradora","lavainterior"))]
-                        if not _sub.empty:
-                            _sub = _sub.rename(columns={"id_ot": "folio"})
-                            # Meta de la OT (técnico, fecha, cliente, EDS, tipo, comentario).
-                            _meta_cols = [c for c in [
-                                "folio","tecnico","creation_date","client","station","maint_type",
-                                "eds_occim","comentario_tecnico","es_correctiva"]
-                                if c in _det_num.columns]
-                            _meta = _det_num[_meta_cols].drop_duplicates("folio")
-                            # INNER merge: solo OTs en el scope actual (período/equipo/técnico).
-                            # Antes era left desde _sub (todo 2026) → filas huérfanas con
-                            # metadatos vacíos (None en técnico/fecha/cliente).
-                            _exp = _meta.merge(_sub, on="folio", how="inner")
-                            if not _exp.empty:
-                                _exp["numeral_motivo"] = _exp["motivo"]
-                                _exp["es_lavadora"]    = True
-                                _exp["numeral_valor"]  = (
-                                    _exp["numeral_final"].fillna(_exp["numeral_inicial"]).fillna(""))
-                                # Equipo = código del activo de ESTA subtarea (EQ-XXXX)
-                                _exp["_equipo_sub"] = _exp["codigo_activo"].fillna("—")
-                                _det_num = _exp
+                            _apply_plot_theme(_fig_abs)
+                            st.session_state[_abs_sig] = _fig_abs
+                        st.plotly_chart(st.session_state[_abs_sig], width="stretch")
 
-                    # Columna Numeral y Estado con tres casos claros:
-                    #   🔵 No aplica  → equipo no es lavadora (no se exige numeral)
-                    #   ✅ 182740     → lavadora con numeral real encontrado en la nota
-                    #   ❌ Sin numeral → lavadora sin numeral registrado
-                    def _fmt_numeral_valor(row):
-                        if not row.get("es_lavadora", True):
-                            return "N/A"
-                        v = str(row.get("numeral_valor", "") or "").strip()
-                        return v if v else "—"
+                        # ── Mapa EDS → Nombre (para enriquecer las 2 tablas siguientes) ──
+                        _eds_nombre_map_prec = {}
+                        if "df_eds" in globals() or "df_eds" in locals():
+                            try:
+                                _src = df_eds
+                                if not _src.empty and "eds_occim" in _src.columns and "nombre" in _src.columns:
+                                    _eds_nombre_map_prec = dict(zip(
+                                        _src["eds_occim"].astype(str), _src["nombre"].astype(str)))
+                            except Exception:
+                                pass
 
-                    def _fmt_numeral_estado(row):
-                        if not row.get("es_lavadora", True):
-                            return "🔵 No aplica"
-                        # Motivo del veredicto de calidad (sin numeral / basura / exceso / etc.)
-                        _motivo = str(row.get("numeral_motivo", "") or "")
-                        if row.get("numeral_ok", False):
-                            return "✅ Cumple"
-                        # Dato MALO → mostrar la razón concreta (no solo "sin numeral")
-                        return NUMERAL_MOTIVO_LABEL.get(_motivo, "❌ Dato inválido")
+                        # ── Tabla detalle de OTs injustificadas ──────────────────────────
+                        _df_abs_only = _df_te_p[_df_te_p["_absurdo"]].copy()
+                        _n_absurdo   = len(_df_abs_only)
 
-                    def _fmt_numeral_ini_fin(row, campo):
-                        if not row.get("es_lavadora", True):
-                            return "—"
-                        v = str(row.get(campo, "") or "").strip()
-                        return v if v and v.lower() not in ("none", "null") else "—"
+                        if not _df_abs_only.empty:
+                            _df_abs_only["_pct_ej_abs"] = (
+                                _df_abs_only["_effective_sec"] / _df_abs_only["estimated_sec"] * 100
+                            ).round(1)
+                            _det_abs = _df_abs_only.copy()
+                            _det_abs_cd = pd.to_datetime(_det_abs["creation_date"], errors="coerce")
+                            _det_abs_cd = _det_abs_cd.dt.tz_convert(None) if _det_abs_cd.dt.tz is not None else _det_abs_cd
+                            _det_abs["creation_date"] = _det_abs_cd.dt.strftime("%d/%m/%Y")
+                            _det_abs["T. Estimado"]  = _det_abs["estimated_sec"].apply(_fmt_seg)
+                            _det_abs["T. Ejecución"] = _det_abs["_effective_sec"].apply(_fmt_seg)
+                            _det_abs["% Ejecutado"]  = _det_abs["_pct_ej_abs"]
+                            if "eds_occim" in _det_abs.columns:
+                                _det_abs["eds_occim"] = _det_abs["eds_occim"].fillna("").replace("", "—")
+                                _det_abs["eds_nombre"] = _det_abs["eds_occim"].map(_eds_nombre_map_prec).fillna("—")
+                            _det_abs_disp = _det_abs[[c for c in
+                                ["folio","eds_occim","eds_nombre","tecnico","creation_date","maint_type",
+                                 "T. Estimado","T. Ejecución","% Ejecutado"]
+                                if c in _det_abs.columns]].rename(columns={
+                                    "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
+                                    "tecnico":"Técnico",
+                                    "creation_date":"Fecha","maint_type":"Tipo",
+                                }).sort_values("Fecha", ascending=False)
 
-                    def _fmt_fichas(row):
-                        if not row.get("es_lavadora", True):
-                            return "—"
-                        fp = row.get("fichas_periodo", None)
-                        if fp is None or (isinstance(fp, float) and pd.isna(fp)):
-                            return "—"
-                        try:
-                            return f"{int(fp):,}"
-                        except (ValueError, TypeError):
-                            return "—"
+                            with st.expander(
+                                f"📋 Detalle OTs con tiempo injustificado ({_n_absurdo:,} OTs)", expanded=False
+                            ):
+                                _filtro_abs = _filtro_ot_input("kpi_filtro_ot_injust")
+                                _det_abs_disp = _aplicar_filtro_ot(_det_abs_disp, _filtro_abs, col="OT")
+                                if _filtro_abs:
+                                    st.caption(f"Mostrando **{len(_det_abs_disp):,}** de {_n_absurdo:,} OTs (filtro: `{_filtro_abs}`).")
+                                _show_df(_det_abs_disp, hide_index=True, width="stretch",
+                                    column_config={
+                                        "OT":          st.column_config.TextColumn(width=110),
+                                        "EDS":         st.column_config.TextColumn(width=85,
+                                            help="Código EDS Occimiano donde se realizó el MP."),
+                                        "Nombre EDS":  st.column_config.TextColumn(width=240,
+                                            help="Nombre / dirección de la estación."),
+                                        "Técnico":     st.column_config.TextColumn(width=190),
+                                        "Fecha":       st.column_config.TextColumn(width=100),
+                                        "Tipo":        st.column_config.TextColumn(width=200),
+                                        "T. Estimado": st.column_config.TextColumn(width=100),
+                                        "T. Ejecución":st.column_config.TextColumn(width=110),
+                                        "% Ejecutado": st.column_config.ProgressColumn(
+                                            min_value=0, max_value=50, format="%.1f%%",
+                                            help="Todos en esta tabla están por debajo del 20% del estimado."),
+                                    })
+                        else:
+                            st.success("✅ No hay preventivos con tiempo inferior al 20% del estimado en este período.")
 
-                    _det_num["_numeral"]  = _det_num.apply(_fmt_numeral_valor, axis=1)
-                    _det_num["_estado"]   = _det_num.apply(_fmt_numeral_estado, axis=1)
-                    _det_num["_n_ini"]    = _det_num.apply(lambda r: _fmt_numeral_ini_fin(r, "numeral_inicial"), axis=1)
-                    _det_num["_n_fin"]    = _det_num.apply(lambda r: _fmt_numeral_ini_fin(r, "numeral_final"), axis=1)
-                    _det_num["_fichas"]   = _det_num.apply(_fmt_fichas, axis=1)
+                        # ── Tabla detalle de OTs con EXCESO (> 150% del estimado) ────
+                        _df_ex_only = _df_te_p[_df_te_p["_exceso"]].copy()
+                        _n_exceso   = len(_df_ex_only)
+                        if not _df_ex_only.empty:
+                            _df_ex_only["_pct_ej_ex"] = (
+                                _df_ex_only["_effective_sec"] / _df_ex_only["estimated_sec"] * 100
+                            ).round(1)
+                            _det_ex = _df_ex_only.copy()
+                            _det_ex_cd = pd.to_datetime(_det_ex["creation_date"], errors="coerce")
+                            _det_ex_cd = _det_ex_cd.dt.tz_convert(None) if _det_ex_cd.dt.tz is not None else _det_ex_cd
+                            _det_ex["creation_date"] = _det_ex_cd.dt.strftime("%d/%m/%Y")
+                            _det_ex["T. Estimado"]  = _det_ex["estimated_sec"].apply(_fmt_seg)
+                            _det_ex["T. Máximo"]    = (_det_ex["estimated_sec"] * 1.50).apply(_fmt_seg)
+                            _det_ex["T. Ejecución"] = _det_ex["_effective_sec"].apply(_fmt_seg)
+                            _det_ex["% Ejecutado"]  = _det_ex["_pct_ej_ex"]
+                            if "eds_occim" in _det_ex.columns:
+                                _det_ex["eds_occim"] = _det_ex["eds_occim"].fillna("").replace("", "—")
+                                _det_ex["eds_nombre"] = _det_ex["eds_occim"].map(_eds_nombre_map_prec).fillna("—")
+                            _det_ex_disp = _det_ex[[c for c in
+                                ["folio","eds_occim","eds_nombre","tecnico","creation_date","maint_type",
+                                 "T. Estimado","T. Máximo","T. Ejecución","% Ejecutado"]
+                                if c in _det_ex.columns]].rename(columns={
+                                    "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
+                                    "tecnico":"Técnico",
+                                    "creation_date":"Fecha","maint_type":"Tipo",
+                                }).sort_values("% Ejecutado", ascending=False)
 
-                    # Formatear fecha
-                    _det_num_cd = pd.to_datetime(_det_num["creation_date"], errors="coerce")
-                    _det_num_cd = _det_num_cd.dt.tz_convert(None) if _det_num_cd.dt.tz is not None else _det_num_cd
-                    _det_num["_fecha"] = _det_num_cd.dt.strftime("%d/%m/%Y")
+                            with st.expander(
+                                f"🟣 Detalle OTs con exceso de tiempo — >150% ({_n_exceso:,} OTs)", expanded=False
+                            ):
+                                _filtro_ex = _filtro_ot_input("kpi_filtro_ot_exceso")
+                                _det_ex_disp = _aplicar_filtro_ot(_det_ex_disp, _filtro_ex, col="OT")
+                                if _filtro_ex:
+                                    st.caption(f"Mostrando **{len(_det_ex_disp):,}** de {_n_exceso:,} OTs (filtro: `{_filtro_ex}`).")
+                                _pct_max = max(250, int(_det_ex_disp["% Ejecutado"].max()) + 20) if not _det_ex_disp.empty else 300
+                                _show_df(_det_ex_disp, hide_index=True, width="stretch",
+                                    column_config={
+                                        "OT":          st.column_config.TextColumn(width=110),
+                                        "EDS":         st.column_config.TextColumn(width=85),
+                                        "Nombre EDS":  st.column_config.TextColumn(width=240,
+                                            help="Nombre / dirección de la estación."),
+                                        "Técnico":     st.column_config.TextColumn(width=190),
+                                        "Fecha":       st.column_config.TextColumn(width=100),
+                                        "Tipo":        st.column_config.TextColumn(width=200),
+                                        "T. Estimado": st.column_config.TextColumn(width=100),
+                                        "T. Máximo":   st.column_config.TextColumn(width=100,
+                                            help="Tope aceptable = 150% del estimado."),
+                                        "T. Ejecución":st.column_config.TextColumn(width=110),
+                                        "% Ejecutado": st.column_config.ProgressColumn(
+                                            min_value=150, max_value=_pct_max, format="%.1f%%",
+                                            help="Todos en esta tabla superan el 150% del estimado."),
+                                    })
 
-                    # Comentario / conclusión del técnico (texto libre del PDF de la OT).
-                    # Clave para rastrear la causa raíz cuando el numeral viene malo.
-                    # fillna("") evita que NaN llegue como "nan" al sanitizer.
-                    _serie_com = (_det_num["comentario_tecnico"].fillna("")
-                                  if "comentario_tecnico" in _det_num.columns
-                                  else pd.Series("", index=_det_num.index))
-                    _det_num["_comentario"] = _serie_com.apply(_strip_comentario_headers)
-
-                    # Equipo (código del activo + tipo legible). En vista expandida =
-                    # activo de la subtarea; en vista normal = no disponible a este nivel.
-                    _TIPO_LBL = {
-                        "lavadora":     "Lavadora",
-                        "aspiradora":   "Aspiradora",
-                        "lavainterior": "Lavatapiz",
-                    }
-                    def _fmt_equipo(row):
-                        code = str(row.get("_equipo_sub", "") or "").strip()
-                        if not code or code == "—":
-                            return "—"
-                        tipo = _TIPO_LBL.get(str(row.get("tipo_activo", "") or "").strip(), "")
-                        return f"{code} · {tipo}" if tipo else code
-                    if "_equipo_sub" in _det_num.columns:
-                        _det_num["_equipo"] = _det_num.apply(_fmt_equipo, axis=1)
                     else:
-                        _det_num["_equipo"] = "—"
+                        st.info("Sin datos de duración estimada disponibles para el filtro actual.")
 
-                    # Construir df de display
-                    _cols_num = [c for c in
-                        ["folio","_equipo","tecnico","_fecha","client","station","maint_type",
-                         "_n_ini","_n_fin","_fichas","_estado","_comentario"]
-                        if c in _det_num.columns]
-                    _det_num_disp = _det_num[_cols_num].rename(columns={
-                        "folio":      "OT",
-                        "_equipo":    "Equipo",
-                        "tecnico":    "Técnico",
-                        "_fecha":     "Fecha",
-                        "client":     "Cliente",
-                        "station":    "EDS",
-                        "maint_type": "Tipo",
-                        "_n_ini":     "N. Inicial",
-                        "_n_fin":     "N. Final",
-                        "_fichas":    "Fichas período",
-                        "_estado":    "Estado",
-                        "_comentario":"Comentario técnico / causa raíz",
-                    }).sort_values(["OT", "Estado"], ascending=[True, True])
+                    # ══════════════════════════════════════════════════════════════════
+                    # SECCIÓN: REGISTRO DE NUMERALES
+                    # ══════════════════════════════════════════════════════════════════
+                    st.divider()
 
-                    _n_sin      = int((~_df_num_base["numeral_ok"]).sum())
-                    _n_lav_ok   = int((_df_num_base["es_lavadora"] & _df_num_base["numeral_ok"]).sum()) \
-                                  if "es_lavadora" in _df_num_base.columns else int(_df_num_base["numeral_ok"].sum())
-                    _n_no_aplica = int((~_df_num_base["es_lavadora"]).sum()) \
-                                   if "es_lavadora" in _df_num_base.columns else 0
-
-                    # ── Ranking por técnico (peso + cumplimiento individual) ─
-                    # Solo evaluamos las OTs de lavadora/aspiradora (donde
-                    # el numeral realmente aplica); el resto es no_aplica=OK auto.
-                    if "es_lavadora" in _df_num_base.columns:
-                        _df_num_rk = _df_num_base[_df_num_base["es_lavadora"]].copy()
-                    else:
-                        _df_num_rk = _df_num_base.copy()
-                    _render_ranking_tecnico(
-                        _df_num_rk, "numeral_ok",
-                        "👤 Ranking por técnico — Registro de Numerales",
-                        _key_pfx="num", _min_ots=1,
+            if _prec_view == _V_NUM:
+                with _pt_num:
+                    st.markdown('<div class="section-header">🔢  Registro de Numerales — OTs con número de ficha</div>',
+                                unsafe_allow_html=True)
+                    st.caption(
+                        "Aplica a **lavadoras y aspiradoras** en MC y MP. El formulario Fracttal "
+                        "exige el numeral en ambos tipos, así que un valor faltante o basura "
+                        "penaliza igual sea correctiva o preventiva."
                     )
 
-                    with st.expander(
-                        f"📋 Detalle OTs — numerales ({_n_lav_ok:,} registrados · {_n_sin:,} sin numeral · {_n_no_aplica:,} no aplica)",
-                        expanded=False,
-                    ):
-                        st.caption(
-                            "Aplica a **lavadoras y aspiradoras**. Numerales **reales** "
-                            "leídos del formulario de la tarea en Fracttal (no de la nota). "
-                            "🔵 **No aplica** = equipo sin numeral (compresores, ablandadores, etc.). "
-                            "✅ = numeral válido · ❌/🟣 = dato malo (sin numeral, basura, exceso de fichas, salto). "
-                            "**Fichas período** = N. Final − N. Inicial (>20 en una OT = sospechoso). "
-                            "**Comentario técnico** = lo que el técnico escribió en el formulario "
-                            "(falla, trabajo realizado, observaciones) — la causa raíz real."
+                    # Numeral aplica a TODA lavadora/aspiradora (MC + MP) — se incluyen
+                    # correctivas y preventivas. Los equipos no-lavadora aportan score=25
+                    # auto (no_aplica), igual no distorsionan el indicador.
+                    _df_num_base = df_ot_scores.copy()
+                    if not _df_num_base.empty:
+                        _num_ok  = int(_df_num_base["numeral_ok"].sum())
+                        _num_tot = len(_df_num_base)
+                        _num_pct = _num_ok / _num_tot * 100 if _num_tot > 0 else 0.0
+
+                        # ── Evolución (respeta selección: semanas si 1 mes, meses si varios) ─
+                        # Incluye MC + MP (el numeral aplica a ambos en lavadora/aspiradora).
+                        _df_num_hist = df_ot_all.copy()
+                        if equipo_kpi != "Todos":
+                            _grp_num = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
+                            _df_num_hist = _df_num_hist[_df_num_hist["equipo"] == _grp_num]
+                        if tec_kpi_sel != "Todos":
+                            _df_num_hist = _df_num_hist[_df_num_hist["tecnico"] == tec_kpi_sel]
+
+                        # _agrupar_por_periodo aplica la regla: 1 mes → semanas; varios → meses.
+                        _g_num = _agrupar_por_periodo(_df_num_hist, "numeral_ok")
+
+                        _periodo_lbl_num = ("por semanas" if len(_meses_sel_raw) == 1
+                                            else "por mes seleccionado")
+
+                        nc1, nc2 = st.columns([1, 3])
+                        with nc1:
+                            _kpi_card(_num_pct, _num_ok, _num_tot,
+                                      "con numeral registrado", meta_pct=90.0)
+                        with nc2:
+                            if not _g_num.empty:
+                                _num_sig = (f"_fig_num_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
+                                            f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
+                                if _num_sig not in st.session_state:
+                                    st.session_state[_num_sig] = _fig_apilada(
+                                        _g_num, color_ok="#22c55e",
+                                        label_ok="Registró numeral", label_err="Sin numeral",
+                                        meta=90.0, titulo_y="% OTs",
+                                    )
+                                st.plotly_chart(st.session_state[_num_sig], width="stretch")
+
+                        # ── Tabla detalle OTs numerales (cumple + no cumple) ──────────
+                        # Si tenemos el desglose por subtarea (numerales_subtarea), una
+                        # OT con varios activos se EXPANDE: 1 fila por (OT, activo) con
+                        # su numeral propio y motivo individual. La OT entera se considera
+                        # mala si CUALQUIER subtarea falla.
+                        _det_num = _df_num_base.copy()
+                        if df_num_sub is not None and not df_num_sub.empty:
+                            _sub = df_num_sub.copy()
+                            # Solo subtareas en activos donde aplica numeral
+                            _sub = _sub[_sub["tipo_activo"].isin(("lavadora","aspiradora","lavainterior"))]
+                            if not _sub.empty:
+                                _sub = _sub.rename(columns={"id_ot": "folio"})
+                                # Meta de la OT (técnico, fecha, cliente, EDS, tipo, comentario).
+                                _meta_cols = [c for c in [
+                                    "folio","tecnico","creation_date","client","station","maint_type",
+                                    "eds_occim","comentario_tecnico","es_correctiva"]
+                                    if c in _det_num.columns]
+                                _meta = _det_num[_meta_cols].drop_duplicates("folio")
+                                # INNER merge: solo OTs en el scope actual (período/equipo/técnico).
+                                # Antes era left desde _sub (todo 2026) → filas huérfanas con
+                                # metadatos vacíos (None en técnico/fecha/cliente).
+                                _exp = _meta.merge(_sub, on="folio", how="inner")
+                                if not _exp.empty:
+                                    _exp["numeral_motivo"] = _exp["motivo"]
+                                    _exp["es_lavadora"]    = True
+                                    _exp["numeral_valor"]  = (
+                                        _exp["numeral_final"].fillna(_exp["numeral_inicial"]).fillna(""))
+                                    # Equipo = código del activo de ESTA subtarea (EQ-XXXX)
+                                    _exp["_equipo_sub"] = _exp["codigo_activo"].fillna("—")
+                                    _det_num = _exp
+
+                        # Columna Numeral y Estado con tres casos claros:
+                        #   🔵 No aplica  → equipo no es lavadora (no se exige numeral)
+                        #   ✅ 182740     → lavadora con numeral real encontrado en la nota
+                        #   ❌ Sin numeral → lavadora sin numeral registrado
+                        def _fmt_numeral_valor(row):
+                            if not row.get("es_lavadora", True):
+                                return "N/A"
+                            v = str(row.get("numeral_valor", "") or "").strip()
+                            return v if v else "—"
+
+                        def _fmt_numeral_estado(row):
+                            if not row.get("es_lavadora", True):
+                                return "🔵 No aplica"
+                            # Motivo del veredicto de calidad (sin numeral / basura / exceso / etc.)
+                            _motivo = str(row.get("numeral_motivo", "") or "")
+                            if row.get("numeral_ok", False):
+                                return "✅ Cumple"
+                            # Dato MALO → mostrar la razón concreta (no solo "sin numeral")
+                            return NUMERAL_MOTIVO_LABEL.get(_motivo, "❌ Dato inválido")
+
+                        def _fmt_numeral_ini_fin(row, campo):
+                            if not row.get("es_lavadora", True):
+                                return "—"
+                            v = str(row.get(campo, "") or "").strip()
+                            return v if v and v.lower() not in ("none", "null") else "—"
+
+                        def _fmt_fichas(row):
+                            if not row.get("es_lavadora", True):
+                                return "—"
+                            fp = row.get("fichas_periodo", None)
+                            if fp is None or (isinstance(fp, float) and pd.isna(fp)):
+                                return "—"
+                            try:
+                                return f"{int(fp):,}"
+                            except (ValueError, TypeError):
+                                return "—"
+
+                        _det_num["_numeral"]  = _det_num.apply(_fmt_numeral_valor, axis=1)
+                        _det_num["_estado"]   = _det_num.apply(_fmt_numeral_estado, axis=1)
+                        _det_num["_n_ini"]    = _det_num.apply(lambda r: _fmt_numeral_ini_fin(r, "numeral_inicial"), axis=1)
+                        _det_num["_n_fin"]    = _det_num.apply(lambda r: _fmt_numeral_ini_fin(r, "numeral_final"), axis=1)
+                        _det_num["_fichas"]   = _det_num.apply(_fmt_fichas, axis=1)
+
+                        # Formatear fecha
+                        _det_num_cd = pd.to_datetime(_det_num["creation_date"], errors="coerce")
+                        _det_num_cd = _det_num_cd.dt.tz_convert(None) if _det_num_cd.dt.tz is not None else _det_num_cd
+                        _det_num["_fecha"] = _det_num_cd.dt.strftime("%d/%m/%Y")
+
+                        # Comentario / conclusión del técnico (texto libre del PDF de la OT).
+                        # Clave para rastrear la causa raíz cuando el numeral viene malo.
+                        # fillna("") evita que NaN llegue como "nan" al sanitizer.
+                        _serie_com = (_det_num["comentario_tecnico"].fillna("")
+                                      if "comentario_tecnico" in _det_num.columns
+                                      else pd.Series("", index=_det_num.index))
+                        _det_num["_comentario"] = _serie_com.apply(_strip_comentario_headers)
+
+                        # Equipo (código del activo + tipo legible). En vista expandida =
+                        # activo de la subtarea; en vista normal = no disponible a este nivel.
+                        _TIPO_LBL = {
+                            "lavadora":     "Lavadora",
+                            "aspiradora":   "Aspiradora",
+                            "lavainterior": "Lavatapiz",
+                        }
+                        def _fmt_equipo(row):
+                            code = str(row.get("_equipo_sub", "") or "").strip()
+                            if not code or code == "—":
+                                return "—"
+                            tipo = _TIPO_LBL.get(str(row.get("tipo_activo", "") or "").strip(), "")
+                            return f"{code} · {tipo}" if tipo else code
+                        if "_equipo_sub" in _det_num.columns:
+                            _det_num["_equipo"] = _det_num.apply(_fmt_equipo, axis=1)
+                        else:
+                            _det_num["_equipo"] = "—"
+
+                        # Construir df de display
+                        _cols_num = [c for c in
+                            ["folio","_equipo","tecnico","_fecha","client","station","maint_type",
+                             "_n_ini","_n_fin","_fichas","_estado","_comentario"]
+                            if c in _det_num.columns]
+                        _det_num_disp = _det_num[_cols_num].rename(columns={
+                            "folio":      "OT",
+                            "_equipo":    "Equipo",
+                            "tecnico":    "Técnico",
+                            "_fecha":     "Fecha",
+                            "client":     "Cliente",
+                            "station":    "EDS",
+                            "maint_type": "Tipo",
+                            "_n_ini":     "N. Inicial",
+                            "_n_fin":     "N. Final",
+                            "_fichas":    "Fichas período",
+                            "_estado":    "Estado",
+                            "_comentario":"Comentario técnico / causa raíz",
+                        }).sort_values(["OT", "Estado"], ascending=[True, True])
+
+                        _n_sin      = int((~_df_num_base["numeral_ok"]).sum())
+                        _n_lav_ok   = int((_df_num_base["es_lavadora"] & _df_num_base["numeral_ok"]).sum()) \
+                                      if "es_lavadora" in _df_num_base.columns else int(_df_num_base["numeral_ok"].sum())
+                        _n_no_aplica = int((~_df_num_base["es_lavadora"]).sum()) \
+                                       if "es_lavadora" in _df_num_base.columns else 0
+
+                        # ── Ranking por técnico (peso + cumplimiento individual) ─
+                        # Solo evaluamos las OTs de lavadora/aspiradora (donde
+                        # el numeral realmente aplica); el resto es no_aplica=OK auto.
+                        if "es_lavadora" in _df_num_base.columns:
+                            _df_num_rk = _df_num_base[_df_num_base["es_lavadora"]].copy()
+                        else:
+                            _df_num_rk = _df_num_base.copy()
+                        _render_ranking_tecnico(
+                            _df_num_rk, "numeral_ok",
+                            "👤 Ranking por técnico — Registro de Numerales",
+                            _key_pfx="num", _min_ots=1,
                         )
-                        _n_num_total = len(_det_num_disp)
-                        _filtro_num = _filtro_ot_input("kpi_filtro_ot_numeral")
-                        _det_num_disp = _aplicar_filtro_ot(_det_num_disp, _filtro_num, col="OT")
-                        if _filtro_num:
-                            st.caption(f"Mostrando **{len(_det_num_disp):,}** de {_n_num_total:,} OTs (filtro: `{_filtro_num}`).")
-                        _show_df(_det_num_disp, hide_index=True, width="stretch",
-                            column_config={
-                                "OT":            st.column_config.TextColumn(width=110),
-                                "Equipo":        st.column_config.TextColumn(width=170,
-                                    help="Código del activo (EQ-XXXX) + tipo (Lavadora/Aspiradora/Lavatapiz). Una OT compuesta muestra una fila por activo con numeral."),
-                                "Técnico":       st.column_config.TextColumn(width=180),
-                                "Fecha":         st.column_config.TextColumn(width=95),
-                                "Cliente":       st.column_config.TextColumn(width=85),
-                                "EDS":           st.column_config.TextColumn(width=180),
-                                "Tipo":          st.column_config.TextColumn(width=130),
-                                "N. Inicial":    st.column_config.TextColumn(width=90,
-                                    help="Lectura inicial del contador (TOMA DE NUMERAL INICIAL)."),
-                                "N. Final":      st.column_config.TextColumn(width=90,
-                                    help="Lectura final del contador (TOMA DE NUMERAL FINAL)."),
-                                "Fichas período":st.column_config.TextColumn(width=100,
-                                    help="Diferencia Final − Inicial = fichas usadas en el período."),
-                                "Estado":        st.column_config.TextColumn(width=150),
-                                "Comentario técnico / causa raíz": st.column_config.TextColumn(width=340,
-                                    help="Texto libre del técnico en el formulario de Fracttal: falla encontrada, trabajo realizado y observaciones. Vacío = el técnico no documentó."),
-                            })
+
+                        with st.expander(
+                            f"📋 Detalle OTs — numerales ({_n_lav_ok:,} registrados · {_n_sin:,} sin numeral · {_n_no_aplica:,} no aplica)",
+                            expanded=False,
+                        ):
+                            st.caption(
+                                "Aplica a **lavadoras y aspiradoras**. Numerales **reales** "
+                                "leídos del formulario de la tarea en Fracttal (no de la nota). "
+                                "🔵 **No aplica** = equipo sin numeral (compresores, ablandadores, etc.). "
+                                "✅ = numeral válido · ❌/🟣 = dato malo (sin numeral, basura, exceso de fichas, salto). "
+                                "**Fichas período** = N. Final − N. Inicial (>20 en una OT = sospechoso). "
+                                "**Comentario técnico** = lo que el técnico escribió en el formulario "
+                                "(falla, trabajo realizado, observaciones) — la causa raíz real."
+                            )
+                            _n_num_total = len(_det_num_disp)
+                            _filtro_num = _filtro_ot_input("kpi_filtro_ot_numeral")
+                            _det_num_disp = _aplicar_filtro_ot(_det_num_disp, _filtro_num, col="OT")
+                            if _filtro_num:
+                                st.caption(f"Mostrando **{len(_det_num_disp):,}** de {_n_num_total:,} OTs (filtro: `{_filtro_num}`).")
+                            _show_df(_det_num_disp, hide_index=True, width="stretch",
+                                column_config={
+                                    "OT":            st.column_config.TextColumn(width=110),
+                                    "Equipo":        st.column_config.TextColumn(width=170,
+                                        help="Código del activo (EQ-XXXX) + tipo (Lavadora/Aspiradora/Lavatapiz). Una OT compuesta muestra una fila por activo con numeral."),
+                                    "Técnico":       st.column_config.TextColumn(width=180),
+                                    "Fecha":         st.column_config.TextColumn(width=95),
+                                    "Cliente":       st.column_config.TextColumn(width=85),
+                                    "EDS":           st.column_config.TextColumn(width=180),
+                                    "Tipo":          st.column_config.TextColumn(width=130),
+                                    "N. Inicial":    st.column_config.TextColumn(width=90,
+                                        help="Lectura inicial del contador (TOMA DE NUMERAL INICIAL)."),
+                                    "N. Final":      st.column_config.TextColumn(width=90,
+                                        help="Lectura final del contador (TOMA DE NUMERAL FINAL)."),
+                                    "Fichas período":st.column_config.TextColumn(width=100,
+                                        help="Diferencia Final − Inicial = fichas usadas en el período."),
+                                    "Estado":        st.column_config.TextColumn(width=150),
+                                    "Comentario técnico / causa raíz": st.column_config.TextColumn(width=340,
+                                        help="Texto libre del técnico en el formulario de Fracttal: falla encontrada, trabajo realizado y observaciones. Vacío = el técnico no documentó."),
+                                })
 
 
     # ══════════════════════════════════════════════════════════════════════════
