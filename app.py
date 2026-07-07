@@ -10757,21 +10757,25 @@ elif _page == _NAV_PAGES[0]:
                     # (nunca fueron procesadas por sync_estim_neta.py). Estas NO
                     # aparecen en el KPI de tiempo (estimated_sec=0 no evaluable)
                     # pero conviene alertar para que el operador corra el sync.
-                    try:
+                    @st.cache_data(ttl=900, show_spinner=False)
+                    def _preventivas_sin_neta():
+                        """OTs preventivas 2026 sin duracion_estim_neta_seg.
+                        Cacheado 15 min — antes corría en cada rerun de la vista."""
                         from supabase_client import _query as _sq_int
-                        _rows_pend = _sq_int(
-                            "ordenes_trabajo",
-                            "select=id_ot,fecha_creacion,estado&tipo_tarea=ilike.*PREVENTIVA*"
-                            "&fecha_creacion=gte.2026-01-01"
-                            "&duracion_estim_neta_seg=is.null"
-                            "&estado=not.in.(ERROR%20DE%20INGRESO,DUPLICADO,Duplicidad,"
-                            "DE%20PRUEBA,PRUEBA%20ROBOT,Cancelado,Canceladas,Cancelada)",
-                            limit=5000,
-                        )
-                        _n_pend_est = len(_rows_pend)
-                    except Exception:
-                        _n_pend_est = 0
-                        _rows_pend = []
+                        try:
+                            return _sq_int(
+                                "ordenes_trabajo",
+                                "select=id_ot,fecha_creacion,estado&tipo_tarea=ilike.*PREVENTIVA*"
+                                "&fecha_creacion=gte.2026-01-01"
+                                "&duracion_estim_neta_seg=is.null"
+                                "&estado=not.in.(ERROR%20DE%20INGRESO,DUPLICADO,Duplicidad,"
+                                "DE%20PRUEBA,PRUEBA%20ROBOT,Cancelado,Canceladas,Cancelada)",
+                                limit=5000,
+                            )
+                        except Exception:
+                            return []
+                    _rows_pend = _preventivas_sin_neta()
+                    _n_pend_est = len(_rows_pend)
                     if _n_pend_est > 0:
                         _muestra = ", ".join(r["id_ot"] for r in _rows_pend[:5])
                         _extra = f" (+{_n_pend_est-5} más)" if _n_pend_est > 5 else ""

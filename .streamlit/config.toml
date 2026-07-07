@@ -1,0 +1,30 @@
+# ============================================================
+# Config de rendimiento — Dashboard Occimiano
+# Optimizaciones de runtime SIN alterar lógica ni resultados.
+# ============================================================
+
+[runner]
+# El dashboard usa st.* explícito en todas partes (0 expresiones
+# "magic" sueltas verificadas). Desactivar el auto-display acelera
+# el parsing/ejecución en archivos grandes (~15k líneas).
+magicEnabled = false
+# Interrumpe el rerun anterior cuando el usuario cambia otro filtro
+# rápido — evita acumular reruns encolados (sensación de lag).
+fastReruns = true
+
+[server]
+# Sin file-watcher en producción (Streamlit Cloud reinicia por git push).
+# Evita el overhead de vigilar cambios de archivos.
+fileWatcherType = "none"
+# Comprimir respuestas → menos datos por la red en tablas grandes.
+enableCORS = false
+enableXsrfProtection = true
+
+[client]
+# Mantener detalles de error visibles (útil para diagnóstico).
+showErrorDetails = true
+# Barra de herramientas minimizada para usuarios finales.
+toolbarMode = "minimal"
+
+[theme]
+base = "light"

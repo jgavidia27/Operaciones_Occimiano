@@ -8,8 +8,9 @@ __pycache__/
 *.pyc
 *.pyo
 
-# ── Streamlit config local ────────────────────────────────────────────────────
-.streamlit/
+# ── Streamlit: ignorar todo MENOS config.toml (config sí va al repo) ─────────
+.streamlit/*
+!.streamlit/config.toml
 
 # ── Scripts de diagnóstico y debug locales (no parte del dashboard) ───────────
 _*.py
