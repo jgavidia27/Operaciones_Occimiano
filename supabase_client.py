@@ -306,11 +306,16 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# Versión del cache: bumpear para invalidar el disk-cache tras cambios en
+# duracion_estim_neta_seg / duracion_real_neta_seg del backend.
+_WO_CACHE_VERSION = "v2-lav-preventiva-07jul"
+
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
-def load_work_orders_supabase() -> list:
+def load_work_orders_supabase(cache_v: str = _WO_CACHE_VERSION) -> list:
     """
     Retorna lista de dicts compatible con el formato raw de Fracttal.
     El dashboard puede llamar build_work_orders_df() sobre este resultado.
+    cache_v: bumpear para forzar recarga (invalida disk cache).
     """
     # Columnas base + numerales reales. Si la migración migrate_numerales.sql
     # aún no se corrió, numeral_inicial/final no existen → reintentar sin ellas
