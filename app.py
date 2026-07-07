@@ -13665,6 +13665,23 @@ elif _page == _NAV_PAGES[2]:
                 except (AttributeError, TypeError):
                     return s2
             _df_pr_disp["_fprog_dt"] = _to_naive_series(_df_pr_disp["_fprog_dt"])
+
+            # Confinar al mes seleccionado: las filas 'Solo Fracttal' y las
+            # rellenadas con fechas de Fracttal pueden traer fechas de meses
+            # anteriores (ej. una MP de julio con fecha_finalizacion=abril).
+            # Filtramos por año-mes exacto para no mezclar meses en la
+            # Agenda día ni en el calendario mensual.
+            _mask_mes = (
+                (_df_pr_disp["_fprog_dt"].dt.year  == _yr_pr0) &
+                (_df_pr_disp["_fprog_dt"].dt.month == _mes_num_pr0)
+            )
+            # Las que caen fuera del mes → se tratan como "sin fecha exacta"
+            # (aparecerán en la sección 'Sin día ni en Excel ni en Fracttal').
+            _df_pr_disp.loc[
+                _df_pr_disp["_fprog_dt"].notna() & (~_mask_mes),
+                "_fprog_dt"
+            ] = pd.NaT
+
             _df_v      = _df_pr_disp[_df_pr_disp["_fprog_dt"].notna()].copy()
             _df_sinfec = _df_pr_disp[_df_pr_disp["_fprog_dt"].isna()].copy()
 
