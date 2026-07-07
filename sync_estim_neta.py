@@ -120,7 +120,15 @@ def fetch_subtasks(folio: str) -> tuple:
     """Consulta /api/work_orders/ por folio y devuelve las subtareas
     con su tipo de activo y duraciones.
     Retorna (folio, estim_neta_seg, real_neta_seg, ajustada_bool).
-    Si la OT no tiene lavadora, devuelve los originales como neto."""
+    Si la OT no tiene lavadora, devuelve los originales como neto.
+
+    IMPORTANTE (07-jul-2026): una OT puede tener MÚLTIPLES subtareas
+    con activo LAVADORA (ej: 'PLAN MTTO MSELF CON SANITIZADO' que es
+    PREVENTIVA + 'REVISIÓN DATOS DE TERMOS' que es INSPECCIÓN). El
+    tiempo neto de lavadora debe contar SOLO las subtareas que son
+    la mantención principal (tasks_log_task_type_main = PREVENTIVA*),
+    excluyendo INSPECCIÓN y otras tareas auxiliares.
+    """
     headers = {"Authorization": f"Bearer {get_token()}"}
     try:
         r = requests.get(
@@ -138,28 +146,44 @@ def fetch_subtasks(folio: str) -> tuple:
     #   - duration       = total de la OT (REPLICADO en cada subtarea, NO usar)
     #   - tasks_duration = duración ESTIMADA por subtarea (en segundos)
     #   - real_duration  = duración REAL ejecutada por subtarea (en segundos)
+    #   - tasks_log_task_type_main = tipo de la tarea (PREVENTIVA*, INSPECCIÓN, etc.)
+    #   - description = nombre de la tarea (ej. 'PLAN MTTO MSELF')
     subtasks = []
     for it in items:
         tipo = _tipo_activo(it.get("items_log_description") or "")
+        tipo_tarea = str(it.get("tasks_log_task_type_main") or "").upper()
+        # Solo cuentan como "mantención de lavadora" las tareas PREVENTIVA*
+        # (excluye INSPECCIÓN, CORRECTIVA embebida, etc.)
+        es_preventiva = "PREVENTIVA" in tipo_tarea
         dur_estim = _to_sec(it.get("tasks_duration"))
         dur_real  = _to_sec(it.get("real_duration"))
-        subtasks.append({"tipo": tipo, "estim": dur_estim, "real": dur_real})
+        subtasks.append({
+            "tipo": tipo, "estim": dur_estim, "real": dur_real,
+            "es_preventiva": es_preventiva,
+            "task_desc": (it.get("description") or "").strip()[:80],
+        })
 
     estim_total = sum(s["estim"] for s in subtasks)
     real_total  = sum(s["real"]  for s in subtasks)
 
-    tiene_lavadora = any(s["tipo"] == "lavadora" for s in subtasks)
-    if not tiene_lavadora:
-        # No aplica descuento → neto = total
-        return folio, estim_total, real_total, False
+    # Buscar subtareas de LAVADORA que sean PREVENTIVA (mantención principal)
+    lav_prev = [s for s in subtasks if s["tipo"] == "lavadora" and s["es_preventiva"]]
 
-    # Solo lavadora: el indicador de precisión usa únicamente el tiempo
-    # de la subtarea lavadora, no el total de la OT.
-    lav = [s for s in subtasks if s["tipo"] == "lavadora"]
-    estim_neta = sum(s["estim"] for s in lav) if lav else estim_total
-    real_neta  = sum(s["real"]  for s in lav) if lav else real_total
-    ajustada = bool(lav)
-    return folio, estim_neta, real_neta, ajustada
+    if not lav_prev:
+        # Fallback: si no hay preventiva de lavadora, ver si hay al menos
+        # alguna subtarea de lavadora — mantener el comportamiento anterior.
+        lav = [s for s in subtasks if s["tipo"] == "lavadora"]
+        if not lav:
+            # No hay lavadora en absoluto → neto = total
+            return folio, estim_total, real_total, False
+        estim_neta = sum(s["estim"] for s in lav)
+        real_neta  = sum(s["real"]  for s in lav)
+        return folio, estim_neta, real_neta, True
+
+    # Caso normal: sumar solo las PREVENTIVAS de lavadora
+    estim_neta = sum(s["estim"] for s in lav_prev)
+    real_neta  = sum(s["real"]  for s in lav_prev)
+    return folio, estim_neta, real_neta, True
 
 
 def _to_sec(v) -> int:
