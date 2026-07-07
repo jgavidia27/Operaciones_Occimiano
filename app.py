@@ -13618,6 +13618,15 @@ elif _page == _NAV_PAGES[2]:
                         f'{_ot_html}</div>')
 
             # Partición: con fecha exacta vs. sin fecha (solo semana)
+            # Forzar dtype datetime64 tz-naive: al concatenar filas Solo
+            # Fracttal con Excel puede quedar como object (mix tz-naive/aware).
+            def _to_naive_series(s):
+                s2 = pd.to_datetime(s, errors="coerce", utc=True)
+                try:
+                    return s2.dt.tz_localize(None)
+                except (AttributeError, TypeError):
+                    return s2
+            _df_pr_disp["_fprog_dt"] = _to_naive_series(_df_pr_disp["_fprog_dt"])
             _df_v      = _df_pr_disp[_df_pr_disp["_fprog_dt"].notna()].copy()
             _df_sinfec = _df_pr_disp[_df_pr_disp["_fprog_dt"].isna()].copy()
 
