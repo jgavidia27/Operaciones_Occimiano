@@ -7263,17 +7263,28 @@ elif _page == _NAV_PAGES[0]:
             cur = end + _td(days=1)
         return semanas
 
-    tab_sla, tab_cal, tab_prec, tab_bono = st.tabs([
-        "📊  Desempeño SLA",
-        "🎯  Efectividad MP",
-        "📋  Precisión Fracttal",
-        "💲  Resumen Bonos",
-    ])
+    # Tabs principales como RADIO en vez de st.tabs: st.tabs renderiza el
+    # contenido de las 4 pestañas en el DOM simultáneamente (solo las oculta
+    # con CSS). Con el volumen de contenido de este dashboard, el contenido
+    # de 'Resumen Bonos' se filtraba visualmente bajo 'Precisión Fracttal'.
+    # Con radio + if, SOLO la pestaña activa se ejecuta y renderiza.
+    _MT_SLA  = "📊  Desempeño SLA"
+    _MT_CAL  = "🎯  Efectividad MP"
+    _MT_PREC = "📋  Precisión Fracttal"
+    _MT_BONO = "💲  Resumen Bonos"
+    _main_tab = st.radio(
+        "Sección desempeño",
+        [_MT_SLA, _MT_CAL, _MT_PREC, _MT_BONO],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="desempeno_main_tab",
+    )
+    st.divider()
 
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 1 — PRODUCTIVIDAD (SLA)
     # ══════════════════════════════════════════════════════════════════════════
-    with tab_sla:
+    if _main_tab == _MT_SLA:
         _tsla_desc, _tsla_ley = st.columns([3, 1])
         with _tsla_ley:
             st.markdown(
@@ -8204,7 +8215,7 @@ elif _page == _NAV_PAGES[0]:
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 2 — CALIDAD (REINCIDENCIAS)
     # ══════════════════════════════════════════════════════════════════════════
-    with tab_cal:
+    if _main_tab == _MT_CAL:
         _tcal_desc, _tcal_ley = st.columns([3, 1])
         with _tcal_ley:
             st.markdown(
@@ -9227,7 +9238,7 @@ elif _page == _NAV_PAGES[0]:
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 3 — PRECISIÓN INFO OPERATIVA (KPI LLENADO)
     # ══════════════════════════════════════════════════════════════════════════
-    with tab_prec:
+    if _main_tab == _MT_PREC:
         _tprec_desc, _tprec_ley = st.columns([3, 1])
         with _tprec_ley:
             st.markdown(
@@ -11622,7 +11633,7 @@ elif _page == _NAV_PAGES[0]:
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 4 — RESUMEN BONOS
 # ══════════════════════════════════════════════════════════════════════════
-    with tab_bono:
+    if _main_tab == _MT_BONO:
         _bi_info, _bi_escala = st.columns([3, 2])
         with _bi_info:
             st.markdown(
