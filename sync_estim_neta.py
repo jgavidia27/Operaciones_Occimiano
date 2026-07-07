@@ -103,16 +103,42 @@ def query_preventiva_folios(desde: str) -> list:
     return folios
 
 
-# Identifica el tipo de activo por nombre. Se aplica al campo
-# items_log_description de cada subtarea Fracttal.
+# Identifica el tipo de activo por nombre. Usa el PRIMER TOKEN como
+# clasificador primario para evitar falsos positivos (ej. "BOMBA CAT
+# LAVADORA NORTE" es BOMBA, no lavadora — antes se clasificaba mal
+# porque contenía "LAVAD" en cualquier parte).
+#
+# Marcas conocidas que SÍ son lavadora aunque no digan "LAVADORA":
+#   - MSELF, SEAL, SMART: siempre vienen precedidas por LAVADORA
+#     en Fracttal (ej. "LAVADORA MSELF 2020") → cae en primer token.
+#   - HIDROLAVADORA: aceptado como token propio.
 def _tipo_activo(nombre: str) -> str:
-    n = (nombre or "").upper()
-    if "BOMBA" in n:                       return "bomba"
-    if "ABLANDADOR" in n:                  return "ablandador"
-    if "LAVAINT" in n or "LAVATAP" in n:   return "lavainterior"
-    if "ASPIRA" in n:                      return "aspiradora"
-    if "FICHERO" in n:                     return "otro"
-    if "LAVAD" in n:                       return "lavadora"
+    n = (nombre or "").strip().upper()
+    if not n:
+        return "otro"
+    first = n.split()[0]
+    # Clasificación por primer token (más robusta)
+    if first in ("BOMBA", "BOMBAS", "KIT"):
+        return "bomba"
+    if first.startswith("ABLANDADOR"):     # ABLANDADOR / ABLANDADORES
+        return "ablandador"
+    if first == "LAVAINTERIORES":
+        return "lavainterior"
+    if first.startswith("LAVATAP"):        # LAVATAPETE / LAVATAPETES
+        return "lavainterior"
+    if first in ("LAVABICICLETAS",):       # no es lavadora de autos
+        return "otro"
+    if first.startswith("ASPIRA"):
+        return "aspiradora"
+    if first in ("FICHERO", "TERMO", "DISPENSADOR", "COMPRESOR",
+                 "GRUPO", "PUENTE"):
+        return "otro"
+    if first.startswith("LAVADORA") or first.startswith("HIDROLAV"):
+        return "lavadora"
+    # Fallback: si el primer token no matchea pero HIDROLAVADORA aparece
+    # (raro pero posible), aceptar como lavadora.
+    if "HIDROLAVADORA" in n:
+        return "lavadora"
     return "otro"
 
 

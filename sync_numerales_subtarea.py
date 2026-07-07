@@ -46,12 +46,30 @@ WORKERS = 16
 
 
 def _tipo_activo(nombre: str) -> str:
-    """Devuelve 'lavadora' | 'aspiradora' | 'lavainterior' | 'otro'."""
-    n = (nombre or "").upper()
-    if "LAVAINT" in n or "LAVATAP" in n: return "lavainterior"
-    if "ASPIRA"  in n:                   return "aspiradora"
-    if "FICHERO" in n:                   return "otro"
-    if "LAVAD"   in n:                   return "lavadora"
+    """Devuelve 'lavadora' | 'aspiradora' | 'lavainterior' | 'otro'.
+
+    Usa primer token para evitar falsos positivos (ej. 'FICHERO LAVADORA
+    RM5' es FICHERO, no lavadora). Marcas MSELF/SEAL/SMART siempre
+    vienen precedidas por 'LAVADORA' en Fracttal → cae en el primer token.
+    """
+    n = (nombre or "").strip().upper()
+    if not n:
+        return "otro"
+    first = n.split()[0]
+    if first == "LAVAINTERIORES" or first.startswith("LAVATAP"):
+        return "lavainterior"
+    if first == "LAVABICICLETAS":
+        return "otro"
+    if first.startswith("ASPIRA"):
+        return "aspiradora"
+    if first in ("FICHERO", "TERMO", "DISPENSADOR", "COMPRESOR",
+                 "BOMBA", "BOMBAS", "KIT", "GRUPO", "PUENTE") \
+       or first.startswith("ABLANDADOR"):
+        return "otro"
+    if first.startswith("LAVADORA") or first.startswith("HIDROLAV"):
+        return "lavadora"
+    if "HIDROLAVADORA" in n:
+        return "lavadora"
     return "otro"
 
 
