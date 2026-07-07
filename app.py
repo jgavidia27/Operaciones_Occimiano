@@ -10283,6 +10283,36 @@ elif _page == _NAV_PAGES[0]:
                 st.markdown('<div class="section-header">⏱  Tiempo de Ejecución — Preventivos</div>',
                             unsafe_allow_html=True)
 
+                # ── Guardia de integridad: OTs preventivas 2026 sin sync ─────────
+                # Detecta preventivas cuya `duracion_estim_neta_seg` está en NULL
+                # (nunca fueron procesadas por sync_estim_neta.py). Estas NO
+                # aparecen en el KPI de tiempo (estimated_sec=0 no evaluable)
+                # pero conviene alertar para que el operador corra el sync.
+                try:
+                    from supabase_client import _query as _sq_int
+                    _rows_pend = _sq_int(
+                        "ordenes_trabajo",
+                        "select=id_ot,fecha_creacion,estado&tipo_tarea=ilike.*PREVENTIVA*"
+                        "&fecha_creacion=gte.2026-01-01"
+                        "&duracion_estim_neta_seg=is.null"
+                        "&estado=not.in.(ERROR%20DE%20INGRESO,DUPLICADO,Duplicidad,"
+                        "DE%20PRUEBA,PRUEBA%20ROBOT,Cancelado,Canceladas,Cancelada)",
+                        limit=5000,
+                    )
+                    _n_pend_est = len(_rows_pend)
+                except Exception:
+                    _n_pend_est = 0
+                    _rows_pend = []
+                if _n_pend_est > 0:
+                    _muestra = ", ".join(r["id_ot"] for r in _rows_pend[:5])
+                    _extra = f" (+{_n_pend_est-5} más)" if _n_pend_est > 5 else ""
+                    st.warning(
+                        f"⚠️ **{_n_pend_est} OT{'s' if _n_pend_est != 1 else ''} preventiva{'s' if _n_pend_est != 1 else ''}** "
+                        f"sin `duracion_estim_neta_seg` en Supabase — no evalúan en este KPI. "
+                        f"Correr `python sync_estim_neta.py --modo incremental` para poblarlas. "
+                        f"Muestra: {_muestra}{_extra}."
+                    )
+
                 # ── Leyenda expandible ────────────────────────────────────────────
                 with st.expander("📖  Regla de cumplimiento de tiempo (piso 75% del estimado)", expanded=False):
                     st.markdown("""

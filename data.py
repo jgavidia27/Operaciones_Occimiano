@@ -802,20 +802,38 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         ])
 
         # Duración real y estimada.
-        # Preferir las versiones "netas" cuando existan: para OTs con LAVADORA,
-        # el sync `sync_estim_neta.py` extrae SOLO los tiempos de la subtarea
-        # lavadora (el indicador de precisión evalúa únicamente ese equipo).
-        # Si la OT no es de lavadora, los campos netos copian los originales.
+        # ══════════════════════════════════════════════════════════════
+        # REGLA CRÍTICA (blindaje contra bug OS-38480/38481):
+        # Para PREVENTIVAS solo aceptamos duracion_*_neta_seg (calculado
+        # por sync_estim_neta.py). NUNCA caemos al fallback `duration`
+        # (total de la OT) porque eso incluye bomba+ablandador+
+        # lavatapices+inspecciones y distorsiona el KPI de tiempo.
+        # Si la neta no está poblada → 0 (no evaluable, no penaliza).
+        # Un warning en el dashboard lista las OTs sin sincronizar.
+        #
+        # Para CORRECTIVAS sí es seguro caer a tasks_duration: en Fracttal
+        # una MC siempre tiene 1 sola subtarea (la falla puntual).
+        # ══════════════════════════════════════════════════════════════
         _real_neto  = wo.get("duracion_real_neta_seg")
         _estim_neto = wo.get("duracion_estim_neta_seg")
+        _has_neto_est  = _estim_neto not in (None, "", "None")
+        _has_neto_real = _real_neto  not in (None, "", "None")
         try:
-            duration_sec = int(_real_neto if _real_neto not in (None, "", "None")
-                               else (wo.get("tasks_duration") or 0))
+            if _has_neto_real:
+                duration_sec = int(_real_neto)
+            elif es_correctiva:
+                duration_sec = int(wo.get("tasks_duration") or 0)
+            else:
+                duration_sec = 0   # preventiva sin sync → no evaluable
         except (ValueError, TypeError):
             duration_sec = 0
         try:
-            estimated_sec = int(_estim_neto if _estim_neto not in (None, "", "None")
-                                else (wo.get("duration") or 0))
+            if _has_neto_est:
+                estimated_sec = int(_estim_neto)
+            elif es_correctiva:
+                estimated_sec = int(wo.get("duration") or 0)
+            else:
+                estimated_sec = 0   # preventiva sin sync → no evaluable
         except (ValueError, TypeError):
             estimated_sec = 0
         # Tiempo OK: ejecución >= 75% de la duración estimada
