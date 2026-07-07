@@ -9943,6 +9943,416 @@ elif _page == _NAV_PAGES[0]:
                 # ══════════════════════════════════════════════════════════════════
                 st.divider()
 
+                if not df_tec_scores_rank.empty:
+                    _tec_base = df_tec_scores_rank[df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)].copy()
+
+                    # Guards para columnas nuevas (caches pre-migración)
+                    _guards = {
+                        "err_total_dim":      lambda b: b["n_errores"],
+                        "err_tiempo":         lambda b: 0,
+                        "err_causa":          lambda b: 0,
+                        "err_numeral":        lambda b: 0,
+                        "err_deteccion":      lambda b: 0,
+                        "ots_correctas":      lambda b: b["ots_evaluadas"] - b["n_errores"],
+                        # Denominadores por dimensión (fallback: total OTs si no hay dato)
+                        "tiempo_aplica_count":  lambda b: b["ots_evaluadas"],
+                        "causa_aplica_count":   lambda b: b["ots_evaluadas"],
+                        "numeral_aplica_count": lambda b: b["ots_evaluadas"],
+                        "tiempo_ok_count":    lambda b: (b["ots_evaluadas"] * b["pct_tiempo_ok"]    / 100).round(0).astype(int),
+                        "causa_ok_count":     lambda b: (b["ots_evaluadas"] * b["pct_causa_ok"]     / 100).round(0).astype(int),
+                        "numeral_ok_count":   lambda b: (b["ots_evaluadas"] * b["pct_numeral_ok"]   / 100).round(0).astype(int),
+                        "deteccion_ok_count": lambda b: (b["ots_evaluadas"] * b.get("pct_deteccion_ok", pd.Series(0, index=b.index)) / 100).round(0).astype(int),
+                        "pct_deteccion_ok":   lambda b: pd.Series(0.0, index=b.index),
+                    }
+                    for _cg, _fb in _guards.items():
+                        if _cg not in _tec_base.columns:
+                            try: _tec_base[_cg] = _fb(_tec_base)
+                            except Exception: _tec_base[_cg] = 0
+                    if "exactitud_pct" not in _tec_base.columns:
+                        _tec_base["exactitud_pct"] = (
+                            (1 - _tec_base["n_errores"] / _tec_base["ots_evaluadas"].clip(lower=1)) * 100
+                        ).round(1)
+
+                    # Formato "X/Y (Z%)" por dimensión — usa el DENOMINADOR CORRECTO
+                    # (OTs donde aplica cada dimensión), no ots_evaluadas total.
+                    # Si el técnico no tiene ninguna OT que aplique esa dimensión,
+                    # se muestra "—" en vez de "0/0 (0.0%)".
+                    def _fmt_dim(ok, aplica, pct):
+                        try:
+                            ap_i = int(aplica) if pd.notna(aplica) else 0
+                            if ap_i == 0:
+                                return "—"
+                            ok_i  = int(ok)   if pd.notna(ok)   else 0
+                            pct_f = float(pct) if pd.notna(pct) else 0.0
+                            return f"{ok_i}/{ap_i} ({pct_f:.1f}%)"
+                        except (ValueError, TypeError):
+                            return "—"
+
+                    # Si _tec_base quedó vacío (p.ej. técnico seleccionado no está
+                    # en TECNICOS_OCCIMIANO_FULL) creamos columnas vacías manualmente
+                    # para no romper el layout con apply sobre DataFrame vacío.
+                    if _tec_base.empty:
+                        for _c in ("col_tiempo", "col_causa", "col_numeral", "col_deteccion"):
+                            _tec_base[_c] = pd.Series(dtype="object")
+                    else:
+                        _tec_base["col_tiempo"]    = _tec_base.apply(lambda r: _fmt_dim(r["tiempo_ok_count"],  r.get("tiempo_aplica_count"),  r["pct_tiempo_ok"]),  axis=1)
+                        _tec_base["col_causa"]     = _tec_base.apply(lambda r: _fmt_dim(r["causa_ok_count"],   r.get("causa_aplica_count"),   r["pct_causa_ok"]),   axis=1)
+                        _tec_base["col_numeral"]   = _tec_base.apply(lambda r: _fmt_dim(r["numeral_ok_count"], r.get("numeral_aplica_count"), r["pct_numeral_ok"]), axis=1)
+                        _tec_base["col_deteccion"] = _tec_base.apply(lambda r: _fmt_dim(r["deteccion_ok_count"], r["ots_evaluadas"], r["pct_deteccion_ok"]), axis=1)
+
+                    st.markdown('<div class="section-header">📋 Resumen por técnico</div>',
+                                unsafe_allow_html=True)
+                    tec_disp = _tec_base[[
+                        "tecnico", "ots_evaluadas", "ots_correctas", "n_errores",
+                        "col_tiempo", "col_causa", "col_numeral",
+                        "exactitud_pct", "bono_label",
+                    ]].copy()
+
+                    # Orden por defecto: mejor a peor % Exactitud (desempata por
+                    # cantidad de OTs para que técnicos con más volumen queden
+                    # arriba en caso de empate en 100%).
+                    tec_disp = tec_disp.sort_values(
+                        ["exactitud_pct","ots_evaluadas"],
+                        ascending=[False, False]).reset_index(drop=True)
+
+                    tec_disp.columns = [
+                        "Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
+                        "⏱ Tiempo OK", "🔍 Causa OK", "🔢 Numeral OK",
+                        "Exactitud %", "Bono semanal",
+                    ]
+
+                    _show_df(
+                        tec_disp, width="stretch", hide_index=True,
+                        column_config={
+                            "OTs evaluadas":       st.column_config.NumberColumn(format="%d"),
+                            "OTs sin error":       st.column_config.NumberColumn(
+                                help="OTs donde los 3 componentes estuvieron correctos.", format="%d"),
+                            "OTs con error":       st.column_config.NumberColumn(
+                                help="OTs con al menos 1 componente incorrecto — estas cuentan para el KPI.", format="%d"),
+                            "⏱ Tiempo OK":         st.column_config.TextColumn(
+                                help="OTs Preventivas con tiempo ≥75% del estimado / total MP del técnico"),
+                            "🔍 Causa OK":          st.column_config.TextColumn(
+                                help="OTs Correctivas con causa raíz válida / total MC del técnico"),
+                            "🔢 Numeral OK":        st.column_config.TextColumn(
+                                help="OTs de lavadora/aspiradora con numeral registrado / total en esos equipos"),
+                            "Exactitud %":         st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
+                        },
+                    )
+
+                # ── Evolución mensual (últimos 6 meses) ───────────────────────────────
+                st.divider()
+                st.markdown('<div class="section-header">📈 Evolución mensual del índice de llenado</div>',
+                            unsafe_allow_html=True)
+
+                ultimos_6 = meses_disp[:6]  # ya están ordenados desc
+                # Usar df_ot_all pre-computado: solo slice, sin recalcular scores
+                ot_hist = df_ot_all[df_ot_all["mes"].isin(ultimos_6)].copy()
+                if equipo_kpi != "Todos":
+                    _grp_kpi_h = _LABEL_TO_GRUPO.get(equipo_kpi)
+                    if _grp_kpi_h:
+                        ot_hist = ot_hist[ot_hist["equipo"] == _grp_kpi_h]
+                if tec_kpi_sel != "Todos":
+                    ot_hist = ot_hist[ot_hist["tecnico"] == tec_kpi_sel]
+                # df_ot_all ya trae columna "mes" — no hace falta recalcular
+                if not ot_hist.empty:
+                    trend = (
+                        ot_hist.groupby("mes")
+                        .agg(
+                            score_global= ("score_total",  "mean"),
+                            pct_tiempo=   ("score_tiempo", lambda x: (x >= 34).mean() * 100),
+                            pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
+                            pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
+                            ots=          ("folio",        "count"),
+                        )
+                        .reset_index()
+                        .sort_values("mes")
+                    )
+                    trend = trend.round(1)
+
+                    _trend_k = f"_fig_prec_trend_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
+                    if _trend_k not in st.session_state:
+                        fig_trend = px.line(
+                            trend, x="mes", y="score_global",
+                            markers=True, text="score_global",
+                            labels={"mes": "Mes", "score_global": "Score global (0-100)"},
+                            title="Score global de llenado por mes",
+                        )
+                        fig_trend.update_traces(
+                            textposition="top center",
+                            line_color="#3b82f6",
+                            marker=dict(size=8),
+                        )
+                        fig_trend.add_hline(y=100, line_dash="dash", line_color=_SCORE_COLOR["verde"],
+                                            annotation_text="Score perfecto (0 errores)")
+                        fig_trend.update_layout(
+                            yaxis=dict(range=[0, 105]),
+                            height=320,
+                            margin=dict(t=40, b=30),
+                        )
+                        _apply_plot_theme(fig_trend)
+                        st.session_state[_trend_k] = fig_trend
+                    st.plotly_chart(st.session_state[_trend_k], width="stretch")
+
+                # ── Drill-down: OTs individuales de un técnico ────────────────────────
+                st.divider()
+                st.markdown('<div class="section-header">🔍 Detalle de OTs por técnico</div>',
+                            unsafe_allow_html=True)
+                st.caption(
+                    "Selecciona uno o varios técnicos para ver el historial completo de sus OTs del periodo. "
+                    "Vacío = todos los técnicos del filtro actual (equipo seleccionado)."
+                )
+
+                if not df_tec_scores.empty:
+                    _tec_opts = df_tec_scores["tecnico"].tolist()
+                    tec_drill_list = st.multiselect(
+                        "Técnico(s)",
+                        _tec_opts,
+                        default=[],
+                        key="kpi_drill_tec",
+                        placeholder="Todos los técnicos del equipo",
+                    )
+                    if tec_drill_list:
+                        df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(tec_drill_list)].copy()
+                        _tec_drill_lbl = (", ".join(tec_drill_list) if len(tec_drill_list) <= 3
+                                          else f"{len(tec_drill_list)} técnicos seleccionados")
+                    else:
+                        # Sin selección explícita → todos los técnicos disponibles en df_ot_scores
+                        df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(_tec_opts)].copy()
+                        _tec_drill_lbl = f"Todos ({df_drill['tecnico'].nunique()} técnicos)"
+                    df_drill = df_drill.sort_values(["tecnico","score_total"], ascending=[True, True])
+
+                    if not df_drill.empty:
+                        avg_drill = df_drill["score_total"].mean()
+                        color_d, lbl_d = _score_level(avg_drill)
+                        st.markdown(
+                            f'<div style="background:{color_d}18;border-left:4px solid {color_d};'
+                            f'border-radius:8px;padding:10px 14px;margin-bottom:8px;">'
+                            f'<b style="color:{color_d}">{_tec_drill_lbl}</b> — '
+                            f'Score promedio: <b>{avg_drill:.1f}/100</b> &nbsp; {lbl_d} &nbsp; | &nbsp; '
+                            f'<b>{len(df_drill)}</b> OTs en {_mes_lbl_prec}</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        # ── Construir columnas de display una por una (sin riesgo de desajuste) ──
+
+                        drill_disp = df_drill.copy()
+
+                        # Scores por componente (con guard para cache viejo)
+                        _s = drill_disp["score_tiempo"]  if "score_tiempo"    in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                        _c = drill_disp["score_causa"]   if "score_causa"     in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                        _n = drill_disp["score_numeral"] if "score_numeral"   in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                        _d = drill_disp["score_deteccion"] if "score_deteccion" in drill_disp.columns else pd.Series(0, index=drill_disp.index)
+                        # KPI: solo 3 componentes (tiempo, causa, numeral) — Modalidad excluida
+                        _ok_bits = ((_s >= 25).astype(int) + (_c >= 25).astype(int) +
+                                    (_n >= 25).astype(int))
+
+                        # Columna 1: Cumple
+                        drill_disp["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 3 else "❌ Con error")
+
+                        # Columna 2: X/3
+                        drill_disp["_x4"] = _ok_bits.apply(
+                            lambda n: f"{n}/3 {'✅' if n == 3 else ('⚠️' if n >= 2 else '❌')}")
+
+                        # Columna 3: Tipo (title case)
+                        drill_disp["_tipo"] = drill_disp["maint_type"].fillna("").str.title()
+
+                        # Columna 3a: Tipo(s) de equipo del OT — icono + label.
+                        # Sirve para leer de un vistazo por qué el numeral aplica o no
+                        # (lavadora sí aplica; ablandador/bomba no; OT mixta muestra
+                        # todos los tipos separados por '+').
+                        _EQUIPO_TIPOS = [
+                            (r"HIDROLAVAD", "💦 Hidrolavadora"),
+                            (r"LAVAINT",    "🧼 Lavainteriores"),
+                            (r"LAVAD",      "🚿 Lavadora"),
+                            (r"ASPIRA",     "🧹 Aspiradora"),
+                            (r"ABLAND",     "💧 Ablandador"),
+                            (r"HIDROPACK",  "🛢️ Hidropack"),
+                            (r"BOMBA",      "⚙️ Bomba"),
+                            (r"TERMO",      "🔥 Termo"),
+                            (r"COMPRESOR",  "🌬️ Compresor"),
+                            (r"TWISTER",    "🌀 Twister"),
+                            (r"SKID",       "🛠️ Skid"),
+                        ]
+                        import re as _re_tipo
+                        def _fmt_tipo_equipo(nom: str) -> str:
+                            s = str(nom or "").upper()
+                            if not s or s == "—":
+                                return "—"
+                            tipos = []
+                            for pat, lbl in _EQUIPO_TIPOS:
+                                if _re_tipo.search(pat, s) and lbl not in tipos:
+                                    tipos.append(lbl)
+                            return " + ".join(tipos) if tipos else "🔧 Otro"
+                        _eq_src = (drill_disp["equipo_nombre"]
+                                   if "equipo_nombre" in drill_disp.columns
+                                   else pd.Series("", index=drill_disp.index))
+                        drill_disp["_tipo_equipo"] = _eq_src.fillna("").apply(_fmt_tipo_equipo)
+
+                        # Columna 3b: Modalidad de atención (informativa, no KPI).
+                        # Simplificamos '1.- ATENDIDO PRESENCIAL' → 'Presencial',
+                        # '2.- ATENDIDO VÍA REMOTA' → 'Remoto', etc.
+                        _MOD_MAP = {
+                            "1.- ATENDIDO PRESENCIAL": "🚗 Presencial",
+                            "2.- ATENDIDO VÍA REMOTA": "📞 Remoto",
+                            "2.- ATENDIDO VIA REMOTA": "📞 Remoto",
+                            "3.- ATENDIDO CON SU MP":  "🔧 Con MP",
+                            "4.- LLAMADO DUPLICADO":   "⚠️ Duplicado",
+                            "SIN CLASIFICAR":          "❔ Sin clasificar",
+                            "":                        "—",
+                        }
+                        _mod_src = (drill_disp["deteccion_raw"]
+                                    if "deteccion_raw" in drill_disp.columns
+                                    else pd.Series("", index=drill_disp.index))
+                        drill_disp["_modalidad"] = _mod_src.fillna("").apply(
+                            lambda v: _MOD_MAP.get(str(v).strip().upper(), str(v).strip().title() or "—")
+                        )
+
+                        # Columna 4: ⏱ Tiempo — valor en minutos + ✅/❌
+                        _em = drill_disp["elapsed_min"] if "elapsed_min" in drill_disp.columns else pd.Series(0.0, index=drill_disp.index)
+                        drill_disp["_col_tiempo"] = drill_disp.apply(
+                            lambda r: f"{'✅' if _s[r.name] >= 25 else '❌'} {_em[r.name]:.0f} min",
+                            axis=1)
+
+                        # Columna 5: 🔍 Causa raíz — texto + ✅/❌
+                        def _fmt_causa(r):
+                            es_corr = r.get("es_correctiva", True)
+                            raw = str(r.get("causa_raiz_raw","") or "").strip()
+                            ok  = _c[r.name] >= 25
+                            if not es_corr:
+                                return "✅ Preventiva (no aplica)"
+                            if ok:
+                                return f"✅ {raw[:38]}" if raw else "✅ Registrada"
+                            # Descuido atribuible: no clasificó pero SÍ describió la falla
+                            if r.get("causa_sin_clasif_con_desglose", False):
+                                return "🔴 No clasificó (sí describió la falla)"
+                            return f"❌ {raw[:35]}" if raw else "❌ Sin causa"
+                        drill_disp["_col_causa"] = drill_disp.apply(_fmt_causa, axis=1)
+
+                        # Columna 6: 🔢 Numeral — calidad: no aplica / registrado / motivo del dato malo
+                        def _fmt_col_numeral(r):
+                            if not r.get("es_lavadora", True):
+                                return "🔵 No aplica"
+                            if r.get("numeral_ok", False):
+                                return "✅ Registrado"
+                            return NUMERAL_MOTIVO_LABEL.get(
+                                str(r.get("numeral_motivo", "") or ""), "❌ Dato inválido")
+                        drill_disp["_col_numeral"] = drill_disp.apply(
+                            _fmt_col_numeral,
+                            axis=1)
+
+                        # Columna 7: 💬 Observación — descripción de qué falló (3 componentes KPI)
+                        _nombres_comp = {0: "Tiempo", 1: "Causa raíz", 2: "Numeral"}
+                        _scores_comp  = [_s, _c, _n]
+                        def _obs(r):
+                            fallos = [_nombres_comp[i] for i, sc in enumerate(_scores_comp)
+                                      if sc[r.name] < 25]
+                            if not fallos:
+                                return "✅ Registro perfecto"
+                            return "⚠️ No cumple: " + ", ".join(fallos)
+                        drill_disp["_obs"] = drill_disp.apply(_obs, axis=1)
+
+                        # Columna 8: Fecha cierre
+                        drill_disp["_fecha"] = pd.to_datetime(
+                            drill_disp["final_date"], errors="coerce"
+                        ).dt.strftime("%d/%m/%Y")
+
+                        # EDS y Técnico (para identificar la fila en vista multi-técnico)
+                        if "eds_occim" in drill_disp.columns:
+                            drill_disp["_eds"] = drill_disp["eds_occim"].fillna("").replace("", "—")
+                        else:
+                            drill_disp["_eds"] = "—"
+
+                        # Estado OT
+                        if "wo_status" in drill_disp.columns:
+                            drill_disp["_estado_ot"] = drill_disp["wo_status"].fillna("").replace("", "—")
+                        else:
+                            drill_disp["_estado_ot"] = "—"
+
+                        # Selección ordenada — Fecha primero (más reciente arriba),
+                        # luego Cumple, y Tipo Equipo justo antes de Numeral para
+                        # leer causalmente por qué aplica o no.
+                        drill_disp = drill_disp[[
+                            "_fecha", "_cumple", "_x4", "folio", "_eds", "tecnico", "station",
+                            "_tipo", "_modalidad", "_estado_ot", "score_total",
+                            "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
+                            "_obs",
+                        ]].copy()
+
+                        drill_disp.columns = [
+                            "Fecha", "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación",
+                            "Tipo", "Modalidad", "Estado", "Score",
+                            "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
+                            "💬 Observación",
+                        ]
+
+                        # Orden por Fecha desc: más recientes arriba (parseando dd/mm/yyyy)
+                        _fecha_ord = pd.to_datetime(drill_disp["Fecha"],
+                                                    format="%d/%m/%Y", errors="coerce")
+                        drill_disp = drill_disp.assign(_ord=_fecha_ord) \
+                                               .sort_values("_ord", ascending=False,
+                                                            na_position="last") \
+                                               .drop(columns="_ord")
+
+                        # Alertas rápidas
+                        _qt_criticas  = int((_s < 1).sum())
+                        _qt_rapidas   = int(((_s >= 1) & (_s < 25)).sum())
+                        _sin_causa    = int((_c == 0).sum())
+
+                        if _qt_criticas or _qt_rapidas:
+                            st.markdown(
+                                f'<div style="background:{_t["err_bg"]};border-left:4px solid #ef4444;'
+                                f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
+                                f'⚠️ Tiempo insuficiente: <b>{_qt_criticas} OTs</b> con tiempo mínimo · '
+                                f'<b>{_qt_rapidas} OTs</b> con tiempo parcial</div>',
+                                unsafe_allow_html=True,
+                            )
+                        if _sin_causa:
+                            st.markdown(
+                                f'<div style="background:{_t["orange_bg"]};border-left:4px solid #01798A;'
+                                f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
+                                f'📋 <b>{_sin_causa} correctiva(s) sin causa raíz</b> registrada</div>',
+                                unsafe_allow_html=True,
+                            )
+
+                        _show_df(
+                            drill_disp,
+                            width="stretch",
+                            hide_index=True,
+                            column_config={
+                                "Cumple":           st.column_config.TextColumn(width=100,
+                                    help="✅ = 3/3 componentes OK · ❌ = ≥1 falló"),
+                                "X/3":              st.column_config.TextColumn(width=80,
+                                    help="Componentes correctos de los 3 del KPI"),
+                                "OT":               st.column_config.TextColumn(width=110),
+                                "EDS":              st.column_config.TextColumn(width=85,
+                                    help="Código EDS Occimiano."),
+                                "Técnico":          st.column_config.TextColumn(width=180),
+                                "Estación":         st.column_config.TextColumn(width=200),
+                                "Tipo":             st.column_config.TextColumn(width=110),
+                                "Modalidad":        st.column_config.TextColumn(width=140,
+                                    help="Método de detección de falla en Fracttal (informativo, no incide en el KPI). "
+                                         "Presencial = técnico fue a la EDS · Remoto = resuelto vía telefónica/remota · "
+                                         "Con MP = aprovechó una mantención preventiva."),
+                                "Estado":           st.column_config.TextColumn(width=110,
+                                    help="Estado de la OT en Fracttal."),
+                                "Score":            st.column_config.ProgressColumn(
+                                    min_value=0, max_value=75, format="%.1f"),
+                                "⏱ Tiempo":         st.column_config.TextColumn(width=110,
+                                    help="Minutos con Fracttal abierto. ✅ cumple ≥75% del estimado neto · MC no aplica (auto-25)."),
+                                "🔍 Causa raíz":    st.column_config.TextColumn(width=240,
+                                    help="Causa registrada por el técnico. Solo se evalúa en MC; MP siempre da 25 auto."),
+                                "🔧 Equipo":        st.column_config.TextColumn(width=170,
+                                    help="Tipo(s) de equipo del OT. El numeral SOLO aplica a Lavadora, Aspiradora, "
+                                         "Lavainteriores e Hidrolavadora. Ablandador/Bomba/Termo/etc. → 'No aplica'. "
+                                         "OTs con varios tipos se muestran separados por '+'."),
+                                "🔢 Numeral":       st.column_config.TextColumn(width=160,
+                                    help="Calidad del numeral en lavadora/aspiradora (MC+MP). Motivo del dato malo si no cumple."),
+                                "💬 Observación":   st.column_config.TextColumn(width=260,
+                                    help="Resumen de cumplimiento de la OT (3 componentes)"),
+                                "Fecha":            st.column_config.TextColumn(width=90),
+                            },
+                        )
+
             with _pt_causa:
                 st.markdown('<div class="section-header">🔍  Causa Raíz — MC y MP</div>',
                             unsafe_allow_html=True)
@@ -11196,421 +11606,9 @@ elif _page == _NAV_PAGES[0]:
                             })
 
 
-            with _pt_res:
-                if not df_tec_scores_rank.empty:
-                    _tec_base = df_tec_scores_rank[df_tec_scores_rank["tecnico"].isin(TECNICOS_OCCIMIANO_FULL)].copy()
-
-                    # Guards para columnas nuevas (caches pre-migración)
-                    _guards = {
-                        "err_total_dim":      lambda b: b["n_errores"],
-                        "err_tiempo":         lambda b: 0,
-                        "err_causa":          lambda b: 0,
-                        "err_numeral":        lambda b: 0,
-                        "err_deteccion":      lambda b: 0,
-                        "ots_correctas":      lambda b: b["ots_evaluadas"] - b["n_errores"],
-                        # Denominadores por dimensión (fallback: total OTs si no hay dato)
-                        "tiempo_aplica_count":  lambda b: b["ots_evaluadas"],
-                        "causa_aplica_count":   lambda b: b["ots_evaluadas"],
-                        "numeral_aplica_count": lambda b: b["ots_evaluadas"],
-                        "tiempo_ok_count":    lambda b: (b["ots_evaluadas"] * b["pct_tiempo_ok"]    / 100).round(0).astype(int),
-                        "causa_ok_count":     lambda b: (b["ots_evaluadas"] * b["pct_causa_ok"]     / 100).round(0).astype(int),
-                        "numeral_ok_count":   lambda b: (b["ots_evaluadas"] * b["pct_numeral_ok"]   / 100).round(0).astype(int),
-                        "deteccion_ok_count": lambda b: (b["ots_evaluadas"] * b.get("pct_deteccion_ok", pd.Series(0, index=b.index)) / 100).round(0).astype(int),
-                        "pct_deteccion_ok":   lambda b: pd.Series(0.0, index=b.index),
-                    }
-                    for _cg, _fb in _guards.items():
-                        if _cg not in _tec_base.columns:
-                            try: _tec_base[_cg] = _fb(_tec_base)
-                            except Exception: _tec_base[_cg] = 0
-                    if "exactitud_pct" not in _tec_base.columns:
-                        _tec_base["exactitud_pct"] = (
-                            (1 - _tec_base["n_errores"] / _tec_base["ots_evaluadas"].clip(lower=1)) * 100
-                        ).round(1)
-
-                    # Formato "X/Y (Z%)" por dimensión — usa el DENOMINADOR CORRECTO
-                    # (OTs donde aplica cada dimensión), no ots_evaluadas total.
-                    # Si el técnico no tiene ninguna OT que aplique esa dimensión,
-                    # se muestra "—" en vez de "0/0 (0.0%)".
-                    def _fmt_dim(ok, aplica, pct):
-                        try:
-                            ap_i = int(aplica) if pd.notna(aplica) else 0
-                            if ap_i == 0:
-                                return "—"
-                            ok_i  = int(ok)   if pd.notna(ok)   else 0
-                            pct_f = float(pct) if pd.notna(pct) else 0.0
-                            return f"{ok_i}/{ap_i} ({pct_f:.1f}%)"
-                        except (ValueError, TypeError):
-                            return "—"
-
-                    # Si _tec_base quedó vacío (p.ej. técnico seleccionado no está
-                    # en TECNICOS_OCCIMIANO_FULL) creamos columnas vacías manualmente
-                    # para no romper el layout con apply sobre DataFrame vacío.
-                    if _tec_base.empty:
-                        for _c in ("col_tiempo", "col_causa", "col_numeral", "col_deteccion"):
-                            _tec_base[_c] = pd.Series(dtype="object")
-                    else:
-                        _tec_base["col_tiempo"]    = _tec_base.apply(lambda r: _fmt_dim(r["tiempo_ok_count"],  r.get("tiempo_aplica_count"),  r["pct_tiempo_ok"]),  axis=1)
-                        _tec_base["col_causa"]     = _tec_base.apply(lambda r: _fmt_dim(r["causa_ok_count"],   r.get("causa_aplica_count"),   r["pct_causa_ok"]),   axis=1)
-                        _tec_base["col_numeral"]   = _tec_base.apply(lambda r: _fmt_dim(r["numeral_ok_count"], r.get("numeral_aplica_count"), r["pct_numeral_ok"]), axis=1)
-                        _tec_base["col_deteccion"] = _tec_base.apply(lambda r: _fmt_dim(r["deteccion_ok_count"], r["ots_evaluadas"], r["pct_deteccion_ok"]), axis=1)
-
-                    st.markdown('<div class="section-header">📋 Resumen por técnico</div>',
-                                unsafe_allow_html=True)
-                    tec_disp = _tec_base[[
-                        "tecnico", "ots_evaluadas", "ots_correctas", "n_errores",
-                        "col_tiempo", "col_causa", "col_numeral",
-                        "exactitud_pct", "bono_label",
-                    ]].copy()
-
-                    # Orden por defecto: mejor a peor % Exactitud (desempata por
-                    # cantidad de OTs para que técnicos con más volumen queden
-                    # arriba en caso de empate en 100%).
-                    tec_disp = tec_disp.sort_values(
-                        ["exactitud_pct","ots_evaluadas"],
-                        ascending=[False, False]).reset_index(drop=True)
-
-                    tec_disp.columns = [
-                        "Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
-                        "⏱ Tiempo OK", "🔍 Causa OK", "🔢 Numeral OK",
-                        "Exactitud %", "Bono semanal",
-                    ]
-
-                    _show_df(
-                        tec_disp, width="stretch", hide_index=True,
-                        column_config={
-                            "OTs evaluadas":       st.column_config.NumberColumn(format="%d"),
-                            "OTs sin error":       st.column_config.NumberColumn(
-                                help="OTs donde los 3 componentes estuvieron correctos.", format="%d"),
-                            "OTs con error":       st.column_config.NumberColumn(
-                                help="OTs con al menos 1 componente incorrecto — estas cuentan para el KPI.", format="%d"),
-                            "⏱ Tiempo OK":         st.column_config.TextColumn(
-                                help="OTs Preventivas con tiempo ≥75% del estimado / total MP del técnico"),
-                            "🔍 Causa OK":          st.column_config.TextColumn(
-                                help="OTs Correctivas con causa raíz válida / total MC del técnico"),
-                            "🔢 Numeral OK":        st.column_config.TextColumn(
-                                help="OTs de lavadora/aspiradora con numeral registrado / total en esos equipos"),
-                            "Exactitud %":         st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
-                        },
-                    )
-
-                # ── Evolución mensual (últimos 6 meses) ───────────────────────────────
-                st.divider()
-                st.markdown('<div class="section-header">📈 Evolución mensual del índice de llenado</div>',
-                            unsafe_allow_html=True)
-
-                ultimos_6 = meses_disp[:6]  # ya están ordenados desc
-                # Usar df_ot_all pre-computado: solo slice, sin recalcular scores
-                ot_hist = df_ot_all[df_ot_all["mes"].isin(ultimos_6)].copy()
-                if equipo_kpi != "Todos":
-                    _grp_kpi_h = _LABEL_TO_GRUPO.get(equipo_kpi)
-                    if _grp_kpi_h:
-                        ot_hist = ot_hist[ot_hist["equipo"] == _grp_kpi_h]
-                if tec_kpi_sel != "Todos":
-                    ot_hist = ot_hist[ot_hist["tecnico"] == tec_kpi_sel]
-                # df_ot_all ya trae columna "mes" — no hace falta recalcular
-                if not ot_hist.empty:
-                    trend = (
-                        ot_hist.groupby("mes")
-                        .agg(
-                            score_global= ("score_total",  "mean"),
-                            pct_tiempo=   ("score_tiempo", lambda x: (x >= 34).mean() * 100),
-                            pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
-                            pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
-                            ots=          ("folio",        "count"),
-                        )
-                        .reset_index()
-                        .sort_values("mes")
-                    )
-                    trend = trend.round(1)
-
-                    _trend_k = f"_fig_prec_trend_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
-                    if _trend_k not in st.session_state:
-                        fig_trend = px.line(
-                            trend, x="mes", y="score_global",
-                            markers=True, text="score_global",
-                            labels={"mes": "Mes", "score_global": "Score global (0-100)"},
-                            title="Score global de llenado por mes",
-                        )
-                        fig_trend.update_traces(
-                            textposition="top center",
-                            line_color="#3b82f6",
-                            marker=dict(size=8),
-                        )
-                        fig_trend.add_hline(y=100, line_dash="dash", line_color=_SCORE_COLOR["verde"],
-                                            annotation_text="Score perfecto (0 errores)")
-                        fig_trend.update_layout(
-                            yaxis=dict(range=[0, 105]),
-                            height=320,
-                            margin=dict(t=40, b=30),
-                        )
-                        _apply_plot_theme(fig_trend)
-                        st.session_state[_trend_k] = fig_trend
-                    st.plotly_chart(st.session_state[_trend_k], width="stretch")
-
-                # ── Drill-down: OTs individuales de un técnico ────────────────────────
-                st.divider()
-                st.markdown('<div class="section-header">🔍 Detalle de OTs por técnico</div>',
-                            unsafe_allow_html=True)
-                st.caption(
-                    "Selecciona uno o varios técnicos para ver el historial completo de sus OTs del periodo. "
-                    "Vacío = todos los técnicos del filtro actual (equipo seleccionado)."
-                )
-
-                if not df_tec_scores.empty:
-                    _tec_opts = df_tec_scores["tecnico"].tolist()
-                    tec_drill_list = st.multiselect(
-                        "Técnico(s)",
-                        _tec_opts,
-                        default=[],
-                        key="kpi_drill_tec",
-                        placeholder="Todos los técnicos del equipo",
-                    )
-                    if tec_drill_list:
-                        df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(tec_drill_list)].copy()
-                        _tec_drill_lbl = (", ".join(tec_drill_list) if len(tec_drill_list) <= 3
-                                          else f"{len(tec_drill_list)} técnicos seleccionados")
-                    else:
-                        # Sin selección explícita → todos los técnicos disponibles en df_ot_scores
-                        df_drill = df_ot_scores[df_ot_scores["tecnico"].isin(_tec_opts)].copy()
-                        _tec_drill_lbl = f"Todos ({df_drill['tecnico'].nunique()} técnicos)"
-                    df_drill = df_drill.sort_values(["tecnico","score_total"], ascending=[True, True])
-
-                    if not df_drill.empty:
-                        avg_drill = df_drill["score_total"].mean()
-                        color_d, lbl_d = _score_level(avg_drill)
-                        st.markdown(
-                            f'<div style="background:{color_d}18;border-left:4px solid {color_d};'
-                            f'border-radius:8px;padding:10px 14px;margin-bottom:8px;">'
-                            f'<b style="color:{color_d}">{_tec_drill_lbl}</b> — '
-                            f'Score promedio: <b>{avg_drill:.1f}/100</b> &nbsp; {lbl_d} &nbsp; | &nbsp; '
-                            f'<b>{len(df_drill)}</b> OTs en {_mes_lbl_prec}</div>',
-                            unsafe_allow_html=True,
-                        )
-
-                        # ── Construir columnas de display una por una (sin riesgo de desajuste) ──
-
-                        drill_disp = df_drill.copy()
-
-                        # Scores por componente (con guard para cache viejo)
-                        _s = drill_disp["score_tiempo"]  if "score_tiempo"    in drill_disp.columns else pd.Series(0, index=drill_disp.index)
-                        _c = drill_disp["score_causa"]   if "score_causa"     in drill_disp.columns else pd.Series(0, index=drill_disp.index)
-                        _n = drill_disp["score_numeral"] if "score_numeral"   in drill_disp.columns else pd.Series(0, index=drill_disp.index)
-                        _d = drill_disp["score_deteccion"] if "score_deteccion" in drill_disp.columns else pd.Series(0, index=drill_disp.index)
-                        # KPI: solo 3 componentes (tiempo, causa, numeral) — Modalidad excluida
-                        _ok_bits = ((_s >= 25).astype(int) + (_c >= 25).astype(int) +
-                                    (_n >= 25).astype(int))
-
-                        # Columna 1: Cumple
-                        drill_disp["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 3 else "❌ Con error")
-
-                        # Columna 2: X/3
-                        drill_disp["_x4"] = _ok_bits.apply(
-                            lambda n: f"{n}/3 {'✅' if n == 3 else ('⚠️' if n >= 2 else '❌')}")
-
-                        # Columna 3: Tipo (title case)
-                        drill_disp["_tipo"] = drill_disp["maint_type"].fillna("").str.title()
-
-                        # Columna 3a: Tipo(s) de equipo del OT — icono + label.
-                        # Sirve para leer de un vistazo por qué el numeral aplica o no
-                        # (lavadora sí aplica; ablandador/bomba no; OT mixta muestra
-                        # todos los tipos separados por '+').
-                        _EQUIPO_TIPOS = [
-                            (r"HIDROLAVAD", "💦 Hidrolavadora"),
-                            (r"LAVAINT",    "🧼 Lavainteriores"),
-                            (r"LAVAD",      "🚿 Lavadora"),
-                            (r"ASPIRA",     "🧹 Aspiradora"),
-                            (r"ABLAND",     "💧 Ablandador"),
-                            (r"HIDROPACK",  "🛢️ Hidropack"),
-                            (r"BOMBA",      "⚙️ Bomba"),
-                            (r"TERMO",      "🔥 Termo"),
-                            (r"COMPRESOR",  "🌬️ Compresor"),
-                            (r"TWISTER",    "🌀 Twister"),
-                            (r"SKID",       "🛠️ Skid"),
-                        ]
-                        import re as _re_tipo
-                        def _fmt_tipo_equipo(nom: str) -> str:
-                            s = str(nom or "").upper()
-                            if not s or s == "—":
-                                return "—"
-                            tipos = []
-                            for pat, lbl in _EQUIPO_TIPOS:
-                                if _re_tipo.search(pat, s) and lbl not in tipos:
-                                    tipos.append(lbl)
-                            return " + ".join(tipos) if tipos else "🔧 Otro"
-                        _eq_src = (drill_disp["equipo_nombre"]
-                                   if "equipo_nombre" in drill_disp.columns
-                                   else pd.Series("", index=drill_disp.index))
-                        drill_disp["_tipo_equipo"] = _eq_src.fillna("").apply(_fmt_tipo_equipo)
-
-                        # Columna 3b: Modalidad de atención (informativa, no KPI).
-                        # Simplificamos '1.- ATENDIDO PRESENCIAL' → 'Presencial',
-                        # '2.- ATENDIDO VÍA REMOTA' → 'Remoto', etc.
-                        _MOD_MAP = {
-                            "1.- ATENDIDO PRESENCIAL": "🚗 Presencial",
-                            "2.- ATENDIDO VÍA REMOTA": "📞 Remoto",
-                            "2.- ATENDIDO VIA REMOTA": "📞 Remoto",
-                            "3.- ATENDIDO CON SU MP":  "🔧 Con MP",
-                            "4.- LLAMADO DUPLICADO":   "⚠️ Duplicado",
-                            "SIN CLASIFICAR":          "❔ Sin clasificar",
-                            "":                        "—",
-                        }
-                        _mod_src = (drill_disp["deteccion_raw"]
-                                    if "deteccion_raw" in drill_disp.columns
-                                    else pd.Series("", index=drill_disp.index))
-                        drill_disp["_modalidad"] = _mod_src.fillna("").apply(
-                            lambda v: _MOD_MAP.get(str(v).strip().upper(), str(v).strip().title() or "—")
-                        )
-
-                        # Columna 4: ⏱ Tiempo — valor en minutos + ✅/❌
-                        _em = drill_disp["elapsed_min"] if "elapsed_min" in drill_disp.columns else pd.Series(0.0, index=drill_disp.index)
-                        drill_disp["_col_tiempo"] = drill_disp.apply(
-                            lambda r: f"{'✅' if _s[r.name] >= 25 else '❌'} {_em[r.name]:.0f} min",
-                            axis=1)
-
-                        # Columna 5: 🔍 Causa raíz — texto + ✅/❌
-                        def _fmt_causa(r):
-                            es_corr = r.get("es_correctiva", True)
-                            raw = str(r.get("causa_raiz_raw","") or "").strip()
-                            ok  = _c[r.name] >= 25
-                            if not es_corr:
-                                return "✅ Preventiva (no aplica)"
-                            if ok:
-                                return f"✅ {raw[:38]}" if raw else "✅ Registrada"
-                            # Descuido atribuible: no clasificó pero SÍ describió la falla
-                            if r.get("causa_sin_clasif_con_desglose", False):
-                                return "🔴 No clasificó (sí describió la falla)"
-                            return f"❌ {raw[:35]}" if raw else "❌ Sin causa"
-                        drill_disp["_col_causa"] = drill_disp.apply(_fmt_causa, axis=1)
-
-                        # Columna 6: 🔢 Numeral — calidad: no aplica / registrado / motivo del dato malo
-                        def _fmt_col_numeral(r):
-                            if not r.get("es_lavadora", True):
-                                return "🔵 No aplica"
-                            if r.get("numeral_ok", False):
-                                return "✅ Registrado"
-                            return NUMERAL_MOTIVO_LABEL.get(
-                                str(r.get("numeral_motivo", "") or ""), "❌ Dato inválido")
-                        drill_disp["_col_numeral"] = drill_disp.apply(
-                            _fmt_col_numeral,
-                            axis=1)
-
-                        # Columna 7: 💬 Observación — descripción de qué falló (3 componentes KPI)
-                        _nombres_comp = {0: "Tiempo", 1: "Causa raíz", 2: "Numeral"}
-                        _scores_comp  = [_s, _c, _n]
-                        def _obs(r):
-                            fallos = [_nombres_comp[i] for i, sc in enumerate(_scores_comp)
-                                      if sc[r.name] < 25]
-                            if not fallos:
-                                return "✅ Registro perfecto"
-                            return "⚠️ No cumple: " + ", ".join(fallos)
-                        drill_disp["_obs"] = drill_disp.apply(_obs, axis=1)
-
-                        # Columna 8: Fecha cierre
-                        drill_disp["_fecha"] = pd.to_datetime(
-                            drill_disp["final_date"], errors="coerce"
-                        ).dt.strftime("%d/%m/%Y")
-
-                        # EDS y Técnico (para identificar la fila en vista multi-técnico)
-                        if "eds_occim" in drill_disp.columns:
-                            drill_disp["_eds"] = drill_disp["eds_occim"].fillna("").replace("", "—")
-                        else:
-                            drill_disp["_eds"] = "—"
-
-                        # Estado OT
-                        if "wo_status" in drill_disp.columns:
-                            drill_disp["_estado_ot"] = drill_disp["wo_status"].fillna("").replace("", "—")
-                        else:
-                            drill_disp["_estado_ot"] = "—"
-
-                        # Selección ordenada — Fecha primero (más reciente arriba),
-                        # luego Cumple, y Tipo Equipo justo antes de Numeral para
-                        # leer causalmente por qué aplica o no.
-                        drill_disp = drill_disp[[
-                            "_fecha", "_cumple", "_x4", "folio", "_eds", "tecnico", "station",
-                            "_tipo", "_modalidad", "_estado_ot", "score_total",
-                            "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
-                            "_obs",
-                        ]].copy()
-
-                        drill_disp.columns = [
-                            "Fecha", "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación",
-                            "Tipo", "Modalidad", "Estado", "Score",
-                            "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
-                            "💬 Observación",
-                        ]
-
-                        # Orden por Fecha desc: más recientes arriba (parseando dd/mm/yyyy)
-                        _fecha_ord = pd.to_datetime(drill_disp["Fecha"],
-                                                    format="%d/%m/%Y", errors="coerce")
-                        drill_disp = drill_disp.assign(_ord=_fecha_ord) \
-                                               .sort_values("_ord", ascending=False,
-                                                            na_position="last") \
-                                               .drop(columns="_ord")
-
-                        # Alertas rápidas
-                        _qt_criticas  = int((_s < 1).sum())
-                        _qt_rapidas   = int(((_s >= 1) & (_s < 25)).sum())
-                        _sin_causa    = int((_c == 0).sum())
-
-                        if _qt_criticas or _qt_rapidas:
-                            st.markdown(
-                                f'<div style="background:{_t["err_bg"]};border-left:4px solid #ef4444;'
-                                f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
-                                f'⚠️ Tiempo insuficiente: <b>{_qt_criticas} OTs</b> con tiempo mínimo · '
-                                f'<b>{_qt_rapidas} OTs</b> con tiempo parcial</div>',
-                                unsafe_allow_html=True,
-                            )
-                        if _sin_causa:
-                            st.markdown(
-                                f'<div style="background:{_t["orange_bg"]};border-left:4px solid #01798A;'
-                                f'border-radius:6px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:{_t["text"]};">'
-                                f'📋 <b>{_sin_causa} correctiva(s) sin causa raíz</b> registrada</div>',
-                                unsafe_allow_html=True,
-                            )
-
-                        _show_df(
-                            drill_disp,
-                            width="stretch",
-                            hide_index=True,
-                            column_config={
-                                "Cumple":           st.column_config.TextColumn(width=100,
-                                    help="✅ = 3/3 componentes OK · ❌ = ≥1 falló"),
-                                "X/3":              st.column_config.TextColumn(width=80,
-                                    help="Componentes correctos de los 3 del KPI"),
-                                "OT":               st.column_config.TextColumn(width=110),
-                                "EDS":              st.column_config.TextColumn(width=85,
-                                    help="Código EDS Occimiano."),
-                                "Técnico":          st.column_config.TextColumn(width=180),
-                                "Estación":         st.column_config.TextColumn(width=200),
-                                "Tipo":             st.column_config.TextColumn(width=110),
-                                "Modalidad":        st.column_config.TextColumn(width=140,
-                                    help="Método de detección de falla en Fracttal (informativo, no incide en el KPI). "
-                                         "Presencial = técnico fue a la EDS · Remoto = resuelto vía telefónica/remota · "
-                                         "Con MP = aprovechó una mantención preventiva."),
-                                "Estado":           st.column_config.TextColumn(width=110,
-                                    help="Estado de la OT en Fracttal."),
-                                "Score":            st.column_config.ProgressColumn(
-                                    min_value=0, max_value=75, format="%.1f"),
-                                "⏱ Tiempo":         st.column_config.TextColumn(width=110,
-                                    help="Minutos con Fracttal abierto. ✅ cumple ≥75% del estimado neto · MC no aplica (auto-25)."),
-                                "🔍 Causa raíz":    st.column_config.TextColumn(width=240,
-                                    help="Causa registrada por el técnico. Solo se evalúa en MC; MP siempre da 25 auto."),
-                                "🔧 Equipo":        st.column_config.TextColumn(width=170,
-                                    help="Tipo(s) de equipo del OT. El numeral SOLO aplica a Lavadora, Aspiradora, "
-                                         "Lavainteriores e Hidrolavadora. Ablandador/Bomba/Termo/etc. → 'No aplica'. "
-                                         "OTs con varios tipos se muestran separados por '+'."),
-                                "🔢 Numeral":       st.column_config.TextColumn(width=160,
-                                    help="Calidad del numeral en lavadora/aspiradora (MC+MP). Motivo del dato malo si no cumple."),
-                                "💬 Observación":   st.column_config.TextColumn(width=260,
-                                    help="Resumen de cumplimiento de la OT (3 componentes)"),
-                                "Fecha":            st.column_config.TextColumn(width=90),
-                            },
-                        )
-
-
-        # ══════════════════════════════════════════════════════════════════════════
-        # TAB 4 — RESUMEN BONOS
-        # ══════════════════════════════════════════════════════════════════════════
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 4 — RESUMEN BONOS
+    # ══════════════════════════════════════════════════════════════════════════
     with tab_bono:
         _bi_info, _bi_escala = st.columns([3, 2])
         with _bi_info:
