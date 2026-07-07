@@ -949,7 +949,15 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             not es_correctiva                                   # PM → siempre OK
             or (bool(raw_deteccion) and "SIN CLASIFICAR" not in raw_deteccion)
         )
-        _es_remota = "REMOTA" in raw_deteccion or "REMOTO" in raw_deteccion
+        # "Es remota" debe leerse de modalidad_atencion (ej. "2.- ATENDIDO
+        # VÍA REMOTA"), NO de detection_method_description. Fallback al
+        # antiguo por compatibilidad con OTs viejas que solo llenaban
+        # detection_method.
+        raw_modalidad = (wo.get("modalidad_atencion") or "").strip().upper()
+        _es_remota = (
+            "REMOTA" in raw_modalidad or "REMOTO" in raw_modalidad
+            or "REMOTA" in raw_deteccion or "REMOTO" in raw_deteccion
+        )
 
         # CALIDAD del numeral (no solo presencia): un 99.999.999 o un salto de
         # >20 fichas dentro de la OT ahora cuenta como dato MALO (numeral_ok=False).
@@ -1001,6 +1009,7 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "numeral_final":     _num_final,
             "fichas_periodo":    _fichas_periodo,
             "deteccion_raw":     raw_deteccion,
+            "modalidad_atencion": raw_modalidad,   # propagar para _es_remota_row
             "deteccion_ok":      deteccion_ok,
             "duration_sec":      duration_sec,
             "estimated_sec":     estimated_sec,
@@ -1062,6 +1071,8 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     if "deteccion_ok" in df_kpi.columns:
         _agg["deteccion_ok"]  = ("deteccion_ok",  "first")
         _agg["deteccion_raw"] = ("deteccion_raw", "first")
+    if "modalidad_atencion" in df_kpi.columns:
+        _agg["modalidad_atencion"] = ("modalidad_atencion", "first")
     # Campos de numeral (pueden faltar en caches pre-migración)
     if "es_lavadora" in df_kpi.columns:
         # any() = True si CUALQUIER subtarea es de lavadora/aspiradora.
@@ -1120,6 +1131,11 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     # lo que se muestra en la tabla, y aplica la regla de calidad aunque el caché
     # venga de antes del cambio (donde numeral_ok era solo presencia).
     def _es_remota_row(r) -> bool:
+        # Fuente primaria: modalidad_atencion (ej. "2.- ATENDIDO VÍA REMOTA").
+        # Fallback: detection_method_description (deteccion_raw).
+        mod = str(r.get("modalidad_atencion", "") or "").upper()
+        if "REMOTA" in mod or "REMOTO" in mod:
+            return True
         det = str(r.get("deteccion_raw", "") or "").upper()
         return "REMOTA" in det or "REMOTO" in det
     _num_eval = ot.apply(
