@@ -11311,7 +11311,7 @@ elif _page == _NAV_PAGES[0]:
                             }).sort_values("Fecha", ascending=False)
 
                         with st.expander(
-                            f"📋 Detalle OTs con tiempo injustificado ({_n_absurdo:,} OTs)", expanded=False
+                            f"📋 Detalle OTs con tiempo injustificado ({_n_absurdo:,} OTs)", expanded=True
                         ):
                             _filtro_abs = _filtro_ot_input("kpi_filtro_ot_injust")
                             _det_abs_disp = _aplicar_filtro_ot(_det_abs_disp, _filtro_abs, col="OT")
