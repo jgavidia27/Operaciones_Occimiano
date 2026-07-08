@@ -62,7 +62,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v31-modalidad-column-num"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v32-m2l-scope-fix"  # bump para invalidar disco al cambiar data.py
 
 
 def _filtro_ot_input(key: str, columna_ot: str = "OT") -> str:
@@ -9885,6 +9885,12 @@ elif _page == _NAV_PAGES[0]:
             )
 
             # ── Helpers de render (accesibles en TODAS las sub-vistas) ──
+            _MN2 = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
+                    7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
+            def _m2l(ym):
+                p = str(ym).split("-")
+                return f"{_MN2.get(int(p[1]),p[1])} '{p[0][2:]}" if len(p)==2 else str(ym)
+
             def _agrupar_por_periodo(df_in, col_ok: str):
                 """Devuelve DataFrame con columnas: bucket_lbl, ok, total, pct_ok, pct_err.
                 df_in debe traer "mes" y "creation_date_local". col_ok = nombre de bool col."""
@@ -10544,13 +10550,7 @@ elif _page == _NAV_PAGES[0]:
     - Usar `01.7.- OTROS` o `02.7.- OTROS` sin especificar
     """)
 
-                # ── Helpers de mes compartidos por Causa Raíz y Tiempo ──────────
                 import re as _re
-                _MN2 = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
-                        7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
-                def _m2l(ym):
-                    p = str(ym).split("-")
-                    return f"{_MN2.get(int(p[1]),p[1])} '{p[0][2:]}" if len(p)==2 else str(ym)
 
                 # ── Agrupador que respeta la selección de meses/semanas ────────────
                 # Regla: 1 mes seleccionado → desglose por semanas DENTRO de ese mes.
