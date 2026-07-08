@@ -30,6 +30,7 @@ SELECT DISTINCT ON (ot.id_ot)
     -- 3. fecha_creacion de la OT (fallback)
     COALESCE(sol.fecha_incidente, ot.fecha_incidente, ot.fecha_creacion)       AS fecha_llamado,
     COALESCE(sol.fecha_incidente, ot.fecha_incidente, ot.fecha_creacion)::TIME AS hora_llamado,
+    ot.fecha_inicio                                              AS fecha_inicio_atencion,
     ot.fecha_finalizacion                                        AS fecha_atencion,
     ot.fecha_finalizacion::TIME                                  AS hora_fin,
 

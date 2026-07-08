@@ -49,15 +49,15 @@ FUENTE_META = {
     "ot_directa":  ("📞", "Directa Fracttal", "#475569", "#f1f5f9"),
 }
 
-# Estado derivado combinando estado_atencion (Fracttal) + cumplimiento SLA
+# Estado derivado combinando fechas de Fracttal + cumplimiento SLA
 #
-# Distingue:
-#   - Nadie la ha tomado (Por Iniciar)               → 🔴 SIN ATENDER
-#   - Técnico terminó pero admin no ha cerrado       → 🟢/🟠 TRABAJO HECHO
-#     (subdividido por SLA: cumple vs excedido)
-#   - Cerrada por completo (Finalizadas)             → ✅ CUMPLE / ❌ NO CUMPLE
-#   - Eximida por operaciones                        → ⚪ EXCEPCIÓN
-#   - Estados basura (ERROR, DUPLICADO, PRUEBA…)     → 🚫 DESCARTADA
+# Lógica basada en FECHAS (más fiable que el campo estado_atencion):
+#   - Sin fecha_inicio NI fecha_final         → 🔴 SIN ATENDER
+#   - Con fecha_inicio pero SIN fecha_final   → 🟡 TÉCNICO ATENDIENDO
+#   - Con fecha_final pero OT no cerrada      → 🟢/🟠 TRABAJO TERMINADO (pend. cierre)
+#   - OT cerrada por completo (Finalizadas)   → ✅ CUMPLE / ❌ NO CUMPLE
+#   - Eximida por operaciones                 → ⚪ EXCEPCIÓN
+#   - Estados basura                          → 🚫 DESCARTADA
 _BASURA_EST = {"ERROR DE INGRESO", "DUPLICADO", "Duplicidad", "PRUEBA ROBOT"}
 
 def estado_ot(row):
@@ -71,32 +71,37 @@ def estado_ot(row):
     if est in _BASURA_EST:
         return ("Descartada", "🚫", "#94a3b8", f"Estado Fracttal: {est}")
 
-    # 3) Sin atender: nadie la ha tomado en Fracttal
-    if est == "Por Iniciar":
-        return ("OT Pendiente - Sin atender", "🔴", "#dc2626",
-                "Nadie la ha tomado en Fracttal")
-
-    # 4) En Progreso: técnico registró fecha_finalizacion pero la OT
-    #    sigue abierta administrativamente. Combinamos con cumplimiento.
-    if est == "En Progreso":
-        if cum == "CUMPLE":
-            return ("OT atendida - Cumple SLA (Pend. Cierre Fracttal)", "🟢", "#16a34a",
-                    "Técnico terminó · pendiente cierre administrativo · SLA cumple")
-        if cum == "NO CUMPLE":
-            return ("OT atendida - No cumple SLA (Pend. Cierre Fracttal)", "🟠", "#ea580c",
-                    "Técnico terminó · pendiente cierre administrativo · SLA excedido")
-        return ("OT en terreno", "🟡", "#f59e0b",
-                "Técnico ya está en terreno")
-
-    # 5) Finalizadas: cerrada por completo
+    # 3) Finalizadas: cerrada por completo en Fracttal
     if est == "Finalizadas":
         if cum == "CUMPLE":
             return ("Finalizada - Cumple SLA", "✅", "#16a34a", "Cerrada · SLA cumplido")
         if cum == "NO CUMPLE":
             return ("Finalizada - No cumple SLA", "❌", "#dc2626", "Cerrada · SLA excedido")
 
-    # 6) Fallback
-    return ("Sin datos", "⏳", "#64748b", "Estado no clasificado")
+    # Fechas para determinar estado operativo
+    tiene_inicio = pd.notna(row.get("fecha_inicio_atencion"))
+    tiene_final  = pd.notna(row.get("fecha_atencion"))
+
+    # 4) Técnico terminó su trabajo (tiene fecha_final) pero OT aún
+    #    no cerrada administrativamente en Fracttal.
+    if tiene_final:
+        if cum == "CUMPLE":
+            return ("OT atendida - Cumple SLA (Pend. Cierre)", "🟢", "#16a34a",
+                    "Técnico terminó · pendiente cierre administrativo · SLA cumple")
+        if cum == "NO CUMPLE":
+            return ("OT atendida - No cumple SLA (Pend. Cierre)", "🟠", "#ea580c",
+                    "Técnico terminó · pendiente cierre administrativo · SLA excedido")
+        return ("OT atendida (Pend. Cierre)", "🟢", "#16a34a",
+                "Técnico terminó · pendiente cierre administrativo")
+
+    # 5) Técnico inició pero aún no termina (fecha_inicio sin fecha_final)
+    if tiene_inicio:
+        return ("Técnico atendiendo", "🟡", "#f59e0b",
+                "Técnico inició la atención · trabajo en curso")
+
+    # 6) Sin fecha_inicio ni fecha_final: nadie la ha tomado
+    return ("OT Pendiente - Sin atender", "🔴", "#dc2626",
+            "Nadie la ha tomado en Fracttal")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -141,7 +146,8 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
         batch = _sb_get("v_llamados_sla", {
             "select": ("os_fracttal,n_llamado,cliente,eds_occim,eds_nombre,"
                        "comuna,region,zona,fecha_llamado,hora_llamado,"
-                       "fecha_atencion,hora_fin,tecnico,tecnico_corto,"
+                       "fecha_inicio_atencion,fecha_atencion,hora_fin,"
+                       "tecnico,tecnico_corto,"
                        "equipo,equipo_senior,prioridad,tiempo_resp_horas,"
                        "tiempo_resp_esp,cumplimiento,excepcion_motivo,"
                        "estado_atencion,facturacion,tipo_tarea,"
@@ -207,6 +213,7 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
         except Exception:
             return pd.NaT
     df["fecha_llamado"]  = df["fecha_llamado"].apply(_ts)
+    df["fecha_inicio_atencion"] = df["fecha_inicio_atencion"].apply(_ts) if "fecha_inicio_atencion" in df.columns else pd.NaT
     df["fecha_atencion"] = df["fecha_atencion"].apply(_ts)
 
     # Numéricos seguros
@@ -315,13 +322,13 @@ with _f4:
     _est_opts = [
         "Finalizada - Cumple SLA",
         "Finalizada - No cumple SLA",
-        "OT atendida - Cumple SLA (Pend. Cierre Fracttal)",
-        "OT atendida - No cumple SLA (Pend. Cierre Fracttal)",
-        "OT en terreno",
+        "OT atendida - Cumple SLA (Pend. Cierre)",
+        "OT atendida - No cumple SLA (Pend. Cierre)",
+        "OT atendida (Pend. Cierre)",
+        "Técnico atendiendo",
         "OT Pendiente - Sin atender",
         "Excepción",
         "Descartada",
-        "Sin datos",
     ]
     # Por defecto ocultamos Descartada (basura de Fracttal)
     _est_default = [e for e in _est_opts if e != "Descartada"]
@@ -379,11 +386,12 @@ _n_hoy = int((_df["fecha_llamado"].dt.date == _hoy).sum())
 _n_cumple = int((_df["estado_lbl"] == "Finalizada - Cumple SLA").sum())
 _n_nocump = int((_df["estado_lbl"] == "Finalizada - No cumple SLA").sum())
 _n_trab   = int(_df["estado_lbl"].isin([
-    "OT atendida - Cumple SLA (Pend. Cierre Fracttal)",
-    "OT atendida - No cumple SLA (Pend. Cierre Fracttal)",
+    "OT atendida - Cumple SLA (Pend. Cierre)",
+    "OT atendida - No cumple SLA (Pend. Cierre)",
+    "OT atendida (Pend. Cierre)",
 ]).sum())
 _n_sinat  = int((_df["estado_lbl"] == "OT Pendiente - Sin atender").sum())
-_n_terr   = int((_df["estado_lbl"] == "OT en terreno").sum())
+_n_terr   = int((_df["estado_lbl"] == "Técnico atendiendo").sum())
 _evaluadas = _n_cumple + _n_nocump
 _pct_cumpl = (_n_cumple / _evaluadas * 100) if _evaluadas else 0
 
@@ -398,10 +406,11 @@ _k4.metric("🟢 OT atendida", f"{_n_trab:,}",
            delta="pend. cierre en Fracttal", delta_color="off",
            help="Técnico terminó y registró fecha_finalizacion, pero la "
                 "OT sigue abierta en Fracttal por cierre administrativo.")
-_k5.metric("🔴 OT Pendiente", f"{_n_sinat:,}",
-           delta=f"{_n_terr} en terreno" if _n_terr else "sin atender",
-           delta_color="inverse" if _n_sinat else "off",
-           help="OTs que nadie ha tomado en Fracttal (estado 'Por Iniciar').")
+_k5.metric("🔴 Sin atender / 🟡 Atendiendo", f"{_n_sinat:,} / {_n_terr:,}",
+           delta=f"{_n_terr} técnico en vivo" if _n_terr else "sin atender",
+           delta_color="off",
+           help="🔴 Sin fecha de inicio = nadie la ha tomado · "
+                "🟡 Con fecha de inicio, sin final = técnico trabajando en vivo.")
 
 # Distribución por fuente
 if _n_tot:
@@ -502,8 +511,10 @@ if vista == "📰 Feed cronológico":
 
         _fl = r["fecha_llamado"]
         _fl_s = _fl.strftime("%d/%m %H:%M") if pd.notna(_fl) else "—"
+        _fi = r.get("fecha_inicio_atencion")
+        _fi_s = ("inicio " + _fi.strftime("%d/%m %H:%M")) if pd.notna(_fi) else ""
         _fc = r["fecha_atencion"]
-        _fc_s = ("cerrada " + _fc.strftime("%d/%m %H:%M")) if pd.notna(_fc) else "abierta"
+        _fc_s = ("cerrada " + _fc.strftime("%d/%m %H:%M")) if pd.notna(_fc) else ("abierta" if not _fi_s else _fi_s)
 
         _hr = r.get("tiempo_resp_horas")
         _um = r.get("tiempo_resp_esp")
@@ -559,6 +570,7 @@ else:
                   if f in FUENTE_META else "❓ (sin fuente)")
     _dft["Estado"] = _dft["estado_ico"] + " " + _dft["estado_lbl"]
     _dft["F. Llamado"] = _dft["fecha_llamado"].dt.strftime("%d/%m/%Y %H:%M")
+    _dft["F. Inicio"]  = _dft["fecha_inicio_atencion"].dt.strftime("%d/%m/%Y %H:%M").fillna("—") if "fecha_inicio_atencion" in _dft.columns else "—"
     _dft["F. Cierre"]  = _dft["fecha_atencion"].dt.strftime("%d/%m/%Y %H:%M").fillna("—")
     _dft["Horas resp."]= _dft["tiempo_resp_horas"].round(2)
     _dft["SLA (h)"]    = _dft["tiempo_resp_esp"]
@@ -566,7 +578,7 @@ else:
 
     _cols = ["os_fracttal","n_llamado","cliente","eds_occim","eds_nombre",
              "comuna","zona","prioridad","Fuente","Estado",
-             "F. Llamado","F. Cierre","Horas resp.","SLA (h)",
+             "F. Llamado","F. Inicio","F. Cierre","Horas resp.","SLA (h)",
              "equipo","tecnico_disp","Excepción","facturacion"]
     _ren = {
         "os_fracttal":"OS Fracttal", "n_llamado":"N° Aviso",
@@ -590,6 +602,7 @@ else:
             "Fuente":      st.column_config.TextColumn(width=140),
             "Estado":      st.column_config.TextColumn(width=115),
             "F. Llamado":  st.column_config.TextColumn(width=125),
+            "F. Inicio":   st.column_config.TextColumn(width=125),
             "F. Cierre":   st.column_config.TextColumn(width=125),
             "Horas resp.": st.column_config.NumberColumn(width=90, format="%.2f"),
             "SLA (h)":     st.column_config.NumberColumn(width=70),
