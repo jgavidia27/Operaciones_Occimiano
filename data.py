@@ -812,6 +812,8 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         # Mejor nota disponible (OT-level o task-level)
         best_note = note if note else task_note
 
+        client, station = _parse_hierarchy(wo.get("parent_description") or "")
+
         # Recursos registrados (cualquier campo distinto de None)
         def _has_value(v) -> bool:
             return v is not None and str(v).strip() not in ("", "None", "none", "0")
@@ -881,8 +883,6 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             elapsed_sec = max(0.0, (final_ts - initial_ts).total_seconds())
         else:
             elapsed_sec = 0.0
-
-        client, station = _parse_hierarchy(wo.get("parent_description") or "")
 
         # ── Causa raíz ────────────────────────────────────────────────────────
         raw_causa = (wo.get("causes_description") or "").strip()
