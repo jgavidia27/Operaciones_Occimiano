@@ -4840,7 +4840,8 @@ elif _page == _NAV_PAGES[3]:
                         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                         font_color=_t["text"],
                         xaxis=dict(gridcolor=_t["border"]),
-                        yaxis=dict(autorange="reversed"),
+                        yaxis=dict(autorange="reversed",
+                                   tickfont=dict(size=14, family="Arial Black, Arial Bold, sans-serif")),
                     )
                     st.plotly_chart(_fig_top5, use_container_width=True, key=f"chart_top5_{_ck}")
 
