@@ -1,6 +1,15 @@
 name: Sync STO Export
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "data.py"
+      - "supabase_client.py"
+      - "gdrive.py"
+      - "sync_sto_export.py"
+      - "mobile_sto.py"
+      - "app.py"
   schedule:
     # 12:00 UTC (08:00 Chile) y 22:00 UTC (18:00 Chile)
     - cron: "0 12 * * *"
