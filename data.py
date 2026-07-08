@@ -498,7 +498,27 @@ def aplicar_numerales_subtarea(ot: pd.DataFrame, df_sub: pd.DataFrame) -> pd.Dat
     _mask = out["_n_subs"].notna() & (out["_n_subs"] > 0)
     out.loc[_mask, "numeral_ok"]     = out.loc[_mask, "_n_ok"].astype(bool)
     out.loc[_mask, "numeral_motivo"] = out.loc[_mask, "_n_motivo"]
-    return out.drop(columns=["_n_ok","_n_sev","_n_motivo","_n_subs"], errors="ignore")
+    out = out.drop(columns=["_n_ok","_n_sev","_n_motivo","_n_subs"], errors="ignore")
+
+    # MC remotas: el sync de subtareas no conoce la modalidad, así que puede
+    # haber marcado numeral_ok=False para una correctiva remota (sin numeral).
+    # Re-aplicar la exención: si es correctiva + remota + sin numeral → cumple.
+    if "es_correctiva" in out.columns:
+        def _is_remota(r):
+            mod = str(r.get("modalidad_atencion", "") or "").upper()
+            if "REMOTA" in mod or "REMOTO" in mod:
+                return True
+            det = str(r.get("deteccion_raw", "") or "").upper()
+            return "REMOTA" in det or "REMOTO" in det
+        _mc_remota = (
+            out["es_correctiva"].fillna(False)
+            & out.apply(_is_remota, axis=1)
+            & out["numeral_motivo"].isin(["sin_numeral"])
+        )
+        out.loc[_mc_remota, "numeral_ok"]     = True
+        out.loc[_mc_remota, "numeral_motivo"] = "no_aplica_remota"
+
+    return out
 
 
 def build_numeral_historial(df_wo: pd.DataFrame, eds_code: str = None,
