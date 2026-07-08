@@ -15,9 +15,9 @@ Es un espejo real de lo que ve el dashboard, en un formato más ameno
 
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-import pytz
-_CL_TZ = pytz.timezone("America/Santiago")
+_CL_TZ = ZoneInfo("America/Santiago")
 
 import pandas as pd
 import requests
