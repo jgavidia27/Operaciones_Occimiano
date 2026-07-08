@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 _CL_TZ = ZoneInfo("America/Santiago")
 
 import pandas as pd
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 
@@ -173,14 +174,18 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     # 2) Fuentes por OT
     fuente_map = {}
     lc = _sb_get("llamados_correctivos", {
-        "select": "os_fracttal,fuente",
+        "select": "os_fracttal,fuente,falla",
         "fecha_llamado": f"gte.{fecha_desde}",
         "limit": 10000,
     })
+    falla_map = {}
     for r in lc:
         if r.get("os_fracttal"):
             fuente_map[r["os_fracttal"]] = r.get("fuente")
+            if r.get("falla"):
+                falla_map[r["os_fracttal"]] = r["falla"]
     df["fuente"] = df["os_fracttal"].map(fuente_map)
+    df["falla"] = df["os_fracttal"].map(falla_map)
 
     # Fallback: si no hay match directo por os_fracttal (típico en Copec
     # porque su robot no linkea os_fracttal al momento del correo), se
@@ -473,7 +478,8 @@ if _n_tot:
 # ══════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-hdr">Vista</div>', unsafe_allow_html=True)
 
-vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida"],
+vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida",
+                           "📊 Estadísticas", "📝 Registro (Excel)"],
                  horizontal=True, label_visibility="collapsed")
 
 
@@ -591,7 +597,7 @@ if vista == "📰 Feed cronológico":
 
 
 # ────────── Tabla ──────────
-else:
+elif vista == "📋 Tabla enriquecida":
     _dft = _df.copy()
     _dft["Fuente"] = _dft["fuente"].map(
         lambda f: (f"{FUENTE_META.get(f, ('❓','?','',''))[0]} "
@@ -646,6 +652,165 @@ else:
     st.download_button(
         "⬇️ Descargar CSV (filtro actual)", _csv,
         file_name=f"correctivas_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+    )
+
+
+# ────────── Estadísticas ──────────
+elif vista == "📊 Estadísticas":
+    _e1, _e2, _e3 = st.columns(3)
+
+    with _e1:
+        st.markdown("#### Finalizadas")
+        _nc = int((_df["estado_lbl"] == "Finalizada - Cumple SLA").sum())
+        _nn = int((_df["estado_lbl"] == "Finalizada - No cumple SLA").sum())
+        if _nc + _nn:
+            fig = go.Figure(go.Pie(
+                labels=["Cumple SLA", "No cumple SLA"],
+                values=[_nc, _nn], hole=.5,
+                marker_colors=["#16a34a", "#dc2626"],
+                textinfo="value+percent",
+            ))
+            fig.update_layout(height=380, margin=dict(t=30, b=30, l=20, r=20),
+                              legend=dict(orientation="h", y=-0.1))
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(f"Total finalizadas: **{_nc + _nn:,}** "
+                       f"({_nc:,} cumple / {_nn:,} no cumple)")
+        else:
+            st.info("Sin OTs finalizadas en el filtro actual.")
+
+    with _e2:
+        st.markdown("#### Pendientes de cierre")
+        _pc = int((_df["estado_lbl"] == "OT atendida - Cumple SLA (Pend. Cierre)").sum())
+        _pn = int((_df["estado_lbl"] == "OT atendida - No cumple SLA (Pend. Cierre)").sum())
+        _po = int((_df["estado_lbl"] == "OT atendida (Pend. Cierre)").sum())
+        _tp = _pc + _pn + _po
+        if _tp:
+            _plbl, _pval, _pcol = [], [], []
+            if _pc:
+                _plbl.append("Cumple SLA"); _pval.append(_pc); _pcol.append("#16a34a")
+            if _pn:
+                _plbl.append("No cumple SLA"); _pval.append(_pn); _pcol.append("#ea580c")
+            if _po:
+                _plbl.append("Sin evaluar"); _pval.append(_po); _pcol.append("#94a3b8")
+            fig = go.Figure(go.Pie(
+                labels=_plbl, values=_pval, hole=.5,
+                marker_colors=_pcol, textinfo="value+percent",
+            ))
+            fig.update_layout(height=380, margin=dict(t=30, b=30, l=20, r=20),
+                              legend=dict(orientation="h", y=-0.1))
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(f"Total pend. cierre: **{_tp:,}** "
+                       f"(OT atendida, falta cierre en Fracttal)")
+        else:
+            st.info("Sin OTs pendientes de cierre en el filtro.")
+
+    with _e3:
+        st.markdown("#### Ordenes pendientes")
+        _na = int((_df["estado_lbl"] == "Técnico atendiendo").sum())
+        _ns = int((_df["estado_lbl"] == "OT Pendiente - Sin atender").sum())
+        if _na + _ns:
+            fig = go.Figure(go.Pie(
+                labels=["Técnico atendiendo", "Sin atender"],
+                values=[_na, _ns], hole=.5,
+                marker_colors=["#f59e0b", "#dc2626"],
+                textinfo="value+percent",
+            ))
+            fig.update_layout(height=380, margin=dict(t=30, b=30, l=20, r=20),
+                              legend=dict(orientation="h", y=-0.1))
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(f"Total pendientes: **{_na + _ns:,}** "
+                       f"({_na:,} atendiendo / {_ns:,} sin atender)")
+        else:
+            st.info("Sin OTs pendientes en el filtro actual.")
+
+
+# ────────── Registro (Excel) ──────────
+elif vista == "📝 Registro (Excel)":
+    st.caption("Vista unificada que consolida los formatos Excel de Shell, Copec y Aramco. "
+               "Todas las columnas se muestran para todos los clientes.")
+
+    _dfr = _df.copy()
+    _dfr["Asunto"] = (_dfr["falla"] if "falla" in _dfr.columns
+                      else pd.Series(dtype="object", index=_dfr.index))
+    _dfr["Asunto"] = _dfr["Asunto"].fillna(_dfr["nombre_activo"]).fillna("—")
+    _dfr["N_llamado"] = _dfr["n_llamado"]
+    _dfr["Codigo_EDS"] = _dfr["eds_occim"]
+    _dfr["EDS_r"] = _dfr["eds_nombre"]
+    _dfr["COMUNA"] = _dfr["comuna"].fillna("—")
+    _dfr["Facturacion_r"] = _dfr["facturacion"].fillna("—")
+    _dfr["Fecha"] = _dfr["fecha_llamado"].dt.strftime("%d/%m/%Y").fillna("—")
+    _dfr["Hora"] = _dfr.get("hora_llamado", pd.Series(dtype="object")).fillna("—")
+    _dfr["Atencion"] = _dfr["tipo_tarea"].fillna("—") if "tipo_tarea" in _dfr.columns else "—"
+    _dfr["Mecanico"] = _dfr["tecnico_disp"].fillna("—")
+    _fa = _dfr["fecha_atencion"]
+    _dfr["Fecha_atencion"] = _fa.dt.strftime("%d/%m/%Y").where(_fa.notna(), "—")
+    _dfr["Hora_Atencion_FIN"] = _dfr.get("hora_fin", pd.Series(dtype="object")).fillna("—")
+    _dfr["OS_FRACTTAL"] = _dfr["os_fracttal"]
+    _dfr["PRIORIDAD"] = _dfr["prioridad"]
+    _dfr["TMPO_RESP_ESP"] = _dfr["tiempo_resp_esp"]
+    _dfr["ZONA"] = _dfr["zona"]
+    _dfr["TMPO_RESP_REAL"] = _dfr["tiempo_resp_horas"].round(2)
+    _dfr["STATUS_CUMPLIMIENTO"] = _dfr["cumplimiento"].fillna("—")
+    _dfr["Mes"] = _dfr["fecha_llamado"].dt.month
+    _dfr["Anio"] = _dfr["fecha_llamado"].dt.year
+    _dfr["Dia"] = _dfr["fecha_llamado"].dt.day_name()
+    _dfr["Cliente_r"] = _dfr["cliente"]
+
+    _excel_cols = [
+        "Asunto", "N_llamado", "Codigo_EDS", "EDS_r", "Cliente_r",
+        "COMUNA", "Facturacion_r", "Fecha", "Hora",
+        "Atencion", "Mecanico", "Fecha_atencion", "Hora_Atencion_FIN",
+        "OS_FRACTTAL", "PRIORIDAD", "TMPO_RESP_ESP", "ZONA",
+        "TMPO_RESP_REAL", "STATUS_CUMPLIMIENTO", "Mes", "Anio", "Dia",
+    ]
+    _excel_ren = {
+        "N_llamado": "N° llamado", "Codigo_EDS": "Codigo EDS",
+        "EDS_r": "EDS", "Cliente_r": "Cliente",
+        "Facturacion_r": "Facturación",
+        "Fecha_atencion": "Fecha de atencion",
+        "Hora_Atencion_FIN": "Hora Atencion (FIN)",
+        "OS_FRACTTAL": "OS FRACTTAL",
+        "TMPO_RESP_ESP": "TMPO.RESP.ESP",
+        "TMPO_RESP_REAL": "TMPO.RESP.REAL",
+        "STATUS_CUMPLIMIENTO": "STATUS CUMPLIMIENTO",
+        "Anio": "Año", "Dia": "Día",
+    }
+    _show_r = _dfr[_excel_cols].rename(columns=_excel_ren).sort_values(
+        "Fecha", ascending=False)
+
+    st.dataframe(
+        _show_r, hide_index=True, use_container_width=True, height=680,
+        column_config={
+            "Asunto":       st.column_config.TextColumn(width=220),
+            "N° llamado":   st.column_config.TextColumn(width=90),
+            "Codigo EDS":   st.column_config.TextColumn(width=90),
+            "EDS":          st.column_config.TextColumn(width=170),
+            "Cliente":      st.column_config.TextColumn(width=130),
+            "COMUNA":       st.column_config.TextColumn(width=110),
+            "Facturación":  st.column_config.TextColumn(width=110),
+            "Fecha":        st.column_config.TextColumn(width=100),
+            "Hora":         st.column_config.TextColumn(width=70),
+            "Atencion":     st.column_config.TextColumn(width=150),
+            "Mecanico":     st.column_config.TextColumn(width=140),
+            "Fecha de atencion": st.column_config.TextColumn(width=120),
+            "Hora Atencion (FIN)": st.column_config.TextColumn(width=100),
+            "OS FRACTTAL":  st.column_config.TextColumn(width=105),
+            "PRIORIDAD":    st.column_config.TextColumn(width=80),
+            "TMPO.RESP.ESP": st.column_config.NumberColumn(width=80),
+            "ZONA":         st.column_config.TextColumn(width=70),
+            "TMPO.RESP.REAL": st.column_config.NumberColumn(width=90, format="%.2f"),
+            "STATUS CUMPLIMIENTO": st.column_config.TextColumn(width=130),
+            "Mes":          st.column_config.NumberColumn(width=50),
+            "Año":          st.column_config.NumberColumn(width=60),
+            "Día":          st.column_config.TextColumn(width=90),
+        },
+    )
+
+    _csv_r = _show_r.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "⬇️ Descargar CSV (formato registro)", _csv_r,
+        file_name=f"registro_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
     )
 
