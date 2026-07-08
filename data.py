@@ -155,7 +155,7 @@ GRUPOS_TERRENO = {
         "senior":   "Carlos Avila",
         # Luis Lopez   = Luis Joel Lopez Isla
         # Gaston Fuller= Gastón Eduardo Fuller Quilodrán
-        "miembros": ["Luis Lopez", "Gaston Fuller"],
+        "miembros": ["Carlos Avila", "Luis Lopez", "Gaston Fuller"],
     },
 }
 
@@ -187,6 +187,7 @@ _TECNICO_A_GRUPO: dict[str, str] = {
     for grupo, info in GRUPOS_TERRENO.items()
     for tec in info["miembros"]
 }
+_TECNICO_A_GRUPO["Carlos Avila"] = "Carlos Avila Norte"
 
 
 def get_grupo_tecnico(nombre_corto: str) -> str | None:
@@ -197,12 +198,27 @@ def get_grupo_tecnico(nombre_corto: str) -> str | None:
 # Técnicos senior cuyo KPI individual = promedio del equipo completo (no solo sus propios casos).
 # Para estos 3, los indicadores SLA, Efectividad MP y Precisión Fracttal se calculan
 # como el agregado de todos los miembros de su equipo (incluido el propio senior).
-SENIORS: frozenset[str] = frozenset({"Juan Gallardo", "Victor Bahamonde", "Luis Pinto"})
+SENIORS: frozenset[str] = frozenset({"Juan Gallardo", "Victor Bahamonde", "Luis Pinto", "Carlos Avila"})
+
+_snr_teams: dict[str, list[str]] = {}
+for _gk, _gv in GRUPOS_TERRENO.items():
+    _snr_teams.setdefault(_gv["senior"], []).append(_gk)
+SENIOR_MULTI_TEAMS: dict[str, list[str]] = {k: v for k, v in _snr_teams.items() if len(v) > 1}
 
 
 def get_senior_team_members(senior_short: str) -> list[str]:
     """Retorna todos los miembros del equipo del senior (incluido él mismo).
-    Solo aplica para seniors con grupo propio (Juan Gallardo, Victor Bahamonde, Luis Pinto)."""
+    Para multi-team seniors (Carlos Avila), retorna miembros de todos sus equipos."""
+    mt = SENIOR_MULTI_TEAMS.get(senior_short)
+    if mt:
+        seen = set()
+        result = []
+        for gk in mt:
+            for m in GRUPOS_TERRENO[gk].get("miembros", []):
+                if m not in seen:
+                    seen.add(m)
+                    result.append(m)
+        return result
     grp = GRUPOS_TERRENO.get(senior_short)
     return list(grp["miembros"]) if grp else [senior_short]
 

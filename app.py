@@ -30,7 +30,7 @@ from data import (
     build_reincidencias, build_numeral_historial, analizar_secuencias, CAT_LABEL,
     NUMERAL_MOTIVO_LABEL, aplicar_numerales_subtarea,
     GRUPOS_TERRENO, get_grupo_tecnico, TECNICOS_NO_APLICA,
-    SENIORS, get_senior_team_members,
+    SENIORS, SENIOR_MULTI_TEAMS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
 )
 from gdrive import (
@@ -7861,7 +7861,8 @@ elif _page == _NAV_PAGES[0]:
                     _snr_idx = _tec_sla_rank.index[_tec_sla_rank["tecnico"] == _snr_full]
                     if len(_snr_idx) == 0:
                         continue
-                    _snr_data = _df_con_pri[_df_con_pri["equipo"] == _snr]
+                    _mt = SENIOR_MULTI_TEAMS.get(_snr)
+                    _snr_data = _df_con_pri[_df_con_pri["equipo"].isin(_mt)] if _mt else _df_con_pri[_df_con_pri["equipo"] == _snr]
                     if _snr_data.empty:
                         continue
                     _si = _snr_idx[0]
@@ -7976,13 +7977,12 @@ elif _page == _NAV_PAGES[0]:
                 for _snr in SENIORS:
                     _snr_full = TECH_NAME_MAP.get(_snr, _snr)
                     _snr_pers = _tec_g.loc[_tec_g["tecnico"] == _snr_full, "_periodo"].unique()
+                    _mt = SENIOR_MULTI_TEAMS.get(_snr)
                     for _per in _snr_pers:
                         _si_g = _tec_g.index[(_tec_g["tecnico"] == _snr_full) & (_tec_g["_periodo"] == _per)]
                         if len(_si_g) == 0:
                             continue
-                        _per_data = _df_tec[
-                            (_df_tec["equipo"] == _snr) & (_df_tec["_periodo"] == _per)
-                        ]
+                        _per_data = _df_tec[_df_tec["equipo"].isin(_mt) & (_df_tec["_periodo"] == _per)] if _mt else _df_tec[(_df_tec["equipo"] == _snr) & (_df_tec["_periodo"] == _per)]
                         if _per_data.empty:
                             continue
                         _tec_g.at[_si_g[0], "total"]  = len(_per_data)
@@ -8003,7 +8003,8 @@ elif _page == _NAV_PAGES[0]:
                     _snr_idx = _tec_tot.index[_tec_tot["tecnico"] == _snr_full]
                     if len(_snr_idx) == 0:
                         continue
-                    _snr_data = _df_tec[_df_tec["equipo"] == _snr]
+                    _mt = SENIOR_MULTI_TEAMS.get(_snr)
+                    _snr_data = _df_tec[_df_tec["equipo"].isin(_mt)] if _mt else _df_tec[_df_tec["equipo"] == _snr]
                     if _snr_data.empty:
                         continue
                     _tec_tot.at[_snr_idx[0], "total"]  = len(_snr_data)
@@ -9506,8 +9507,8 @@ elif _page == _NAV_PAGES[0]:
                 _snr_idx_r = df_tec_scores_rank.index[df_tec_scores_rank["tecnico"] == _snr_full_r]
                 if len(_snr_idx_r) == 0:
                     continue
-                # Usar columna "equipo" para matching robusto (igual que tarjetas equipo)
-                _team_rows_r = df_tec_scores[df_tec_scores["equipo"] == _snr]
+                _mt = SENIOR_MULTI_TEAMS.get(_snr)
+                _team_rows_r = df_tec_scores[df_tec_scores["equipo"].isin(_mt)] if _mt else df_tec_scores[df_tec_scores["equipo"] == _snr]
                 if len(_team_rows_r) <= 1:
                     continue  # solo el senior mismo, sin compañeros → no hay nada que agregar
                 _si_r      = _snr_idx_r[0]
@@ -9656,9 +9657,16 @@ elif _page == _NAV_PAGES[0]:
                 _render_prec_card(_col_indiv, tec_kpi_sel, "Registro individual", _tec_indiv, _t)
 
                 # Tarjeta 2: equipo completo — usar datos PRE-filtro técnico
-                _df_equipo_full = score_llenado_por_tecnico(
-                    _df_ot_pre_tec[_df_ot_pre_tec["equipo"] == _pgk_snr]
-                )
+                _mt_snr = SENIOR_MULTI_TEAMS.get(_tec_short_sel)
+                if _mt_snr:
+                    _df_equipo_full = score_llenado_por_tecnico(
+                        _df_ot_pre_tec[_df_ot_pre_tec["equipo"].isin(_mt_snr)]
+                    )
+                    _pgl_snr = "Carlos Avila (Norte + Sur)"
+                else:
+                    _df_equipo_full = score_llenado_por_tecnico(
+                        _df_ot_pre_tec[_df_ot_pre_tec["equipo"] == _pgk_snr]
+                    )
                 _n_eq = len(_df_equipo_full)
                 _render_prec_card(_col_equipo,
                     f"Equipo {_pgl_snr} ({_n_eq} téc.)",
@@ -11860,6 +11868,22 @@ elif _page == _NAV_PAGES[0]:
             # Seniors: su KPI = promedio del equipo (igual que ranking y tabla SLA)
             _short_snr = next((k for k, v in TECH_NAME_MAP.items() if v == tech_full), None)
             if _short_snr in SENIORS:
+                _mt = SENIOR_MULTI_TEAMS.get(_short_snr)
+                if _mt:
+                    _combined = [_kpi_para_equipo(ek) for ek in _mt]
+                    _sla_ok = sum(c["n_sla_ok"] for c in _combined)
+                    _sla_tot = sum(c["n_sla_total"] for c in _combined)
+                    _fallas = sum(c["n_fallas"] for c in _combined)
+                    _pm = sum(c["n_pm"] for c in _combined)
+                    _prec_ok = sum(c["n_correctas_prec"] for c in _combined)
+                    _prec_tot = sum(c["n_ots_prec"] for c in _combined)
+                    return {
+                        "n_sla_ok": _sla_ok, "n_sla_total": _sla_tot,
+                        "pct_sla": (_sla_ok / _sla_tot * 100) if _sla_tot > 0 else None,
+                        "n_fallas": _fallas, "n_pm": _pm,
+                        "pct_prec": (_prec_ok / _prec_tot * 100) if _prec_tot > 0 else None,
+                        "n_ots_prec": _prec_tot, "n_correctas_prec": _prec_ok,
+                    }
                 return _kpi_para_equipo(equipo_key)
 
             _tn = " ".join(_norm_n(tech_full).split())
@@ -12561,7 +12585,16 @@ elif _page == _NAV_PAGES[0]:
                         ts = next((k for k,v in TECH_NAME_MAP.items() if v==tf),tf)
                         iss = ts in SENIORS
                         if iss:
-                            so,st2,pb,pt,fl,pm = eso,est,epb,ept,efl,epm
+                            _mt = SENIOR_MULTI_TEAMS.get(ts)
+                            if _mt:
+                                so = sum(r.get("cumple",0) for r in _sf if r.get("equipo") in _mt)
+                                st2 = sum(r.get("total",0) for r in _sf if r.get("equipo") in _mt)
+                                pb = sum(r.get("buenas",0) for r in _pf if r.get("equipo") in _mt)
+                                pt = sum(r.get("total",0) for r in _pf if r.get("equipo") in _mt)
+                                pm = sum(r.get("pms",0) for r in _mfr if r.get("equipo") in _mt)
+                                fl = sum(r.get("fallas",0) for r in _rfr if r.get("equipo") in _mt)
+                            else:
+                                so,st2,pb,pt,fl,pm = eso,est,epb,ept,efl,epm
                         else:
                             so = sum(r.get("cumple",0) for r in _sf if r.get("tecnico")==tf)
                             st2 = sum(r.get("total",0) for r in _sf if r.get("tecnico")==tf)

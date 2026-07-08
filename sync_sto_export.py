@@ -32,7 +32,7 @@ from data import (
     aplicar_numerales_subtarea,
     build_reincidencias,
     GRUPOS_TERRENO,
-    SENIORS,
+    SENIORS, SENIOR_MULTI_TEAMS,
     TECNICOS_NO_APLICA,
 )
 from gdrive import TECH_NAME_MAP
@@ -408,7 +408,16 @@ def main():
                 ts = next((k for k, v in TECH_NAME_MAP.items() if v == tf), tf)
                 iss = ts in SENIORS
                 if iss:
-                    so, st2, pb, pt, fl, pm = eso, est, epb, ept, efl, epm
+                    _mt = SENIOR_MULTI_TEAMS.get(ts)
+                    if _mt:
+                        so = sum(r.get("cumple", 0) for r in sf if r.get("equipo") in _mt)
+                        st2 = sum(r.get("total", 0) for r in sf if r.get("equipo") in _mt)
+                        pb = sum(r.get("buenas", 0) for r in pf if r.get("equipo") in _mt)
+                        pt = sum(r.get("total", 0) for r in pf if r.get("equipo") in _mt)
+                        pm = sum(r.get("pms", 0) for r in mfr if r.get("equipo") in _mt)
+                        fl = sum(r.get("fallas", 0) for r in rfr if r.get("equipo") in _mt)
+                    else:
+                        so, st2, pb, pt, fl, pm = eso, est, epb, ept, efl, epm
                 else:
                     so = sum(r.get("cumple", 0) for r in sf if r.get("tecnico") == tf)
                     st2 = sum(r.get("total", 0) for r in sf if r.get("tecnico") == tf)
