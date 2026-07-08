@@ -10869,7 +10869,9 @@ elif _page == _NAV_PAGES[0]:
                     #                          (informativo; se registra pero
                     #                          no penaliza. El técnico puede
                     #                          justificadamente tardar más.)
-                    _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * 0.75
+                    _df_te["_piso_pct"] = _df_te["client"].apply(
+                        lambda c: 0.50 if c == "SHELL (Enex)" else 0.70)
+                    _df_te["_te_ok"] = _df_te["_effective_sec"] >= _df_te["estimated_sec"] * _df_te["_piso_pct"]
                     _df_te["_te_sobretiempo"] = (
                         _df_te["_effective_sec"] > _df_te["estimated_sec"] * 1.50
                     )
