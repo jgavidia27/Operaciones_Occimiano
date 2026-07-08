@@ -11,8 +11,9 @@ on:
       - "mobile_sto.py"
       - "app.py"
   schedule:
-    # 12:00 UTC (08:00 Chile) y 22:00 UTC (18:00 Chile)
-    - cron: "0 12 * * *"
+    # 09:30 Chile (13:30 UTC) · 13:00 Chile (17:00 UTC) · 18:00 Chile (22:00 UTC)
+    - cron: "30 13 * * *"
+    - cron: "0 17 * * *"
     - cron: "0 22 * * *"
   workflow_dispatch: {}
 
