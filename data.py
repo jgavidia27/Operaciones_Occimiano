@@ -861,11 +861,13 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
                 estimated_sec = 0   # preventiva sin sync → no evaluable
         except (ValueError, TypeError):
             estimated_sec = 0
-        # Tiempo OK: ejecución >= 75% de la duración estimada
-        # Solo aplica si hay duración estimada (> 0) y la tarea es preventiva
+        # Tiempo OK: ejecución >= piso% de la duración estimada
+        # Shell (Enex) → 50% (equipos con mantención más corta)
+        # Resto         → 70%
+        _piso_tiempo = 0.50 if client == "SHELL (Enex)" else 0.70
         tiempo_ok_estim = (
-            (duration_sec >= estimated_sec * 0.75)
-            if estimated_sec > 0 else None  # None = sin datos suficientes
+            (duration_sec >= estimated_sec * _piso_tiempo)
+            if estimated_sec > 0 else None
         )
 
         # Estado de la tarea
@@ -1185,7 +1187,8 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
         ot = ot.merge(_estim_g, on="folio", how="left")
         ot["estim_sec_sum"] = ot["estim_sec_sum"].fillna(0)
         ot["tiempo_ok_estim"] = ot.apply(
-            lambda r: (r["exec_sec_sum"] >= r["estim_sec_sum"] * 0.75)
+            lambda r: (r["exec_sec_sum"] >= r["estim_sec_sum"]
+                       * (0.50 if r.get("client") == "SHELL (Enex)" else 0.70))
                       if r["estim_sec_sum"] > 0 else None,
             axis=1,
         )
@@ -1218,15 +1221,14 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
             return 25, False  # Tiempo no se evalúa en correctivas → 25 pts auto
         elapsed = row["max_elapsed"]
         estim = row.get("estim_sec_sum", 0) or 0
+        _piso = 0.50 if row.get("client") == "SHELL (Enex)" else 0.70
         if estim > 60:
             exec_r = row.get("exec_sec_sum", 0) or 0
             effective = max(exec_r, elapsed)
             ratio = effective / estim
             if ratio > 1.50:
-                # SOBRETIEMPO: técnico duró más del 150% del estimado.
-                # Sigue siendo CUMPLE (25 pts) pero se marca para reporte.
                 return 25, True
-            if ratio >= 0.75: return 25, False
+            if ratio >= _piso: return 25, False
             if ratio >= 0.35: return 12, False
             return 0, False
         else:

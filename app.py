@@ -62,7 +62,7 @@ from supabase_client import (
 _USE_SUPABASE = True   # ← cambiar a False para volver a Fracttal/Excel
 
 # ── Caché en disco para build_kpi_llenado_df (≈9s sin caché) ────────────────
-_KPI_CACHE_VERSION = "v33-mc-remota-numeral"  # bump para invalidar disco al cambiar data.py
+_KPI_CACHE_VERSION = "v34-piso-70-shell-50"  # bump para invalidar disco al cambiar data.py
 
 
 def _filtro_ot_input(key: str, columna_ot: str = "OT") -> str:
@@ -9786,8 +9786,8 @@ elif _page == _NAV_PAGES[0]:
             gk1.metric("Score global del mes", f"{score_global:.1f} / 100",
                        delta=lbl_global, delta_color="off")
             gk2.metric("OTs evaluadas", f"{total_ots_mes:,}")
-            gk3.metric("Tiempo OK · solo MP (≥75%)", f"{pct_tiempo:.1f}%",
-                       delta=f"{'✅' if pct_tiempo >= 75 else '⚠️'}")
+            gk3.metric("Tiempo OK · solo MP (≥70%)", f"{pct_tiempo:.1f}%",
+                       delta=f"{'✅' if pct_tiempo >= 70 else '⚠️'}")
             gk4.metric("Causa raíz OK · solo MC", f"{pct_causa:.1f}%",
                        delta=f"{'✅' if pct_causa >= 80 else '⚠️'}")
             gk5.metric("Técnicos con bono (≥90% exactitud)", f"{tecnicos_con_bono} / {total_tecnicos}")
@@ -10178,7 +10178,7 @@ elif _page == _NAV_PAGES[0]:
                             "OTs con error":       st.column_config.NumberColumn(
                                 help="OTs con al menos 1 componente incorrecto — estas cuentan para el KPI.", format="%d"),
                             "⏱ Tiempo OK":         st.column_config.TextColumn(
-                                help="OTs Preventivas con tiempo ≥75% del estimado / total MP del técnico"),
+                                help="OTs Preventivas con tiempo ≥70% del estimado (Shell ≥50%) / total MP del técnico"),
                             "🔍 Causa OK":          st.column_config.TextColumn(
                                 help="OTs Correctivas con causa raíz válida / total MC del técnico"),
                             "🔢 Numeral OK":        st.column_config.TextColumn(
@@ -10486,7 +10486,7 @@ elif _page == _NAV_PAGES[0]:
                                 "Score":            st.column_config.ProgressColumn(
                                     min_value=0, max_value=75, format="%.1f"),
                                 "⏱ Tiempo":         st.column_config.TextColumn(width=110,
-                                    help="Minutos con Fracttal abierto. ✅ cumple ≥75% del estimado neto · MC no aplica (auto-25)."),
+                                    help="Minutos con Fracttal abierto. ✅ cumple ≥70% del estimado neto (Shell ≥50%) · MC no aplica (auto-25)."),
                                 "🔍 Causa raíz":    st.column_config.TextColumn(width=240,
                                     help="Causa registrada por el técnico. Solo se evalúa en MC; MP siempre da 25 auto."),
                                 "🔧 Equipo":        st.column_config.TextColumn(width=170,
@@ -10793,36 +10793,34 @@ elif _page == _NAV_PAGES[0]:
                     )
 
                 # ── Leyenda expandible ────────────────────────────────────────────
-                with st.expander("📖  Regla de cumplimiento de tiempo (piso 75% del estimado)", expanded=False):
+                with st.expander("📖  Regla de cumplimiento de tiempo (piso 70% / Shell 50%)", expanded=False):
                     st.markdown("""
     **¿Cómo funciona?**
 
     Cada mantenimiento preventivo tiene una **duración estimada** (programada en Fracttal).
     La duración estimada se toma **solo de la subtarea LAVADORA** (no se suman bomba,
     ablandador, lavatapices ni cambio de aceite — esos son actividades aparte).
-    El técnico debe ejecutar la tarea al menos por el **75% del tiempo estimado de la lavadora**.
 
-    - **Piso: 75% del tiempo estimado** — si se ejecuta más rápido, es sospecha de quick-tick.
+    - **Copec / Aramco**: piso **70%** del tiempo estimado.
+    - **Shell (Enex)**: piso **50%** — sus equipos tienen mantención más corta.
     - **Sin techo (informativo)** — si se ejecuta más lento del 150%, se marca como
-      🟣 **Sobretiempo**, pero **CUMPLE**. El técnico puede justificadamente tardar más
-      (falla adicional, revisión profunda, etc.). El dato queda registrado para monitoreo,
+      🟣 **Sobretiempo**, pero **CUMPLE**. El dato queda registrado para monitoreo,
       no penaliza el KPI.
 
     Ejemplo con MP de **1:30 h (90 min)** estimados (lavadora):
 
-    | Duración estimada | Mínimo (75%) | Ejemplo | Resultado |
-    |---|---|---|---|
-    | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 1:20 (80 min) | ✅ Cumple |
-    | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 0:30 (30 min) | ❌ No cumple (déficit) |
-    | 01:30 (90 min) | 01:07 (67 min) | Ejecutó 2:30 (150 min) | ✅ Cumple 🟣 Sobretiempo |
-    | 00:40 (40 min) | 00:30 (30 min) | Ejecutó 32 min | ✅ Cumple |
-    | 01:00 (60 min) | 00:45 (45 min) | Ejecutó 50 min | ✅ Cumple |
+    | Cliente | Duración estimada | Mínimo | Ejemplo | Resultado |
+    |---|---|---|---|---|
+    | Copec | 01:30 (90 min) | 01:03 (63 min, 70%) | Ejecutó 1:20 | ✅ Cumple |
+    | Copec | 01:30 (90 min) | 01:03 (63 min, 70%) | Ejecutó 0:30 | ❌ No cumple |
+    | Shell | 01:30 (90 min) | 00:45 (45 min, 50%) | Ejecutó 0:50 | ✅ Cumple |
+    | Shell | 01:30 (90 min) | 00:45 (45 min, 50%) | Ejecutó 0:20 | ❌ No cumple |
 
     **¿Qué se mide?**
     - **Tiempo efectivo** = `max(tasks_duration, tiempo real por fechas OT)`
     - **Duración estimada** = SOLO de la subtarea LAVADORA (fuente: `duracion_estim_neta_seg`)
-    - Si `Tiempo Efectivo ≥ 75% × Estimada` → **✅ CUMPLE**
-    - Si `Tiempo Efectivo < 75% × Estimada` → **❌ NO CUMPLE**
+    - Si `Tiempo Efectivo ≥ piso% × Estimada` → **✅ CUMPLE**
+    - Si `Tiempo Efectivo < piso% × Estimada` → **❌ NO CUMPLE**
     - Si además `Tiempo Efectivo > 150% × Estimada` → **✅ CUMPLE + 🟣 Sobretiempo** (informativo)
     - Si no hay duración estimada → **Sin datos** (no penaliza)
 
@@ -10897,17 +10895,17 @@ elif _page == _NAV_PAGES[0]:
                     tc1, tc2 = st.columns([1, 3])
                     with tc1:
                         _kpi_card(_te_pct, _te_ok, _te_tot,
-                                  "preventivos con tiempo OK (75%–150%)", meta_pct=75.0)
+                                  "preventivos con tiempo OK (≥70% / Shell ≥50%)", meta_pct=70.0)
                     with tc2:
                         if not _g_te.empty:
-                            _te_sig = (f"_fig_te_v2_{_current_theme}_{_wo_sig}_{equipo_kpi}"
+                            _te_sig = (f"_fig_te_v3_{_current_theme}_{_wo_sig}_{equipo_kpi}"
                                        f"_{tec_kpi_sel}_{'-'.join(_meses_prec_str)}_{_sem_prec}")
                             if _te_sig not in st.session_state:
                                 st.session_state[_te_sig] = _fig_apilada(
                                     _g_te, color_ok="#3b82f6",
-                                    label_ok="Tiempo correcto (≥75%)",
+                                    label_ok="Tiempo correcto (≥70%)",
                                     label_err="Tiempo insuficiente",
-                                    meta=75.0, titulo_y="% preventivos",
+                                    meta=70.0, titulo_y="% preventivos",
                                 )
                             st.plotly_chart(st.session_state[_te_sig], width="stretch")
 
@@ -10929,7 +10927,9 @@ elif _page == _NAV_PAGES[0]:
                         return f"{h:02d}:{m:02d}"
 
                     _det_te = _df_te_p.copy()
-                    _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * 0.75).round(0)
+                    _det_te["_piso_pct"] = _det_te["client"].apply(
+                        lambda c: 0.50 if c == "SHELL (Enex)" else 0.70)
+                    _det_te["_minimo_sec"] = (_det_te["estimated_sec"] * _det_te["_piso_pct"]).round(0)
                     _det_te["_maximo_sec"] = (_det_te["estimated_sec"] * 1.50).round(0)
                     _det_te["_pct_ej"]     = (_det_te["_effective_sec"] / _det_te["estimated_sec"] * 100).round(1)
                     _det_te["_es_exceso"]  = _det_te["_effective_sec"] > _det_te["_maximo_sec"]
@@ -10943,7 +10943,7 @@ elif _page == _NAV_PAGES[0]:
                          "_pct_ej","_te_ok","_es_exceso"]
                         if c in _det_te.columns]].copy()
                     _det_te_disp["T. Estimado"]   = _det_te_disp["estimated_sec"].apply(_fmt_seg)
-                    _det_te_disp["Mín. 75%"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
+                    _det_te_disp["T. Mínimo"]       = _det_te_disp["_minimo_sec"].apply(_fmt_seg)
                     _det_te_disp["Máx. 150%"]      = _det_te_disp["_maximo_sec"].apply(_fmt_seg)
                     _det_te_disp["T. Ejecución"]   = _det_te_disp["_effective_sec"].apply(_fmt_seg)
                     _det_te_disp["% Ejecutado"]    = _det_te_disp["_pct_ej"]
@@ -10974,37 +10974,30 @@ elif _page == _NAV_PAGES[0]:
                         minimo = int(r.get("_minimo_sec") or 0)
                         maximo = int(r.get("_maximo_sec") or 0)
                         pct = float(r.get("_pct_ej") or 0.0)
+                        _piso_lbl = f"{int(r.get('_piso_pct', 0.70) * 100)}%"
                         estim_h = _fmt_hm(estim)
                         real_h  = _fmt_hm(real)
                         min_h   = _fmt_hm(minimo)
                         max_h   = _fmt_hm(maximo)
-                        # ── SOBRETIEMPO (cumple, informativo) ───────────────────
                         if bool(r.get("_te_ok", False)) and bool(r.get("_es_exceso", False)):
                             exceso = real - maximo
                             return (f"Sobretiempo (informativo, no penaliza): {real_h} ejecutado "
                                     f"supera el tope de referencia {max_h} (150% de {estim_h}) "
-                                    f"por {_fmt_hm(exceso)}. La OT CUMPLE — puede haber tenido "
-                                    f"causa legítima (falla adicional, revisión profunda).")
-                        # Si cumple sin sobretiempo, vacío
+                                    f"por {_fmt_hm(exceso)}. La OT CUMPLE.")
                         if bool(r.get("_te_ok", False)):
                             return ""
-                        # ── DÉFICIT (<75% del estimado) ─────────────────────────
                         deficit = minimo - real
                         if real == 0:
                             return (f"Sin registro de tiempo: el técnico no documentó duración alguna. "
-                                    f"Estimado {estim_h}, mínimo aceptable {min_h}.")
+                                    f"Estimado {estim_h}, mínimo aceptable {min_h} ({_piso_lbl}).")
                         if pct < 5:
                             return (f"Tiempo absurdo: registró {real_h} cuando el estimado era {estim_h} "
                                     f"(mínimo {min_h}). Imposible ejecutar una preventiva en ese plazo.")
                         if pct < 20:
                             return (f"Tiempo injustificado: {real_h} es <20% del estimado ({estim_h}). "
                                     f"Quick-tick probable — debió ser al menos {min_h}.")
-                        if pct < 50:
-                            return (f"Muy por debajo del mínimo: {real_h} ejecutado vs {min_h} requerido "
-                                    f"(75% de {estim_h}). Déficit de {_fmt_hm(deficit)}.")
-                        # 50-75% → cerca pero no llega
-                        return (f"El acumulado del tiempo no cumple ni siquiera el 75% mínimo de {estim_h}: "
-                                f"registró {real_h} y se requerían {min_h} (faltaron {_fmt_hm(deficit)}).")
+                        return (f"Por debajo del mínimo: {real_h} ejecutado vs {min_h} requerido "
+                                f"({_piso_lbl} de {estim_h}). Déficit de {_fmt_hm(deficit)}.")
 
                     _det_te_disp["Diagnóstico"] = _det_te.apply(_diag_tiempo, axis=1).values
                     # Mapa código EDS → nombre (desde el maestro estaciones_servicio)
@@ -11029,7 +11022,7 @@ elif _page == _NAV_PAGES[0]:
                     }).sort_values("Fecha", ascending=False)
                     # Orden: OT - EDS - Nombre EDS - Técnico - resto, Diagnóstico al final
                     _orden_te = ["OT","EDS","Nombre EDS","Técnico","Fecha","Tipo",
-                                 "T. Estimado","Mín. 75%","Máx. 150%","T. Ejecución","% Ejecutado","Estado",
+                                 "T. Estimado","T. Mínimo","Máx. 150%","T. Ejecución","% Ejecutado","Estado",
                                  "Diagnóstico"]
                     _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
@@ -11060,15 +11053,15 @@ elif _page == _NAV_PAGES[0]:
                                 "Tipo":        st.column_config.TextColumn(width=200),
                                 "T. Estimado": st.column_config.TextColumn(width=100,
                                     help="Duración programada en Fracttal (HH:MM)"),
-                                "Mín. 75%":    st.column_config.TextColumn(width=90,
-                                    help="Tiempo mínimo aceptable = 75% del estimado"),
+                                "T. Mínimo":    st.column_config.TextColumn(width=90,
+                                    help="Tiempo mínimo aceptable = 70% del estimado (Shell = 50%)"),
                                 "Máx. 150%":   st.column_config.TextColumn(width=90,
                                     help="Umbral de referencia = 150% del estimado. Superarlo se marca como 🟣 Sobretiempo (informativo, NO penaliza)."),
                                 "T. Ejecución":st.column_config.TextColumn(width=110,
                                     help="Tiempo efectivo = max(tiempo tareas, tiempo real por fechas)"),
                                 "% Ejecutado": st.column_config.ProgressColumn(
                                     label="% Ejecutado", min_value=0, max_value=250, format="%.1f%%",
-                                    help="T.Efectivo / T.Estimado × 100. Cumple si es ≥ 75%. Sobre 150% es informativo (cumple)."),
+                                    help="T.Efectivo / T.Estimado × 100. Cumple si ≥ 70% (Shell ≥ 50%). Sobre 150% = informativo (cumple)."),
                                 "Estado":      st.column_config.TextColumn(width=180),
                                 "Diagnóstico": st.column_config.TextColumn(width=380,
                                     help="Razón concreta cuando NO cumple, o marca de sobretiempo informativo cuando cumple pero superó 150%. Vacío cuando cumple normalmente."),
@@ -11157,14 +11150,14 @@ elif _page == _NAV_PAGES[0]:
                                 specs=[[{"type": "domain"}, {"type": "domain"}]],
                                 subplot_titles=[
                                     "Cumplimiento general",
-                                    "OTs fuera de rango normal (75–150%)",
+                                    "OTs fuera de rango normal",
                                 ],
                             )
                             # Dona 1: cumple total (normal + sobretiempo) vs no cumple
                             # Rojo (#dc2626) para no cumplen — distinto del naranja
                             # de 'Déficit' en la dona 2 (evita confusión visual).
                             _fig_abs.add_trace(go.Pie(
-                                labels=["Cumplen (≥75%)", "No cumplen (<75%)"],
+                                labels=["Cumplen", "No cumplen"],
                                 values=[_n_ok_total, _n_no_cumple],
                                 hole=0.52,
                                 marker=dict(colors=["#22c55e", "#dc2626"],
@@ -11185,7 +11178,7 @@ elif _page == _NAV_PAGES[0]:
                                 _fig_abs.add_trace(go.Pie(
                                     labels=[
                                         "✅ Sobretiempo (>150%) - cumple igual",
-                                        "❌ Déficit (20–75%)",
+                                        "❌ Déficit",
                                         "❌ Injustificado (<20%)",
                                     ],
                                     values=[_n_ex_d, _n_jd, _n_abd],
@@ -11218,7 +11211,7 @@ elif _page == _NAV_PAGES[0]:
                             _x_lbl = _te_grp["_label"].tolist()
                             _fig_abs = go.Figure()
                             _fig_abs.add_trace(go.Bar(
-                                name="✅ Cumple normal (75–150%)",
+                                name="✅ Cumple normal",
                                 x=_x_lbl,
                                 y=_te_grp["ok"].tolist(),
                                 marker_color="#22c55e",
@@ -11238,7 +11231,7 @@ elif _page == _NAV_PAGES[0]:
                                 textfont=dict(size=11, color="#ffffff"),
                             ))
                             _fig_abs.add_trace(go.Bar(
-                                name="❌ Déficit (20–75%)",
+                                name="❌ Déficit",
                                 x=_x_lbl,
                                 y=_te_grp["just_fail"].tolist(),
                                 marker_color="#f59e0b",
