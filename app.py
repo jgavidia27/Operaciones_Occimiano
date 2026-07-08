@@ -8157,7 +8157,7 @@ elif _page == _NAV_PAGES[0]:
                     _df_sla_disp["_exc"] = None
 
                 _cols_final = [c for c in [
-                    "os_fracttal", "eds_occim",
+                    "os_fracttal", "n_llamado", "eds_occim",
                     "equipo_label", "tecnico", "cliente", "eds_nombre",
                     "_fecha_exacta", "_hora_inicio", "_hora_cierre",
                     "prioridad", "zona_norm",
@@ -8167,7 +8167,8 @@ elif _page == _NAV_PAGES[0]:
 
                 _df_sla_disp = _df_sla_disp[_cols_final].copy()
                 _df_sla_disp.rename(columns={
-                    "os_fracttal":     "OT (OS-XXXXX)",
+                    "os_fracttal":     "N°Orden (OT)",
+                    "n_llamado":       "N°Aviso",
                     "eds_occim":       "Cód. EDS",
                     "equipo_label":    "Equipo",
                     "tecnico":         "Técnico",
@@ -8190,7 +8191,8 @@ elif _page == _NAV_PAGES[0]:
                     width="stretch",
                     hide_index=True,
                     column_config={
-                        "OT (OS-XXXXX)":       st.column_config.TextColumn(width=120),
+                        "N°Orden (OT)":        st.column_config.TextColumn(width=120),
+                        "N°Aviso":             st.column_config.TextColumn(width=100),
                         "Cód. EDS":            st.column_config.TextColumn(width=90),
                         "Fecha atención":      st.column_config.TextColumn(width=105),
                         "Hora inicio SLA":     st.column_config.TextColumn(width=110),
