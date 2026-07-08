@@ -14,7 +14,10 @@ Es un espejo real de lo que ve el dashboard, en un formato más ameno
 """
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+import pytz
+_CL_TZ = pytz.timezone("America/Santiago")
 
 import pandas as pd
 import requests
@@ -209,7 +212,9 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
             return pd.NaT
         try:
             t = pd.Timestamp(str(x))
-            return t.tz_convert(None) if t.tzinfo is not None else t
+            if t.tzinfo is not None:
+                return t.tz_convert("America/Santiago").tz_localize(None)
+            return t
         except Exception:
             return pd.NaT
     df["fecha_llamado"]  = df["fecha_llamado"].apply(_ts)
@@ -512,7 +517,7 @@ if vista == "📰 Feed cronológico":
         _fl = r["fecha_llamado"]
         _fl_s = _fl.strftime("%d/%m %H:%M") if pd.notna(_fl) else "—"
         _fi = r.get("fecha_inicio_atencion")
-        _fi_s = ("inicio " + _fi.strftime("%d/%m %H:%M")) if pd.notna(_fi) else ""
+        _fi_s = ("🔧 inicio " + _fi.strftime("%d/%m %H:%M")) if pd.notna(_fi) else ""
         _fc = r["fecha_atencion"]
         _fc_s = ("cerrada " + _fc.strftime("%d/%m %H:%M")) if pd.notna(_fc) else ("abierta" if not _fi_s else _fi_s)
 
@@ -522,6 +527,29 @@ if vista == "📰 Feed cronológico":
         if pd.notna(_hr):
             _u = f"{int(_um)}h" if pd.notna(_um) else "?h"
             _hr_s = f" · <b>{_hr:.1f}h</b> resp. / SLA {_u}"
+
+        _sla_line = ""
+        if pd.notna(_fl) and pd.notna(_um) and float(_um) > 0:
+            _deadline = _fl + timedelta(hours=float(_um))
+            _dl_s = _deadline.strftime("%d/%m %H:%M")
+            if pd.isna(_fc):
+                _now = datetime.now(_CL_TZ).replace(tzinfo=None)
+                _diff_sec = int((_deadline - _now).total_seconds())
+                if _diff_sec > 0:
+                    _hh, _rr = divmod(_diff_sec, 3600)
+                    _mm = _rr // 60
+                    _sla_line = (f'<div class="meta" style="margin-top:2px;">'
+                        f'⏱ <b>SLA:</b> inicio {_fl_s} · vence {_dl_s} '
+                        f'· <span style="color:#16a34a;font-weight:600;">quedan {_hh}h {_mm}min</span></div>')
+                else:
+                    _hh, _rr = divmod(abs(_diff_sec), 3600)
+                    _mm = _rr // 60
+                    _sla_line = (f'<div class="meta" style="margin-top:2px;">'
+                        f'⏱ <b>SLA:</b> inicio {_fl_s} · vence {_dl_s} '
+                        f'· <span style="color:#dc2626;font-weight:600;">⚠️ vencida hace {_hh}h {_mm}min</span></div>')
+            else:
+                _sla_line = (f'<div class="meta" style="margin-top:2px;">'
+                    f'⏱ <b>SLA:</b> inicio {_fl_s} · límite {_dl_s} ({int(_um)}h)</div>')
 
         _exc = r.get("excepcion_motivo")
         _exc_html = ""
@@ -555,6 +583,7 @@ if vista == "📰 Feed cronológico":
             f'<div class="cli">{_cli} · {_cm} ({_zn}) · Equipo: {_eq} · Téc: {_tec}</div>'
             f'{_exc_html}'
             f'<div class="meta">📅 {_fl_s} · {_fc_s}{_hr_s}</div>'
+            f'{_sla_line}'
             f'</div>'
         )
 
