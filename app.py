@@ -10630,7 +10630,7 @@ elif _page == _NAV_PAGES[0]:
 
                     # ── Tabla detalle de Causa Raíz ───────────────────────────────
                     _n_cr_total = len(_df_cr_base)
-                    with st.expander(f"📋 Detalle de OTs — Causa Raíz ({_n_cr_total:,} correctivas)", expanded=False):
+                    with st.expander(f"📋 Detalle de OTs — Causa Raíz ({_n_cr_total:,} correctivas)", expanded=True):
                         _filtro_cr = _filtro_ot_input("kpi_filtro_ot_causa")
                         _det_cr = _df_cr_base[[c for c in
                             ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
@@ -11043,7 +11043,7 @@ elif _page == _NAV_PAGES[0]:
                     )
 
                     _n_te_total = len(_det_te_disp)
-                    with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({_n_te_total:,} preventivos con estimado)", expanded=False):
+                    with st.expander(f"📋 Detalle de OTs — Tiempo de Ejecución ({_n_te_total:,} preventivos con estimado)", expanded=True):
                         _filtro_te = _filtro_ot_input("kpi_filtro_ot_tiempo")
                         _det_te_disp = _aplicar_filtro_ot(_det_te_disp, _filtro_te, col="OT")
                         if _filtro_te:
@@ -11364,7 +11364,7 @@ elif _page == _NAV_PAGES[0]:
                             }).sort_values("% Ejecutado", ascending=False)
 
                         with st.expander(
-                            f"🟣 Detalle OTs con exceso de tiempo — >150% ({_n_exceso:,} OTs)", expanded=False
+                            f"🟣 Detalle OTs con exceso de tiempo — >150% ({_n_exceso:,} OTs)", expanded=True
                         ):
                             _filtro_ex = _filtro_ot_input("kpi_filtro_ot_exceso")
                             _det_ex_disp = _aplicar_filtro_ot(_det_ex_disp, _filtro_ex, col="OT")
