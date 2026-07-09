@@ -41,7 +41,7 @@ def _build_loc_to_eds(h):
 def main():
     h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     h_post = {**h, "Content-Type": "application/json",
-              "Prefer": "resolution=merge-duplicates,return=minimal"}
+              "Prefer": "resolution=ignore-duplicates,return=minimal"}
 
     log("Buscando OTs directas de Fracttal no capturadas por robot...")
     loc_map = _build_loc_to_eds(h)
@@ -117,13 +117,14 @@ def main():
         log("Sin OTs nuevas para agregar.")
         return
 
-    # 3. Insertar en llamados_correctivos
+    # 3. Insertar en llamados_correctivos (upsert por os_fracttal+cliente)
     BATCH = 200
     total = 0
     for i in range(0, len(nuevos), BATCH):
         batch = nuevos[i:i+BATCH]
         r3 = requests.post(
-            SUPABASE_URL + "/rest/v1/llamados_correctivos",
+            SUPABASE_URL + "/rest/v1/llamados_correctivos"
+            "?on_conflict=os_fracttal,cliente",
             headers=h_post,
             data=json.dumps(batch, ensure_ascii=False),
             timeout=20

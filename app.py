@@ -4382,7 +4382,7 @@ elif _page == _NAV_PAGES[3]:
 
     # Work orders con eds_occim ──────────────────────────────────────────────
     raw_wo_eds = load_work_orders_supabase()
-    _wo_eds_sig = str(len(raw_wo_eds))
+    _wo_eds_sig = f"{len(raw_wo_eds)}_{raw_wo_eds[0].get('id_ot','') if raw_wo_eds else ''}"
 
     def _build_wo_eds():
         _df = build_work_orders_df(raw_wo_eds)
