@@ -43,6 +43,7 @@ SLEEP_OK    = 0.25
 SLEEP_429   = 8
 MAX_RETRIES = 6
 PROGRESS_FILE = Path("sync_progress.json")
+_ZONE_NAMES = {"CENTRO", "SUR", "SANTIAGO", "NORTE"}
 
 CHROME_HEADERS = {
     "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
@@ -330,6 +331,15 @@ def _has_resources(wo: dict) -> bool:
                   "resources_hours", "resources_services"]
     )
 
+def _resolve_eds(wo: dict):
+    """Return eds code, resolving zone names via LOC mapping."""
+    raw = _str(wo.get("groups_2_description"))
+    if raw and raw.upper() in _ZONE_NAMES and _loc_to_eds:
+        loc = _str(wo.get("code"))
+        if loc and loc in _loc_to_eds:
+            return _loc_to_eds[loc]
+    return raw
+
 def map_record(wo: dict) -> dict | None:
     folio = _str(wo.get("wo_folio"))
     if not folio:
@@ -366,7 +376,7 @@ def map_record(wo: dict) -> dict | None:
         "ubicacion":          _str(wo.get("parent_description"), 500),
         "cliente":            client,
         "estacion":           _str(station, 300),
-        "codigo_eds":         _str(wo.get("groups_2_description")),
+        "codigo_eds":         _resolve_eds(wo),
 
         # Equipo/Activo
         "codigo_activo":      _str(wo.get("code")),
@@ -431,6 +441,25 @@ def map_record(wo: dict) -> dict | None:
         # Sync metadata
         "updated_at":         datetime.now(timezone.utc).isoformat(),
     }
+
+# ── LOC→EDS mapping (resolve zone names to real station codes) ─────────────
+
+_loc_to_eds: dict = {}
+
+def _load_loc_mapping():
+    global _loc_to_eds
+    h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/estaciones_servicio"
+        "?loc_fracttal=not.is.null&select=eds_occim,loc_fracttal",
+        headers=h, timeout=15,
+    )
+    _loc_to_eds = {
+        row["loc_fracttal"]: row["eds_occim"]
+        for row in r.json()
+        if row.get("loc_fracttal") and row.get("eds_occim")
+    }
+    log(f"LOC→EDS mapping: {len(_loc_to_eds)} entries")
 
 # ── Upsert Supabase ────────────────────────────────────────────────────────
 
@@ -534,6 +563,8 @@ def main():
     # Cargar índice SLA Cotalker (Aramco) ANTES del sync principal.
     # Sin esto, prioridad_calc de Aramco cae al fallback (Fracttal, incorrecto).
     build_cotalker_sla_index()
+
+    _load_loc_mapping()
 
     buffer, pages, stopped = [], 0, False
 

@@ -351,7 +351,7 @@ with _f5:
         key="q",
     )
 
-_r1, _r2 = st.columns([1.6, 5])
+_r1, _r2, _r3 = st.columns([1.6, 1.4, 3.6])
 with _r1:
     _hoy_date = datetime.now(_CL_TZ).date()
     _fmax_data = df["fecha_llamado"].max().date() if pd.notna(df["fecha_llamado"].max()) else _hoy_date
@@ -359,6 +359,10 @@ with _r1:
     _fmin = df["fecha_llamado"].min().date() if pd.notna(df["fecha_llamado"].min()) else _fmax
     fecha_rng = st.date_input("Rango de fechas", (_fmin, _fmax),
                               min_value=_fmin, max_value=_fmax)
+with _r2:
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    _solo_pend = st.toggle("Solo pendientes (abiertas)", key="solo_pend",
+                           help="Muestra únicamente OTs sin atender + técnico atendiendo")
 
 # Aplicar filtros
 _df = df.copy()
@@ -383,6 +387,8 @@ if buscar and buscar.strip():
 if len(fecha_rng) == 2:
     d0, d1 = fecha_rng
     _df = _df[(_df["fecha_llamado"].dt.date >= d0) & (_df["fecha_llamado"].dt.date <= d1)]
+if _solo_pend:
+    _df = _df[_df["estado_lbl"].isin(["OT Pendiente - Sin atender", "Técnico atendiendo"])]
 
 
 # ══════════════════════════════════════════════════════════════════════

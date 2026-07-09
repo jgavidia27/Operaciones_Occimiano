@@ -20,9 +20,23 @@ SUPABASE_KEY = (
     "MDcxMTk0OCwiZXhwIjoyMDk2Mjg3OTQ4fQ.keB15jRQ7ahuXiDHktFC_Yi000XUlExjDMqTuC6VLgw"
 )
 CLIENTES_SLA = ("COPEC", "ESMAX (Aramco)", "SHELL (Enex)")
+_ZONE_NAMES = {"CENTRO", "SUR", "SANTIAGO", "NORTE"}
 
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+def _build_loc_to_eds(h):
+    """Mapea loc_fracttal -> (eds_occim, nombre) desde estaciones_servicio."""
+    r = requests.get(
+        SUPABASE_URL + "/rest/v1/estaciones_servicio"
+        "?loc_fracttal=not.is.null&select=eds_occim,nombre,loc_fracttal",
+        headers=h, timeout=15,
+    )
+    return {
+        row["loc_fracttal"]: (row["eds_occim"], row.get("nombre") or "")
+        for row in r.json()
+        if row.get("loc_fracttal") and row.get("eds_occim")
+    }
 
 def main():
     h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
@@ -30,6 +44,7 @@ def main():
               "Prefer": "resolution=merge-duplicates,return=minimal"}
 
     log("Buscando OTs directas de Fracttal no capturadas por robot...")
+    loc_map = _build_loc_to_eds(h)
 
     # 1. Obtener folios que YA estan en llamados_correctivos
     r = requests.get(
@@ -50,7 +65,7 @@ def main():
             "?tipo_tarea=eq.CORRECTIVA"
             "&select=id_ot,cliente,codigo_eds,estacion,responsable,"
             "prioridad_calc,fecha_creacion,fecha_finalizacion,estado,"
-            "causa_raiz,nombre_activo",
+            "causa_raiz,nombre_activo,codigo_activo",
             headers={**h, "Range": f"{offset}-{offset+499}"},
             timeout=15
         )
@@ -68,12 +83,23 @@ def main():
                 continue  # ya lo tenemos
 
             # OT nueva no capturada por robot -> 'ot_directa'
+            eds_cod = ot.get("codigo_eds") or ""
+            eds_nom = ot.get("estacion") or ""
+
+            if eds_cod.upper() in _ZONE_NAMES or not eds_cod:
+                loc_code = ot.get("codigo_activo") or ""
+                if not loc_code:
+                    raw = ot.get("nombre_activo", "")
+                    loc_code = raw.split("{ ")[-1].rstrip(" }") if "{ " in raw else ""
+                if loc_code and loc_code in loc_map:
+                    eds_cod, eds_nom = loc_map[loc_code]
+
             nuevos.append({
                 "os_fracttal":     folio,
                 "n_aviso":         None,
                 "cliente":         cliente,
-                "eds_codigo":      ot.get("codigo_eds"),
-                "eds_nombre":      ot.get("estacion"),
+                "eds_codigo":      eds_cod or None,
+                "eds_nombre":      eds_nom or None,
                 "fecha_llamado":   ot.get("fecha_creacion"),
                 "prioridad":       ot.get("prioridad_calc"),
                 "tecnico":         ot.get("responsable"),
