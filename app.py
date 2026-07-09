@@ -2221,11 +2221,11 @@ if _page == _NAV_PAGES[1]:
                 kpis_ll = _kpis_raw_c
                 kpis_ll = kpis_ll.merge(_eds_avg_pct, on="eds_occim", how="left")
             if not kpis_ll.empty:
-                # Nombre para mostrar: nombre comercial → dirección → código
-                kpis_ll["nombre"] = kpis_ll["eds_occim"].astype(str).map(station_name_map)
+                # Nombre para mostrar: estaciones_servicio.nombre → Fracttal third-party → código
                 kpis_ll["nombre"] = kpis_ll.apply(
-                    lambda r: r["nombre"] if pd.notna(r.get("nombre")) and str(r.get("nombre","")).strip()
-                    else r.get("direccion",""), axis=1)
+                    lambda r: r.get("direccion","") if pd.notna(r.get("direccion")) and str(r.get("direccion","")).strip()
+                    else (station_name_map.get(str(r["eds_occim"]), "") or str(r["eds_occim"])),
+                    axis=1)
                 if "ultimo_llamado" in kpis_ll.columns:
                     kpis_ll["ultimo_llamado"] = (pd.to_datetime(kpis_ll["ultimo_llamado"],errors="coerce")
                                                  .dt.strftime("%d/%m/%Y"))
