@@ -353,7 +353,9 @@ with _f5:
 
 _r1, _r2 = st.columns([1.6, 5])
 with _r1:
-    _fmax = df["fecha_llamado"].max().date() if pd.notna(df["fecha_llamado"].max()) else datetime.today().date()
+    _hoy_date = datetime.now(_CL_TZ).date()
+    _fmax_data = df["fecha_llamado"].max().date() if pd.notna(df["fecha_llamado"].max()) else _hoy_date
+    _fmax = max(_fmax_data, _hoy_date)
     _fmin = df["fecha_llamado"].min().date() if pd.notna(df["fecha_llamado"].min()) else _fmax
     fecha_rng = st.date_input("Rango de fechas", (_fmin, _fmax),
                               min_value=_fmin, max_value=_fmax)
