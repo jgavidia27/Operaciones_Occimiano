@@ -286,6 +286,41 @@ def index():
             all_tecnicos.append({"full": t_full, "short": t_short, "equipo": eq_info.get("label", eq_key)})
     all_tecnicos.sort(key=lambda x: x["short"])
 
+    # Helper: asegura que TODOS los seniors aparezcan por cada equipo que lideran,
+    # aunque no ejecuten trabajos directamente a su nombre. Los seniors muestran
+    # SIEMPRE el promedio de su equipo (etiqueta PROMEDIO EQUIPO).
+    # `agg_key` = clave del dict agregado por equipo ("prec", "sla", "cal").
+    def _ensure_seniors_in_ranking(rows_list, agg_by_eq, build_row_fn):
+        """rows_list: lista actual de dicts con al menos nombre/equipo/es_senior.
+           agg_by_eq: dict {eq_key: aggregated_data} para calcular métricas de equipo.
+           build_row_fn(senior_short, eq_key, eq_data) → dict con la fila del senior.
+           Deduplica por (nombre_short, equipo_label) para no repetir."""
+        # Filtrar respetando filtros activos (equipo_sel, tecnico_sel)
+        if tecnico_sel and not _is_senior_row_of_selected(tecnico_sel):
+            # Si el usuario filtró por un técnico no-senior, no agregamos seniors.
+            return rows_list
+        _present = {(r["nombre"], r["equipo"]) for r in rows_list}
+        for eq_key, eq_info in equipos_info.items():
+            if equipo_sel and eq_key != equipo_sel:
+                continue
+            senior_short = eq_info.get("senior", "")
+            if not senior_short or senior_short not in seniors:
+                continue
+            eq_label = equipos_label.get(eq_key, eq_key)
+            if (senior_short, eq_label) in _present:
+                continue
+            eq_data = agg_by_eq.get(eq_key)
+            if not eq_data:
+                continue
+            new_row = build_row_fn(senior_short, eq_key, eq_data)
+            if new_row:
+                rows_list.append(new_row)
+        return rows_list
+
+    def _is_senior_row_of_selected(tec_full):
+        """True si el técnico seleccionado en el filtro es senior."""
+        return full_to_short.get(tec_full, tec_full) in seniors
+
     # ═══ AGREGAR DATOS DEL DASHBOARD ═══
 
     # SLA — filtrar por mes, equipo, técnico
@@ -359,6 +394,17 @@ def index():
             "pct": pct, "cumple": c, "total": tot,
             "bono_pct": bp, "bono_clp": bc, "es_senior": _is_snr,
         })
+    # Rellenar seniors faltantes por cada equipo que lideran
+    def _build_sla_senior_row(snr_short, eq_key, eq_d):
+        tot = eq_d.get("total", 0)
+        if tot <= 0: return None
+        c = eq_d.get("cumple", 0)
+        pct = round(c / tot * 100, 1)
+        bp, bc = _bono_sla(pct)
+        return {"nombre": snr_short, "equipo": equipos_label.get(eq_key, eq_key),
+                "pct": pct, "cumple": c, "total": tot,
+                "bono_pct": bp, "bono_clp": bc, "es_senior": True}
+    sla_tecnicos = _ensure_seniors_in_ranking(sla_tecnicos, _sla_eq_agg, _build_sla_senior_row)
     sla_tecnicos.sort(key=lambda x: x["pct"], reverse=True)
 
     sla_data = {"pct": sla_pct, "cumple": sla_cumple, "total": sla_total,
@@ -435,6 +481,17 @@ def index():
                 "pct": pct, "buenas": d["buenas"], "total": d["total"], "bono_clp": bc,
                 "es_senior": False,
             })
+    # Rellenar seniors faltantes por cada equipo que lideran
+    def _build_prec_senior_row(snr_short, eq_key, eq_d):
+        tot = eq_d.get("total", 0)
+        if tot <= 0: return None
+        b = eq_d.get("buenas", 0)
+        pct = round(b / tot * 100, 1)
+        bp, bc = _bono_prec(pct)
+        return {"nombre": snr_short, "equipo": equipos_label.get(eq_key, eq_key),
+                "pct": pct, "buenas": b, "total": tot, "bono_clp": bc,
+                "es_senior": True}
+    prec_tecnicos = _ensure_seniors_in_ranking(prec_tecnicos, _eq_agg, _build_prec_senior_row)
     prec_tecnicos.sort(key=lambda x: x["pct"], reverse=True)
 
     prec_data = {"pct": prec_pct, "buenas": prec_buenas, "total": prec_total,
@@ -504,6 +561,20 @@ def index():
             "exactitud": round(ex_t, 1), "fallas": n_f, "pms": n_pm, "bono_clp": bc_t,
             "es_senior": _is_snr,
         })
+    # Rellenar seniors faltantes: los seniors que no ejecutan PMs a su nombre
+    # (Luis Pinto, Victor Bahamonde) igualmente deben aparecer mostrando el
+    # promedio del equipo — es la base de su bono de Efectividad MP.
+    _cal_eq_agg = {eq: {"fallas": _cal_eq_f.get(eq, 0), "pms": _cal_eq_pm.get(eq, 0)}
+                   for eq in equipos_info}
+    def _build_cal_senior_row(snr_short, eq_key, eq_d):
+        n_pm = eq_d.get("pms", 0)
+        if n_pm <= 0: return None
+        n_f = eq_d.get("fallas", 0)
+        _, bc_t, ex_t = _bono_calidad(n_f, n_pm)
+        return {"nombre": snr_short, "equipo": equipos_label.get(eq_key, eq_key),
+                "exactitud": round(ex_t, 1), "fallas": n_f, "pms": n_pm,
+                "bono_clp": bc_t, "es_senior": True}
+    cal_tecnicos = _ensure_seniors_in_ranking(cal_tecnicos, _cal_eq_agg, _build_cal_senior_row)
     cal_tecnicos.sort(key=lambda x: x["exactitud"], reverse=True)
 
     cal_data = {"exactitud": round(exactitud, 1), "fallas": fallas_total,
