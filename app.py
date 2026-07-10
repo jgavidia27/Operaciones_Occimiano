@@ -111,6 +111,68 @@ def _strip_comentario_headers(txt) -> str:
         return "—"
     return _COMENT_HEADER_RE.sub("", s).strip(" |") or "—"
 
+
+# ── Título Case inteligente para nombres/EDS/ciudades en tablas ──────────────
+# Fracttal devuelve muchos campos en MAYÚSCULAS. Para display humano queremos
+# Title Case, pero respetando acrónimos (EDS, RM, N°, LTDA, S.A.) y siglas.
+_SMART_ACRONIMOS = {
+    "EDS","S.A.","SA","SPA","EIRL","E.I.R.L.",
+    "RM","R.M.","N°","OS","OT","N","AV","AV.","AVDA","AVDA.","CL","C.",
+    "T1","T2","T3","T4","T5","P1","P2","P3","P4","P5",
+    "II","III","IV","VI","VII","VIII","IX","XI","XII","XIII","XIV","XV",
+    "USA","EEUU","V","VI","EQ","MP","MC","PM","CM","OM","BSA",
+}
+_SMART_PREFIJOS = {"E/S", "E.S.", "E/S.", "EE.", "EE"}
+def _smart_title(s) -> str:
+    """Title case por-token respetando acrónimos, códigos y siglas cortas.
+
+    Procesa token por token: sólo baja a Title Case los tokens que están
+    completamente en MAYÚSCULAS y tienen 3+ letras. Deja intactos:
+    - acrónimos conocidos (EDS, SA, EIRL, N°, P1-P5, T1-T4)
+    - códigos alfanuméricos (OS-38532, EQ-6103, EE_S016)
+    - siglas de 1-2 letras (V, IV, N°)
+    - tokens ya mixtos ("(Enex)", "Aramco", "d'Almendariz")
+    """
+    if s is None:
+        return ""
+    try:
+        if isinstance(s, float) and pd.isna(s):
+            return ""
+    except Exception:
+        pass
+    txt = str(s).strip()
+    if not txt or txt in ("—", "-", "nan", "None", "NaT"):
+        return txt
+    out = []
+    for tok in txt.split():
+        prefix = ""; suffix = ""; core = tok
+        while core and core[0] in "(«\"'“¿[":
+            prefix += core[0]; core = core[1:]
+        while core and core[-1] in ",.:;!)»\"'”?]":
+            suffix = core[-1] + suffix; core = core[:-1]
+        if not core:
+            out.append(tok); continue
+        # Si el token no está all-upper, no lo tocamos (ya viene bien)
+        if not core.isupper():
+            out.append(prefix + core + suffix); continue
+        # Acrónimo → mantener
+        if core in _SMART_ACRONIMOS or core in _SMART_PREFIJOS:
+            out.append(prefix + core + suffix); continue
+        # Códigos alfanuméricos → mantener
+        if any(ch.isdigit() for ch in core) or "-" in core or "_" in core:
+            out.append(prefix + core + suffix); continue
+        # Token all-upper → Title Case (siglas 1-2 letras deben estar en
+        # _SMART_ACRONIMOS explícito para preservarse: N, V, II, IV, etc.)
+        out.append(prefix + core.capitalize() + suffix)
+    return " ".join(out)
+
+
+def _smart_title_series(s: pd.Series) -> pd.Series:
+    """Aplica _smart_title a una serie completa (vectorización manual)."""
+    if s is None or s.empty:
+        return s
+    return s.apply(_smart_title)
+
 @st.cache_data(ttl=1800, show_spinner=False, persist="disk")
 def _cached_build_kpi_llenado(raw_wo: list, cache_v: str = _KPI_CACHE_VERSION) -> pd.DataFrame:
     """Wrapper con caché persistente en disco. Sobrevive reinicios de Streamlit.
@@ -2519,6 +2581,11 @@ if _page == _NAV_PAGES[1]:
                     _df_sla_ot_disp["excepcion_motivo"] = _df_sla_ot_disp["excepcion_motivo"].fillna("")
                 _df_sla_ot_disp["fecha_llamado"]  = pd.to_datetime(_df_sla_ot_disp["fecha_llamado"],  errors="coerce").dt.strftime("%d/%m/%Y")
                 _df_sla_ot_disp["fecha_atencion"] = pd.to_datetime(_df_sla_ot_disp["fecha_atencion"], errors="coerce").dt.strftime("%d/%m/%Y")
+                # Title Case para columnas de texto que vienen en MAYÚSCULAS de Fracttal.
+                # Aplica a nombres de EDS, técnico, ciudad, cliente — respeta acrónimos.
+                for _colt in ("eds_nombre","tecnico","ciudad","cliente"):
+                    if _colt in _df_sla_ot_disp.columns:
+                        _df_sla_ot_disp[_colt] = _smart_title_series(_df_sla_ot_disp[_colt])
                 _df_sla_ot_disp = _df_sla_ot_disp.sort_values("fecha_llamado", ascending=False).rename(
                     columns={"os_fracttal":"OS Fracttal",
                              "fecha_llamado":"Fecha llamado",
@@ -11464,10 +11531,13 @@ elif _page == _NAV_PAGES[0]:
                         _sub = _sub[_sub["tipo_activo"].isin(("lavadora","aspiradora","lavainterior"))]
                         if not _sub.empty:
                             _sub = _sub.rename(columns={"id_ot": "folio"})
-                            # Meta de la OT (técnico, fecha, cliente, EDS, tipo, comentario).
+                            # Meta de la OT (técnico, fecha, cliente, EDS, tipo, modalidad, comentario).
+                            # modalidad_atencion y deteccion_raw se incluyen para que
+                            # _fmt_modalidad tenga el dato al expandir por subtarea.
                             _meta_cols = [c for c in [
                                 "folio","tecnico","creation_date","client","station","maint_type",
-                                "eds_occim","comentario_tecnico","es_correctiva"]
+                                "eds_occim","comentario_tecnico","es_correctiva",
+                                "modalidad_atencion","deteccion_raw"]
                                 if c in _det_num.columns]
                             _meta = _det_num[_meta_cols].drop_duplicates("folio")
                             # INNER merge: solo OTs en el scope actual (período/equipo/técnico).
@@ -11573,6 +11643,10 @@ elif _page == _NAV_PAGES[0]:
                         ["folio","_equipo","tecnico","_fecha","client","station","maint_type",
                          "_modalidad","_n_ini","_n_fin","_fichas","_estado","_comentario"]
                         if c in _det_num.columns]
+                    # Title Case para columnas con MAYÚSCULAS de Fracttal
+                    for _colt in ("tecnico","client","station","maint_type"):
+                        if _colt in _det_num.columns:
+                            _det_num[_colt] = _smart_title_series(_det_num[_colt].astype(str))
                     _det_num_disp = _det_num[_cols_num].rename(columns={
                         "folio":      "OT",
                         "_equipo":    "Equipo",
@@ -11610,7 +11684,7 @@ elif _page == _NAV_PAGES[0]:
 
                     with st.expander(
                         f"📋 Detalle OTs — numerales ({_n_lav_ok:,} registrados · {_n_sin:,} sin numeral · {_n_no_aplica:,} no aplica)",
-                        expanded=False,
+                        expanded=True,
                     ):
                         st.caption(
                             "Aplica a **lavadoras y aspiradoras**. Numerales **reales** "
