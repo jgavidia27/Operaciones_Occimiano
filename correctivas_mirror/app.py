@@ -210,7 +210,7 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     }
 
     lc = _sb_get("llamados_correctivos", {
-        "select": "os_fracttal,fuente,falla",
+        "select": "os_fracttal,fuente,falla,n_aviso",
         "fecha_llamado": f"gte.{fecha_desde}",
         "limit": 10000,
     })
@@ -218,7 +218,10 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
                   for r in lc if r.get("os_fracttal")}
     falla_map = {r["os_fracttal"]: r["falla"]
                  for r in lc if r.get("os_fracttal") and r.get("falla")}
+    n_aviso_map = {r["os_fracttal"]: r["n_aviso"]
+                   for r in lc if r.get("os_fracttal") and r.get("n_aviso")}
     df["falla"] = df["os_fracttal"].map(falla_map)
+    df["n_aviso"] = df["os_fracttal"].map(n_aviso_map)
     df["fuente_bd"] = df["os_fracttal"].map(fuente_map)
 
     # ── Fechas vectorizado (antes: .apply(_ts) x3 = O(N) Python) ─────────────
@@ -814,18 +817,18 @@ elif vista == "📝 Registro (Excel)":
     _dfr["Asunto"] = (_dfr["falla"] if "falla" in _dfr.columns
                       else pd.Series(dtype="object", index=_dfr.index))
     _dfr["Asunto"] = _dfr["Asunto"].fillna(_dfr["nombre_activo"]).fillna("—")
-    _dfr["N_llamado"] = _dfr["n_llamado"]
+    _dfr["N_llamado"] = (_dfr["n_aviso"].fillna(_dfr["n_llamado"])
+                         if "n_aviso" in _dfr.columns else _dfr["n_llamado"])
     _dfr["Codigo_EDS"] = _dfr["eds_occim"]
     _dfr["EDS_r"] = _dfr["eds_nombre"]
-    _dfr["COMUNA"] = _dfr["comuna"].fillna("—")
     _dfr["Facturacion_r"] = _dfr["facturacion"].fillna("—")
     _dfr["Fecha"] = _dfr["fecha_llamado"].dt.strftime("%d/%m/%Y").fillna("—")
-    _dfr["Hora"] = _dfr.get("hora_llamado", pd.Series(dtype="object")).fillna("—")
+    _dfr["Hora"] = _dfr["fecha_llamado"].dt.strftime("%H:%M:%S").fillna("—")
     _dfr["Atencion"] = _dfr["tipo_tarea"].fillna("—") if "tipo_tarea" in _dfr.columns else "—"
     _dfr["Mecanico"] = _dfr["tecnico_disp"].fillna("—")
     _fa = _dfr["fecha_atencion"]
     _dfr["Fecha_atencion"] = _fa.dt.strftime("%d/%m/%Y").where(_fa.notna(), "—")
-    _dfr["Hora_Atencion_FIN"] = _dfr.get("hora_fin", pd.Series(dtype="object")).fillna("—")
+    _dfr["Hora_Atencion_FIN"] = _fa.dt.strftime("%H:%M:%S").where(_fa.notna(), "—")
     _dfr["OS_FRACTTAL"] = _dfr["os_fracttal"]
     _dfr["PRIORIDAD"] = _dfr["prioridad"]
     _dfr["TMPO_RESP_ESP"] = _dfr["tiempo_resp_esp"]
@@ -835,18 +838,17 @@ elif vista == "📝 Registro (Excel)":
     _dfr["Mes"] = _dfr["fecha_llamado"].dt.month
     _dfr["Anio"] = _dfr["fecha_llamado"].dt.year
     _dfr["Dia"] = _dfr["fecha_llamado"].dt.day_name()
-    _dfr["Cliente_r"] = _dfr["cliente"]
 
     _excel_cols = [
-        "Asunto", "N_llamado", "Codigo_EDS", "EDS_r", "Cliente_r",
-        "COMUNA", "Facturacion_r", "Fecha", "Hora",
+        "Asunto", "N_llamado", "Codigo_EDS", "EDS_r",
+        "Facturacion_r", "Fecha", "Hora",
         "Atencion", "Mecanico", "Fecha_atencion", "Hora_Atencion_FIN",
         "OS_FRACTTAL", "PRIORIDAD", "TMPO_RESP_ESP", "ZONA",
         "TMPO_RESP_REAL", "STATUS_CUMPLIMIENTO", "Mes", "Anio", "Dia",
     ]
     _excel_ren = {
         "N_llamado": "N° llamado", "Codigo_EDS": "Codigo EDS",
-        "EDS_r": "EDS", "Cliente_r": "Cliente",
+        "EDS_r": "EDS",
         "Facturacion_r": "Facturación",
         "Fecha_atencion": "Fecha de atencion",
         "Hora_Atencion_FIN": "Hora Atencion (FIN)",
@@ -863,22 +865,20 @@ elif vista == "📝 Registro (Excel)":
         _show_r, hide_index=True, use_container_width=True, height=680,
         column_config={
             "Asunto":       st.column_config.TextColumn(width=220),
-            "N° llamado":   st.column_config.TextColumn(width=90),
+            "N° llamado":   st.column_config.TextColumn(width=110),
             "Codigo EDS":   st.column_config.TextColumn(width=90),
-            "EDS":          st.column_config.TextColumn(width=170),
-            "Cliente":      st.column_config.TextColumn(width=130),
-            "COMUNA":       st.column_config.TextColumn(width=110),
-            "Facturación":  st.column_config.TextColumn(width=110),
+            "EDS":          st.column_config.TextColumn(width=180),
+            "Facturación":  st.column_config.TextColumn(width=120),
             "Fecha":        st.column_config.TextColumn(width=100),
-            "Hora":         st.column_config.TextColumn(width=70),
+            "Hora":         st.column_config.TextColumn(width=80),
             "Atencion":     st.column_config.TextColumn(width=150),
-            "Mecanico":     st.column_config.TextColumn(width=140),
+            "Mecanico":     st.column_config.TextColumn(width=150),
             "Fecha de atencion": st.column_config.TextColumn(width=120),
             "Hora Atencion (FIN)": st.column_config.TextColumn(width=100),
             "OS FRACTTAL":  st.column_config.TextColumn(width=105),
             "PRIORIDAD":    st.column_config.TextColumn(width=80),
             "TMPO.RESP.ESP": st.column_config.NumberColumn(width=80),
-            "ZONA":         st.column_config.TextColumn(width=70),
+            "ZONA":         st.column_config.TextColumn(width=80),
             "TMPO.RESP.REAL": st.column_config.NumberColumn(width=90, format="%.2f"),
             "STATUS CUMPLIMIENTO": st.column_config.TextColumn(width=130),
             "Mes":          st.column_config.NumberColumn(width=50),
