@@ -308,7 +308,16 @@ with _c2:
         cargar_llamados.clear()
         st.rerun()
 
-df = cargar_llamados(FECHA_CORTE)
+# Wrap toda la carga en try/except para que Streamlit Cloud muestre
+# el error real en vez de "Oh no. Error running app."
+try:
+    df = cargar_llamados(FECHA_CORTE)
+except Exception as _e_load:
+    import traceback as _tb
+    st.error(f"❌ Error cargando datos de Supabase: {type(_e_load).__name__}: {_e_load}")
+    st.code(_tb.format_exc())
+    st.stop()
+
 if df.empty:
     st.warning("No hay datos en Supabase para el período configurado.")
     st.stop()
@@ -360,11 +369,23 @@ with _f5:
 _r1, _r2, _r3 = st.columns([1.6, 1.4, 3.6])
 with _r1:
     _hoy_date = datetime.now(_CL_TZ).date()
-    _fmax_data = df["fecha_llamado"].max().date() if pd.notna(df["fecha_llamado"].max()) else _hoy_date
+    _max_dt = df["fecha_llamado"].max()
+    _min_dt = df["fecha_llamado"].min()
+    _fmax_data = _max_dt.date() if pd.notna(_max_dt) else _hoy_date
     _fmax = max(_fmax_data, _hoy_date)
-    _fmin = df["fecha_llamado"].min().date() if pd.notna(df["fecha_llamado"].min()) else _fmax
-    fecha_rng = st.date_input("Rango de fechas", (_fmin, _fmax),
-                              min_value=_fmin, max_value=_fmax)
+    _fmin_data = _min_dt.date() if pd.notna(_min_dt) else _fmax
+    _fmin = min(_fmin_data, _fmax)
+    # Defensivo: date_input puede crashear si state stale queda fuera de rango.
+    # Damos key explícita + fallback si excepta.
+    try:
+        fecha_rng = st.date_input(
+            "Rango de fechas", (_fmin, _fmax),
+            min_value=_fmin, max_value=_fmax, key="fecha_rng_v3",
+        )
+    except Exception:
+        # Reset state y reintentar
+        st.session_state.pop("fecha_rng_v3", None)
+        fecha_rng = (_fmin, _fmax)
 with _r2:
     st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
     _solo_pend = st.toggle("Solo pendientes (abiertas)", key="solo_pend",
@@ -390,9 +411,18 @@ if buscar and buscar.strip():
         | _df["tecnico_disp"].astype(str).str.upper().str.contains(q, na=False)
         | _df["comuna"].astype(str).str.upper().str.contains(q, na=False)
     ]
-if len(fecha_rng) == 2:
-    d0, d1 = fecha_rng
-    _df = _df[(_df["fecha_llamado"].dt.date >= d0) & (_df["fecha_llamado"].dt.date <= d1)]
+# Filtro de fecha defensivo: si fecha_rng no es tupla de 2, o si hay NaT,
+# aplicamos filtro sobre serie datetime en lugar de .dt.date (más robusto).
+try:
+    if isinstance(fecha_rng, (tuple, list)) and len(fecha_rng) == 2:
+        d0, d1 = fecha_rng
+        _d0_ts = pd.Timestamp(d0)
+        _d1_ts = pd.Timestamp(d1) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        _fl = _df["fecha_llamado"]
+        _mask = _fl.notna() & (_fl >= _d0_ts) & (_fl <= _d1_ts)
+        _df = _df[_mask].copy()
+except Exception as _e_fec:
+    st.warning(f"⚠️ Filtro de fecha ignorado por error: {type(_e_fec).__name__}: {_e_fec}")
 if _solo_pend:
     _df = _df[_df["estado_lbl"].isin(["OT Pendiente - Sin atender", "Técnico atendiendo"])]
 
@@ -406,7 +436,7 @@ _hoy = pd.Timestamp.now(tz="America/Santiago").tz_localize(None).date()
 _semana = _hoy - timedelta(days=7)
 
 _n_tot = len(_df)
-_n_hoy = int((_df["fecha_llamado"].dt.date == _hoy).sum())
+_n_hoy = int((_df["fecha_llamado"].dt.date == _hoy).sum()) if not _df.empty else 0
 _n_cumple = int((_df["estado_lbl"] == "Finalizada - Cumple SLA").sum())
 _n_nocump = int((_df["estado_lbl"] == "Finalizada - No cumple SLA").sum())
 _n_trab   = int(_df["estado_lbl"].isin([
