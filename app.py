@@ -11872,11 +11872,37 @@ elif _page == _NAV_PAGES[0]:
             )
 
         # ── Cargar datos de Precisión ─────────────────────────────────────────
-        # Usar df_ot_all_scores_v4_direct (con aplicar_numerales_subtarea) para
-        # que los valores coincidan con la pestaña Precisión Fracttal.
+        # Key actualizado a df_ot_all_scores_v5_equipo (antes v4_direct → obsoleto).
+        # Si la pestaña Precisión no fue visitada aún, session_state está vacío;
+        # computamos fresh usando la misma pipeline que _build_ot_all.
         _df_ot_bono = st.session_state.get(
-            "df_ot_all_scores_v4_direct", pd.DataFrame()
+            "df_ot_all_scores_v5_equipo", pd.DataFrame()
         ).copy()
+        if _df_ot_bono.empty:
+            try:
+                _kpi_bn = _cached_build_kpi_llenado(raw_wo)
+                if not _kpi_bn.empty:
+                    _kpi_bn = _kpi_bn[~_kpi_bn["tecnico"].apply(_es_excluido)].copy()
+                    _tub = _kpi_bn["maint_type"].str.upper()
+                    _kpi_bn = _kpi_bn[_tub.str.contains("CORRECTIVA", na=False) | _tub.str.contains("PREVENTIVA", na=False)].copy()
+                    _kpi_bn = _kpi_bn[_kpi_bn["creation_date"].dt.tz_convert(None).dt.year >= 2026].copy()
+                    _df_ot_bono = score_llenado_por_ot(_kpi_bn)
+                if not _df_ot_bono.empty:
+                    _EST_NP_BN = {"Canceladas","Cancelado","Cancelada","ERROR DE INGRESO","EQUIPO CON RECAMBIO","DUPLICADO","Duplicidad","DE PRUEBA","FUE REPETIDA EN OTRA OS","PLAN INCOMPLETO"}
+                    from supabase_client import _query as _q_bn
+                    _est_rows_bn = _q_bn("ordenes_trabajo","select=id_ot,estado&fecha_creacion=gte.2026-01-01", limit=20_000)
+                    _f_exc_bn = {r["id_ot"] for r in _est_rows_bn if r.get("id_ot") and r.get("estado","") in _EST_NP_BN}
+                    if _f_exc_bn and "folio" in _df_ot_bono.columns:
+                        _df_ot_bono = _df_ot_bono[~_df_ot_bono["folio"].isin(_f_exc_bn)].copy()
+                    _ns_bn = st.session_state.get("df_num_sub_v1") or load_numerales_subtarea_supabase()
+                    _df_ot_bono = aplicar_numerales_subtarea(_df_ot_bono, _ns_bn)
+                    _df_ot_bono["score_numeral"] = _df_ot_bono["numeral_ok"].apply(lambda ok: 25 if ok else 0)
+                    _df_ot_bono["score_total"] = (_df_ot_bono["score_tiempo"] + _df_ot_bono["score_causa"] + _df_ot_bono["score_numeral"]).clip(upper=75).round(1)
+                    _df_ot_bono["equipo"] = _df_ot_bono["tecnico"].apply(_get_equipo)
+                    _df_ot_bono["mes"] = _df_ot_bono["creation_date"].dt.tz_convert(None).dt.to_period("M").astype(str)
+            except Exception as _e_bono_prec:
+                st.warning(f"⚠️ Precisión bono no pudo computarse: {type(_e_bono_prec).__name__}: {_e_bono_prec}")
+                _df_ot_bono = pd.DataFrame()
         if not _df_ot_bono.empty:
             if "_tech_norm" not in _df_ot_bono.columns:
                 _df_ot_bono["_tech_norm"] = _df_ot_bono["tecnico"].fillna("").apply(
