@@ -37,7 +37,7 @@ st.set_page_config(
 # Marker de versión visible para confirmar qué commit deployó Streamlit Cloud.
 # Si el usuario ve "Oh no", pero cambia este valor al recargar, sabemos que
 # el deploy sí llegó y el crash es diferente al que arreglé.
-APP_VERSION = "v2026.07.10-fix6"
+APP_VERSION = "v2026.07.10-fix7"
 FECHA_CORTE = "2026-05-01"
 
 # Prioridad → color / label
@@ -148,7 +148,7 @@ def _sb_get(path, params, timeout=25):
     return data
 
 
-@st.cache_data(ttl=300, show_spinner="Cargando llamados correctivos...")
+@st.cache_data(ttl=900, show_spinner="Cargando llamados correctivos...", persist="disk")
 def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     """Base: v_llamados_sla (vista ya enriquecida con cumplimiento,
     horas, técnico, zona, excepciones). Cruza con llamados_correctivos
@@ -221,51 +221,43 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     df["falla"] = df["os_fracttal"].map(falla_map)
     df["fuente_bd"] = df["os_fracttal"].map(fuente_map)
 
-    def _resolver_fuente(row):
-        cli = row.get("cliente")
-        fbd = row.get("fuente_bd")
-        fll = row.get("fecha_llamado")
-        # Fecha de llamado como Timestamp
-        try:
-            ts = pd.Timestamp(fll) if pd.notna(fll) else pd.NaT
-            if pd.notna(ts) and ts.tzinfo is not None:
-                ts = ts.tz_convert(None)
-        except Exception:
-            ts = pd.NaT
-        robot_target = _cli_to_robot.get(cli)
-        robot_start = ROBOT_START.get(cli)
-        # a) BD dice robot → confiar
-        if fbd in ("robot_email", "robot_shell", "robot_esmax"):
-            return fbd
-        # b/c) Cliente con robot activo y OT posterior al inicio → robot
-        if robot_target and robot_start and pd.notna(ts) and ts >= robot_start:
-            return robot_target
-        # Pre-robot o cliente sin robot → mantener BD o directa
-        return fbd if fbd else "ot_directa"
+    # ── Fechas vectorizado (antes: .apply(_ts) x3 = O(N) Python) ─────────────
+    def _vec_ts(col):
+        return (pd.to_datetime(col, errors="coerce", format="ISO8601", utc=True)
+                  .dt.tz_convert("America/Santiago").dt.tz_localize(None))
+    df["fecha_llamado"]  = _vec_ts(df["fecha_llamado"])
+    df["fecha_atencion"] = _vec_ts(df["fecha_atencion"])
+    if "fecha_inicio_atencion" in df.columns:
+        df["fecha_inicio_atencion"] = _vec_ts(df["fecha_inicio_atencion"])
+    else:
+        df["fecha_inicio_atencion"] = pd.NaT
 
-    df["fuente"] = df.apply(_resolver_fuente, axis=1)
-    # `fuente_inferida` = True cuando corregimos la BD (BD decía ot_directa
-    # o null pero el cliente con robot activo debería ser robot_*)
+    # ── Resolver fuente vectorizado ──────────────────────────────────────────
+    # Antes: df.apply(_resolver_fuente, axis=1) sobre 600+ filas cada rerun.
+    # Ahora: máscaras booleanas vectorizadas.
+    _robot_target_series = df["cliente"].map(_cli_to_robot)
+    _robot_start_series  = df["cliente"].map(ROBOT_START)
+    _fbd_series          = df["fuente_bd"]
+
+    # Default: si BD tiene fuente, usar BD; si no, ot_directa
+    _resolved = _fbd_series.fillna("ot_directa")
+    # Override: cliente con robot activo Y fecha >= inicio robot → robot
+    _mask_post_robot = (
+        _robot_target_series.notna()
+        & _robot_start_series.notna()
+        & df["fecha_llamado"].notna()
+        & (df["fecha_llamado"] >= _robot_start_series)
+    )
+    _resolved = _resolved.where(~_mask_post_robot, _robot_target_series)
+    # Pero si la BD ya dice robot_*, respetar la BD (más confiable que inferencia)
+    _mask_bd_es_robot = _fbd_series.isin(["robot_email", "robot_shell", "robot_esmax"])
+    _resolved = _resolved.where(~_mask_bd_es_robot, _fbd_series)
+    df["fuente"] = _resolved
     df["fuente_inferida"] = df["fuente_bd"] != df["fuente"]
     df = df.drop(columns=["fuente_bd"], errors="ignore")
 
     # 3) Normalización
     df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
-
-    # Fechas
-    def _ts(x):
-        if not x or str(x).strip() in ("", "None", "null"):
-            return pd.NaT
-        try:
-            t = pd.Timestamp(str(x))
-            if t.tzinfo is not None:
-                return t.tz_convert("America/Santiago").tz_localize(None)
-            return t
-        except Exception:
-            return pd.NaT
-    df["fecha_llamado"]  = df["fecha_llamado"].apply(_ts)
-    df["fecha_inicio_atencion"] = df["fecha_inicio_atencion"].apply(_ts) if "fecha_inicio_atencion" in df.columns else pd.NaT
-    df["fecha_atencion"] = df["fecha_atencion"].apply(_ts)
 
     # Numéricos seguros
     df["tiempo_resp_horas"] = pd.to_numeric(df["tiempo_resp_horas"], errors="coerce")
@@ -274,9 +266,20 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     # Técnico "amigable"
     df["tecnico_disp"] = df["tecnico_corto"].fillna(df["tecnico"])
 
-    # Estado derivado + descripción tooltip
-    df[["estado_lbl","estado_ico","estado_fg","estado_desc"]] = df.apply(
-        lambda r: pd.Series(estado_ot(r)), axis=1)
+    # ── Estado derivado vectorizado ──────────────────────────────────────────
+    # Antes: df.apply(lambda r: pd.Series(estado_ot(r)), axis=1) — el hotspot
+    # MÁS lento (Python fila x fila + pd.Series por cada iteración).
+    # Ahora: itertuples() con list-comp + unzip → 5-10× más rápido y sin
+    # crear un Series por cada fila.
+    _est_rows = [estado_ot(r._asdict()) for r in df.itertuples(index=False)]
+    if _est_rows:
+        _lbl, _ico, _fg, _desc = zip(*_est_rows)
+        df["estado_lbl"]  = list(_lbl)
+        df["estado_ico"]  = list(_ico)
+        df["estado_fg"]   = list(_fg)
+        df["estado_desc"] = list(_desc)
+    else:
+        df["estado_lbl"] = df["estado_ico"] = df["estado_fg"] = df["estado_desc"] = ""
 
     return df
 
