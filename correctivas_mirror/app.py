@@ -14,6 +14,7 @@ Es un espejo real de lo que ve el dashboard, en un formato más ameno
 """
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -258,6 +259,57 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     df["fuente"] = _resolved
     df["fuente_inferida"] = df["fuente_bd"] != df["fuente"]
     df = df.drop(columns=["fuente_bd"], errors="ignore")
+
+    # 2b) nota_tarea → falla_desc (descripción real de la falla)
+    _PAT_COPEC_FALLA = re.compile(
+        r"Falla reportada[:\s]+(.+?)(?:\r?\n|$)", re.IGNORECASE)
+    _PAT_SHELL_DESC = re.compile(
+        r"Descripci[oó]n del Requerimiento[:\s]+\"?(.+?)\"?\s*(?:\r?\n|$)", re.IGNORECASE)
+    _PAT_ARAMCO_DET = re.compile(
+        r"Detalles del incidente[:\s]+(.+?)(?:\r?\n|$)", re.IGNORECASE)
+
+    def _extract_falla(nota, cliente):
+        if not nota:
+            return None
+        nota = str(nota)
+        if "COPEC" in (cliente or ""):
+            m = _PAT_COPEC_FALLA.search(nota)
+            if m:
+                return m.group(1).strip()
+        elif "SHELL" in (cliente or "").upper():
+            m = _PAT_SHELL_DESC.search(nota)
+            if m:
+                return m.group(1).strip()
+            first = nota.split("\n")[0].strip()
+            if first and len(first) < 120:
+                return first
+        elif "ARAMCO" in (cliente or "").upper() or "ESMAX" in (cliente or "").upper():
+            m = _PAT_ARAMCO_DET.search(nota)
+            if m:
+                return m.group(1).strip()
+            first = nota.split("\n")[0].strip()
+            if first and len(first) < 120:
+                return first
+        first = nota.split("\n")[0].strip()
+        if first and len(first) < 120:
+            return first
+        return None
+
+    _ot_ids = df["os_fracttal"].dropna().unique().tolist()
+    _nota_map = {}
+    for _off in range(0, len(_ot_ids), 200):
+        _chunk = _ot_ids[_off:_off + 200]
+        _nt = _sb_get("ordenes_trabajo", {
+            "select": "id_ot,nota_tarea",
+            "id_ot": f"in.({','.join(_chunk)})",
+            "limit": 200,
+        })
+        for r in _nt:
+            _nota_map[r["id_ot"]] = r.get("nota_tarea")
+    df["falla_desc"] = [
+        _extract_falla(_nota_map.get(ot), cli)
+        for ot, cli in zip(df["os_fracttal"], df["cliente"])
+    ]
 
     # 3) Normalización
     df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
@@ -814,7 +866,7 @@ elif vista == "📝 Registro (Excel)":
                "Todas las columnas se muestran para todos los clientes.")
 
     _dfr = _df.copy()
-    _dfr["Asunto"] = (_dfr["falla"] if "falla" in _dfr.columns
+    _dfr["Asunto"] = (_dfr["falla_desc"] if "falla_desc" in _dfr.columns
                       else pd.Series(dtype="object", index=_dfr.index))
     _dfr["Asunto"] = _dfr["Asunto"].fillna(_dfr["nombre_activo"]).fillna("—")
     _dfr["N_llamado"] = (_dfr["n_aviso"].fillna(_dfr["n_llamado"])
