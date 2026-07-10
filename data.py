@@ -385,7 +385,7 @@ _NUMERAL_FICHAS_MAX = 25          # > esto dentro de una misma OT = sospechoso
 NUMERAL_MOTIVO_LABEL = {
     "ok":               "✅ Numeral válido",
     "no_aplica":        "🔵 No aplica",
-    "no_aplica_mc":     "🔵 No aplica (correctiva sin campo)",
+    "no_aplica_mc":     "🔵 No aplica (correctiva)",
     "no_aplica_remota": "🔵 No aplica (atención remota)",
     "sin_numeral":      "❌ Sin numeral",
     "basura":           "🟣 Valor basura (≥8 díg.)",
@@ -403,8 +403,10 @@ def eval_numeral_kpi(es_lavadora: bool, inicial, final,
     Veredicto BINARIO de calidad del numeral para el KPI Precisión.
     Returns (numeral_ok: bool, motivo: str).
 
-    Aplica a lavadoras/aspiradoras en MC y MP (el formulario exige el numeral en
-    ambas). Reglas con valor registrado (de peor a mejor):
+    Aplica SOLO a lavadoras/aspiradoras en PREVENTIVAS (por decisión operativa
+    2026-07: las correctivas se excluyen del cálculo del numeral porque el
+    técnico atiende una falla, no siempre puede leer el contador). Reglas con
+    valor registrado (de peor a mejor):
       • basura         → algún valor ≥8 díg (tecleo imposible, ej. 99.999.999)
       • negativo       → final < inicial (imposible, el contador no retrocede)
       • salto_magnitud → final ≥ 9× inicial (un cero de más al teclear)
@@ -412,30 +414,24 @@ def eval_numeral_kpi(es_lavadora: bool, inicial, final,
       • ok             → numeral coherente
 
     Sin valor registrado:
-      • Preventiva                       → sin_numeral (el form MP siempre lo pide)
-      • Correctiva atendida REMOTA       → no_aplica_remota (físicamente imposible
-                                            leer el numeral sin estar en la EDS)
-      • Correctiva con campo en el form  → sin_numeral (lo dejó vacío = descuido)
-      • Correctiva sin campo / desconocido → no_aplica_mc (justificable, no penaliza)
+      • Preventiva → sin_numeral (el form MP siempre lo pide)
+      • Correctiva → no_aplica_mc (excluida del KPI, no penaliza)
     """
     if not es_lavadora:
         return True, "no_aplica"
+
+    # DECISIÓN OPERACIONES (2026-07): las correctivas quedan FUERA del cálculo
+    # del KPI de numeral. Siempre devuelven no_aplica (sin penalizar) sin
+    # importar si tienen numeral cargado o no.
+    if es_correctiva:
+        return True, "no_aplica_mc"
 
     _ni = str(inicial or "").strip()
     _nf = str(final or "").strip()
     _ni = "" if _ni.lower() in ("none", "null") else _ni
     _nf = "" if _nf.lower() in ("none", "null") else _nf
     if not _ni and not _nf:
-        if not es_correctiva:
-            return False, "sin_numeral"          # MP: el formulario siempre lo pide
-        # Correctiva atendida de forma REMOTA: el técnico no fue a la EDS, no
-        # tiene forma física de leer el numeral. No debe penalizar.
-        if es_remota:
-            return True, "no_aplica_remota"
-        # Correctiva: solo penaliza si el formulario tenía el campo numeral
-        if form_tiene_numeral is True:
-            return False, "sin_numeral"
-        return True, "no_aplica_mc"              # sin campo o desconocido → justificable
+        return False, "sin_numeral"          # MP: el formulario siempre lo pide
 
     vi, vf = _numeral_raw_int(_ni), _numeral_raw_int(_nf)
 
@@ -518,23 +514,14 @@ def aplicar_numerales_subtarea(ot: pd.DataFrame, df_sub: pd.DataFrame) -> pd.Dat
     out.loc[_mask, "numeral_motivo"] = out.loc[_mask, "_n_motivo"]
     out = out.drop(columns=["_n_ok","_n_sev","_n_motivo","_n_subs"], errors="ignore")
 
-    # MC remotas: el sync de subtareas no conoce la modalidad, así que puede
-    # haber marcado numeral_ok=False para una correctiva remota (sin numeral).
-    # Re-aplicar la exención: si es correctiva + remota + sin numeral → cumple.
+    # DECISIÓN OPERACIONES (2026-07): TODAS las correctivas quedan fuera del
+    # cálculo del numeral. Antes solo se eximían las correctivas remotas; ahora
+    # se eximen todas (presenciales y remotas). El sync de subtareas puede
+    # haber marcado numeral_ok=False para correctivas — lo revertimos aquí.
     if "es_correctiva" in out.columns:
-        def _is_remota(r):
-            mod = str(r.get("modalidad_atencion", "") or "").upper()
-            if "REMOTA" in mod or "REMOTO" in mod:
-                return True
-            det = str(r.get("deteccion_raw", "") or "").upper()
-            return "REMOTA" in det or "REMOTO" in det
-        _mc_remota = (
-            out["es_correctiva"].fillna(False)
-            & out.apply(_is_remota, axis=1)
-            & out["numeral_motivo"].isin(["sin_numeral"])
-        )
-        out.loc[_mc_remota, "numeral_ok"]     = True
-        out.loc[_mc_remota, "numeral_motivo"] = "no_aplica_remota"
+        _mc = out["es_correctiva"].fillna(False).astype(bool)
+        out.loc[_mc, "numeral_ok"]     = True
+        out.loc[_mc, "numeral_motivo"] = "no_aplica_mc"
 
     return out
 

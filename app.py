@@ -11663,19 +11663,21 @@ elif _page == _NAV_PAGES[0]:
                         "_comentario":"Comentario técnico / causa raíz",
                     }).sort_values(["OT", "Estado"], ascending=[True, True])
 
-                    _n_sin      = int((~_df_num_base["numeral_ok"]).sum())
-                    _n_lav_ok   = int((_df_num_base["es_lavadora"] & _df_num_base["numeral_ok"]).sum()) \
-                                  if "es_lavadora" in _df_num_base.columns else int(_df_num_base["numeral_ok"].sum())
-                    _n_no_aplica = int((~_df_num_base["es_lavadora"]).sum()) \
-                                   if "es_lavadora" in _df_num_base.columns else 0
+                    # Conteos: por decisión operativa (2026-07) las correctivas
+                    # NO se miden para numeral → cuentan como "no aplica".
+                    # Solo las preventivas de lavadora/aspiradora entran al KPI.
+                    _mc_mask = _df_num_base.get("es_correctiva", pd.Series(False, index=_df_num_base.index)).fillna(False).astype(bool)
+                    _lav_mask = _df_num_base.get("es_lavadora", pd.Series(True, index=_df_num_base.index)).fillna(True).astype(bool)
+                    _mp_lav_mask = _lav_mask & ~_mc_mask
+                    _n_lav_ok   = int((_mp_lav_mask & _df_num_base["numeral_ok"]).sum())
+                    _n_sin      = int((_mp_lav_mask & ~_df_num_base["numeral_ok"]).sum())
+                    _n_no_aplica = int((~_lav_mask | _mc_mask).sum())
 
                     # ── Ranking por técnico (peso + cumplimiento individual) ─
-                    # Solo evaluamos las OTs de lavadora/aspiradora (donde
-                    # el numeral realmente aplica); el resto es no_aplica=OK auto.
-                    if "es_lavadora" in _df_num_base.columns:
-                        _df_num_rk = _df_num_base[_df_num_base["es_lavadora"]].copy()
-                    else:
-                        _df_num_rk = _df_num_base.copy()
+                    # Solo evaluamos preventivas de lavadora/aspiradora (donde
+                    # el numeral realmente aplica). Correctivas y equipos sin
+                    # numeral → no_aplica=OK auto, no entran al ranking.
+                    _df_num_rk = _df_num_base[_mp_lav_mask].copy()
                     _render_ranking_tecnico(
                         _df_num_rk, "numeral_ok",
                         "👤 Ranking por técnico — Registro de Numerales",
