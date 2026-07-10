@@ -112,8 +112,14 @@ def estado_ot(row):
 # Supabase client
 # ══════════════════════════════════════════════════════════════════════
 def _sb_config():
-    url = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
-    key = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", ""))
+    try:
+        url = st.secrets["SUPABASE_URL"]
+    except Exception:
+        url = os.getenv("SUPABASE_URL", "")
+    try:
+        key = st.secrets["SUPABASE_KEY"]
+    except Exception:
+        key = os.getenv("SUPABASE_KEY", "")
     if not url or not key:
         st.error("Faltan credenciales de Supabase. Configura los secrets "
                  "**SUPABASE_URL** y **SUPABASE_KEY** en Streamlit Cloud "
