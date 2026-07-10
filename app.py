@@ -12471,10 +12471,33 @@ elif _page == _NAV_PAGES[0]:
                 _sla_records = _sla_g.to_dict(orient="records")
 
         # 2. Precisión — datos completos (sin filtro de trimestre)
-        # Usar df_ot_all_scores_v4_direct (incluye aplicar_numerales_subtarea + filtro canceladas)
-        # para que coincida con lo que muestra la pestaña Precisión Fracttal.
-        _ot_full = st.session_state.get("df_ot_all_scores_v4_direct",
-                   st.session_state.get("df_ot_bono_scores", pd.DataFrame()))
+        _ot_full = st.session_state.get("df_ot_all_scores_v5_equipo", pd.DataFrame())
+        if _ot_full.empty:
+            try:
+                _kpi_exp = _cached_build_kpi_llenado(raw_wo)
+                if not _kpi_exp.empty:
+                    _kpi_exp["equipo"] = _kpi_exp["tecnico"].apply(_get_equipo)
+                    _kpi_exp = _kpi_exp[~_kpi_exp["tecnico"].apply(_es_excluido)].copy()
+                    _tu = _kpi_exp["maint_type"].str.upper()
+                    _kpi_exp = _kpi_exp[_tu.str.contains("CORRECTIVA", na=False) | _tu.str.contains("PREVENTIVA", na=False)].copy()
+                    _kpi_exp = _kpi_exp[_kpi_exp["creation_date"].dt.tz_convert(None).dt.year >= 2026].copy()
+                    _kpi_exp["mes"] = _kpi_exp["creation_date"].dt.tz_convert(None).dt.to_period("M").astype(str)
+                    _ot_full = score_llenado_por_ot(_kpi_exp)
+                if not _ot_full.empty:
+                    _EST_NP = {"Canceladas","Cancelado","Cancelada","ERROR DE INGRESO","EQUIPO CON RECAMBIO","DUPLICADO","Duplicidad","DE PRUEBA","FUE REPETIDA EN OTRA OS","PLAN INCOMPLETO"}
+                    from supabase_client import _query as _q_exp
+                    _ot_est = {r["id_ot"]: r.get("estado","") for r in _q_exp("ordenes_trabajo","select=id_ot,estado&fecha_creacion=gte.2026-01-01",limit=20_000) if r.get("id_ot")}
+                    _f_exc = {f for f,e in _ot_est.items() if e in _EST_NP}
+                    if _f_exc and "folio" in _ot_full.columns:
+                        _ot_full = _ot_full[~_ot_full["folio"].isin(_f_exc)].copy()
+                    _ns_exp = st.session_state.get("df_num_sub_v1") or load_numerales_subtarea_supabase()
+                    _ot_full = aplicar_numerales_subtarea(_ot_full, _ns_exp)
+                    _ot_full["score_numeral"] = _ot_full["numeral_ok"].apply(lambda ok: 25 if ok else 0)
+                    _ot_full["score_total"] = (_ot_full["score_tiempo"] + _ot_full["score_causa"] + _ot_full["score_numeral"]).clip(upper=75).round(1)
+                    _ot_full["equipo"] = _ot_full["tecnico"].apply(_get_equipo)
+                    _ot_full["mes"] = _ot_full["creation_date"].dt.tz_convert(None).dt.to_period("M").astype(str)
+            except Exception:
+                _ot_full = pd.DataFrame()
         _prec_records = []
         if not _ot_full.empty and "score_total" in _ot_full.columns:
             _prec_exp = _ot_full[["tecnico", "equipo", "score_total", "mes"]].copy() if {"tecnico","equipo","score_total","mes"}.issubset(_ot_full.columns) else pd.DataFrame()
@@ -12489,6 +12512,15 @@ elif _page == _NAV_PAGES[0]:
 
         # 3. Efectividad — reincidencias completas
         _reinc_full = st.session_state.get("df_reinc", pd.DataFrame())
+        if _reinc_full.empty:
+            try:
+                _CLIENTES_SLA_R = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
+                _df_wo_r = df_wo[df_wo["client"].isin(_CLIENTES_SLA_R)].copy() if "client" in df_wo.columns else df_wo.copy()
+                _reinc_full = build_reincidencias(_df_wo_r, _excel_to_full)
+                if not _reinc_full.empty and "fecha_cm" in _reinc_full.columns:
+                    _reinc_full = _reinc_full[pd.to_datetime(_reinc_full["fecha_cm"], errors="coerce") >= pd.Timestamp("2026-01-01")].copy()
+            except Exception:
+                _reinc_full = pd.DataFrame()
         _reinc_records = []
         if not _reinc_full.empty and "falla_tipo" in _reinc_full.columns:
             _reinc_exp = _reinc_full[_reinc_full["falla_tipo"] == "fao"].copy()
