@@ -600,8 +600,10 @@ def _copec_prio_from_nota(nota: str, zona: str) -> "tuple[str, int] | None":
     return prio, umbral
 
 
+@st.cache_data(ttl=600, show_spinner=False, persist="disk")
 def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
-    """No usa @st.cache_data — el dashboard lo cachea via _sc() para control total."""
+    """Cache 10min + persist a disco. Antes usaba solo _sc() en session_state,
+    pero cross-session era refetch de 10s. Argumento str hasheable → cache eficiente."""
     """
     Retorna DataFrame compatible con load_all_llamados().
     Lee desde v_llamados_sla (vista que replica estructura del Excel).
@@ -628,19 +630,16 @@ def load_all_llamados_supabase(desde: str = "2026-01-01") -> pd.DataFrame:
         "tiempo_resp_horas":"horas_resolucion",
         "tiempo_resp_esp":  "tiempo_resp_esp",
     })
-    # Convertir fechas: pd.to_datetime falla con timestamps sin microsegundos en pandas 3.x
-    # pd.Timestamp() maneja ambos formatos correctamente
-    def _safe_ts(x):
-        if not x or str(x).strip() in ("", "None", "null"):
-            return pd.NaT
-        try:
-            t = pd.Timestamp(str(x))
-            return t.tz_convert(None) if t.tzinfo is not None else t
-        except Exception:
-            return pd.NaT
+    # Convertir fechas: vectorizado con pd.to_datetime(format='ISO8601') que
+    # maneja mixto con/sin microsegundos (pandas >=2.0). ~50x más rápido que
+    # .apply(_safe_ts) sobre 1800+ filas.
+    def _vec_ts(col: pd.Series) -> pd.Series:
+        ts = pd.to_datetime(col, errors="coerce", format="ISO8601", utc=True)
+        # Extraer valores sin tz para compatibilidad con el resto del código
+        return ts.dt.tz_convert(None)
 
-    df["fecha_llamado"]  = df["fecha_llamado"].apply(_safe_ts)
-    df["fecha_atencion"] = df["fecha_atencion"].apply(_safe_ts)
+    df["fecha_llamado"]  = _vec_ts(df["fecha_llamado"])
+    df["fecha_atencion"] = _vec_ts(df["fecha_atencion"])
     df["fecha_llamado_dt"] = df["fecha_llamado"]
 
     # Normalizar etiqueta del cliente: "ESMAX (Aramco)" → "Aramco (Esmax)"

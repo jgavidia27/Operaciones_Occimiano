@@ -799,8 +799,18 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
     if not raw:
         return pd.DataFrame()
 
+    # ── OPTIMIZACIÓN: pre-computar fechas vectorizadas ────────────────────────
+    # ANTES: pd.to_datetime(single_value) dentro del loop llamaba 3× por wo →
+    # 52k llamadas × infer format = 38s de los 40s totales.
+    # AHORA: una llamada vectorizada por columna → ~200ms total.
+    # Los timestamps por índice se leen del pre-cache dentro del loop.
+    _n_raw = len(raw)
+    _init_series  = pd.to_datetime([w.get("initial_date")  for w in raw], utc=True, errors="coerce", format="ISO8601")
+    _final_series = pd.to_datetime([w.get("final_date")    for w in raw], utc=True, errors="coerce", format="ISO8601")
+    _creat_series = pd.to_datetime([w.get("creation_date") for w in raw], utc=True, errors="coerce", format="ISO8601")
+
     rows = []
-    for wo in raw:
+    for _i, wo in enumerate(raw):
         # Saltar subtareas que nunca se ejecutaron (NO_STARTED).
         # No se puede evaluar calidad de algo que no se hizo.
         _ts = (wo.get("task_status") or "").strip().upper()
@@ -881,9 +891,9 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         done = str(wo.get("done", "False")).lower() in ("true", "1", "yes")
 
         # Tiempo real que el técnico tuvo Fracttal abierto (initial_date → final_date)
-        # Si es muy corto → quick-tick: llenó todo de golpe al terminar, no al llegar
-        initial_ts = pd.to_datetime(wo.get("initial_date"), utc=True, errors="coerce")
-        final_ts   = pd.to_datetime(wo.get("final_date"),   utc=True, errors="coerce")
+        # Timestamps pre-computados vectorizados (optim 2026-07-10).
+        initial_ts = _init_series[_i]
+        final_ts   = _final_series[_i]
         if pd.notna(initial_ts) and pd.notna(final_ts):
             elapsed_sec = max(0.0, (final_ts - initial_ts).total_seconds())
         else:
@@ -1005,7 +1015,7 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
             "station":          station,
             "equipment_code":   (wo.get("code") or "").strip(),
             "eds_occim":        _eds_occim_str(wo.get("groups_2_description")),
-            "creation_date":    pd.to_datetime(wo.get("creation_date"), utc=True, errors="coerce"),
+            "creation_date":    _creat_series[_i],
             "initial_date":     initial_ts,
             "final_date":       final_ts,
             "maint_type":       maint_type_raw,

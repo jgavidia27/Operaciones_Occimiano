@@ -112,6 +112,19 @@ def _strip_comentario_headers(txt) -> str:
     return _COMENT_HEADER_RE.sub("", s).strip(" |") or "—"
 
 
+# ── Cache global de estados_ot ────────────────────────────────────────────────
+# Antes se consultaba en 3 lugares distintos sin cache compartida (Precisión
+# tab, Resumen Bonos fallback, Export STO fallback) → 3× la misma query pesada
+# (~3.5s cada una). Ahora una sola función cacheada a 30min.
+@st.cache_data(ttl=1800, show_spinner=False, persist="disk")
+def _load_ot_estados_cached() -> dict:
+    """{id_ot: estado} de ordenes_trabajo. Cache 30min + disco.
+    Reemplaza consultas duplicadas dispersas por app.py."""
+    from supabase_client import _query as _q_est
+    _rows = _q_est("ordenes_trabajo", "select=id_ot,estado&fecha_creacion=gte.2026-01-01", limit=20_000)
+    return {r["id_ot"]: r.get("estado", "") for r in _rows if r.get("id_ot")}
+
+
 # ── Título Case inteligente para nombres/EDS/ciudades en tablas ──────────────
 # Fracttal devuelve muchos campos en MAYÚSCULAS. Para display humano queremos
 # Title Case, pero respetando acrónimos (EDS, RM, N°, LTDA, S.A.) y siglas.
@@ -9409,14 +9422,8 @@ elif _page == _NAV_PAGES[0]:
             "PLAN INCOMPLETO",
         }
 
-        @st.cache_data(ttl=1800, show_spinner=False)
-        def _load_ot_estados() -> dict:
-            """Consulta directa a Supabase: {id_ot: estado} para filtrar OTs no operativas."""
-            from supabase_client import _query
-            _rows = _query("ordenes_trabajo", "select=id_ot,estado&fecha_creacion=gte.2026-01-01", limit=20_000)
-            return {r["id_ot"]: r.get("estado", "") for r in _rows if r.get("id_ot")}
-
-        _ot_estados = _load_ot_estados()
+        # Usa helper cacheado global _load_ot_estados_cached (30min + disco)
+        _ot_estados = _load_ot_estados_cached()
         _folios_excluir = {f for f, e in _ot_estados.items() if e in _ESTADOS_NO_PUNTUAN}
 
         def _build_ot_all():
@@ -11889,9 +11896,8 @@ elif _page == _NAV_PAGES[0]:
                     _df_ot_bono = score_llenado_por_ot(_kpi_bn)
                 if not _df_ot_bono.empty:
                     _EST_NP_BN = {"Canceladas","Cancelado","Cancelada","ERROR DE INGRESO","EQUIPO CON RECAMBIO","DUPLICADO","Duplicidad","DE PRUEBA","FUE REPETIDA EN OTRA OS","PLAN INCOMPLETO"}
-                    from supabase_client import _query as _q_bn
-                    _est_rows_bn = _q_bn("ordenes_trabajo","select=id_ot,estado&fecha_creacion=gte.2026-01-01", limit=20_000)
-                    _f_exc_bn = {r["id_ot"] for r in _est_rows_bn if r.get("id_ot") and r.get("estado","") in _EST_NP_BN}
+                    _est_map_bn = _load_ot_estados_cached()
+                    _f_exc_bn = {folio for folio, e in _est_map_bn.items() if e in _EST_NP_BN}
                     if _f_exc_bn and "folio" in _df_ot_bono.columns:
                         _df_ot_bono = _df_ot_bono[~_df_ot_bono["folio"].isin(_f_exc_bn)].copy()
                     _ns_bn = st.session_state.get("df_num_sub_v1") or load_numerales_subtarea_supabase()
@@ -12617,9 +12623,8 @@ elif _page == _NAV_PAGES[0]:
                 _ot_full = score_llenado_por_ot(_kpi_exp)
                 if not _ot_full.empty:
                     _EST_NP = {"Canceladas","Cancelado","Cancelada","ERROR DE INGRESO","EQUIPO CON RECAMBIO","DUPLICADO","Duplicidad","DE PRUEBA","FUE REPETIDA EN OTRA OS","PLAN INCOMPLETO"}
-                    from supabase_client import _query as _q_exp
-                    _ot_est_rows = _q_exp("ordenes_trabajo","select=id_ot,estado&fecha_creacion=gte.2026-01-01", limit=20_000)
-                    _f_exc = {r["id_ot"] for r in _ot_est_rows if r.get("id_ot") and r.get("estado","") in _EST_NP}
+                    _ot_est_map = _load_ot_estados_cached()
+                    _f_exc = {folio for folio, e in _ot_est_map.items() if e in _EST_NP}
                     if _f_exc and "folio" in _ot_full.columns:
                         _ot_full = _ot_full[~_ot_full["folio"].isin(_f_exc)].copy()
                     _ns_exp = st.session_state.get("df_num_sub_v1") or load_numerales_subtarea_supabase()
