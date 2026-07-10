@@ -196,13 +196,43 @@ _METABASE_COTALKER_URL = (
     "/56662edd-715d-4dbe-af9a-21891f4dbb97/query/json"
 )
 _PAT_SLA_COPEC   = re.compile(r"Tiempo\s+de\s+respuesta\s*:\s*(\d+)", re.IGNORECASE)
+_PAT_COMUNA      = re.compile(r"Comuna\s*:\s*(.+?)(?:\r?\n|$)", re.IGNORECASE)
 _PAT_COTALKER_N  = re.compile(r"^(\d{5,8})(?:\s*-|\s*$)")
 
-# COPEC SLA (horas) → prioridad. Ambigüedad de 24h se resuelve por zona
-# (Santiago=P2, Regiones=P1). Aquí no tenemos la zona al momento del sync,
-# así que 24h → P1 por defecto y el consumo en dashboard sigue usando el
-# umbral correcto vía sla_umbrales_horas.
-_COPEC_SLA_TO_PRIO = {18: "P1", 24: "P1", 36: "P3", 48: "P2", 72: "P3", 96: "P4"}
+# COPEC SLA (horas) → prioridad. FIX 2026-07-11: la ambigüedad de 24h SÍ se
+# resuelve por zona (Santiago=P2, Regiones=P1) — antes se defaulteaba a P1
+# lo cual clasificaba mal ~cientos de OTs Santiago P2 como P1.
+# La zona se saca del mapa eds→zona (cargado al inicio) o de la línea
+# "Comuna:" del nota_tarea (fallback).
+#
+# Tabla oficial SLA COPEC:
+#   P1: Santiago=18h, Regiones=24h
+#   P2: Santiago=24h, Regiones=48h
+#   P3: Santiago=36h, Regiones=72h
+#   P4: cualquier zona=96h
+_COPEC_SLA_UNAMBIG = {18: "P1", 36: "P3", 48: "P2", 72: "P3", 96: "P4"}
+
+# Comunas de la Región Metropolitana (Santiago). Fuera de esta lista → Regiones.
+_RM_COMUNAS = {
+    "SANTIAGO","LAS CONDES","VITACURA","PROVIDENCIA","NUNOA","LA REINA","MACUL",
+    "PENALOLEN","LA FLORIDA","PUENTE ALTO","MAIPU","ESTACION CENTRAL","CERRILLOS",
+    "PUDAHUEL","QUILICURA","RENCA","CONCHALI","INDEPENDENCIA","RECOLETA","HUECHURABA",
+    "LO BARNECHEA","SAN MIGUEL","SAN JOAQUIN","LA GRANJA","LA CISTERNA","EL BOSQUE",
+    "SAN BERNARDO","LO ESPEJO","PEDRO AGUIRRE CERDA","P.A. CERDA","SAN RAMON",
+    "LA PINTANA","CERRO NAVIA","LO PRADO","QUINTA NORMAL","BUIN","CALERA DE TANGO",
+    "COLINA","LAMPA","TALAGANTE","PENAFLOR","EL MONTE","PADRE HURTADO","MELIPILLA",
+    "CURACAVI","MARIA PINTO","ISLA DE MAIPO","SAN PEDRO","ALHUE","PIRQUE","TILTIL",
+    "BATUCO","PAINE",
+}
+
+def _norm_comuna(s: str) -> str:
+    """UPPER + sin tildes (para match contra _RM_COMUNAS)."""
+    import unicodedata as _ud
+    return _ud.normalize("NFD", str(s or "").upper().strip()).encode("ascii","ignore").decode()
+
+def _es_santiago(comuna: str) -> bool:
+    """True si la comuna pertenece a la RM (Santiago). Fallback False."""
+    return _norm_comuna(comuna) in _RM_COMUNAS
 
 # Aramco / Cotalker: mapeo directo horas → prioridad.
 _ARAMCO_SLA_TO_PRIO = {24: "P1", 48: "P2", 72: "P3"}
@@ -240,8 +270,15 @@ def build_cotalker_sla_index() -> None:
         _COTALKER_SLA_INDEX = {}
 
 
-def _copec_prio_from_nota(nota_tarea: str) -> str | None:
-    """Parsea 'Tiempo de respuesta: XX horas' de nota_tarea COPEC → P1-P4."""
+def _copec_prio_from_nota(nota_tarea: str, es_santiago: bool | None = None) -> str | None:
+    """Parsea 'Tiempo de respuesta: XX horas' de nota_tarea COPEC → P1-P4.
+
+    es_santiago: True si la EDS está en la RM, False si es Regiones, None
+    si no se pudo determinar. Necesario porque 24h es ambiguo:
+      - Santiago 24h → P2
+      - Regiones 24h → P1
+    Si es_santiago=None y sla=24, FALLBACK a leer "Comuna:" del propio nota.
+    """
     if not nota_tarea:
         return None
     m = _PAT_SLA_COPEC.search(nota_tarea)
@@ -251,7 +288,21 @@ def _copec_prio_from_nota(nota_tarea: str) -> str | None:
         sla_h = int(m.group(1))
     except ValueError:
         return None
-    return _COPEC_SLA_TO_PRIO.get(sla_h)
+    # Casos sin ambigüedad
+    if sla_h in _COPEC_SLA_UNAMBIG:
+        return _COPEC_SLA_UNAMBIG[sla_h]
+    # Ambigüedad: 24h depende de zona
+    if sla_h == 24:
+        if es_santiago is None:
+            # Fallback: buscar "Comuna: XXX" en la propia nota
+            mc = _PAT_COMUNA.search(nota_tarea)
+            if mc:
+                es_santiago = _es_santiago(mc.group(1))
+        if es_santiago is True:
+            return "P2"
+        # Regiones o desconocido → P1 (defensivo: mismo comportamiento anterior)
+        return "P1"
+    return None  # SLA no reconocido → no modificar
 
 
 def _aramco_prio_from_nota(nota_tarea: str) -> str | None:
@@ -272,15 +323,19 @@ def _aramco_prio_from_nota(nota_tarea: str) -> str | None:
 
 
 def compute_prioridad_calc(client: str, nota: str, nota_tarea: str,
-                           fracttal_prio_desc: str) -> str | None:
+                           fracttal_prio_desc: str,
+                           es_santiago: bool | None = None) -> str | None:
     """
     Fuente de verdad de prioridad_calc según cliente:
       - COPEC:  nota_tarea (email SLA). Fallback: Fracttal.
       - Aramco: Cotalker Metabase por N°. Fallback: Fracttal.
       - Otros: Fracttal (comportamiento anterior).
+
+    es_santiago se usa SOLO para COPEC (desambigua 24h → P2 Santiago / P1 Reg).
     """
     if client == "COPEC":
-        prio = _copec_prio_from_nota(nota_tarea) or _copec_prio_from_nota(nota)
+        prio = (_copec_prio_from_nota(nota_tarea, es_santiago)
+                or _copec_prio_from_nota(nota, es_santiago))
         if prio:
             return prio
         return _priority(fracttal_prio_desc)
@@ -395,7 +450,13 @@ def map_record(wo: dict) -> dict | None:
         "prioridad":          _str(wo.get("priorities_description")),
         "prioridad_calc":     compute_prioridad_calc(
                                   client, nota, nota_tarea,
-                                  wo.get("priorities_description")
+                                  wo.get("priorities_description"),
+                                  # Zona: primero mapa eds→comuna (cargado por
+                                  # _load_loc_mapping). None si no hay match →
+                                  # _copec_prio_from_nota hará fallback leyendo
+                                  # "Comuna:" directamente del nota_tarea.
+                                  (_es_santiago(_eds_to_comuna[_resolve_eds(wo)])
+                                   if _resolve_eds(wo) in _eds_to_comuna else None),
                               ),
 
         # Fechas
@@ -445,21 +506,35 @@ def map_record(wo: dict) -> dict | None:
 # ── LOC→EDS mapping (resolve zone names to real station codes) ─────────────
 
 _loc_to_eds: dict = {}
+_eds_to_comuna: dict = {}   # {eds_occim: comuna_str} para desambiguar P1/P2 COPEC 24h
 
 def _load_loc_mapping():
-    global _loc_to_eds
+    global _loc_to_eds, _eds_to_comuna
     h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     r = requests.get(
         f"{SUPABASE_URL}/rest/v1/estaciones_servicio"
-        "?loc_fracttal=not.is.null&select=eds_occim,loc_fracttal",
+        "?select=eds_occim,loc_fracttal,comuna,cod_occim_fracttal&limit=3000",
         headers=h, timeout=15,
     )
+    rows = r.json()
     _loc_to_eds = {
         row["loc_fracttal"]: row["eds_occim"]
-        for row in r.json()
+        for row in rows
         if row.get("loc_fracttal") and row.get("eds_occim")
     }
-    log(f"LOC→EDS mapping: {len(_loc_to_eds)} entries")
+    # Mapa eds→comuna: indexado por AMBAS claves (eds_occim y cod_occim_fracttal)
+    # para cubrir OTs con código PBR y códigos Fracttal EE_S###.
+    _eds_to_comuna = {}
+    for row in rows:
+        comuna = row.get("comuna")
+        if not comuna: continue
+        if row.get("eds_occim"):
+            _eds_to_comuna[str(row["eds_occim"])] = comuna
+        if row.get("cod_occim_fracttal"):
+            _eds_to_comuna[str(row["cod_occim_fracttal"])] = comuna
+        if row.get("loc_fracttal"):
+            _eds_to_comuna[str(row["loc_fracttal"])] = comuna
+    log(f"LOC→EDS mapping: {len(_loc_to_eds)} entries · eds→comuna: {len(_eds_to_comuna)}")
 
 # ── Upsert Supabase ────────────────────────────────────────────────────────
 
