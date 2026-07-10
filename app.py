@@ -11474,14 +11474,13 @@ elif _page == _NAV_PAGES[0]:
                 st.markdown('<div class="section-header">🔢  Registro de Numerales — OTs con número de ficha</div>',
                             unsafe_allow_html=True)
                 st.caption(
-                    "Aplica a **lavadoras y aspiradoras** en MC y MP. El formulario Fracttal "
-                    "exige el numeral en ambos tipos, así que un valor faltante o basura "
-                    "penaliza igual sea correctiva o preventiva."
+                    "Aplica **sólo a preventivas** de lavadoras y aspiradoras (decisión "
+                    "operativa 2026-07). Las correctivas se muestran en la tabla pero "
+                    "aparecen como *No aplica* y no penalizan el KPI."
                 )
 
-                # Numeral aplica a TODA lavadora/aspiradora (MC + MP) — se incluyen
-                # correctivas y preventivas. Los equipos no-lavadora aportan score=25
-                # auto (no_aplica), igual no distorsionan el indicador.
+                # Numeral aplica SÓLO a preventivas de lavadora/aspiradora. Las
+                # correctivas aparecen en la tabla como 'no_aplica_mc' (sin penalizar).
                 _df_num_base = df_ot_scores.copy()
                 if not _df_num_base.empty:
                     _num_ok  = int(_df_num_base["numeral_ok"].sum())
@@ -11551,6 +11550,14 @@ elif _page == _NAV_PAGES[0]:
                                     _exp["numeral_final"].fillna(_exp["numeral_inicial"]).fillna(""))
                                 # Equipo = código del activo de ESTA subtarea (EQ-XXXX)
                                 _exp["_equipo_sub"] = _exp["codigo_activo"].fillna("—")
+                                # DECISIÓN OPERACIONES (2026-07): correctivas fuera
+                                # del KPI numeral. Al expandir por subtarea, sobrescribimos
+                                # numeral_ok/motivo del sync — hay que volver a aplicar
+                                # la exención acá.
+                                if "es_correctiva" in _exp.columns:
+                                    _mc_exp = _exp["es_correctiva"].fillna(False).astype(bool)
+                                    _exp.loc[_mc_exp, "numeral_ok"]     = True
+                                    _exp.loc[_mc_exp, "numeral_motivo"] = "no_aplica_mc"
                                 _det_num = _exp
 
                     # Columna Numeral y Estado con tres casos claros:
@@ -11689,9 +11696,10 @@ elif _page == _NAV_PAGES[0]:
                         expanded=True,
                     ):
                         st.caption(
-                            "Aplica a **lavadoras y aspiradoras**. Numerales **reales** "
-                            "leídos del formulario de la tarea en Fracttal (no de la nota). "
-                            "🔵 **No aplica** = equipo sin numeral (compresores, ablandadores, etc.). "
+                            "Aplica **sólo a preventivas** de lavadoras y aspiradoras. Numerales "
+                            "**reales** leídos del formulario de la tarea en Fracttal (no de la nota). "
+                            "🔵 **No aplica** = equipo sin numeral (compresores, ablandadores, etc.) "
+                            "o **correctiva** (excluida del KPI por decisión operativa 2026-07). "
                             "✅ = numeral válido · ❌/🟣 = dato malo (sin numeral, basura, exceso de fichas, salto). "
                             "**Fichas período** = N. Final − N. Inicial (>20 en una OT = sospechoso). "
                             "**Comentario técnico** = lo que el técnico escribió en el formulario "
