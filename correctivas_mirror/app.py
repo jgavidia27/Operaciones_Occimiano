@@ -34,6 +34,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Marker de versión visible para confirmar qué commit deployó Streamlit Cloud.
+# Si el usuario ve "Oh no", pero cambia este valor al recargar, sabemos que
+# el deploy sí llegó y el crash es diferente al que arreglé.
+APP_VERSION = "v2026.07.10-fix4"
 FECHA_CORTE = "2026-05-01"
 
 # Prioridad → color / label
@@ -298,7 +302,8 @@ st.markdown("# 📞 Panel de Llamados Correctivos — Operaciones Occimiano")
 st.markdown(
     f'<div class="hdr-sub">Fuente: <code>v_llamados_sla</code> (misma vista que el dashboard principal) · '
     f'Enriquecida con <code>fuente</code> desde <code>llamados_correctivos</code> · '
-    f'Datos desde <b>{FECHA_CORTE}</b> · Cache 5 min.</div>',
+    f'Datos desde <b>{FECHA_CORTE}</b> · Cache 5 min · '
+    f'<span style="color:#94a3b8;">Build {APP_VERSION}</span></div>',
     unsafe_allow_html=True,
 )
 

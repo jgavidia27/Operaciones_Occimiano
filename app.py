@@ -12524,9 +12524,32 @@ elif _page == _NAV_PAGES[0]:
                 )
 
     # ══════════════════════════════════════════════════════════════════════════
-    # EXPORTAR DATOS STO PARA APP MÓVIL (sto_data.json)
+    # EXPORT DATOS STO — usa sync_sto_export.py (fuente única)
     # ══════════════════════════════════════════════════════════════════════════
-    try:
+    # El export automático en cada rerun del dashboard causaba data corrupta:
+    # las sub-pestañas usan st.radio, así que sólo la activa poblaba
+    # session_state → precision/reincidencias quedaban vacías en el export.
+    # Ahora la lógica vive UNICAMENTE en sync_sto_export.py (cron 2x/día en
+    # Render + botón manual acá). Un solo lugar para debuggear.
+    with st.expander("📱 App móvil — datos sincronizados", expanded=False):
+        st.caption(
+            "Los datos de la app móvil se sincronizan automáticamente 2 veces al día "
+            "(12:00 y 22:00 UTC). Usa el botón para forzar una sincronización manual "
+            "si necesitas ver cambios inmediatos."
+        )
+        if st.button("🔄 Sincronizar app móvil ahora", key="sto_sync_manual"):
+            try:
+                import sync_sto_export as _sync_mod
+                with st.spinner("Sincronizando (~40s)..."):
+                    _sync_mod.main()
+                st.success("✅ App móvil sincronizada. Refresca la app en tu teléfono.")
+            except Exception as _e_sync:
+                st.error(f"❌ Error sincronizando: {type(_e_sync).__name__}: {_e_sync}")
+                import traceback as _tb_sync
+                st.code(_tb_sync.format_exc())
+
+    # Bloque legacy eliminado — sync_sto_export.py es fuente única.
+    if False:  # dead code preservado por si necesitamos referencia
         import json as _json_mod
         _sto_export_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sto_data.json")
 
@@ -12763,8 +12786,7 @@ elif _page == _NAV_PAGES[0]:
             })
         except Exception:
             pass
-    except Exception:
-        pass
+    # fin bloque legacy dead code (if False:)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PÁGINA 5: MANTENCIONES PREVENTIVAS
