@@ -112,6 +112,27 @@ def _strip_comentario_headers(txt) -> str:
     return _COMENT_HEADER_RE.sub("", s).strip(" |") or "—"
 
 
+# ── Resolución EDS: código Fracttal → nombre humano ──────────────────────────
+# Las OTs vienen con código Fracttal (EE_S016, LOC-182, PBR-41, 60513, etc.).
+# El catálogo estaciones_servicio los indexa por:
+#   - eds_occim (PBR-41, 60513, SH_152)           — código Occimiano
+#   - eds_occim_raw / cod_occim_fracttal (EE_S016) — código Aramco/Fracttal
+#   - _loc_code / loc_fracttal (LOC-182)          — código Fracttal LOC-###
+# Un solo helper resuelve las 3 variantes.
+def _build_eds_nombre_map(df_eds_) -> dict:
+    """{código_cualquiera: nombre_humano}. Cubre PBR/60513/SH, EE_S y LOC."""
+    if df_eds_ is None or df_eds_.empty or "nombre" not in df_eds_.columns:
+        return {}
+    m = {}
+    _nombres = df_eds_["nombre"].astype(str)
+    for col in ("eds_occim", "eds_occim_raw", "_cod_occim_frac", "_loc_code"):
+        if col in df_eds_.columns:
+            for k, v in zip(df_eds_[col].astype(str), _nombres):
+                if k and k not in ("nan", "None", "") and v and v != "nan":
+                    m.setdefault(k, v)
+    return m
+
+
 # ── Cache global de estados_ot ────────────────────────────────────────────────
 # Antes se consultaba en 3 lugares distintos sin cache compartida (Precisión
 # tab, Resumen Bonos fallback, Export STO fallback) → 3× la misma query pesada
@@ -10778,14 +10799,11 @@ elif _page == _NAV_PAGES[0]:
                         # siempre tienen 1 activo por OT (la falla es por equipo),
                         # así que cada fila corresponde inequívocamente a un equipo.
                         # Las preventivas multi-subtarea no tienen causa raíz registrada.
-                        # Mapa código EDS → nombre (desde el maestro estaciones_servicio)
-                        _eds_nombre_map_cr = {}
-                        try:
-                            if not df_eds.empty and "eds_occim" in df_eds.columns and "nombre" in df_eds.columns:
-                                _eds_nombre_map_cr = dict(zip(
-                                    df_eds["eds_occim"].astype(str), df_eds["nombre"].astype(str)))
-                        except Exception:
-                            pass
+                        # Mapa código EDS → nombre. Usa helper que cubre TODAS las
+                        # variantes de código (eds_occim/PBR, eds_occim_raw/EE_S###,
+                        # _loc_code/LOC-###). Antes solo mapeaba eds_occim → nombre
+                        # y las OTs Aramco con código EE_S### quedaban en "—".
+                        _eds_nombre_map_cr = _build_eds_nombre_map(df_eds)
                         if "equipment_code" in _det_cr.columns:
                             _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
                         if "eds_occim" in _det_cr.columns:
@@ -11087,14 +11105,8 @@ elif _page == _NAV_PAGES[0]:
                                 f"({_piso_lbl} de {estim_h}). Déficit de {_fmt_hm(deficit)}.")
 
                     _det_te_disp["Diagnóstico"] = _det_te.apply(_diag_tiempo, axis=1).values
-                    # Mapa código EDS → nombre (desde el maestro estaciones_servicio)
-                    _eds_nombre_map_te = {}
-                    try:
-                        if not df_eds.empty and "eds_occim" in df_eds.columns and "nombre" in df_eds.columns:
-                            _eds_nombre_map_te = dict(zip(
-                                df_eds["eds_occim"].astype(str), df_eds["nombre"].astype(str)))
-                    except Exception:
-                        pass
+                    # Helper compartido: mapea eds_occim/eds_occim_raw/_loc_code → nombre
+                    _eds_nombre_map_te = _build_eds_nombre_map(df_eds)
                     # Normalizar EDS para display + inyectar nombre
                     if "eds_occim" in _det_te_disp.columns:
                         _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
@@ -11352,16 +11364,9 @@ elif _page == _NAV_PAGES[0]:
                         st.session_state[_abs_sig] = _fig_abs
                     st.plotly_chart(st.session_state[_abs_sig], width="stretch")
 
-                    # ── Mapa EDS → Nombre (para enriquecer las 2 tablas siguientes) ──
-                    _eds_nombre_map_prec = {}
-                    if "df_eds" in globals() or "df_eds" in locals():
-                        try:
-                            _src = df_eds
-                            if not _src.empty and "eds_occim" in _src.columns and "nombre" in _src.columns:
-                                _eds_nombre_map_prec = dict(zip(
-                                    _src["eds_occim"].astype(str), _src["nombre"].astype(str)))
-                        except Exception:
-                            pass
+                    # Helper compartido: cubre eds_occim (PBR/60513/SH), eds_occim_raw
+                    # (EE_S### Aramco/Fracttal) y _loc_code (LOC-###).
+                    _eds_nombre_map_prec = _build_eds_nombre_map(df_eds)
 
                     # ── Tabla detalle de OTs injustificadas ──────────────────────────
                     _df_abs_only = _df_te_p[_df_te_p["_absurdo"]].copy()
