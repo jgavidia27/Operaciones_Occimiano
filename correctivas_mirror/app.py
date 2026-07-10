@@ -37,7 +37,7 @@ st.set_page_config(
 # Marker de versión visible para confirmar qué commit deployó Streamlit Cloud.
 # Si el usuario ve "Oh no", pero cambia este valor al recargar, sabemos que
 # el deploy sí llegó y el crash es diferente al que arreglé.
-APP_VERSION = "v2026.07.10-fix5"
+APP_VERSION = "v2026.07.10-fix6"
 FECHA_CORTE = "2026-05-01"
 
 # Prioridad → color / label
@@ -181,25 +181,26 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # 2) Fuentes por OT — sólo usamos `falla` de llamados_correctivos.
-    # NO usamos `fuente` de esa tabla porque el proceso que la pobla
-    # marca masivamente como "ot_directa" muchas OTs que sí vienen de
-    # robots (verificado 2026-07: 2523/3163 marcadas ot_directa en
-    # una semana, cuando los robots leen la mayoría de correos Copec/
-    # Shell/Aramco). Inferimos fuente 100% por cliente:
-    #   COPEC          → robot_email
-    #   SHELL (Enex)   → robot_shell
-    #   ESMAX/Aramco   → robot_esmax
-    #   Resto (Abastible, otros) → ot_directa
-    lc = _sb_get("llamados_correctivos", {
-        "select": "os_fracttal,falla",
-        "fecha_llamado": f"gte.{fecha_desde}",
-        "limit": 10000,
-    })
-    falla_map = {r["os_fracttal"]: r["falla"] for r in lc
-                 if r.get("os_fracttal") and r.get("falla")}
-    df["falla"] = df["os_fracttal"].map(falla_map)
-
+    # 2) Fuentes por OT.
+    # Lógica en 3 capas (más confiable primero):
+    #  a) `fuente` de llamados_correctivos si viene poblada por el robot
+    #     (robot_email/robot_shell/robot_esmax) → confiable.
+    #  b) Si es 'ot_directa' PERO el cliente tiene robot activo y la OT
+    #     es POSTERIOR a la fecha de inicio del robot → sobrescribir al
+    #     robot correspondiente (asumimos que sync_llamados_directos
+    #     corrió antes que el robot procesara el correo).
+    #  c) Sin match en llamados_correctivos → inferir por cliente:
+    #       Copec/Shell/Aramco con OT posterior a inicio robot → robot_*
+    #       resto o pre-robot → ot_directa
+    #
+    # Fechas de inicio de robots (aprox. — validado con operaciones):
+    ROBOT_START = {
+        "COPEC":          pd.Timestamp("2026-06-02"),  # robot email Copec
+        "SHELL (Enex)":   pd.Timestamp("2026-06-12"),  # robot Shell
+        "ESMAX (Aramco)": pd.Timestamp("2026-06-12"),  # robot Aramco/Esmax
+        "Aramco (Esmax)": pd.Timestamp("2026-06-12"),
+        "ESMAX":          pd.Timestamp("2026-06-12"),
+    }
     _cli_to_robot = {
         "COPEC":          "robot_email",
         "SHELL (Enex)":   "robot_shell",
@@ -207,10 +208,46 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
         "Aramco (Esmax)": "robot_esmax",
         "ESMAX (Aramco)": "robot_esmax",
     }
-    df["fuente"] = df["cliente"].map(_cli_to_robot).fillna("ot_directa")
-    # Marca cuáles vienen de cliente-inferido (todas las de los 3 clientes
-    # con robot). Mantenemos el flag para el mensaje en UI.
-    df["fuente_inferida"] = df["cliente"].isin(list(_cli_to_robot)).fillna(False)
+
+    lc = _sb_get("llamados_correctivos", {
+        "select": "os_fracttal,fuente,falla",
+        "fecha_llamado": f"gte.{fecha_desde}",
+        "limit": 10000,
+    })
+    fuente_map = {r["os_fracttal"]: r.get("fuente")
+                  for r in lc if r.get("os_fracttal")}
+    falla_map = {r["os_fracttal"]: r["falla"]
+                 for r in lc if r.get("os_fracttal") and r.get("falla")}
+    df["falla"] = df["os_fracttal"].map(falla_map)
+    df["fuente_bd"] = df["os_fracttal"].map(fuente_map)
+
+    def _resolver_fuente(row):
+        cli = row.get("cliente")
+        fbd = row.get("fuente_bd")
+        fll = row.get("fecha_llamado")
+        # Fecha de llamado como Timestamp
+        try:
+            ts = pd.Timestamp(fll) if pd.notna(fll) else pd.NaT
+            if pd.notna(ts) and ts.tzinfo is not None:
+                ts = ts.tz_convert(None)
+        except Exception:
+            ts = pd.NaT
+        robot_target = _cli_to_robot.get(cli)
+        robot_start = ROBOT_START.get(cli)
+        # a) BD dice robot → confiar
+        if fbd in ("robot_email", "robot_shell", "robot_esmax"):
+            return fbd
+        # b/c) Cliente con robot activo y OT posterior al inicio → robot
+        if robot_target and robot_start and pd.notna(ts) and ts >= robot_start:
+            return robot_target
+        # Pre-robot o cliente sin robot → mantener BD o directa
+        return fbd if fbd else "ot_directa"
+
+    df["fuente"] = df.apply(_resolver_fuente, axis=1)
+    # `fuente_inferida` = True cuando corregimos la BD (BD decía ot_directa
+    # o null pero el cliente con robot activo debería ser robot_*)
+    df["fuente_inferida"] = df["fuente_bd"] != df["fuente"]
+    df = df.drop(columns=["fuente_bd"], errors="ignore")
 
     # 3) Normalización
     df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
@@ -503,12 +540,13 @@ if _n_tot:
     )
     st.markdown(_resumen, unsafe_allow_html=True)
 
+    _n_inf = int(_df["fuente_inferida"].sum()) if "fuente_inferida" in _df.columns else 0
     st.caption(
-        "Distribución por canal en el filtro actual. "
-        "**Fuente inferida por cliente**: Copec → Robot Copec (correo) · "
-        "Shell (Enex) → Robot Shell · Aramco/ESMAX → Robot Aramco · "
-        "resto (Abastible, etc.) → Directa Fracttal. Los llamados directos "
-        "reales (OTs creadas manualmente sin robot) son ínfimos en la práctica."
+        f"Distribución por canal · **{_n_inf:,}** OTs con fuente corregida "
+        f"(BD decía 'ot_directa' pero cliente tiene robot activo). "
+        f"Robots iniciaron: Copec 02-jun-2026 · Shell 12-jun-2026 · "
+        f"Aramco 12-jun-2026. OTs anteriores al inicio del robot se "
+        f"mantienen como aparecen en la BD."
     )
 
 

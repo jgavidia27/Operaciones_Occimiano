@@ -1,9 +1,13 @@
 """
 sync_llamados_directos.py
 =========================
-Detecta OTs correctivas de COPEC/Shell/ESMAX creadas directamente
-en Fracttal (sin correo ni robot) y las agrega a llamados_correctivos
-con fuente = 'ot_directa'.
+Detecta OTs correctivas creadas directamente en Fracttal (sin correo ni
+robot) y las agrega a llamados_correctivos con fuente = 'ot_directa'.
+
+IMPORTANTE (fix 2026-07): NO procesa OTs de clientes con robot activo
+posteriores al inicio del robot — esas OTs deben esperar a que el
+robot correspondiente las procese. Si el sync corría primero, marcaba
+mal miles de OTs como ot_directa cuando en realidad venían por robot.
 
 Se ejecuta diariamente. Complementa al robot de correos.
 """
@@ -11,7 +15,7 @@ Se ejecuta diariamente. Complementa al robot de correos.
 import json
 import time
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 SUPABASE_URL = "https://puefgkyjghwwgdfxbrex.supabase.co"
 SUPABASE_KEY = (
@@ -21,6 +25,18 @@ SUPABASE_KEY = (
 )
 CLIENTES_SLA = ("COPEC", "ESMAX (Aramco)", "SHELL (Enex)")
 _ZONE_NAMES = {"CENTRO", "SUR", "SANTIAGO", "NORTE"}
+
+# Fecha desde la que cada robot está activo (validado con operaciones).
+# OTs POSTERIORES a esta fecha para el cliente NO deben marcarse como
+# ot_directa — pertenecen al robot. Si el robot todavía no las procesó,
+# es preferible tener un hueco temporal que un dato falso permanente.
+ROBOT_START = {
+    "COPEC":          date(2026, 6, 2),
+    "SHELL (Enex)":   date(2026, 6, 12),
+    "ESMAX (Aramco)": date(2026, 6, 12),
+    "Aramco (Esmax)": date(2026, 6, 12),
+    "ESMAX":          date(2026, 6, 12),
+}
 
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
@@ -81,6 +97,22 @@ def main():
             folio = ot.get("id_ot", "")
             if folio in ya_registrados:
                 continue  # ya lo tenemos
+
+            # SKIP OTs post-inicio-robot: pertenecen al robot correspondiente.
+            # Si el robot todavía no las procesó, esperar. Marcarlas como
+            # ot_directa acá crea data corrupta permanente (y no se corrige
+            # aunque el robot las procese después, por el on_conflict=ignore).
+            robot_start = ROBOT_START.get(cliente)
+            if robot_start:
+                fc_raw = ot.get("fecha_creacion") or ""
+                try:
+                    fc_date = datetime.fromisoformat(
+                        fc_raw.replace("Z", "+00:00")
+                    ).date()
+                    if fc_date >= robot_start:
+                        continue  # dejar que el robot la maneje
+                except (ValueError, AttributeError):
+                    pass  # fecha ilegible → seguimos con el flujo normal
 
             # OT nueva no capturada por robot -> 'ot_directa'
             eds_cod = ot.get("codigo_eds") or ""
