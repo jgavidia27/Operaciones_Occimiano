@@ -37,7 +37,7 @@ st.set_page_config(
 # Marker de versión visible para confirmar qué commit deployó Streamlit Cloud.
 # Si el usuario ve "Oh no", pero cambia este valor al recargar, sabemos que
 # el deploy sí llegó y el crash es diferente al que arreglé.
-APP_VERSION = "v2026.07.10-fix4"
+APP_VERSION = "v2026.07.10-fix5"
 FECHA_CORTE = "2026-05-01"
 
 # Prioridad → color / label
@@ -181,31 +181,25 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # 2) Fuentes por OT
-    fuente_map = {}
+    # 2) Fuentes por OT — sólo usamos `falla` de llamados_correctivos.
+    # NO usamos `fuente` de esa tabla porque el proceso que la pobla
+    # marca masivamente como "ot_directa" muchas OTs que sí vienen de
+    # robots (verificado 2026-07: 2523/3163 marcadas ot_directa en
+    # una semana, cuando los robots leen la mayoría de correos Copec/
+    # Shell/Aramco). Inferimos fuente 100% por cliente:
+    #   COPEC          → robot_email
+    #   SHELL (Enex)   → robot_shell
+    #   ESMAX/Aramco   → robot_esmax
+    #   Resto (Abastible, otros) → ot_directa
     lc = _sb_get("llamados_correctivos", {
-        "select": "os_fracttal,fuente,falla",
+        "select": "os_fracttal,falla",
         "fecha_llamado": f"gte.{fecha_desde}",
         "limit": 10000,
     })
-    falla_map = {}
-    for r in lc:
-        if r.get("os_fracttal"):
-            fuente_map[r["os_fracttal"]] = r.get("fuente")
-            if r.get("falla"):
-                falla_map[r["os_fracttal"]] = r["falla"]
-    df["fuente"] = df["os_fracttal"].map(fuente_map)
+    falla_map = {r["os_fracttal"]: r["falla"] for r in lc
+                 if r.get("os_fracttal") and r.get("falla")}
     df["falla"] = df["os_fracttal"].map(falla_map)
 
-    # Fallback: si no hay match directo por os_fracttal (típico en Copec
-    # porque su robot no linkea os_fracttal al momento del correo), se
-    # infiere la fuente por cliente. Correlación real observada en la
-    # tabla llamados_correctivos:
-    #   robot_email → 100% Copec
-    #   robot_shell → 100% Shell (Enex)
-    #   robot_esmax → 100% Esmax (Aramco)
-    # Si el cliente no es uno de los 3 que tienen robot, asumimos
-    # ot_directa (OT manual/directa en Fracttal sin canal automatizado).
     _cli_to_robot = {
         "COPEC":          "robot_email",
         "SHELL (Enex)":   "robot_shell",
@@ -213,10 +207,10 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
         "Aramco (Esmax)": "robot_esmax",
         "ESMAX (Aramco)": "robot_esmax",
     }
-    _fallback = df["cliente"].map(_cli_to_robot).fillna("ot_directa")
-    df["fuente"] = df["fuente"].fillna(_fallback)
-    # Marca si fue inferida (para explicar en UI si hace falta)
-    df["fuente_inferida"] = df["os_fracttal"].map(fuente_map).isna()
+    df["fuente"] = df["cliente"].map(_cli_to_robot).fillna("ot_directa")
+    # Marca cuáles vienen de cliente-inferido (todas las de los 3 clientes
+    # con robot). Mantenemos el flag para el mensaje en UI.
+    df["fuente_inferida"] = df["cliente"].isin(list(_cli_to_robot)).fillna(False)
 
     # 3) Normalización
     df["cliente"] = df["cliente"].replace({"ESMAX (Aramco)": "Aramco (Esmax)"})
@@ -509,17 +503,13 @@ if _n_tot:
     )
     st.markdown(_resumen, unsafe_allow_html=True)
 
-    _n_inf = int(_df["fuente_inferida"].sum()) if "fuente_inferida" in _df.columns else 0
-    if _n_inf:
-        st.caption(
-            f"Distribución por canal en el filtro actual · "
-            f"⚠️ {_n_inf:,} OTs con fuente **inferida por cliente** "
-            f"(el robot Copec no linkea os_fracttal al recibir el correo, "
-            f"así que se asume: Copec→robot email, Shell→robot Shell, "
-            f"Aramco→robot Aramco, resto→directa Fracttal)."
-        )
-    else:
-        st.caption("Distribución por canal de entrada en el filtro actual.")
+    st.caption(
+        "Distribución por canal en el filtro actual. "
+        "**Fuente inferida por cliente**: Copec → Robot Copec (correo) · "
+        "Shell (Enex) → Robot Shell · Aramco/ESMAX → Robot Aramco · "
+        "resto (Abastible, etc.) → Directa Fracttal. Los llamados directos "
+        "reales (OTs creadas manualmente sin robot) son ínfimos en la práctica."
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════
