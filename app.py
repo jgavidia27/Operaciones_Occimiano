@@ -10532,14 +10532,14 @@ elif _page == _NAV_PAGES[0]:
                         # luego Cumple, y Tipo Equipo justo antes de Numeral para
                         # leer causalmente por qué aplica o no.
                         drill_disp = drill_disp[[
-                            "_fecha", "_cumple", "_x4", "folio", "_cliente", "_eds", "tecnico", "station",
+                            "_fecha", "_cumple", "_x4", "folio", "_cliente", "_eds", "station", "tecnico",
                             "_tipo", "_modalidad", "_estado_ot", "score_total",
                             "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
                             "_obs",
                         ]].copy()
 
                         drill_disp.columns = [
-                            "Fecha", "Estado", "X/3", "OT", "Cliente", "Codigo EDS", "Técnico", "Estación",
+                            "Fecha", "Estado", "X/3", "OT", "Cliente", "Codigo EDS", "Estación", "Técnico",
                             "Tipo", "Modalidad", "Estado OT", "Score",
                             "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
                             "💬 Observación",
