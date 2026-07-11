@@ -9860,7 +9860,7 @@ elif _page == _NAV_PAGES[0]:
                     _render_prec_card(_prec_eq_cols[_pi], _card_titulo, _card_subtitulo, _tecs_grp, _t)
             st.caption(
                 "**Llenadas** = OTs evaluadas en el período (base 100%)  ·  "
-                "**Con error** = OTs con ≥1 componente malo  ·  "
+                "**No cumple** = OTs con ≥1 componente malo  ·  "
                 "**Cumplimiento** = OTs correctas / OTs llenadas  ·  "
                 "**Err. individuales** = suma de fallos por dimensión (informativo, no mide el KPI)  ·  "
                 "Escala (por técnico/trimestre): ≥95%→$105K · ≥90%→$94.5K · ≥85%→$84K · "
@@ -10401,7 +10401,7 @@ elif _page == _NAV_PAGES[0]:
                                     (_n >= 25).astype(int))
 
                         # Columna 1: Cumple
-                        drill_disp["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 3 else "❌ Con error")
+                        drill_disp["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 3 else "❌ No cumple")
 
                         # Columna 2: X/3
                         drill_disp["_x4"] = _ok_bits.apply(
@@ -10522,19 +10522,25 @@ elif _page == _NAV_PAGES[0]:
                         else:
                             drill_disp["_estado_ot"] = "—"
 
+                        # Cliente
+                        if "client" in drill_disp.columns:
+                            drill_disp["_cliente"] = drill_disp["client"].fillna("—")
+                        else:
+                            drill_disp["_cliente"] = "—"
+
                         # Selección ordenada — Fecha primero (más reciente arriba),
                         # luego Cumple, y Tipo Equipo justo antes de Numeral para
                         # leer causalmente por qué aplica o no.
                         drill_disp = drill_disp[[
-                            "_fecha", "_cumple", "_x4", "folio", "_eds", "tecnico", "station",
+                            "_fecha", "_cumple", "_x4", "folio", "_cliente", "_eds", "tecnico", "station",
                             "_tipo", "_modalidad", "_estado_ot", "score_total",
                             "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
                             "_obs",
                         ]].copy()
 
                         drill_disp.columns = [
-                            "Fecha", "Cumple", "X/3", "OT", "EDS", "Técnico", "Estación",
-                            "Tipo", "Modalidad", "Estado", "Score",
+                            "Fecha", "Estado", "X/3", "OT", "Cliente", "Codigo EDS", "Técnico", "Estación",
+                            "Tipo", "Modalidad", "Estado OT", "Score",
                             "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
                             "💬 Observación",
                         ]
@@ -10573,12 +10579,14 @@ elif _page == _NAV_PAGES[0]:
                             width="stretch",
                             hide_index=True,
                             column_config={
-                                "Cumple":           st.column_config.TextColumn(width=100,
+                                "Fecha":            st.column_config.TextColumn(width=90),
+                                "Estado":           st.column_config.TextColumn(width=110,
                                     help="✅ = 3/3 componentes OK · ❌ = ≥1 falló"),
                                 "X/3":              st.column_config.TextColumn(width=80,
                                     help="Componentes correctos de los 3 del KPI"),
                                 "OT":               st.column_config.TextColumn(width=110),
-                                "EDS":              st.column_config.TextColumn(width=85,
+                                "Cliente":          st.column_config.TextColumn(width=85),
+                                "Codigo EDS":       st.column_config.TextColumn(width=85,
                                     help="Código EDS Occimiano."),
                                 "Técnico":          st.column_config.TextColumn(width=180),
                                 "Estación":         st.column_config.TextColumn(width=200),
@@ -10587,7 +10595,7 @@ elif _page == _NAV_PAGES[0]:
                                     help="Método de detección de falla en Fracttal (informativo, no incide en el KPI). "
                                          "Presencial = técnico fue a la EDS · Remoto = resuelto vía telefónica/remota · "
                                          "Con MP = aprovechó una mantención preventiva."),
-                                "Estado":           st.column_config.TextColumn(width=110,
+                                "Estado OT":        st.column_config.TextColumn(width=110,
                                     help="Estado de la OT en Fracttal."),
                                 "Score":            st.column_config.ProgressColumn(
                                     min_value=0, max_value=75, format="%.1f"),
@@ -10603,7 +10611,6 @@ elif _page == _NAV_PAGES[0]:
                                     help="Calidad del numeral en lavadora/aspiradora (MC+MP). Motivo del dato malo si no cumple."),
                                 "💬 Observación":   st.column_config.TextColumn(width=260,
                                     help="Resumen de cumplimiento de la OT (3 componentes)"),
-                                "Fecha":            st.column_config.TextColumn(width=90),
                             },
                         )
 
@@ -10739,14 +10746,14 @@ elif _page == _NAV_PAGES[0]:
                     with st.expander(f"📋 Detalle de OTs — Causa Raíz ({_n_cr_total:,} correctivas)", expanded=True):
                         _filtro_cr = _filtro_ot_input("kpi_filtro_ot_causa")
                         _det_cr = _df_cr_base[[c for c in
-                            ["folio","equipment_code","eds_occim","tecnico","creation_date","maint_type",
+                            ["folio","equipment_code","eds_occim","client","tecnico","creation_date","maint_type",
                              "causa_raiz_raw","causa_clasif","comentario_tecnico","_causa_ok",
                              "es_correctiva"]
                             if c in _df_cr_base.columns]].copy()
                         _det_cr["creation_date"] = pd.to_datetime(_det_cr["creation_date"], errors="coerce")\
                             .dt.tz_convert(None).dt.strftime("%d/%m/%Y")
                         _det_cr["Estado"] = _det_cr["_causa_ok"].apply(
-                            lambda v: "✅ Correcto" if v else "❌ Error")
+                            lambda v: "✅ Cumple" if v else "❌ No cumple")
 
                         # Diagnóstico breve del error de llenado (solo cuando _causa_ok=False)
                         # Explica por qué se imputa el error; vacío cuando está correcto.
@@ -10809,20 +10816,21 @@ elif _page == _NAV_PAGES[0]:
                         if "eds_occim" in _det_cr.columns:
                             _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
                             _det_cr["eds_nombre"] = _det_cr["eds_occim"].map(_eds_nombre_map_cr).fillna("—")
+                        if "client" in _det_cr.columns:
+                            _det_cr["client"] = _det_cr["client"].fillna("—")
                         _det_cr = _det_cr.drop(
                             columns=["_causa_ok","es_correctiva"], errors="ignore"
                         ).rename(columns={
-                            "folio":"OT","equipment_code":"Equipo","eds_occim":"EDS",
-                            "eds_nombre":"Nombre EDS",
+                            "folio":"OT","equipment_code":"Equipo","eds_occim":"Codigo EDS",
+                            "eds_nombre":"Nombre EDS","client":"Cliente",
                             "tecnico":"Técnico","creation_date":"Fecha",
                             "maint_type":"Tipo","causa_raiz_raw":"Causa Raíz",
                             "causa_clasif":"Clasificación",
                             "comentario_tecnico":"Comentario técnico / qué hizo",
                             "_diagnostico":"Diagnóstico del error"
                         }).sort_values("Fecha", ascending=False)
-                        # Orden final: OT - Equipo - EDS - Nombre EDS - resto
-                        _orden_cr = ["OT","Equipo","EDS","Nombre EDS","Técnico","Fecha","Tipo","Causa Raíz",
-                                     "Clasificación","Estado",
+                        _orden_cr = ["Fecha","Estado","Equipo","OT","Cliente","Codigo EDS","Nombre EDS",
+                                     "Técnico","Tipo","Causa Raíz","Clasificación",
                                      "Comentario técnico / qué hizo","Diagnóstico del error"]
                         _det_cr = _det_cr[[c for c in _orden_cr if c in _det_cr.columns]]
                         # Filtro por OT (si el usuario escribió algo)
@@ -10831,15 +10839,17 @@ elif _page == _NAV_PAGES[0]:
                             st.caption(f"Mostrando **{len(_det_cr):,}** de {_n_cr_total:,} OTs (filtro: `{_filtro_cr}`).")
                         _show_df(_det_cr, hide_index=True, width="stretch",
                             column_config={
-                                "OT":            st.column_config.TextColumn(width=110),
+                                "Fecha":         st.column_config.TextColumn(width=100),
+                                "Estado":        st.column_config.TextColumn(width=110),
                                 "Equipo":        st.column_config.TextColumn(width=95,
                                     help="Código del activo en Fracttal (ej. EQ-6249). En correctivas siempre hay 1 equipo por OT."),
-                                "EDS":           st.column_config.TextColumn(width=85,
+                                "OT":            st.column_config.TextColumn(width=110),
+                                "Cliente":       st.column_config.TextColumn(width=85),
+                                "Codigo EDS":    st.column_config.TextColumn(width=85,
                                     help="Código EDS Occimiano donde se realizó el MP/MC."),
                                 "Nombre EDS":    st.column_config.TextColumn(width=230,
                                     help="Nombre / dirección de la estación."),
                                 "Técnico":       st.column_config.TextColumn(width=190),
-                                "Fecha":         st.column_config.TextColumn(width=100),
                                 "Tipo":          st.column_config.TextColumn(width=110),
                                 "Causa Raíz":    st.column_config.TextColumn(width=220),
                                 "Clasificación": st.column_config.TextColumn(width=110),
@@ -10847,7 +10857,6 @@ elif _page == _NAV_PAGES[0]:
                                     help="Texto libre del técnico en Fracttal (falla encontrada, trabajo realizado, observaciones). Explica el 'OTROS'/'SIN CLASIFICAR' o lo deja en evidencia si está vacío."),
                                 "Diagnóstico del error": st.column_config.TextColumn(width=320,
                                     help="Razón por la que el KPI imputa el error: qué llenó mal o qué omitió. Vacío si la fila está correcta."),
-                                "Estado":        st.column_config.TextColumn(width=110),
                             })
                 else:
                     st.info("Sin datos de OTs correctivas para el filtro actual.")
@@ -11043,7 +11052,7 @@ elif _page == _NAV_PAGES[0]:
                     _det_te["creation_date"] = _det_te_cd.dt.strftime("%d/%m/%Y")
 
                     _det_te_disp = _det_te[[c for c in
-                        ["folio","eds_occim","tecnico","creation_date","maint_type",
+                        ["folio","equipment_code","eds_occim","client","tecnico","creation_date","maint_type",
                          "estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
                          "_pct_ej","_te_ok","_es_exceso"]
                         if c in _det_te.columns]].copy()
@@ -11111,17 +11120,22 @@ elif _page == _NAV_PAGES[0]:
                     if "eds_occim" in _det_te_disp.columns:
                         _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
                         _det_te_disp["eds_nombre"] = _det_te_disp["eds_occim"].map(_eds_nombre_map_te).fillna("—")
+                    if "equipment_code" in _det_te_disp.columns:
+                        _det_te_disp["equipment_code"] = _det_te_disp["equipment_code"].fillna("").replace("", "—")
+                    if "client" in _det_te_disp.columns:
+                        _det_te_disp["client"] = _det_te_disp["client"].fillna("—")
                     _det_te_disp = _det_te_disp.drop(
                         columns=["estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
                                  "_pct_ej","_te_ok","_es_exceso"],
                         errors="ignore"
                     ).rename(columns={
-                        "folio":"OT","eds_occim":"EDS","eds_nombre":"Nombre EDS",
+                        "folio":"OT","equipment_code":"Equipo","eds_occim":"Codigo EDS",
+                        "eds_nombre":"Nombre EDS","client":"Cliente",
                         "tecnico":"Técnico","creation_date":"Fecha","maint_type":"Tipo"
                     }).sort_values("Fecha", ascending=False)
-                    # Orden: OT - EDS - Nombre EDS - Técnico - resto, Diagnóstico al final
-                    _orden_te = ["OT","EDS","Nombre EDS","Técnico","Fecha","Tipo",
-                                 "T. Estimado","T. Mínimo","Máx. 150%","T. Ejecución","% Ejecutado","Estado",
+                    _orden_te = ["Fecha","Estado","Equipo","OT","Cliente","Codigo EDS","Nombre EDS",
+                                 "Técnico","Tipo",
+                                 "T. Estimado","T. Mínimo","Máx. 150%","T. Ejecución","% Ejecutado",
                                  "Diagnóstico"]
                     _det_te_disp = _det_te_disp[[c for c in _orden_te if c in _det_te_disp.columns]]
 
@@ -11142,13 +11156,17 @@ elif _page == _NAV_PAGES[0]:
                             st.caption(f"Mostrando **{len(_det_te_disp):,}** de {_n_te_total:,} OTs (filtro: `{_filtro_te}`).")
                         _show_df(_det_te_disp, hide_index=True, width="stretch",
                             column_config={
+                                "Fecha":       st.column_config.TextColumn(width=100),
+                                "Estado":      st.column_config.TextColumn(width=180),
+                                "Equipo":      st.column_config.TextColumn(width=95,
+                                    help="Código del activo en Fracttal (ej. EQ-6249)."),
                                 "OT":          st.column_config.TextColumn(width=110),
-                                "EDS":         st.column_config.TextColumn(width=85,
+                                "Cliente":     st.column_config.TextColumn(width=85),
+                                "Codigo EDS":  st.column_config.TextColumn(width=85,
                                     help="Código EDS Occimiano donde se realizó el MP/MC."),
                                 "Nombre EDS":  st.column_config.TextColumn(width=240,
                                     help="Nombre / dirección de la estación."),
                                 "Técnico":     st.column_config.TextColumn(width=190),
-                                "Fecha":       st.column_config.TextColumn(width=100),
                                 "Tipo":        st.column_config.TextColumn(width=200),
                                 "T. Estimado": st.column_config.TextColumn(width=100,
                                     help="Duración programada en Fracttal (HH:MM)"),
@@ -11161,7 +11179,6 @@ elif _page == _NAV_PAGES[0]:
                                 "% Ejecutado": st.column_config.ProgressColumn(
                                     label="% Ejecutado", min_value=0, max_value=250, format="%.1f%%",
                                     help="T.Efectivo / T.Estimado × 100. Cumple si ≥ 70% (Shell ≥ 50%). Sobre 150% = informativo (cumple)."),
-                                "Estado":      st.column_config.TextColumn(width=180),
                                 "Diagnóstico": st.column_config.TextColumn(width=380,
                                     help="Razón concreta cuando NO cumple, o marca de sobretiempo informativo cuando cumple pero superó 150%. Vacío cuando cumple normalmente."),
                             })
@@ -11658,9 +11675,11 @@ elif _page == _NAV_PAGES[0]:
                         _det_num["_equipo"] = "—"
 
                     # Construir df de display
+                    if "eds_occim" in _det_num.columns:
+                        _det_num["eds_occim"] = _det_num["eds_occim"].fillna("").replace("", "—")
                     _cols_num = [c for c in
-                        ["folio","_equipo","tecnico","_fecha","client","station","maint_type",
-                         "_modalidad","_n_ini","_n_fin","_fichas","_estado","_comentario"]
+                        ["_fecha","_estado","_equipo","folio","client","eds_occim","station","tecnico","maint_type",
+                         "_modalidad","_n_ini","_n_fin","_fichas","_comentario"]
                         if c in _det_num.columns]
                     # Title Case para columnas con MAYÚSCULAS de Fracttal
                     for _colt in ("tecnico","client","station","maint_type"):
@@ -11672,7 +11691,8 @@ elif _page == _NAV_PAGES[0]:
                         "tecnico":    "Técnico",
                         "_fecha":     "Fecha",
                         "client":     "Cliente",
-                        "station":    "EDS",
+                        "eds_occim":  "Codigo EDS",
+                        "station":    "Nombre EDS",
                         "maint_type": "Tipo",
                         "_modalidad": "Modalidad",
                         "_n_ini":     "N. Inicial",
@@ -11724,13 +11744,17 @@ elif _page == _NAV_PAGES[0]:
                             st.caption(f"Mostrando **{len(_det_num_disp):,}** de {_n_num_total:,} OTs (filtro: `{_filtro_num}`).")
                         _show_df(_det_num_disp, hide_index=True, width="stretch",
                             column_config={
-                                "OT":            st.column_config.TextColumn(width=110),
+                                "Fecha":         st.column_config.TextColumn(width=95),
+                                "Estado":        st.column_config.TextColumn(width=150),
                                 "Equipo":        st.column_config.TextColumn(width=170,
                                     help="Código del activo (EQ-XXXX) + tipo (Lavadora/Aspiradora/Lavatapiz). Una OT compuesta muestra una fila por activo con numeral."),
-                                "Técnico":       st.column_config.TextColumn(width=180),
-                                "Fecha":         st.column_config.TextColumn(width=95),
+                                "OT":            st.column_config.TextColumn(width=110),
                                 "Cliente":       st.column_config.TextColumn(width=85),
-                                "EDS":           st.column_config.TextColumn(width=180),
+                                "Codigo EDS":    st.column_config.TextColumn(width=85,
+                                    help="Código EDS Occimiano."),
+                                "Nombre EDS":    st.column_config.TextColumn(width=180,
+                                    help="Nombre / dirección de la estación."),
+                                "Técnico":       st.column_config.TextColumn(width=180),
                                 "Tipo":          st.column_config.TextColumn(width=130),
                                 "Modalidad":     st.column_config.TextColumn(width=110,
                                     help="📞 Remoto = atendido a distancia (sin numeral esperado). 🚗 Presencial = técnico fue a la EDS."),
@@ -11740,7 +11764,6 @@ elif _page == _NAV_PAGES[0]:
                                     help="Lectura final del contador (TOMA DE NUMERAL FINAL)."),
                                 "Fichas período":st.column_config.TextColumn(width=100,
                                     help="Diferencia Final − Inicial = fichas usadas en el período."),
-                                "Estado":        st.column_config.TextColumn(width=150),
                                 "Comentario técnico / causa raíz": st.column_config.TextColumn(width=340,
                                     help="Texto libre del técnico en el formulario de Fracttal: falla encontrada, trabajo realizado y observaciones. Vacío = el técnico no documentó."),
                             })
