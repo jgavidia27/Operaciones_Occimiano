@@ -10524,13 +10524,14 @@ elif _page == _NAV_PAGES[0]:
 
                         # Cliente
                         if "client" in drill_disp.columns:
-                            drill_disp["_cliente"] = drill_disp["client"].fillna("—")
+                            drill_disp["_cliente"] = drill_disp["client"].fillna("—").str.title()
                         else:
                             drill_disp["_cliente"] = "—"
 
-                        # Selección ordenada — Fecha primero (más reciente arriba),
-                        # luego Cumple, y Tipo Equipo justo antes de Numeral para
-                        # leer causalmente por qué aplica o no.
+                        # Estación: title case
+                        if "station" in drill_disp.columns:
+                            drill_disp["station"] = drill_disp["station"].fillna("—").str.title()
+
                         drill_disp = drill_disp[[
                             "_fecha", "_cumple", "_x4", "folio", "_cliente", "_eds", "station", "tecnico",
                             "_tipo", "_modalidad", "_estado_ot", "score_total",
@@ -10796,8 +10797,8 @@ elif _page == _NAV_PAGES[0]:
                         # por horas, etc.) → "PREVENTIVA". En esta tabla no aporta el subtipo.
                         if "maint_type" in _det_cr.columns:
                             _det_cr["maint_type"] = _det_cr["maint_type"].astype(str).str.upper().apply(
-                                lambda t: "PREVENTIVA" if "PREVENTIVA" in t or "INSPECC" in t
-                                          else ("CORRECTIVA" if "CORRECTIVA" in t else t.title()))
+                                lambda t: "Preventiva" if "PREVENTIVA" in t or "INSPECC" in t
+                                          else ("Correctiva" if "CORRECTIVA" in t else t.title()))
                         # Comentario del técnico (texto libre del PDF) — explica el "OTROS" / "SIN CLASIFICAR"
                         if "comentario_tecnico" in _det_cr.columns:
                             _det_cr["comentario_tecnico"] = (
@@ -10815,9 +10816,9 @@ elif _page == _NAV_PAGES[0]:
                             _det_cr["equipment_code"] = _det_cr["equipment_code"].fillna("").replace("", "—")
                         if "eds_occim" in _det_cr.columns:
                             _det_cr["eds_occim"] = _det_cr["eds_occim"].fillna("").replace("", "—")
-                            _det_cr["eds_nombre"] = _det_cr["eds_occim"].map(_eds_nombre_map_cr).fillna("—")
+                            _det_cr["eds_nombre"] = _det_cr["eds_occim"].map(_eds_nombre_map_cr).fillna("—").str.title()
                         if "client" in _det_cr.columns:
-                            _det_cr["client"] = _det_cr["client"].fillna("—")
+                            _det_cr["client"] = _det_cr["client"].fillna("—").str.title()
                         _det_cr = _det_cr.drop(
                             columns=["_causa_ok","es_correctiva"], errors="ignore"
                         ).rename(columns={
@@ -11119,11 +11120,13 @@ elif _page == _NAV_PAGES[0]:
                     # Normalizar EDS para display + inyectar nombre
                     if "eds_occim" in _det_te_disp.columns:
                         _det_te_disp["eds_occim"] = _det_te_disp["eds_occim"].fillna("").replace("", "—")
-                        _det_te_disp["eds_nombre"] = _det_te_disp["eds_occim"].map(_eds_nombre_map_te).fillna("—")
+                        _det_te_disp["eds_nombre"] = _det_te_disp["eds_occim"].map(_eds_nombre_map_te).fillna("—").str.title()
                     if "equipment_code" in _det_te_disp.columns:
                         _det_te_disp["equipment_code"] = _det_te_disp["equipment_code"].fillna("").replace("", "—")
                     if "client" in _det_te_disp.columns:
-                        _det_te_disp["client"] = _det_te_disp["client"].fillna("—")
+                        _det_te_disp["client"] = _det_te_disp["client"].fillna("—").str.title()
+                    if "maint_type" in _det_te_disp.columns:
+                        _det_te_disp["maint_type"] = _det_te_disp["maint_type"].fillna("").str.title()
                     _det_te_disp = _det_te_disp.drop(
                         columns=["estimated_sec","_minimo_sec","_maximo_sec","_effective_sec",
                                  "_pct_ej","_te_ok","_es_exceso"],
