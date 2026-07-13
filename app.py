@@ -7597,13 +7597,21 @@ elif _page == _NAV_PAGES[0]:
             # ═══ Sheet 2: SLA ═══
             if not _sla.empty:
                 _se = _sla.copy()
+                _aviso_idx_xl = load_cotalker_index_supabase()
+                if _aviso_idx_xl and "os_fracttal" in _se.columns:
+                    _se["n_llamado"] = (
+                        _se["os_fracttal"]
+                        .map(_aviso_idx_xl)
+                        .apply(lambda v: str(v) if pd.notna(v) and str(v) not in ("", "nan") else "")
+                        .where(lambda s: s != "", _se["n_llamado"].astype(str))
+                    )
                 if "fecha_llamado_dt" in _se.columns:
                     _se["Fecha atención"] = _se["fecha_llamado_dt"].dt.strftime("%d/%m/%Y").fillna("—")
-                    _se["Hora inicio SLA"] = _se["fecha_llamado_dt"].dt.strftime("%H:%M").fillna("—")
+                    _se["Inicio SLA"] = _se["fecha_llamado_dt"].dt.strftime("%d/%m/%Y %H:%M").fillna("—")
                 if "fecha_atencion" in _se.columns:
-                    _se["Hora cierre OT"] = pd.to_datetime(
+                    _se["Fecha cierre OT Técnico"] = pd.to_datetime(
                         _se["fecha_atencion"], errors="coerce"
-                    ).dt.strftime("%H:%M").fillna("—")
+                    ).dt.strftime("%d/%m/%Y %H:%M").fillna("—")
                 if {"tiempo_resp_esp", "horas_resolucion"}.issubset(_se.columns):
                     def _pct_dl(r):
                         h, u = r.get("horas_resolucion"), r.get("tiempo_resp_esp")
@@ -7632,7 +7640,7 @@ elif _page == _NAV_PAGES[0]:
                 _sla_cols = [c for c in [
                     "os_fracttal", "n_llamado", "eds_occim", "equipo_label",
                     "tecnico", "cliente", "eds_nombre",
-                    "Fecha atención", "Hora inicio SLA", "Hora cierre OT",
+                    "Fecha atención", "Inicio SLA", "Fecha cierre OT Técnico",
                     "prioridad", "zona_norm", "horas_resolucion",
                     "Uso SLA", "Exceso", "Cumple SLA", "Observación técnico",
                 ] if c in _se.columns]
@@ -8752,35 +8760,44 @@ elif _page == _NAV_PAGES[0]:
 
                 _df_sla_disp = _df_sla.copy()
 
+                # N°Aviso real del cliente (Copec/Aramco/Shell)
+                _aviso_idx = load_cotalker_index_supabase()
+                if _aviso_idx and "os_fracttal" in _df_sla_disp.columns:
+                    _df_sla_disp["n_llamado"] = (
+                        _df_sla_disp["os_fracttal"]
+                        .map(_aviso_idx)
+                        .apply(lambda v: str(v) if pd.notna(v) and str(v) not in ("", "nan") else "")
+                        .where(lambda s: s != "", _df_sla_disp["n_llamado"].astype(str))
+                    )
+
                 # a) Fecha exacta (dd/MM/yyyy)
                 if "fecha_llamado_dt" in _df_sla_disp.columns:
                     _df_sla_disp["_fecha_exacta"] = (
                         _df_sla_disp["fecha_llamado_dt"]
                         .dt.strftime("%d/%m/%Y").fillna("—")
                     )
-                    # b) Hora inicio SLA (HH:MM) desde la misma columna datetime
                     _df_sla_disp["_hora_inicio"] = (
                         _df_sla_disp["fecha_llamado_dt"]
-                        .dt.strftime("%H:%M").fillna("—")
+                        .dt.strftime("%d/%m/%Y %H:%M").fillna("—")
                     )
                 elif "fecha_llamado" in _df_sla_disp.columns:
                     _fl = pd.to_datetime(_df_sla_disp["fecha_llamado"], errors="coerce")
                     _df_sla_disp["_fecha_exacta"] = _fl.dt.strftime("%d/%m/%Y").fillna("—")
-                    _df_sla_disp["_hora_inicio"]  = _fl.dt.strftime("%H:%M").fillna("—")
+                    _df_sla_disp["_hora_inicio"]  = _fl.dt.strftime("%d/%m/%Y %H:%M").fillna("—")
                 else:
                     _df_sla_disp["_fecha_exacta"] = "—"
                     _df_sla_disp["_hora_inicio"]  = "—"
 
-                # b) Hora cierre (de fecha_atencion)
+                # b) Fecha cierre OT técnico (de fecha_atencion)
                 if "fecha_atencion" in _df_sla_disp.columns:
                     _df_sla_disp["_hora_cierre"] = (
                         pd.to_datetime(_df_sla_disp["fecha_atencion"], errors="coerce")
-                        .dt.strftime("%H:%M").fillna("—")
+                        .dt.strftime("%d/%m/%Y %H:%M").fillna("—")
                     )
                 elif "hora_fin" in _df_sla_disp.columns:
                     _df_sla_disp["_hora_cierre"] = (
                         _df_sla_disp["hora_fin"].apply(
-                            lambda t: t.strftime("%H:%M") if hasattr(t, "strftime") else "—"
+                            lambda t: t.strftime("%d/%m/%Y %H:%M") if hasattr(t, "strftime") else "—"
                         )
                     )
                 else:
@@ -8859,8 +8876,8 @@ elif _page == _NAV_PAGES[0]:
                     "cliente":         "Cliente",
                     "eds_nombre":      "Estación",
                     "_fecha_exacta":   "Fecha atención",
-                    "_hora_inicio":    "Hora inicio SLA",
-                    "_hora_cierre":    "Hora cierre OT",
+                    "_hora_inicio":    "Inicio SLA",
+                    "_hora_cierre":    "Fecha cierre OT Técnico",
                     "prioridad":       "Prioridad",
                     "zona_norm":       "Zona",
                     "horas_resolucion":"Horas resolución",
@@ -8879,8 +8896,8 @@ elif _page == _NAV_PAGES[0]:
                         "N°Aviso":             st.column_config.TextColumn(width=100),
                         "Cód. EDS":            st.column_config.TextColumn(width=90),
                         "Fecha atención":      st.column_config.TextColumn(width=105),
-                        "Hora inicio SLA":     st.column_config.TextColumn(width=110),
-                        "Hora cierre OT":      st.column_config.TextColumn(width=105),
+                        "Inicio SLA":          st.column_config.TextColumn(width=140),
+                        "Fecha cierre OT Técnico": st.column_config.TextColumn(width=165),
                         "Horas resolución":    st.column_config.NumberColumn(format="%.1f h"),
                         "Uso SLA":             st.column_config.ProgressColumn(
                             label="Uso SLA (0–100%)",
