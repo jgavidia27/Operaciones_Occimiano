@@ -9007,16 +9007,24 @@ elif _page == _NAV_PAGES[0]:
                 ]
                 _eq_rc = st.selectbox("Equipo", _eq_rc_opts, key="rc_equipo")
             with _rc4:
+                _pm_team = df_wo[
+                    (df_wo["maint_type"] == "Preventiva") &
+                    (~df_wo["technician"].apply(_es_excluido)) &
+                    (df_wo["equipo"] != "Sin equipo")
+                ]
                 if _eq_rc != "Todos":
                     _grp_rc_k = _LABEL_TO_GRUPO.get(_eq_rc)
-                    # Nombres desde el dato real (igual que Precisión) — incluye al senior
+                    _tec_reinc = set(df_reinc[df_reinc["grupo_responsable"] == _grp_rc_k]["tecnico_responsable"].dropna().unique())
+                    _tec_pm = set(_pm_team[_pm_team["equipo"] == _grp_rc_k]["technician"].dropna().unique())
                     _tec_rc_opts = ["Todos"] + sorted(
-                        t for t in df_reinc[df_reinc["grupo_responsable"] == _grp_rc_k]["tecnico_responsable"].dropna().unique()
+                        t for t in (_tec_reinc | _tec_pm)
                         if not _es_excluido(t)
                     )
                 else:
+                    _tec_reinc = set(df_reinc["tecnico_responsable"].dropna().unique())
+                    _tec_pm = set(_pm_team["technician"].dropna().unique())
                     _tec_rc_opts = ["Todos"] + sorted(
-                        t for t in df_reinc["tecnico_responsable"].dropna().unique()
+                        t for t in (_tec_reinc | _tec_pm)
                         if not _es_excluido(t) and _get_equipo(t) != "Sin equipo"
                     )
                 _tec_rc_sel = st.selectbox("Técnico", _tec_rc_opts, key="rc_tecnico")
