@@ -7429,10 +7429,14 @@ elif _page == _NAV_PAGES[0]:
                 _sla = _sla[_sla["tecnico"] == tec_sel]
 
         # ── Reincidencia data ──
-        _reinc = st.session_state.get("df_reinc", pd.DataFrame()).copy()
+        _reinc = st.session_state.get("_df_reinc_export", pd.DataFrame()).copy()
+        if _reinc.empty:
+            _reinc = st.session_state.get("df_reinc", pd.DataFrame()).copy()
         if not _reinc.empty and "fecha_cm" in _reinc.columns:
-            _reinc["fecha_cm_dt"] = pd.to_datetime(_reinc["fecha_cm"], errors="coerce")
-            _reinc["mes"] = _reinc["fecha_cm_dt"].dt.to_period("M").astype(str)
+            if "fecha_cm_dt" not in _reinc.columns:
+                _reinc["fecha_cm_dt"] = pd.to_datetime(_reinc["fecha_cm"], errors="coerce")
+            if "mes" not in _reinc.columns:
+                _reinc["mes"] = _reinc["fecha_cm_dt"].dt.to_period("M").astype(str)
             _reinc = _reinc[_reinc["mes"] == str(dl_mes)]
             if sem_match is not None:
                 _reinc = _reinc[
@@ -8949,6 +8953,7 @@ elif _page == _NAV_PAGES[0]:
         else:
             df_reinc["fecha_cm_dt"] = pd.to_datetime(df_reinc["fecha_cm"], errors="coerce")
             df_reinc["mes"] = df_reinc["fecha_cm_dt"].dt.to_period("M").astype(str)
+            st.session_state["_df_reinc_export"] = df_reinc
 
             _meses_rc = sorted(df_reinc["mes"].dropna().unique(), reverse=True)
             _meses_rc_nums = {int(str(m).split("-")[1]) for m in _meses_rc if "-" in str(m)}
