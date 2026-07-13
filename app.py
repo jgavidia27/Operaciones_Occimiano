@@ -7488,16 +7488,20 @@ elif _page == _NAV_PAGES[0]:
                 rows_sla.append(("Suma total", _ts, _tt, f"{_tp}%"))
 
             rows_mp = []
-            _err_by_full = {}
-            if not _reinc.empty and "es_reincidencia_tecnico" in _reinc.columns:
-                _tc = "tecnico_resp_short" if "tecnico_resp_short" in _reinc.columns else "tecnico_cm"
-                _mg = _reinc.groupby(_tc).agg(
-                    errores=("es_reincidencia_tecnico", "sum"),
-                    total=("es_reincidencia_tecnico", "count"),
-                ).reset_index()
-                for _, r in _mg.iterrows():
-                    _fn = _excel_to_full.get(str(r[_tc]).strip(), str(r[_tc]).strip())
-                    _err_by_full[_fn] = (int(r["errores"]), int(r["total"]))
+            _fallas_by_tec = {}
+            if not _reinc.empty and "folio_cm" in _reinc.columns:
+                _reinc_mp = _reinc.copy()
+                if "falla_tipo" in _reinc_mp.columns:
+                    _reinc_mp = _reinc_mp[~_reinc_mp["falla_tipo"].isin(["especial"])]
+                if "tecnico_responsable" in _reinc_mp.columns:
+                    _fg = _reinc_mp.groupby("tecnico_responsable")["folio_cm"].nunique()
+                    for t, n in _fg.items():
+                        _fallas_by_tec[str(t).strip()] = int(n)
+                elif "tecnico_resp_short" in _reinc_mp.columns:
+                    _fg = _reinc_mp.groupby("tecnico_resp_short")["folio_cm"].nunique()
+                    for t, n in _fg.items():
+                        _fn = _excel_to_full.get(str(t).strip(), str(t).strip())
+                        _fallas_by_tec[_fn] = int(n)
 
             _pm_dl = df_wo[
                 (df_wo["maint_type"] == "Preventiva") &
@@ -7513,22 +7517,25 @@ elif _page == _NAV_PAGES[0]:
                 _pm_dl = _pm_dl[_pm_dl["equipo"] == _LABEL_TO_GRUPO.get(equipo_label, equipo_label)]
             if tec_sel != "Todos" and "technician" in _pm_dl.columns:
                 _pm_dl = _pm_dl[_pm_dl["technician"] == tec_sel]
-            _pm_tec_names = set(_pm_dl["technician"].dropna().unique()) if not _pm_dl.empty else set()
+            _pms_by_tec = {}
+            if not _pm_dl.empty and "folio" in _pm_dl.columns:
+                _pg = _pm_dl.groupby("technician")["folio"].nunique()
+                for t, n in _pg.items():
+                    _pms_by_tec[str(t).strip()] = int(n)
 
-            _all_mp = set(_err_by_full.keys()) | _pm_tec_names
-            _me_total = 0
-            _mt_total = 0
+            _all_mp = set(_fallas_by_tec.keys()) | set(_pms_by_tec.keys())
+            _total_fallas = 0
+            _total_pms = 0
             for t in sorted(_all_mp):
-                if t in _err_by_full:
-                    err, tot = _err_by_full[t]
-                    ef = round((1 - err / tot) * 100, 1) if tot > 0 else 100
-                    rows_mp.append((t, err, f"{ef}%"))
-                    _me_total += err; _mt_total += tot
-                else:
-                    rows_mp.append((t, 0, "100%"))
+                _f = _fallas_by_tec.get(t, 0)
+                _p = _pms_by_tec.get(t, 0)
+                _ef = round((_p - _f) / _p * 100, 1) if _p > 0 else 100.0
+                rows_mp.append((t, _f, f"{_ef}%"))
+                _total_fallas += _f
+                _total_pms += _p
             if rows_mp:
-                _mef = round((1 - _me_total / _mt_total) * 100, 1) if _mt_total > 0 else 100
-                rows_mp.append(("Suma total", _me_total, f"{_mef}%"))
+                _mef = round((_total_pms - _total_fallas) / _total_pms * 100, 1) if _total_pms > 0 else 100
+                rows_mp.append(("Suma total", _total_fallas, f"{_mef}%"))
 
             _NCOLS_RES = 11  # A..K
             def _pad(row, n=_NCOLS_RES):
