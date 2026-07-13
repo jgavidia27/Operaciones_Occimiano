@@ -7384,6 +7384,259 @@ elif _page == _NAV_PAGES[0]:
     )
     st.divider()
 
+    # ── Helper compartido: genera Excel resumen mensual (SLA + Efect. + Precisión) ──
+    def _build_excel_resumen_shared(dl_mes, dl_quien, equipo_label, tec_sel, sem_match):
+        buf = BytesIO()
+
+        # ── Precisión data desde session_state ──
+        _ot_all = st.session_state.get("df_ot_all_scores_v5_equipo", pd.DataFrame())
+        if not _ot_all.empty and "mes" in _ot_all.columns:
+            _df_ot_sc = _ot_all[_ot_all["mes"].astype(str) == str(dl_mes)].copy()
+            if sem_match is not None and "creation_date_local" in _df_ot_sc.columns:
+                _df_ot_sc = _df_ot_sc[
+                    (_df_ot_sc["creation_date_local"] >= sem_match[1]) &
+                    (_df_ot_sc["creation_date_local"] <= sem_match[2])
+                ]
+            if equipo_label != "Todos" and "equipo" in _df_ot_sc.columns:
+                _grp_kpi = _LABEL_TO_GRUPO.get(equipo_label, equipo_label)
+                _df_ot_sc = _df_ot_sc[_df_ot_sc["equipo"] == _grp_kpi]
+            if tec_sel != "Todos" and "tecnico" in _df_ot_sc.columns:
+                _df_ot_sc = _df_ot_sc[_df_ot_sc["tecnico"] == tec_sel]
+            _df_tec_sc = score_llenado_por_tecnico(_df_ot_sc)
+        else:
+            _df_ot_sc = pd.DataFrame()
+            _df_tec_sc = pd.DataFrame()
+
+        # ── SLA data ──
+        _sla_key_dl = f"_sla_proc_v5_{len(df_llamados)}"
+        _sla = st.session_state.get(_sla_key_dl, pd.DataFrame()).copy()
+        if not _sla.empty and "mes" in _sla.columns:
+            _sla = _sla[_sla["mes"].astype(str) == str(dl_mes)]
+            if sem_match is not None and "fecha_llamado_dt" in _sla.columns:
+                _sla = _sla[
+                    (_sla["fecha_llamado_dt"].dt.date >= sem_match[1]) &
+                    (_sla["fecha_llamado_dt"].dt.date <= sem_match[2])
+                ]
+            if equipo_label != "Todos":
+                _grp_dl = _LABEL_TO_GRUPO.get(equipo_label, equipo_label)
+                _sla = _sla[_sla["equipo"] == _grp_dl]
+            if tec_sel != "Todos":
+                _sla = _sla[_sla["tecnico"] == tec_sel]
+
+        # ── Reincidencia data ──
+        _reinc = st.session_state.get("df_reinc", pd.DataFrame()).copy()
+        if not _reinc.empty and "fecha_cm" in _reinc.columns:
+            _reinc["fecha_cm_dt"] = pd.to_datetime(_reinc["fecha_cm"], errors="coerce")
+            _reinc["mes"] = _reinc["fecha_cm_dt"].dt.to_period("M").astype(str)
+            _reinc = _reinc[_reinc["mes"] == str(dl_mes)]
+            if sem_match is not None:
+                _reinc = _reinc[
+                    (_reinc["fecha_cm_dt"].dt.date >= sem_match[1]) &
+                    (_reinc["fecha_cm_dt"].dt.date <= sem_match[2])
+                ]
+            if equipo_label != "Todos":
+                _grp_dl = _LABEL_TO_GRUPO.get(equipo_label, equipo_label)
+                if "grupo_responsable" in _reinc.columns:
+                    _reinc = _reinc[_reinc["grupo_responsable"] == _grp_dl]
+            if tec_sel != "Todos":
+                if "tecnico_resp_short" in _reinc.columns:
+                    _norm_sel = _norm_n(tec_sel)
+                    _reinc = _reinc[
+                        _reinc["tecnico_resp_short"].fillna("").apply(
+                            lambda t: _norm_n(_excel_to_full.get(str(t).strip(), str(t).strip()))
+                        ) == _norm_sel
+                    ]
+
+        with pd.ExcelWriter(buf, engine="openpyxl") as wr:
+            # ═══ Sheet 1: Resumen ═══
+            rows_sla = []
+            if not _sla.empty and "cumple_sla" in _sla.columns:
+                _sg = _sla.groupby("tecnico").agg(
+                    cumple=("cumple_sla", lambda x: x.fillna(False).astype(bool).sum()),
+                    total=("cumple_sla", "count"),
+                ).reset_index()
+                for _, r in _sg.iterrows():
+                    p = round(r["cumple"] / r["total"] * 100, 1) if r["total"] > 0 else 0
+                    rows_sla.append((r["tecnico"], int(r["cumple"]), int(r["total"]), f"{p}%"))
+                _ts = int(_sg["cumple"].sum()); _tt = int(_sg["total"].sum())
+                _tp = round(_ts / _tt * 100, 1) if _tt > 0 else 0
+                rows_sla.append(("Suma total", _ts, _tt, f"{_tp}%"))
+
+            rows_mp = []
+            if not _reinc.empty and "es_reincidencia_tecnico" in _reinc.columns:
+                _tc = "tecnico_resp_short" if "tecnico_resp_short" in _reinc.columns else "tecnico_cm"
+                _mg = _reinc.groupby(_tc).agg(
+                    errores=("es_reincidencia_tecnico", "sum"),
+                    total=("es_reincidencia_tecnico", "count"),
+                ).reset_index()
+                for _, r in _mg.iterrows():
+                    ef = round((1 - r["errores"] / r["total"]) * 100, 1) if r["total"] > 0 else 100
+                    rows_mp.append((r[_tc], int(r["errores"]), f"{ef}%"))
+                _me = int(_mg["errores"].sum()); _mt = int(_mg["total"].sum())
+                _mef = round((1 - _me / _mt) * 100, 1) if _mt > 0 else 100
+                rows_mp.append(("Suma total", _me, f"{_mef}%"))
+
+            res = []
+            res.append(["Cumplimiento SLA", "", "", "", "", "Efectividad MP", "", ""])
+            res.append(["Técnico", "Cumple SLA", "N° ordenes", "% Cumplimiento",
+                        "", "Técnico", "Errores", "Efectividad"])
+            for i in range(max(len(rows_sla), len(rows_mp), 1)):
+                row = list(rows_sla[i]) if i < len(rows_sla) else ["", "", "", ""]
+                row.append("")
+                row.extend(list(rows_mp[i]) if i < len(rows_mp) else ["", "", ""])
+                res.append(row)
+            res.append([""] * 8)
+            res.append([""] * 8)
+            res.append(["Precisión Fracttal", "", "", "", "", "", "", ""])
+            res.append(["Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
+                        "⏱ Tiempo OK", "\U0001f50d Causa OK", "\U0001f522 Numeral OK",
+                        "Exactitud %"])
+            if not _df_tec_sc.empty:
+                for _, r in _df_tec_sc.iterrows():
+                    _ots = int(r.get("ots_evaluadas", 0))
+                    _nerr = int(r.get("n_errores", 0))
+                    res.append([
+                        r.get("tecnico", ""), _ots, _ots - _nerr, _nerr,
+                        int(r.get("tiempo_ok_count", 0)),
+                        int(r.get("causa_ok_count", 0)),
+                        int(r.get("numeral_ok_count", 0)),
+                        f"{r.get('exactitud_pct', 0):.1f}%",
+                    ])
+            pd.DataFrame(res).to_excel(wr, sheet_name="Resumen", index=False, header=False)
+
+            # ═══ Sheet 2: SLA ═══
+            if not _sla.empty:
+                _se = _sla.copy()
+                if "fecha_llamado_dt" in _se.columns:
+                    _se["Fecha atención"] = _se["fecha_llamado_dt"].dt.strftime("%d/%m/%Y").fillna("—")
+                    _se["Hora inicio SLA"] = _se["fecha_llamado_dt"].dt.strftime("%H:%M").fillna("—")
+                if "fecha_atencion" in _se.columns:
+                    _se["Hora cierre OT"] = pd.to_datetime(
+                        _se["fecha_atencion"], errors="coerce"
+                    ).dt.strftime("%H:%M").fillna("—")
+                if {"tiempo_resp_esp", "horas_resolucion"}.issubset(_se.columns):
+                    def _pct_dl(r):
+                        h, u = r.get("horas_resolucion"), r.get("tiempo_resp_esp")
+                        if pd.notna(h) and pd.notna(u) and float(u) > 0:
+                            return round(float(h) / float(u) * 100, 1)
+                        return None
+                    _se["_pct"] = _se.apply(_pct_dl, axis=1)
+                    _se["Uso SLA"] = _se["_pct"].apply(
+                        lambda v: f"{min(v, 100):.1f}%" if pd.notna(v) else "—")
+                    _se["Exceso"] = _se["_pct"].apply(
+                        lambda v: f"{max(v - 100, 0):.1f}%" if pd.notna(v) else "—")
+                _se["Cumple SLA"] = _se["cumple_sla"].apply(
+                    lambda x: "Sí" if x is True else ("No" if x is False else "—"))
+                _note_dl = {}
+                if not df_wo.empty and "comentario_tecnico" in df_wo.columns:
+                    _note_dl = (
+                        df_wo[df_wo["comentario_tecnico"].astype(str).str.strip() != ""]
+                        .set_index("folio")["comentario_tecnico"].to_dict()
+                    )
+                if "os_fracttal" in _se.columns and _note_dl:
+                    _se["Observación técnico"] = _se["os_fracttal"].apply(
+                        lambda f: _strip_comentario_headers(
+                            _note_dl.get(str(f).strip(), "—")))
+                else:
+                    _se["Observación técnico"] = "—"
+                _sla_cols = [c for c in [
+                    "os_fracttal", "n_llamado", "eds_occim", "equipo_label",
+                    "tecnico", "cliente", "eds_nombre",
+                    "Fecha atención", "Hora inicio SLA", "Hora cierre OT",
+                    "prioridad", "zona_norm", "horas_resolucion",
+                    "Uso SLA", "Exceso", "Cumple SLA", "Observación técnico",
+                ] if c in _se.columns]
+                _se[_sla_cols].rename(columns={
+                    "os_fracttal": "N°Orden (OT)", "n_llamado": "N°Aviso",
+                    "eds_occim": "Cód. EDS", "equipo_label": "Equipo",
+                    "tecnico": "Técnico", "cliente": "Cliente",
+                    "eds_nombre": "Estación", "prioridad": "Prioridad",
+                    "zona_norm": "Zona", "horas_resolucion": "Horas resolución",
+                }).to_excel(wr, sheet_name="SLA", index=False)
+            else:
+                pd.DataFrame({"Sin datos SLA": []}).to_excel(
+                    wr, sheet_name="SLA", index=False)
+
+            # ═══ Sheet 3: Efectividad MP ═══
+            if not _reinc.empty:
+                _rc = _reinc.copy()
+                for dc in ("fecha_pm", "fecha_cm"):
+                    if dc in _rc.columns:
+                        _rc[dc] = pd.to_datetime(
+                            _rc[dc], errors="coerce"
+                        ).dt.strftime("%d/%m/%Y").fillna("—")
+                _FT = {"fao": "F.A.O", "fnao": "F.N.A.O", "sin_info": "Sin info",
+                       "especial": "Especial", "sin_dato": "Sin dato"}
+                _CC = {"sin_causa": "Sin causa", "tecnico": "Técnico",
+                       "cliente": "Cliente"}
+                if "falla_tipo" in _rc.columns:
+                    _rc["_ft"] = _rc["falla_tipo"].map(_FT).fillna(_rc["falla_tipo"])
+                    _CL = {"fao": "Falla atribuible", "fnao": "Falla no atribuible",
+                           "sin_info": "Sin información", "especial": "Trabajo especial",
+                           "sin_dato": "Sin dato"}
+                    _rc["_concl"] = _rc["falla_tipo"].map(_CL).fillna("—")
+                if "causa_clasif" in _rc.columns:
+                    _rc["_cc"] = _rc["causa_clasif"].map(_CC).fillna(_rc["causa_clasif"])
+                if "es_reincidencia_tecnico" in _rc.columns:
+                    _rc["_resp"] = _rc["es_reincidencia_tecnico"].apply(
+                        lambda x: "Técnico" if x else "No técnico")
+                if "grupo_responsable" in _rc.columns:
+                    _rc["_grp"] = _rc["grupo_responsable"].map(
+                        _EQUIPO_LABEL).fillna(_rc["grupo_responsable"])
+                _rc_map = [
+                    ("equipment", "Equipo"), ("client", "Cliente"),
+                    ("station", "Estación"), ("folio_pm", "OT MP"),
+                    ("folio_cm", "OT MC"), ("fecha_pm", "Fecha MP"),
+                    ("fecha_cm", "Fecha MC"),
+                    ("tecnico_resp_short", "Técnico MP"),
+                    ("tecnico_cm", "Técnico MC"), ("_grp", "T.Senior"),
+                    ("dias_entre", "Días MP→MC"),
+                    ("falla_raw", "Tipo Falla"), ("_ft", "Clasif. Falla"),
+                    ("causa_raiz", "Causa raíz"), ("_cc", "Clasif. causa"),
+                    ("_resp", "Responsabilidad"),
+                    ("comentario_tecnico_cm", "Comentario STO"),
+                    ("_concl", "Conclusión"),
+                ]
+                _rc_use = [(s, d) for s, d in _rc_map if s in _rc.columns]
+                _rc[[s for s, _ in _rc_use]].rename(
+                    columns={s: d for s, d in _rc_use}
+                ).to_excel(wr, sheet_name="Efectividad MP", index=False)
+            else:
+                pd.DataFrame({"Sin fallas post-preventiva": []}).to_excel(
+                    wr, sheet_name="Efectividad MP", index=False)
+
+            # ═══ Sheet 4: P. Fracttal ═══
+            if not _df_ot_sc.empty:
+                _pf = _df_ot_sc.copy()
+                if "creation_date" in _pf.columns:
+                    _pf["Fecha"] = pd.to_datetime(
+                        _pf["creation_date"], errors="coerce"
+                    ).dt.strftime("%d/%m/%Y").fillna("—")
+                else:
+                    _pf["Fecha"] = "—"
+                _pf["Estado"] = _pf["score_total"].apply(
+                    lambda s: "Cumple" if s >= 75 else "No cumple")
+                _pf["X/3"] = _pf.apply(lambda r: f"{sum([r.get('score_tiempo',0)>=25, r.get('score_causa',0)>=25, r.get('score_numeral',0)>=25])}/3", axis=1)
+                _pf_out = pd.DataFrame({
+                    "Fecha": _pf["Fecha"],
+                    "Estado": _pf["Estado"],
+                    "X/3": _pf["X/3"],
+                    "OT": _pf.get("folio", "—"),
+                    "Cliente": _pf["client"].str.title() if "client" in _pf.columns else "—",
+                    "Codigo EDS": _pf.get("eds_occim", "—"),
+                    "Estación": _pf["station"].str.title() if "station" in _pf.columns else "—",
+                    "Técnico": _pf.get("tecnico", "—"),
+                    "Tipo": _pf["maint_type"].str.title() if "maint_type" in _pf.columns else "—",
+                    "Score": _pf["score_total"],
+                })
+                _pf_out.to_excel(wr, sheet_name="P. Fracttal", index=False)
+            else:
+                pd.DataFrame({"Sin OTs evaluadas": []}).to_excel(
+                    wr, sheet_name="P. Fracttal", index=False)
+
+        buf.seek(0)
+        return buf.getvalue()
+
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 1 — PRODUCTIVIDAD (SLA)
     # ══════════════════════════════════════════════════════════════════════════
@@ -7744,6 +7997,24 @@ elif _page == _NAV_PAGES[0]:
                 _df_sla = _df_sla[_df_sla["equipo"] == _grp_sla]
             if _tec_sla_sel != "Todos":
                 _df_sla = _df_sla[_df_sla["tecnico"] == _tec_sla_sel]
+
+            if len(_mes_sla) == 1 and (_equipo_sla != "Todos" or _tec_sla_sel != "Todos"):
+                _dl_quien_sla = _tec_sla_sel if _tec_sla_sel != "Todos" else _equipo_sla
+                _dl_mes_sla = _mes_sla[0]
+                _MESES_SHORT = {"01":"Ene","02":"Feb","03":"Mar","04":"Abr","05":"May","06":"Jun",
+                                "07":"Jul","08":"Ago","09":"Sep","10":"Oct","11":"Nov","12":"Dic"}
+                _dl_p = str(_dl_mes_sla).split("-")
+                _dl_lbl_sla = f"{_MESES_SHORT.get(_dl_p[1], _dl_p[1])} '{_dl_p[0][2:]}" if len(_dl_p)==2 else str(_dl_mes_sla)
+                _sem_match_sla = next((s for s in _sems if s[0] == _sem_sla), None) if _sem_sla != "Todas" else None
+                _dl_fname_sla = f"Resumen {_dl_lbl_sla} _ {_dl_quien_sla}.xlsx".replace("'", "")
+                _dl_data_sla = _build_excel_resumen_shared(_dl_mes_sla, _dl_quien_sla, _equipo_sla, _tec_sla_sel, _sem_match_sla)
+                st.download_button(
+                    label=f"\U0001f4e5 Descargar Resumen {_dl_quien_sla} — {_dl_lbl_sla}",
+                    data=_dl_data_sla,
+                    file_name=_dl_fname_sla,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.document",
+                    key="dl_resumen_sla",
+                )
 
             st.divider()
 
@@ -8541,6 +8812,24 @@ elif _page == _NAV_PAGES[0]:
                 _df_rc = _df_rc[_df_rc["falla_tipo"] == "fao"] if "falla_tipo" in _df_rc.columns else _df_rc
             elif _atrib_rc == "F.N.A.O":
                 _df_rc = _df_rc[_df_rc["falla_tipo"] == "fnao"] if "falla_tipo" in _df_rc.columns else _df_rc
+
+            if len(_mes_rc) == 1 and (_eq_rc != "Todos" or _tec_rc_sel != "Todos"):
+                _dl_quien_rc = _tec_rc_sel if _tec_rc_sel != "Todos" else _eq_rc
+                _dl_mes_rc = _mes_rc[0]
+                _MESES_SHORT_RC = {"01":"Ene","02":"Feb","03":"Mar","04":"Abr","05":"May","06":"Jun",
+                                   "07":"Jul","08":"Ago","09":"Sep","10":"Oct","11":"Nov","12":"Dic"}
+                _dl_p_rc = str(_dl_mes_rc).split("-")
+                _dl_lbl_rc = f"{_MESES_SHORT_RC.get(_dl_p_rc[1], _dl_p_rc[1])} '{_dl_p_rc[0][2:]}" if len(_dl_p_rc)==2 else str(_dl_mes_rc)
+                _sem_match_rc = next((s for s in _sems_rc if s[0] == _sem_rc), None) if _sem_rc != "Todas" else None
+                _dl_fname_rc = f"Resumen {_dl_lbl_rc} _ {_dl_quien_rc}.xlsx".replace("'", "")
+                _dl_data_rc = _build_excel_resumen_shared(_dl_mes_rc, _dl_quien_rc, _eq_rc, _tec_rc_sel, _sem_match_rc)
+                st.download_button(
+                    label=f"\U0001f4e5 Descargar Resumen {_dl_quien_rc} — {_dl_lbl_rc}",
+                    data=_dl_data_rc,
+                    file_name=_dl_fname_rc,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.document",
+                    key="dl_resumen_efec",
+                )
 
         # ── KPIs globales: Total PMs y PMs sin reincidencia ──────────────────────
         # Solo se cuentan PMs de los mismos clientes que el numerador (COPEC/ESMAX/SHELL/Abastible).
@@ -9677,250 +9966,14 @@ elif _page == _NAV_PAGES[0]:
             _dl_quien = tec_kpi_sel if tec_kpi_sel != "Todos" else equipo_kpi
             _dl_mes_lbl = _prec_m2l(_dl_mes)
             _dl_fname = f"Resumen {_dl_mes_lbl} _ {_dl_quien}.xlsx".replace("'", "")
-
-            def _build_excel_resumen():
-                buf = BytesIO()
-                _df_tec_sc = df_tec_scores
-                _df_ot_sc = df_ot_scores
-
-                _sla_key_dl = f"_sla_proc_v5_{len(df_llamados)}"
-                _sla = st.session_state.get(_sla_key_dl, pd.DataFrame()).copy()
-                if not _sla.empty and "mes" in _sla.columns:
-                    _sla = _sla[_sla["mes"].astype(str) == str(_dl_mes)]
-                    if _sem_prec != "Todas" and _sems_prec:
-                        _sm = next((s for s in _sems_prec if s[0] == _sem_prec), None)
-                        if _sm and "fecha_llamado_dt" in _sla.columns:
-                            _sla = _sla[
-                                (_sla["fecha_llamado_dt"].dt.date >= _sm[1]) &
-                                (_sla["fecha_llamado_dt"].dt.date <= _sm[2])
-                            ]
-                    if equipo_kpi != "Todos":
-                        _grp_dl = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
-                        _sla = _sla[_sla["equipo"] == _grp_dl]
-                    if tec_kpi_sel != "Todos":
-                        _sla = _sla[_sla["tecnico"] == tec_kpi_sel]
-
-                _reinc = st.session_state.get("df_reinc", pd.DataFrame()).copy()
-                if not _reinc.empty and "fecha_cm" in _reinc.columns:
-                    _reinc["fecha_cm_dt"] = pd.to_datetime(_reinc["fecha_cm"], errors="coerce")
-                    _reinc["mes"] = _reinc["fecha_cm_dt"].dt.to_period("M").astype(str)
-                    _reinc = _reinc[_reinc["mes"] == str(_dl_mes)]
-                    if _sem_prec != "Todas" and _sems_prec:
-                        _sm = next((s for s in _sems_prec if s[0] == _sem_prec), None)
-                        if _sm:
-                            _reinc = _reinc[
-                                (_reinc["fecha_cm_dt"].dt.date >= _sm[1]) &
-                                (_reinc["fecha_cm_dt"].dt.date <= _sm[2])
-                            ]
-                    if equipo_kpi != "Todos":
-                        _grp_dl = _LABEL_TO_GRUPO.get(equipo_kpi, equipo_kpi)
-                        if "grupo_responsable" in _reinc.columns:
-                            _reinc = _reinc[_reinc["grupo_responsable"] == _grp_dl]
-                    if tec_kpi_sel != "Todos":
-                        if "tecnico_resp_short" in _reinc.columns:
-                            _norm_sel = _norm_n(tec_kpi_sel)
-                            _reinc = _reinc[
-                                _reinc["tecnico_resp_short"].fillna("").apply(
-                                    lambda t: _norm_n(_excel_to_full.get(str(t).strip(), str(t).strip()))
-                                ) == _norm_sel
-                            ]
-
-                with pd.ExcelWriter(buf, engine="openpyxl") as wr:
-                    # ═══ Sheet 1: Resumen ═══
-                    rows_sla = []
-                    if not _sla.empty and "cumple_sla" in _sla.columns:
-                        _sg = _sla.groupby("tecnico").agg(
-                            cumple=("cumple_sla", lambda x: x.fillna(False).astype(bool).sum()),
-                            total=("cumple_sla", "count"),
-                        ).reset_index()
-                        for _, r in _sg.iterrows():
-                            p = round(r["cumple"] / r["total"] * 100, 1) if r["total"] > 0 else 0
-                            rows_sla.append((r["tecnico"], int(r["cumple"]), int(r["total"]), f"{p}%"))
-                        _ts = int(_sg["cumple"].sum()); _tt = int(_sg["total"].sum())
-                        _tp = round(_ts / _tt * 100, 1) if _tt > 0 else 0
-                        rows_sla.append(("Suma total", _ts, _tt, f"{_tp}%"))
-
-                    rows_mp = []
-                    if not _reinc.empty and "es_reincidencia_tecnico" in _reinc.columns:
-                        _tc = "tecnico_resp_short" if "tecnico_resp_short" in _reinc.columns else "tecnico_cm"
-                        _mg = _reinc.groupby(_tc).agg(
-                            errores=("es_reincidencia_tecnico", "sum"),
-                            total=("es_reincidencia_tecnico", "count"),
-                        ).reset_index()
-                        for _, r in _mg.iterrows():
-                            ef = round((1 - r["errores"] / r["total"]) * 100, 1) if r["total"] > 0 else 100
-                            rows_mp.append((r[_tc], int(r["errores"]), f"{ef}%"))
-                        _me = int(_mg["errores"].sum()); _mt = int(_mg["total"].sum())
-                        _mef = round((1 - _me / _mt) * 100, 1) if _mt > 0 else 100
-                        rows_mp.append(("Suma total", _me, f"{_mef}%"))
-
-                    res = []
-                    res.append(["Cumplimiento SLA", "", "", "", "", "Efectividad MP", "", ""])
-                    res.append(["Técnico", "Cumple SLA", "N° ordenes", "% Cumplimiento",
-                                "", "Técnico", "Errores", "Efectividad"])
-                    for i in range(max(len(rows_sla), len(rows_mp), 1)):
-                        row = list(rows_sla[i]) if i < len(rows_sla) else ["", "", "", ""]
-                        row.append("")
-                        row.extend(list(rows_mp[i]) if i < len(rows_mp) else ["", "", ""])
-                        res.append(row)
-                    res.append([""] * 8)
-                    res.append([""] * 8)
-                    res.append(["Precisión Fracttal", "", "", "", "", "", "", ""])
-                    res.append(["Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
-                                "⏱ Tiempo OK", "\U0001f50d Causa OK", "\U0001f522 Numeral OK",
-                                "Exactitud %"])
-                    if not _df_tec_sc.empty:
-                        for _, r in _df_tec_sc.iterrows():
-                            _ots = int(r.get("ots_evaluadas", 0))
-                            _nerr = int(r.get("n_errores", 0))
-                            res.append([
-                                r.get("tecnico", ""), _ots, _ots - _nerr, _nerr,
-                                int(r.get("tiempo_ok_count", 0)),
-                                int(r.get("causa_ok_count", 0)),
-                                int(r.get("numeral_ok_count", 0)),
-                                f"{r.get('exactitud_pct', 0):.1f}%",
-                            ])
-                    pd.DataFrame(res).to_excel(wr, sheet_name="Resumen", index=False, header=False)
-
-                    # ═══ Sheet 2: SLA ═══
-                    if not _sla.empty:
-                        _se = _sla.copy()
-                        if "fecha_llamado_dt" in _se.columns:
-                            _se["Fecha atención"] = _se["fecha_llamado_dt"].dt.strftime("%d/%m/%Y").fillna("—")
-                            _se["Hora inicio SLA"] = _se["fecha_llamado_dt"].dt.strftime("%H:%M").fillna("—")
-                        if "fecha_atencion" in _se.columns:
-                            _se["Hora cierre OT"] = pd.to_datetime(
-                                _se["fecha_atencion"], errors="coerce"
-                            ).dt.strftime("%H:%M").fillna("—")
-                        if {"tiempo_resp_esp", "horas_resolucion"}.issubset(_se.columns):
-                            def _pct_dl(r):
-                                h, u = r.get("horas_resolucion"), r.get("tiempo_resp_esp")
-                                if pd.notna(h) and pd.notna(u) and float(u) > 0:
-                                    return round(float(h) / float(u) * 100, 1)
-                                return None
-                            _se["_pct"] = _se.apply(_pct_dl, axis=1)
-                            _se["Uso SLA"] = _se["_pct"].apply(
-                                lambda v: f"{min(v, 100):.1f}%" if pd.notna(v) else "—")
-                            _se["Exceso"] = _se["_pct"].apply(
-                                lambda v: f"{max(v - 100, 0):.1f}%" if pd.notna(v) else "—")
-                        _se["Cumple SLA"] = _se["cumple_sla"].apply(
-                            lambda x: "Sí" if x is True else ("No" if x is False else "—"))
-                        _note_dl = {}
-                        if not df_wo.empty and "comentario_tecnico" in df_wo.columns:
-                            _note_dl = (
-                                df_wo[df_wo["comentario_tecnico"].astype(str).str.strip() != ""]
-                                .set_index("folio")["comentario_tecnico"].to_dict()
-                            )
-                        if "os_fracttal" in _se.columns and _note_dl:
-                            _se["Observación técnico"] = _se["os_fracttal"].apply(
-                                lambda f: _strip_comentario_headers(
-                                    _note_dl.get(str(f).strip(), "—")))
-                        else:
-                            _se["Observación técnico"] = "—"
-                        _sla_cols = [c for c in [
-                            "os_fracttal", "n_llamado", "eds_occim", "equipo_label",
-                            "tecnico", "cliente", "eds_nombre",
-                            "Fecha atención", "Hora inicio SLA", "Hora cierre OT",
-                            "prioridad", "zona_norm", "horas_resolucion",
-                            "Uso SLA", "Exceso", "Cumple SLA", "Observación técnico",
-                        ] if c in _se.columns]
-                        _se[_sla_cols].rename(columns={
-                            "os_fracttal": "N°Orden (OT)", "n_llamado": "N°Aviso",
-                            "eds_occim": "Cód. EDS", "equipo_label": "Equipo",
-                            "tecnico": "Técnico", "cliente": "Cliente",
-                            "eds_nombre": "Estación", "prioridad": "Prioridad",
-                            "zona_norm": "Zona", "horas_resolucion": "Horas resolución",
-                        }).to_excel(wr, sheet_name="SLA", index=False)
-                    else:
-                        pd.DataFrame({"Sin datos SLA": []}).to_excel(
-                            wr, sheet_name="SLA", index=False)
-
-                    # ═══ Sheet 3: Efectividad MP ═══
-                    if not _reinc.empty:
-                        _rc = _reinc.copy()
-                        for dc in ("fecha_pm", "fecha_cm"):
-                            if dc in _rc.columns:
-                                _rc[dc] = pd.to_datetime(
-                                    _rc[dc], errors="coerce"
-                                ).dt.strftime("%d/%m/%Y").fillna("—")
-                        _FT = {"fao": "F.A.O", "fnao": "F.N.A.O", "sin_info": "Sin info",
-                               "especial": "Especial", "sin_dato": "Sin dato"}
-                        _CC = {"sin_causa": "Sin causa", "tecnico": "Técnico",
-                               "cliente": "Cliente"}
-                        if "falla_tipo" in _rc.columns:
-                            _rc["_ft"] = _rc["falla_tipo"].map(_FT).fillna(_rc["falla_tipo"])
-                            _CL = {"fao": "Falla atribuible", "fnao": "Falla no atribuible",
-                                   "sin_info": "Sin información", "especial": "Trabajo especial",
-                                   "sin_dato": "Sin dato"}
-                            _rc["_concl"] = _rc["falla_tipo"].map(_CL).fillna("—")
-                        if "causa_clasif" in _rc.columns:
-                            _rc["_cc"] = _rc["causa_clasif"].map(_CC).fillna(_rc["causa_clasif"])
-                        if "es_reincidencia_tecnico" in _rc.columns:
-                            _rc["_resp"] = _rc["es_reincidencia_tecnico"].apply(
-                                lambda x: "Técnico" if x else "No técnico")
-                        if "grupo_responsable" in _rc.columns:
-                            _rc["_grp"] = _rc["grupo_responsable"].map(
-                                _EQUIPO_LABEL).fillna(_rc["grupo_responsable"])
-                        _rc_map = [
-                            ("equipment", "Equipo"), ("client", "Cliente"),
-                            ("station", "Estación"), ("folio_pm", "OT MP"),
-                            ("folio_cm", "OT MC"), ("fecha_pm", "Fecha MP"),
-                            ("fecha_cm", "Fecha MC"),
-                            ("tecnico_resp_short", "Técnico MP"),
-                            ("tecnico_cm", "Técnico MC"), ("_grp", "T.Senior"),
-                            ("dias_entre", "Días MP→MC"),
-                            ("falla_raw", "Tipo Falla"), ("_ft", "Clasif. Falla"),
-                            ("causa_raiz", "Causa raíz"), ("_cc", "Clasif. causa"),
-                            ("_resp", "Responsabilidad"),
-                            ("comentario_tecnico_cm", "Comentario STO"),
-                            ("_concl", "Conclusión"),
-                        ]
-                        _rc_use = [(s, d) for s, d in _rc_map if s in _rc.columns]
-                        _rc[[s for s, _ in _rc_use]].rename(
-                            columns={s: d for s, d in _rc_use}
-                        ).to_excel(wr, sheet_name="Efectividad MP", index=False)
-                    else:
-                        pd.DataFrame({"Sin fallas post-preventiva": []}).to_excel(
-                            wr, sheet_name="Efectividad MP", index=False)
-
-                    # ═══ Sheet 4: P. Fracttal ═══
-                    if not _df_ot_sc.empty:
-                        _pf = _df_ot_sc.copy()
-                        if "creation_date" in _pf.columns:
-                            _pf["Fecha"] = pd.to_datetime(
-                                _pf["creation_date"], errors="coerce"
-                            ).dt.strftime("%d/%m/%Y").fillna("—")
-                        else:
-                            _pf["Fecha"] = "—"
-                        _pf["Estado"] = _pf["score_total"].apply(
-                            lambda s: "Cumple" if s >= 75 else "No cumple")
-                        _pf["X/3"] = _pf.apply(lambda r: f"{sum([r.get('score_tiempo',0)>=25, r.get('score_causa',0)>=25, r.get('score_numeral',0)>=25])}/3", axis=1)
-                        _pf_out = pd.DataFrame({
-                            "Fecha": _pf["Fecha"],
-                            "Estado": _pf["Estado"],
-                            "X/3": _pf["X/3"],
-                            "OT": _pf.get("folio", "—"),
-                            "Cliente": _pf["client"].str.title() if "client" in _pf.columns else "—",
-                            "Codigo EDS": _pf.get("eds_occim", "—"),
-                            "Estación": _pf["station"].str.title() if "station" in _pf.columns else "—",
-                            "Técnico": _pf.get("tecnico", "—"),
-                            "Tipo": _pf["maint_type"].str.title() if "maint_type" in _pf.columns else "—",
-                            "Score": _pf["score_total"],
-                        })
-                        _pf_out.to_excel(wr, sheet_name="P. Fracttal", index=False)
-                    else:
-                        pd.DataFrame({"Sin OTs evaluadas": []}).to_excel(
-                            wr, sheet_name="P. Fracttal", index=False)
-
-                buf.seek(0)
-                return buf.getvalue()
-
-            _dl_data = _build_excel_resumen()
+            _sem_match_prec = next((s for s in _sems_prec if s[0] == _sem_prec), None) if _sem_prec != "Todas" else None
+            _dl_data = _build_excel_resumen_shared(_dl_mes, _dl_quien, equipo_kpi, tec_kpi_sel, _sem_match_prec)
             st.download_button(
                 label=f"\U0001f4e5 Descargar Resumen {_dl_quien} — {_dl_mes_lbl}",
                 data=_dl_data,
                 file_name=_dl_fname,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.document",
+                key="dl_resumen_prec",
             )
 
         st.divider()
