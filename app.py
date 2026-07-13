@@ -7481,32 +7481,61 @@ elif _page == _NAV_PAGES[0]:
                 _mef = round((1 - _me / _mt) * 100, 1) if _mt > 0 else 100
                 rows_mp.append(("Suma total", _me, f"{_mef}%"))
 
+            _NCOLS_RES = 11  # A..K
+            def _pad(row, n=_NCOLS_RES):
+                return row + [""] * (n - len(row))
+
             res = []
-            res.append(["Cumplimiento SLA", "", "", "", "", "Efectividad MP", "", ""])
-            res.append(["Técnico", "Cumple SLA", "N° ordenes", "% Cumplimiento",
-                        "", "Técnico", "Errores", "Efectividad"])
+            res.append(_pad(["Cumplimiento SLA", "", "", "", "", "Efectividad MP", "", "",
+                             "", "Explicativo de criterios"]))
+            res.append(_pad(["Técnico", "Cumple SLA", "N° ordenes", "% Cumplimiento",
+                             "", "Técnico", "Errores", "Efectividad",
+                             "", "Cumplimiento SLA",
+                             "% de llamados correctivos cerrados dentro del tiempo comprometido. "
+                             "Binario por llamado: cumple ✅ o no cumple ❌."]))
             for i in range(max(len(rows_sla), len(rows_mp), 1)):
                 row = list(rows_sla[i]) if i < len(rows_sla) else ["", "", "", ""]
                 row.append("")
                 row.extend(list(rows_mp[i]) if i < len(rows_mp) else ["", "", ""])
-                res.append(row)
-            res.append([""] * 8)
-            res.append([""] * 8)
-            res.append(["Precisión Fracttal", "", "", "", "", "", "", ""])
-            res.append(["Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
-                        "⏱ Tiempo OK", "\U0001f50d Causa OK", "\U0001f522 Numeral OK",
-                        "Exactitud %"])
+                res.append(_pad(row))
+            res.append(_pad([]))
+            res.append(_pad(["", "", "", "", "", "", "", "",
+                             "", "Efectividad MP",
+                             "Fallas post-preventiva: correctivo generado dentro de los 5 días "
+                             "siguientes a un mantenimiento preventivo en el mismo equipo. "
+                             "El error se imputa al técnico que realizó el preventivo."]))
+            res.append(_pad([]))
+            res.append(_pad([]))
+            res.append(_pad(["Precisión Fracttal", "", "", "", "", "", "", "",
+                             "", "Precisión Fracttal",
+                             "Mide 3 componentes por OT (25 pts c/u = 75 total): "
+                             "Tiempo de ejecución (solo MP), Causa raíz (solo MC) "
+                             "y Numeral registrado (MP en lavadoras). "
+                             "Una OT es \"mala\" si falla en cualquiera de los componentes que le aplican."]))
+            res.append(_pad(["Técnico", "OTs evaluadas", "OTs sin error", "OTs con error",
+                             "⏱ Tiempo OK", "\U0001f50d Causa OK", "\U0001f522 Numeral OK",
+                             "Exactitud %"]))
+            def _frac(ok, ap):
+                if ap == 0:
+                    return "N/A"
+                return f"{ok}/{ap} ({ok/ap*100:.1f}%)"
             if not _df_tec_sc.empty:
                 for _, r in _df_tec_sc.iterrows():
                     _ots = int(r.get("ots_evaluadas", 0))
                     _nerr = int(r.get("n_errores", 0))
-                    res.append([
+                    _t_ok = int(r.get("tiempo_ok_count", 0))
+                    _t_ap = int(r.get("tiempo_aplica_count", 0))
+                    _c_ok = int(r.get("causa_ok_count", 0))
+                    _c_ap = int(r.get("causa_aplica_count", 0))
+                    _n_ok = int(r.get("numeral_ok_count", 0))
+                    _n_ap = int(r.get("numeral_aplica_count", 0))
+                    res.append(_pad([
                         r.get("tecnico", ""), _ots, _ots - _nerr, _nerr,
-                        int(r.get("tiempo_ok_count", 0)),
-                        int(r.get("causa_ok_count", 0)),
-                        int(r.get("numeral_ok_count", 0)),
+                        _frac(_t_ok, _t_ap),
+                        _frac(_c_ok, _c_ap),
+                        _frac(_n_ok, _n_ap),
                         f"{r.get('exactitud_pct', 0):.1f}%",
-                    ])
+                    ]))
             pd.DataFrame(res).to_excel(wr, sheet_name="Resumen", index=False, header=False)
 
             # ═══ Sheet 2: SLA ═══
@@ -7610,31 +7639,250 @@ elif _page == _NAV_PAGES[0]:
                 pd.DataFrame({"Sin fallas post-preventiva": []}).to_excel(
                     wr, sheet_name="Efectividad MP", index=False)
 
-            # ═══ Sheet 4: P. Fracttal ═══
+            # ═══ Sheet 4: P. Fracttal (4 secciones apiladas) ═══
             if not _df_ot_sc.empty:
                 _pf = _df_ot_sc.copy()
-                if "creation_date" in _pf.columns:
-                    _pf["Fecha"] = pd.to_datetime(
-                        _pf["creation_date"], errors="coerce"
-                    ).dt.strftime("%d/%m/%Y").fillna("—")
-                else:
-                    _pf["Fecha"] = "—"
-                _pf["Estado"] = _pf["score_total"].apply(
-                    lambda s: "Cumple" if s >= 75 else "No cumple")
-                _pf["X/3"] = _pf.apply(lambda r: f"{sum([r.get('score_tiempo',0)>=25, r.get('score_causa',0)>=25, r.get('score_numeral',0)>=25])}/3", axis=1)
-                _pf_out = pd.DataFrame({
-                    "Fecha": _pf["Fecha"],
-                    "Estado": _pf["Estado"],
-                    "X/3": _pf["X/3"],
+                _eds_map_dl = _build_eds_nombre_map(df_eds)
+
+                # Helper: formatear segundos a HH:MM
+                def _fmt_seg_dl(s):
+                    if pd.isna(s) or s == 0: return "—"
+                    s = int(s); h, m = s//3600, (s%3600)//60
+                    return f"{h:02d}:{m:02d}"
+
+                # Fecha común
+                _pf_cd = pd.to_datetime(_pf["creation_date"], errors="coerce")
+                if _pf_cd.dt.tz is not None:
+                    _pf_cd = _pf_cd.dt.tz_convert(None)
+                _pf["_fecha"] = _pf_cd.dt.strftime("%d/%m/%Y").fillna("—")
+
+                # Scores por componente
+                _st = _pf["score_tiempo"].fillna(0) if "score_tiempo" in _pf.columns else pd.Series(0, index=_pf.index)
+                _sc_c = _pf["score_causa"].fillna(0) if "score_causa" in _pf.columns else pd.Series(0, index=_pf.index)
+                _sn = _pf["score_numeral"].fillna(0) if "score_numeral" in _pf.columns else pd.Series(0, index=_pf.index)
+                _ok_bits = ((_st >= 25).astype(int) + (_sc_c >= 25).astype(int) + (_sn >= 25).astype(int))
+
+                # ── SECCIÓN 1: DETALLE COMPLETO (16 cols) ──
+                _pf["_cumple"] = _ok_bits.apply(lambda n: "✅ Cumple" if n == 3 else "❌ No cumple")
+                _pf["_x3"] = _ok_bits.apply(lambda n: f"{n}/3")
+                _pf["_tipo"] = _pf["maint_type"].fillna("").str.title() if "maint_type" in _pf.columns else "—"
+                _pf["_modalidad"] = "—"
+                if "deteccion_raw" in _pf.columns:
+                    _MOD_MAP_DL = {"1.- ATENDIDO PRESENCIAL": "Presencial",
+                                   "2.- ATENDIDO VÍA REMOTA": "Remoto", "2.- ATENDIDO VIA REMOTA": "Remoto",
+                                   "3.- ATENDIDO CON SU MP": "Con MP", "4.- LLAMADO DUPLICADO": "Duplicado"}
+                    _pf["_modalidad"] = _pf["deteccion_raw"].fillna("").apply(
+                        lambda v: _MOD_MAP_DL.get(str(v).strip().upper(), str(v).strip().title() or "—"))
+                _pf["_estado_ot"] = _pf["wo_status"].fillna("—") if "wo_status" in _pf.columns else "—"
+                _em = _pf["elapsed_min"] if "elapsed_min" in _pf.columns else pd.Series(0.0, index=_pf.index)
+                _pf["_col_tiempo"] = _pf.apply(
+                    lambda r: f"{'✅' if _st[r.name] >= 25 else '❌'} {_em[r.name]:.0f} min", axis=1)
+                def _fmt_causa_dl(r):
+                    es_corr = r.get("es_correctiva", True)
+                    raw = str(r.get("causa_raiz_raw", "") or "").strip()
+                    ok = _sc_c[r.name] >= 25
+                    if not es_corr:
+                        return "✅ Preventiva (no aplica)"
+                    if ok:
+                        return f"✅ {raw[:38]}" if raw else "✅ Registrada"
+                    return f"❌ {raw[:35]}" if raw else "❌ Sin causa"
+                _pf["_col_causa"] = _pf.apply(_fmt_causa_dl, axis=1)
+                _eq_src = _pf["equipo_nombre"].fillna("") if "equipo_nombre" in _pf.columns else pd.Series("", index=_pf.index)
+                _pf["_equipo"] = _eq_src.apply(lambda s: str(s).strip().title() if s else "—")
+                def _fmt_num_dl(r):
+                    if not r.get("es_lavadora", True):
+                        return "🔵 No aplica"
+                    if r.get("numeral_ok", False):
+                        return "✅ Registrado"
+                    return NUMERAL_MOTIVO_LABEL.get(str(r.get("numeral_motivo", "") or ""), "❌ Dato inválido")
+                _pf["_col_numeral"] = _pf.apply(_fmt_num_dl, axis=1)
+                _nombres_comp_dl = {0: "Tiempo", 1: "Causa raíz", 2: "Numeral"}
+                _scores_comp_dl = [_st, _sc_c, _sn]
+                def _obs_dl(r):
+                    fallos = [_nombres_comp_dl[i] for i, sc in enumerate(_scores_comp_dl) if sc[r.name] < 25]
+                    if not fallos:
+                        return "✅ Registro perfecto"
+                    return "⚠️ No cumple: " + ", ".join(fallos)
+                _pf["_obs"] = _pf.apply(_obs_dl, axis=1)
+
+                _det_completo = pd.DataFrame({
+                    "Fecha": _pf["_fecha"],
+                    "Cumple": _pf["_cumple"],
+                    "X/3": _pf["_x3"],
                     "OT": _pf.get("folio", "—"),
-                    "Cliente": _pf["client"].str.title() if "client" in _pf.columns else "—",
-                    "Codigo EDS": _pf.get("eds_occim", "—"),
-                    "Estación": _pf["station"].str.title() if "station" in _pf.columns else "—",
+                    "EDS": _pf.get("eds_occim", "—"),
                     "Técnico": _pf.get("tecnico", "—"),
-                    "Tipo": _pf["maint_type"].str.title() if "maint_type" in _pf.columns else "—",
+                    "Estación": _pf["station"].fillna("—").str.title() if "station" in _pf.columns else "—",
+                    "Tipo": _pf["_tipo"],
+                    "Modalidad": _pf["_modalidad"],
+                    "Estado": _pf["_estado_ot"],
                     "Score": _pf["score_total"],
+                    "⏱ Tiempo": _pf["_col_tiempo"],
+                    "🔍 Causa raíz": _pf["_col_causa"],
+                    "🔧 Equipo": _pf["_equipo"],
+                    "🔢 Numeral": _pf["_col_numeral"],
+                    "💬 Observación": _pf["_obs"],
                 })
-                _pf_out.to_excel(wr, sheet_name="P. Fracttal", index=False)
+
+                # ── SECCIÓN 2: RESUMEN CAUSA RAIZ (solo correctivas) ──
+                _cr = _pf[_pf["es_correctiva"].fillna(False).astype(bool)].copy() if "es_correctiva" in _pf.columns else pd.DataFrame()
+                _det_causa = pd.DataFrame()
+                if not _cr.empty:
+                    _cr["_estado_cr"] = "❌ No cumple"
+                    if "causa_ok" in _cr.columns:
+                        _cr["_estado_cr"] = _cr["causa_ok"].fillna(False).apply(
+                            lambda v: "✅ Cumple" if v else "❌ No cumple")
+                    if "eds_occim" in _cr.columns:
+                        _cr["_eds_nombre"] = _cr["eds_occim"].map(_eds_map_dl).fillna("—").str.title()
+                    else:
+                        _cr["_eds_nombre"] = "—"
+                    if "comentario_tecnico" in _cr.columns:
+                        _cr["_comentario_cr"] = _cr["comentario_tecnico"].fillna("").apply(_strip_comentario_headers)
+                    else:
+                        _cr["_comentario_cr"] = "—"
+                    _det_causa = pd.DataFrame({
+                        "Fecha": _cr["_fecha"],
+                        "Equipo": _cr["equipment_code"].fillna("—") if "equipment_code" in _cr.columns else "—",
+                        "EDS": _cr.get("eds_occim", "—"),
+                        "OT": _cr.get("folio", "—"),
+                        "Tipo": _cr["maint_type"].fillna("").str.title() if "maint_type" in _cr.columns else "—",
+                        "Técnico": _cr.get("tecnico", "—"),
+                        "Nombre EDS": _cr["_eds_nombre"],
+                        "Causa Raíz": _cr["causa_raiz_raw"].fillna("—") if "causa_raiz_raw" in _cr.columns else "—",
+                        "Clasificación": _cr["causa_clasif"].fillna("—") if "causa_clasif" in _cr.columns else "—",
+                        "Estado": _cr["_estado_cr"],
+                        "Comentario técnico / qué hizo": _cr["_comentario_cr"],
+                    })
+
+                # ── SECCIÓN 3: RESUMEN TIEMPO (solo preventivas con estimado) ──
+                _te = _pf[_pf["maint_type"].str.upper().str.contains("PREVENTIVA", na=False)].copy() if "maint_type" in _pf.columns else pd.DataFrame()
+                _det_tiempo = pd.DataFrame()
+                if not _te.empty and "estimated_sec" in _te.columns:
+                    _te = _te[_te["estimated_sec"].fillna(0) > 0].copy()
+                    if not _te.empty:
+                        _te["_effective_sec"] = _te[["duration_sec", "elapsed_sec"]].fillna(0).max(axis=1)
+                        _te["_piso_pct"] = _te["client"].apply(
+                            lambda c: 0.50 if c == "SHELL (Enex)" else 0.70)
+                        _te["_te_ok"] = _te["_effective_sec"] >= _te["estimated_sec"] * _te["_piso_pct"]
+                        _te["_te_sobre"] = _te["_effective_sec"] > _te["estimated_sec"] * 1.50
+                        _te = _te.drop_duplicates(subset="folio", keep="first")
+                        _te["_minimo_sec"] = (_te["estimated_sec"] * _te["_piso_pct"]).round(0)
+                        _te["_maximo_sec"] = (_te["estimated_sec"] * 1.50).round(0)
+                        _te["_pct_ej"] = (_te["_effective_sec"] / _te["estimated_sec"] * 100).round(1)
+                        def _estado_te_dl(r):
+                            if bool(r.get("_te_ok", False)):
+                                if bool(r.get("_te_sobre", False)):
+                                    return "✅ Cumple · Sobretiempo"
+                                return "✅ Cumple"
+                            return "❌ No cumple"
+                        _te["_estado_te"] = _te.apply(_estado_te_dl, axis=1)
+                        if "eds_occim" in _te.columns:
+                            _te["_eds_nombre_te"] = _te["eds_occim"].map(_eds_map_dl).fillna("—").str.title()
+                        else:
+                            _te["_eds_nombre_te"] = "—"
+                        def _diag_te_dl(r):
+                            estim = int(r.get("estimated_sec") or 0)
+                            real = int(r.get("_effective_sec") or 0)
+                            minimo = int(r.get("_minimo_sec") or 0)
+                            pct = float(r.get("_pct_ej") or 0.0)
+                            def _hm(s):
+                                if s <= 0: return "0min"
+                                h, m = int(s)//3600, (int(s)%3600)//60
+                                return f"{h}h{m:02d}min" if h else f"{m}min"
+                            if bool(r.get("_te_ok", False)):
+                                return ""
+                            if real == 0:
+                                return f"Sin registro de tiempo. Estimado {_hm(estim)}, mínimo {_hm(minimo)}."
+                            if pct < 20:
+                                return f"Tiempo insuficiente: {_hm(real)} vs mínimo {_hm(minimo)}."
+                            return f"Por debajo del mínimo: {_hm(real)} vs {_hm(minimo)} requerido."
+                        _te["_diag"] = _te.apply(_diag_te_dl, axis=1)
+                        _det_tiempo = pd.DataFrame({
+                            "Fecha": _te["_fecha"],
+                            "Estado": _te["_estado_te"],
+                            "EDS": _te.get("eds_occim", "—"),
+                            "OT": _te.get("folio", "—"),
+                            "Tipo": _te["maint_type"].fillna("").str.title() if "maint_type" in _te.columns else "—",
+                            "Técnico": _te.get("tecnico", "—"),
+                            "Nombre EDS": _te["_eds_nombre_te"],
+                            "T. Estimado": _te["estimated_sec"].apply(_fmt_seg_dl),
+                            "T. Mínimo": _te["_minimo_sec"].apply(_fmt_seg_dl),
+                            "Máx. 150%": _te["_maximo_sec"].apply(_fmt_seg_dl),
+                            "T. Ejecución": _te["_effective_sec"].apply(_fmt_seg_dl),
+                            "% Ejecutado": _te["_pct_ej"],
+                            "Diagnóstico": _te["_diag"],
+                        })
+
+                # ── SECCIÓN 4: PRECISIÓN FRACTTAL / Numeral ──
+                _det_numeral = pd.DataFrame()
+                if not _pf.empty:
+                    _nm = _pf.copy()
+                    def _est_num_dl(r):
+                        if not r.get("es_lavadora", True):
+                            return "🔵 No aplica"
+                        if r.get("numeral_ok", False):
+                            return "✅ Cumple"
+                        return NUMERAL_MOTIVO_LABEL.get(str(r.get("numeral_motivo", "") or ""), "❌ Dato inválido")
+                    _nm["_estado_num"] = _nm.apply(_est_num_dl, axis=1)
+                    _nm["_n_ini"] = _nm.apply(lambda r: str(r.get("numeral_inicial", "") or "").strip() or "—", axis=1)
+                    _nm["_n_fin"] = _nm.apply(lambda r: str(r.get("numeral_final", "") or "").strip() or "—", axis=1)
+                    def _fichas_dl(r):
+                        fp = r.get("fichas_periodo", None)
+                        if fp is None or (isinstance(fp, float) and pd.isna(fp)):
+                            return "—"
+                        try:
+                            return f"{int(fp):,}"
+                        except (ValueError, TypeError):
+                            return "—"
+                    _nm["_fichas"] = _nm.apply(_fichas_dl, axis=1)
+                    if "comentario_tecnico" in _nm.columns:
+                        _nm["_com_num"] = _nm["comentario_tecnico"].fillna("").apply(_strip_comentario_headers)
+                    else:
+                        _nm["_com_num"] = "—"
+                    _det_numeral = pd.DataFrame({
+                        "Fecha": _nm["_fecha"],
+                        "Equipo": _nm["equipment_code"].fillna("—") if "equipment_code" in _nm.columns else "—",
+                        "Cliente": _nm["client"].fillna("—").str.title() if "client" in _nm.columns else "—",
+                        "OT": _nm.get("folio", "—"),
+                        "Tipo": _nm["maint_type"].fillna("").str.title() if "maint_type" in _nm.columns else "—",
+                        "Técnico": _nm.get("tecnico", "—"),
+                        "EDS": _nm.get("eds_occim", "—"),
+                        "N. Inicial": _nm["_n_ini"],
+                        "N. Final": _nm["_n_fin"],
+                        "Fichas período": _nm["_fichas"],
+                        "Estado": _nm["_estado_num"],
+                        "Comentario técnico / causa raíz": _nm["_com_num"],
+                    })
+
+                # ── Escribir las 4 secciones apiladas en una sola hoja ──
+                _ws_name = "P. Fracttal"
+                _row_cursor = 0
+
+                _sec1_title = pd.DataFrame([["DETALLE COMPLETO"] + [""] * (_det_completo.shape[1] - 1)])
+                _sec1_title.to_excel(wr, sheet_name=_ws_name, index=False, header=False, startrow=_row_cursor)
+                _row_cursor += 1
+                _det_completo.to_excel(wr, sheet_name=_ws_name, index=False, startrow=_row_cursor)
+                _row_cursor += len(_det_completo) + 1 + 1  # +header +gap
+
+                if not _det_causa.empty:
+                    _sec2_title = pd.DataFrame([["RESUMEN CAUSA RAIZ"] + [""] * (_det_causa.shape[1] - 1)])
+                    _sec2_title.to_excel(wr, sheet_name=_ws_name, index=False, header=False, startrow=_row_cursor)
+                    _row_cursor += 1
+                    _det_causa.to_excel(wr, sheet_name=_ws_name, index=False, startrow=_row_cursor)
+                    _row_cursor += len(_det_causa) + 1 + 1
+
+                if not _det_tiempo.empty:
+                    _sec3_title = pd.DataFrame([["RESUMEN TIEMPO"] + [""] * (_det_tiempo.shape[1] - 1)])
+                    _sec3_title.to_excel(wr, sheet_name=_ws_name, index=False, header=False, startrow=_row_cursor)
+                    _row_cursor += 1
+                    _det_tiempo.to_excel(wr, sheet_name=_ws_name, index=False, startrow=_row_cursor)
+                    _row_cursor += len(_det_tiempo) + 1 + 1
+
+                if not _det_numeral.empty:
+                    _sec4_title = pd.DataFrame([["PRECISIÓN FRACTTAL"] + [""] * (_det_numeral.shape[1] - 1)])
+                    _sec4_title.to_excel(wr, sheet_name=_ws_name, index=False, header=False, startrow=_row_cursor)
+                    _row_cursor += 1
+                    _det_numeral.to_excel(wr, sheet_name=_ws_name, index=False, startrow=_row_cursor)
             else:
                 pd.DataFrame({"Sin OTs evaluadas": []}).to_excel(
                     wr, sheet_name="P. Fracttal", index=False)
