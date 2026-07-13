@@ -7338,7 +7338,7 @@ elif _page == _NAV_PAGES[0]:
         _unique = _tmp["technician"].dropna().unique()
         _tech_equipo = {t: _get_equipo(t) for t in _unique}
         _tmp["equipo"] = _tmp["technician"].map(_tech_equipo).fillna("Sin equipo")
-        aplicar_transferencias(_tmp, "initial_date", "equipo", "technician")
+        aplicar_transferencias(_tmp, "creation_date", "equipo", "technician")
         return _tmp
 
     _ph_eq = st.empty()
