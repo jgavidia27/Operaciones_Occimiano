@@ -2914,6 +2914,11 @@ if _page == _NAV_PAGES[1]:
                     _df_comp = _df_comp[_df_comp["_mes"].isin(_periods_comp)]
             if sel_pr_t != "Todas":
                 _df_comp = _df_comp[_df_comp["prioridad"].str.upper() == sel_pr_t.upper()]
+            if sel_cli_t != "Todos" and "cliente" in _df_comp.columns:
+                _sel_key_comp = _norm_cli_t(sel_cli_t)
+                _df_comp = _df_comp[_df_comp["cliente"].apply(_norm_cli_t) == _sel_key_comp]
+            if sel_cu_t != "Todos" and "cumplimiento" in _df_comp.columns:
+                _df_comp = _df_comp[_df_comp["cumplimiento"] == sel_cu_t]
             _df_occ_c  = _df_comp[_df_comp["tecnico"].isin(_occa_members_t)]
             _df_autec_c = _df_comp[_df_comp["tecnico"].str.contains("autec", case=False, na=False)]
             _df_elec_c  = _df_comp[_df_comp["tecnico"].str.contains("ocampo", case=False, na=False)]
