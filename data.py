@@ -125,9 +125,8 @@ GRUPOS_TERRENO = {
     "Juan Gallardo": {
         "senior":   "Juan Gallardo",
         # Juan Gallardo = Juan Antonio Gallardo Romero
-        # Ignacio Ferrari = Iván Ignacio Vergara Ferrari
         # Edison Carrasco = Edison Jhon Carrasco Navarro
-        "miembros": ["Juan Gallardo", "Javier Hein", "Edison Carrasco", "Ignacio Ferrari"],
+        "miembros": ["Juan Gallardo", "Javier Hein", "Edison Carrasco"],
     },
     # Región Metropolitana — equipos nombrados por su jefe
     "Luis Pinto": {
@@ -142,7 +141,8 @@ GRUPOS_TERRENO = {
         "senior":   "Victor Bahamonde",
         # Victor Bahamonde = Victor Hugo Bahamonde Bustamante
         # Martin Flores = Martín Ignacio Flores Galaz
-        "miembros": ["Victor Bahamonde", "Martin Flores", "Eduardo Toro"],
+        # Ignacio Ferrari = Iván Ignacio Vergara Ferrari (transfer desde Juan Gallardo, 2026-06-22)
+        "miembros": ["Victor Bahamonde", "Martin Flores", "Eduardo Toro", "Ignacio Ferrari"],
     },
     # Carlos Avila Norte — Coquimbo (equipo directo de Carlos Avila)
     "Carlos Avila Norte": {
@@ -195,6 +195,43 @@ _TECNICO_A_GRUPO["Carlos Avila"] = "Carlos Avila Norte"
 def get_grupo_tecnico(nombre_corto: str) -> str | None:
     """Retorna el nombre del equipo ('Luis Pinto', 'Victor Bahamonde', etc.) o None."""
     return _TECNICO_A_GRUPO.get(nombre_corto)
+
+
+# ── Transferencias de equipo con fecha de corte ──────────────────────────────
+# Antes de la fecha: el técnico pertenece a "desde". Desde la fecha: a "hacia".
+# GRUPOS_TERRENO refleja el estado ACTUAL (post-transferencia).
+TRANSFERENCIAS_EQUIPO: list[dict] = [
+    {
+        "tecnico_patterns": ["ignacio ferrari", "vergara ferrari"],
+        "desde": "Juan Gallardo",
+        "hacia": "Victor Bahamonde",
+        "fecha": "2026-06-22",
+    },
+]
+
+
+def aplicar_transferencias(df, col_fecha, col_equipo="equipo", col_tecnico=None):
+    """Reasigna equipo/grupo para filas anteriores a una transferencia de técnico.
+
+    GRUPOS_TERRENO refleja el roster actual → la asignación base mapea al equipo
+    nuevo.  Esta función corrige las filas cuya fecha es anterior al corte,
+    devolviéndolas al equipo original.
+    """
+    if df.empty or col_tecnico is None or not TRANSFERENCIAS_EQUIPO:
+        return df
+    _dates = pd.to_datetime(df[col_fecha], errors="coerce")
+    if _dates.dt.tz is not None:
+        _dates = _dates.dt.tz_convert(None)
+    _names = df[col_tecnico].fillna("").str.lower().str.strip()
+    for t in TRANSFERENCIAS_EQUIPO:
+        corte = pd.Timestamp(t["fecha"])
+        mask_tec = pd.Series(False, index=df.index)
+        for pat in t["tecnico_patterns"]:
+            mask_tec |= _names.str.contains(pat, na=False, regex=False)
+        mask = mask_tec & (_dates < corte) & (df[col_equipo] == t["hacia"])
+        if mask.any():
+            df.loc[mask, col_equipo] = t["desde"]
+    return df
 
 
 # Técnicos senior cuyo KPI individual = promedio del equipo completo (no solo sus propios casos).
@@ -1892,6 +1929,7 @@ def build_reincidencias(df_wo: pd.DataFrame, excel_to_full: dict = None) -> pd.D
     # tecnico_short solo está en prev_tmp → no tiene sufijo
     merged["tecnico_resp_short"] = merged.get("tecnico_short", pd.Series("", index=merged.index)).fillna("")
     merged["grupo_responsable"]  = merged["tecnico_resp_short"].apply(get_grupo_tecnico)
+    aplicar_transferencias(merged, "fecha_dt_pm", "grupo_responsable", "tecnico_resp_short")
 
     # Construir DataFrame final
     _s = pd.Series("", index=merged.index)

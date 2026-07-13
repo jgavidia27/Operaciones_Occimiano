@@ -30,7 +30,7 @@ from data import (
     build_kpi_llenado_df, score_llenado_por_ot, score_llenado_por_tecnico,
     build_reincidencias, build_numeral_historial, analizar_secuencias, CAT_LABEL,
     NUMERAL_MOTIVO_LABEL, aplicar_numerales_subtarea,
-    GRUPOS_TERRENO, get_grupo_tecnico, TECNICOS_NO_APLICA,
+    GRUPOS_TERRENO, get_grupo_tecnico, aplicar_transferencias, TECNICOS_NO_APLICA,
     SENIORS, SENIOR_MULTI_TEAMS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
 )
@@ -7338,6 +7338,7 @@ elif _page == _NAV_PAGES[0]:
         _unique = _tmp["technician"].dropna().unique()
         _tech_equipo = {t: _get_equipo(t) for t in _unique}
         _tmp["equipo"] = _tmp["technician"].map(_tech_equipo).fillna("Sin equipo")
+        aplicar_transferencias(_tmp, "initial_date", "equipo", "technician")
         return _tmp
 
     _ph_eq = st.empty()
@@ -8138,6 +8139,7 @@ elif _page == _NAV_PAGES[0]:
                 # Mapear técnico → equipo y filtrar excluidos (cacheado aquí →
                 # no se recalcula en cada cambio de filtro, solo al cargar datos nuevos)
                 _src["equipo"] = _src["tecnico"].apply(_get_equipo)
+                aplicar_transferencias(_src, "fecha_llamado_dt", "equipo", "tecnico")
                 _src = _src[~_src["tecnico"].apply(_es_excluido)].copy()
                 _src["equipo_label"] = _src["equipo"].map(_EQUIPO_LABEL).fillna(_src["equipo"])
 
@@ -9938,15 +9940,13 @@ elif _page == _NAV_PAGES[0]:
             _df = _cached_build_kpi_llenado(raw_wo)
             if not _df.empty:
                 _df["equipo"] = _df["tecnico"].apply(_get_equipo)
+                aplicar_transferencias(_df, "creation_date", "equipo", "tecnico")
                 _df = _df[~_df["tecnico"].apply(_es_excluido)].copy()
-                # Solo tipos de mantenimiento evaluables: Correctiva y Preventiva (cualquier variante).
-                # Excluidos: Entrega de Insumos, Inspección, Pendiente, Garantía, etc.
                 _tipo_upper = _df["maint_type"].str.upper()
                 _df = _df[
                     _tipo_upper.str.contains("CORRECTIVA", na=False) |
                     _tipo_upper.str.contains("PREVENTIVA", na=False)
                 ].copy()
-                # Solo datos desde 2026 — el KPI de Precisión aplica a partir de ese año
                 _df = _df[_df["creation_date"].dt.tz_convert(None).dt.year >= 2026].copy()
                 _df["mes"] = (
                     _df["creation_date"].dt.tz_convert(None)
@@ -10014,6 +10014,7 @@ elif _page == _NAV_PAGES[0]:
                     _df["score_tiempo"] + _df["score_causa"] + _df["score_numeral"]
                 ).clip(upper=75).round(1)
                 _df["equipo"] = _df["tecnico"].apply(_get_equipo)
+                aplicar_transferencias(_df, "creation_date", "equipo", "tecnico")
                 _df["mes"] = (
                     _df["creation_date"].dt.tz_convert(None)
                     .dt.to_period("M").astype(str)
@@ -12500,6 +12501,7 @@ elif _page == _NAV_PAGES[0]:
                     _df_ot_bono["score_numeral"] = _df_ot_bono["numeral_ok"].apply(lambda ok: 25 if ok else 0)
                     _df_ot_bono["score_total"] = (_df_ot_bono["score_tiempo"] + _df_ot_bono["score_causa"] + _df_ot_bono["score_numeral"]).clip(upper=75).round(1)
                     _df_ot_bono["equipo"] = _df_ot_bono["tecnico"].apply(_get_equipo)
+                    aplicar_transferencias(_df_ot_bono, "creation_date", "equipo", "tecnico")
                     _df_ot_bono["mes"] = _df_ot_bono["creation_date"].dt.tz_convert(None).dt.to_period("M").astype(str)
             except Exception as _e_bono_prec:
                 st.warning(f"⚠️ Precisión bono no pudo computarse: {type(_e_bono_prec).__name__}: {_e_bono_prec}")
@@ -13227,6 +13229,7 @@ elif _page == _NAV_PAGES[0]:
                     _ot_full["score_numeral"] = _ot_full["numeral_ok"].apply(lambda ok: 25 if ok else 0)
                     _ot_full["score_total"] = (_ot_full["score_tiempo"] + _ot_full["score_causa"] + _ot_full["score_numeral"]).clip(upper=75).round(1)
                     _ot_full["equipo"] = _ot_full["tecnico"].apply(_get_equipo)
+                    aplicar_transferencias(_ot_full, "creation_date", "equipo", "tecnico")
                     _ot_full["mes_num"] = _ot_full["creation_date"].dt.tz_convert(None).dt.month
                     _ot_full["buena"] = _ot_full["score_total"] >= 75
                     _prec_g = _ot_full.groupby(["tecnico","equipo","mes_num"]).agg(
