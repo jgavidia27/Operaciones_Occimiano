@@ -7416,6 +7416,68 @@ elif _page == _NAV_PAGES[0]:
         # ── SLA data ──
         _sla_key_dl = f"_sla_proc_v5_{len(df_llamados)}"
         _sla = st.session_state.get(_sla_key_dl, pd.DataFrame()).copy()
+        if _sla.empty and not df_llamados.empty:
+            _src = df_llamados[
+                df_llamados["fecha_atencion"].notna() &
+                df_llamados["fecha_llamado"].notna()
+            ].copy()
+            if "tiempo_resp_real" in _src.columns:
+                _src["horas_resolucion"] = (
+                    pd.to_timedelta(_src["tiempo_resp_real"], errors="coerce")
+                    .dt.total_seconds() / 3600
+                ).clip(lower=0).round(2)
+                _miss = _src["horas_resolucion"].isna()
+                if _miss.any():
+                    _src.loc[_miss, "horas_resolucion"] = (
+                        (pd.to_datetime(_src.loc[_miss, "fecha_atencion"]) -
+                         pd.to_datetime(_src.loc[_miss, "fecha_llamado"]))
+                        .dt.total_seconds() / 3600
+                    ).clip(lower=0).round(2)
+            else:
+                _src["horas_resolucion"] = (
+                    (pd.to_datetime(_src["fecha_atencion"]) -
+                     pd.to_datetime(_src["fecha_llamado"]))
+                    .dt.total_seconds() / 3600
+                ).clip(lower=0).round(2)
+            _src["prioridad"] = _src["prioridad"].fillna("").str.strip().str.upper()
+            def _nz(z):
+                z = str(z).strip().upper()
+                if not z or z == "NAN":
+                    return "Santiago"
+                if z in ("RM", "R.M.", "R.M") or any(k in z for k in ("SANTIAGO", "METRO")):
+                    return "Santiago"
+                return "Regiones"
+            _src["zona_norm"] = _src["zona"].fillna("").astype(str).apply(_nz) if "zona" in _src.columns else "Santiago"
+            _SZ = {("P1","Santiago"):18,("P1","Regiones"):24,("P2","Santiago"):24,("P2","Regiones"):48,
+                   ("P3","Santiago"):36,("P3","Regiones"):72,("P4","Santiago"):96,("P4","Regiones"):96}
+            _SD = {"P1":24,"P2":48,"P3":72,"P4":96}
+            if "cumplimiento" in _src.columns:
+                _src["cumple_sla"] = _src["cumplimiento"].map({"CUMPLE": True, "NO CUMPLE": False})
+                _fb = _src["cumple_sla"].isna()
+                if _fb.any():
+                    for _p in ("P1","P2","P3","P4"):
+                        for _z in ("Santiago","Regiones"):
+                            _m = _fb & (_src["prioridad"]==_p) & (_src["zona_norm"]==_z)
+                            if _m.any():
+                                _src.loc[_m,"cumple_sla"] = _src.loc[_m,"horas_resolucion"] <= _SZ.get((_p,_z),_SD.get(_p,24))
+            else:
+                _src["cumple_sla"] = pd.NA
+                for _p in ("P1","P2","P3","P4"):
+                    for _z in ("Santiago","Regiones"):
+                        _m = (_src["prioridad"]==_p) & (_src["zona_norm"]==_z)
+                        if _m.any():
+                            _src.loc[_m,"cumple_sla"] = _src.loc[_m,"horas_resolucion"] <= _SZ.get((_p,_z),_SD.get(_p,24))
+            _src["fecha_llamado_dt"] = pd.to_datetime(_src["fecha_llamado"], errors="coerce")
+            _src["mes"] = _src["fecha_llamado_dt"].dt.to_period("M").astype(str)
+            _src["tecnico"] = _src["tecnico"].apply(
+                lambda t: _excel_to_full.get(str(t).strip(), str(t).strip())
+                if isinstance(t, str) and t.strip() else t)
+            _src["equipo"] = _src["tecnico"].apply(_get_equipo)
+            aplicar_transferencias(_src, "fecha_llamado_dt", "equipo", "tecnico")
+            _src = _src[~_src["tecnico"].apply(_es_excluido)].copy()
+            _src["equipo_label"] = _src["equipo"].map(_EQUIPO_LABEL).fillna(_src["equipo"])
+            st.session_state[_sla_key_dl] = _src
+            _sla = _src.copy()
         if not _sla.empty and "mes" in _sla.columns:
             _sla = _sla[_sla["mes"].astype(str) == str(dl_mes)]
             if sem_match is not None and "fecha_llamado_dt" in _sla.columns:
