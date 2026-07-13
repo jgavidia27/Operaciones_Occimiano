@@ -7488,7 +7488,7 @@ elif _page == _NAV_PAGES[0]:
                 rows_sla.append(("Suma total", _ts, _tt, f"{_tp}%"))
 
             rows_mp = []
-            _err_by_tec = {}
+            _err_by_full = {}
             if not _reinc.empty and "es_reincidencia_tecnico" in _reinc.columns:
                 _tc = "tecnico_resp_short" if "tecnico_resp_short" in _reinc.columns else "tecnico_cm"
                 _mg = _reinc.groupby(_tc).agg(
@@ -7496,7 +7496,8 @@ elif _page == _NAV_PAGES[0]:
                     total=("es_reincidencia_tecnico", "count"),
                 ).reset_index()
                 for _, r in _mg.iterrows():
-                    _err_by_tec[r[_tc]] = (int(r["errores"]), int(r["total"]))
+                    _fn = _excel_to_full.get(str(r[_tc]).strip(), str(r[_tc]).strip())
+                    _err_by_full[_fn] = (int(r["errores"]), int(r["total"]))
 
             _pm_dl = df_wo[
                 (df_wo["maint_type"] == "Preventiva") &
@@ -7514,12 +7515,12 @@ elif _page == _NAV_PAGES[0]:
                 _pm_dl = _pm_dl[_pm_dl["technician"] == tec_sel]
             _pm_tec_names = set(_pm_dl["technician"].dropna().unique()) if not _pm_dl.empty else set()
 
-            _all_mp = set(_err_by_tec.keys()) | _pm_tec_names
+            _all_mp = set(_err_by_full.keys()) | _pm_tec_names
             _me_total = 0
             _mt_total = 0
             for t in sorted(_all_mp):
-                if t in _err_by_tec:
-                    err, tot = _err_by_tec[t]
+                if t in _err_by_full:
+                    err, tot = _err_by_full[t]
                     ef = round((1 - err / tot) * 100, 1) if tot > 0 else 100
                     rows_mp.append((t, err, f"{ef}%"))
                     _me_total += err; _mt_total += tot
