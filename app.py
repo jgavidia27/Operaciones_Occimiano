@@ -7821,7 +7821,14 @@ elif _page == _NAV_PAGES[0]:
                 # ── SECCIÓN 3: RESUMEN TIEMPO (solo preventivas con estimado) ──
                 _te = _pf[_pf["maint_type"].str.upper().str.contains("PREVENTIVA", na=False)].copy() if "maint_type" in _pf.columns else pd.DataFrame()
                 _det_tiempo = pd.DataFrame()
-                if not _te.empty and "estimated_sec" in _te.columns:
+                _te_estim_col = "estimated_sec" if "estimated_sec" in _te.columns else ("estim_sec_sum" if not _te.empty and "estim_sec_sum" in _te.columns else None)
+                if not _te.empty and _te_estim_col:
+                    if _te_estim_col != "estimated_sec":
+                        _te["estimated_sec"] = _te[_te_estim_col]
+                    if "duration_sec" not in _te.columns and "exec_sec_sum" in _te.columns:
+                        _te["duration_sec"] = _te["exec_sec_sum"]
+                    if "elapsed_sec" not in _te.columns and "max_elapsed" in _te.columns:
+                        _te["elapsed_sec"] = _te["max_elapsed"]
                     _te = _te[_te["estimated_sec"].fillna(0) > 0].copy()
                     if not _te.empty:
                         _te["_effective_sec"] = _te[["duration_sec", "elapsed_sec"]].fillna(0).max(axis=1)
@@ -7943,7 +7950,7 @@ elif _page == _NAV_PAGES[0]:
                     _row_cursor += len(_det_tiempo) + 1 + 1
 
                 if not _det_numeral.empty:
-                    _sec4_title = pd.DataFrame([["PRECISIÓN FRACTTAL"] + [""] * (_det_numeral.shape[1] - 1)])
+                    _sec4_title = pd.DataFrame([["RESUMEN NUMERALES"] + [""] * (_det_numeral.shape[1] - 1)])
                     _sec4_title.to_excel(wr, sheet_name=_ws_name, index=False, header=False, startrow=_row_cursor)
                     _row_cursor += 1
                     _det_numeral.to_excel(wr, sheet_name=_ws_name, index=False, startrow=_row_cursor)
