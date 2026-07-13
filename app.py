@@ -7433,6 +7433,21 @@ elif _page == _NAV_PAGES[0]:
         _reinc = st.session_state.get("_df_reinc_export", pd.DataFrame()).copy()
         if _reinc.empty:
             _reinc = st.session_state.get("df_reinc", pd.DataFrame()).copy()
+        if _reinc.empty and not df_wo.empty:
+            _CL_SLA_DL = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
+            _wo_dl = df_wo[df_wo["client"].isin(_CL_SLA_DL)].copy() if "client" in df_wo.columns else df_wo
+            _reinc = build_reincidencias(_wo_dl, _excel_to_full)
+            if not _reinc.empty:
+                if "fecha_cm" in _reinc.columns:
+                    _reinc = _reinc[pd.to_datetime(_reinc["fecha_cm"], errors="coerce") >= pd.Timestamp("2026-01-01")].copy()
+                if "falla_tipo" in _reinc.columns and "causa_clasif" in _reinc.columns:
+                    _reinc["es_reincidencia_tecnico"] = (
+                        (_reinc["falla_tipo"] != "especial") & (_reinc["causa_clasif"] != "cliente")
+                    )
+                if "fecha_cm" in _reinc.columns:
+                    _reinc["fecha_cm_dt"] = pd.to_datetime(_reinc["fecha_cm"], errors="coerce")
+                    _reinc["mes"] = _reinc["fecha_cm_dt"].dt.to_period("M").astype(str)
+                st.session_state["_df_reinc_export"] = _reinc
         if not _reinc.empty and "fecha_cm" in _reinc.columns:
             if "fecha_cm_dt" not in _reinc.columns:
                 _reinc["fecha_cm_dt"] = pd.to_datetime(_reinc["fecha_cm"], errors="coerce")
@@ -7473,6 +7488,7 @@ elif _page == _NAV_PAGES[0]:
                 rows_sla.append(("Suma total", _ts, _tt, f"{_tp}%"))
 
             rows_mp = []
+            _err_by_tec = {}
             if not _reinc.empty and "es_reincidencia_tecnico" in _reinc.columns:
                 _tc = "tecnico_resp_short" if "tecnico_resp_short" in _reinc.columns else "tecnico_cm"
                 _mg = _reinc.groupby(_tc).agg(
@@ -7480,11 +7496,38 @@ elif _page == _NAV_PAGES[0]:
                     total=("es_reincidencia_tecnico", "count"),
                 ).reset_index()
                 for _, r in _mg.iterrows():
-                    ef = round((1 - r["errores"] / r["total"]) * 100, 1) if r["total"] > 0 else 100
-                    rows_mp.append((r[_tc], int(r["errores"]), f"{ef}%"))
-                _me = int(_mg["errores"].sum()); _mt = int(_mg["total"].sum())
-                _mef = round((1 - _me / _mt) * 100, 1) if _mt > 0 else 100
-                rows_mp.append(("Suma total", _me, f"{_mef}%"))
+                    _err_by_tec[r[_tc]] = (int(r["errores"]), int(r["total"]))
+
+            _pm_dl = df_wo[
+                (df_wo["maint_type"] == "Preventiva") &
+                (~df_wo["technician"].apply(_es_excluido)) &
+                (df_wo["equipo"] != "Sin equipo")
+            ].copy()
+            if not _pm_dl.empty and "creation_date" in _pm_dl.columns:
+                _pmd = _pm_dl["creation_date"]
+                if _pmd.dt.tz is not None:
+                    _pmd = _pmd.dt.tz_convert(None)
+                _pm_dl = _pm_dl[_pmd.dt.to_period("M").astype(str) == str(dl_mes)]
+            if equipo_label != "Todos" and "equipo" in _pm_dl.columns:
+                _pm_dl = _pm_dl[_pm_dl["equipo"] == _LABEL_TO_GRUPO.get(equipo_label, equipo_label)]
+            if tec_sel != "Todos" and "technician" in _pm_dl.columns:
+                _pm_dl = _pm_dl[_pm_dl["technician"] == tec_sel]
+            _pm_tec_names = set(_pm_dl["technician"].dropna().unique()) if not _pm_dl.empty else set()
+
+            _all_mp = set(_err_by_tec.keys()) | _pm_tec_names
+            _me_total = 0
+            _mt_total = 0
+            for t in sorted(_all_mp):
+                if t in _err_by_tec:
+                    err, tot = _err_by_tec[t]
+                    ef = round((1 - err / tot) * 100, 1) if tot > 0 else 100
+                    rows_mp.append((t, err, f"{ef}%"))
+                    _me_total += err; _mt_total += tot
+                else:
+                    rows_mp.append((t, 0, "100%"))
+            if rows_mp:
+                _mef = round((1 - _me_total / _mt_total) * 100, 1) if _mt_total > 0 else 100
+                rows_mp.append(("Suma total", _me_total, f"{_mef}%"))
 
             _NCOLS_RES = 11  # A..K
             def _pad(row, n=_NCOLS_RES):
