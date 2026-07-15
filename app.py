@@ -5829,9 +5829,12 @@ elif _page == _NAV_PAGES[3]:
 elif _page == _NAV_PAGES[4]:
     _hdr(_PAGE_TITLE[_NAV_PAGES[4]])
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
+    _sub_tabs_util = ["🗓️ Programación STO", "📅 Cronograma de Turnos", "📡 En Vivo"]
+    if _is_admin:
+        _sub_tabs_util.append("⏰ Validación HHEE")
     _util_sub_tab = st.radio(
         "",
-        ["🗓️ Programación STO", "📅 Cronograma de Turnos", "📡 En Vivo"],
+        _sub_tabs_util,
         horizontal=True,
         label_visibility="collapsed",
         key="util_sub_tab",
@@ -6980,6 +6983,214 @@ elif _page == _NAV_PAGES[4]:
             f"Datos desde planilla de turnos. "
             f"Generado: {_turnos_all.get('generated_at', '?')[:16].replace('T',' ')}"
         )
+        st.stop()
+
+    # ── Sub-tab: Validación HHEE (solo admin) ─────────────────────────────────
+    if _util_sub_tab == "⏰ Validación HHEE":
+        from datetime import date as _date_hhee, timedelta as _td_hhee
+
+        st.title("⏰ Validación de Horas Extra")
+        st.caption(
+            "Cruce automático de **3 fuentes** para determinar si las HHEE declaradas "
+            "corresponden: última OT cerrada (Fracttal) + llegada a casa por GPS (Rastreosat) "
+            "+ marcación salida (Buk Asistencia). Cada técnico × día recibe un veredicto: "
+            "✅ válida · ⚠️ dudosa · ❌ no corresponde · ⚪ sin datos."
+        )
+
+        # Cargar veredictos de Supabase (cacheable)
+        @st.cache_data(ttl=300, show_spinner="Cargando veredictos HHEE...")
+        def _load_hhee_veredictos(desde_iso: str, hasta_iso: str):
+            _sb_url_h = str(st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", "")))
+            _sb_key_h = str(st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", "")))
+            if not _sb_url_h or not _sb_key_h:
+                return pd.DataFrame()
+            _h = {"apikey": _sb_key_h, "Authorization": f"Bearer {_sb_key_h}"}
+            # Traer veredictos + nombre tecnico via join manual
+            _r = requests.get(
+                f"{_sb_url_h}/rest/v1/hhee_veredictos"
+                f"?select=*&fecha=gte.{desde_iso}&fecha=lte.{hasta_iso}"
+                f"&order=fecha.desc,veredicto.asc",
+                headers=_h, timeout=30,
+            )
+            if _r.status_code != 200:
+                return pd.DataFrame()
+            _df = pd.DataFrame(_r.json())
+            # Agregar nombre técnico
+            _rt = requests.get(f"{_sb_url_h}/rest/v1/tecnicos_hhee?select=rut,nombre_completo,equipo,patente",
+                                headers=_h, timeout=15)
+            if _rt.status_code == 200:
+                _tec_df = pd.DataFrame(_rt.json())
+                _df = _df.merge(_tec_df, on="rut", how="left")
+            return _df
+
+        # Filtros
+        _c1, _c2, _c3 = st.columns([1, 1, 2])
+        with _c1:
+            _hhee_desde = st.date_input("Desde", value=_date_hhee.today() - _td_hhee(days=14),
+                                          key="hhee_desde")
+        with _c2:
+            _hhee_hasta = st.date_input("Hasta", value=_date_hhee.today(), key="hhee_hasta")
+        with _c3:
+            _hhee_ver_filtros = st.multiselect(
+                "Veredictos", ["valida", "dudosa", "no_corresponde", "sin_datos"],
+                default=["valida", "dudosa"], key="hhee_verf",
+            )
+
+        _df_hhee = _load_hhee_veredictos(_hhee_desde.isoformat(), _hhee_hasta.isoformat())
+
+        if _df_hhee.empty:
+            st.warning("Sin veredictos en el rango. Ejecuta `python he_evaluator.py --desde X --hasta Y` para poblar.")
+            st.stop()
+
+        # ── KPIs (4 cards) ──
+        _kpi_c = _df_hhee["veredicto"].value_counts().to_dict()
+        _n_val = _kpi_c.get("valida", 0)
+        _n_dud = _kpi_c.get("dudosa", 0)
+        _n_noc = _kpi_c.get("no_corresponde", 0)
+        _n_sin = _kpi_c.get("sin_datos", 0)
+        _n_tot = len(_df_hhee)
+
+        _min_val = int(_df_hhee[_df_hhee["veredicto"] == "valida"]["hhee_validadas_min"].fillna(0).sum())
+        _hrs_val = _min_val / 60
+
+        _kpi_html = f"""
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0 20px 0">
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;flex:1;min-width:170px">
+            <div style="font-size:.72rem;color:#166534;font-weight:700">✅ VÁLIDAS</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#16a34a">{_n_val}</div>
+            <div style="font-size:.7rem;color:#14532d">{_hrs_val:.1f}h de HHEE reales</div>
+          </div>
+          <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:14px 18px;flex:1;min-width:170px">
+            <div style="font-size:.72rem;color:#854d0e;font-weight:700">⚠️ DUDOSAS</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#ca8a04">{_n_dud}</div>
+            <div style="font-size:.7rem;color:#713f12">Requieren revisión manual</div>
+          </div>
+          <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:14px 18px;flex:1;min-width:170px">
+            <div style="font-size:.72rem;color:#475569;font-weight:700">❌ NO CORRESPONDE</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#64748b">{_n_noc}</div>
+            <div style="font-size:.7rem;color:#334155">Jornadas normales</div>
+          </div>
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px 18px;flex:1;min-width:170px">
+            <div style="font-size:.72rem;color:#6b7280;font-weight:700">⚪ SIN DATOS</div>
+            <div style="font-size:1.6rem;font-weight:800;color:#9ca3af">{_n_sin}</div>
+            <div style="font-size:.7rem;color:#6b7280">Falta GPS/OT/marcación</div>
+          </div>
+        </div>
+        """
+        st.markdown(_kpi_html, unsafe_allow_html=True)
+
+        # ── Filtro por técnico ──
+        _tecs_disp = sorted(_df_hhee["nombre_completo"].dropna().unique().tolist())
+        _tec_hhee = st.selectbox("Técnico", ["Todos"] + _tecs_disp, key="hhee_tec")
+
+        # Aplicar filtros
+        _df_f = _df_hhee.copy()
+        if _hhee_ver_filtros:
+            _df_f = _df_f[_df_f["veredicto"].isin(_hhee_ver_filtros)]
+        if _tec_hhee != "Todos":
+            _df_f = _df_f[_df_f["nombre_completo"] == _tec_hhee]
+
+        st.markdown(f'<div style="margin-top:10px;font-weight:600;font-size:.9rem;">'
+                    f'📋 {len(_df_f)} veredictos filtrados</div>', unsafe_allow_html=True)
+
+        if _df_f.empty:
+            st.info("Sin resultados para los filtros seleccionados.")
+        else:
+            # Preparar columnas visualizables
+            _VER_ICONO = {"valida": "✅ Válida", "dudosa": "⚠️ Dudosa",
+                          "no_corresponde": "❌ No corresponde", "sin_datos": "⚪ Sin datos"}
+            _df_show = _df_f.copy()
+            _df_show["Veredicto"] = _df_show["veredicto"].map(_VER_ICONO).fillna(_df_show["veredicto"])
+            _df_show["Fecha"] = pd.to_datetime(_df_show["fecha"]).dt.strftime("%d-%m-%Y")
+            _df_show["Técnico"] = _df_show["nombre_completo"].fillna("—")
+
+            def _fmt_hm(iso_ts):
+                if pd.isna(iso_ts) or not iso_ts:
+                    return "—"
+                try:
+                    dt = pd.to_datetime(iso_ts, utc=True).tz_convert("America/Santiago")
+                    return dt.strftime("%H:%M")
+                except Exception:
+                    return "—"
+
+            _df_show["Fin OT"] = _df_show["ultima_ot_fin"].apply(_fmt_hm)
+            _df_show["Llegada casa"] = _df_show["llegada_casa_estimada"].apply(_fmt_hm)
+            _df_show["Marca Buk"] = _df_show["marca_salida"].apply(_fmt_hm)
+            _df_show["HHEE (min)"] = _df_show["hhee_validadas_min"].fillna(0).astype(int)
+            _df_show["EDS"] = _df_show["ultima_ot_eds"].fillna("—")
+            _df_show["OT"] = _df_show["ultima_ot_folio"].fillna("—")
+            _df_show["Razón"] = _df_show["razon"].fillna("—")
+
+            _cols_final = ["Fecha", "Técnico", "Veredicto", "OT", "EDS",
+                            "Fin OT", "Llegada casa", "Marca Buk",
+                            "HHEE (min)", "Razón"]
+            _show_df(
+                _df_show[_cols_final].reset_index(drop=True),
+                use_container_width=True, hide_index=True, height=520,
+                column_config={
+                    "Fecha":        st.column_config.TextColumn(width=90),
+                    "Técnico":      st.column_config.TextColumn(width=200),
+                    "Veredicto":    st.column_config.TextColumn(width=130),
+                    "OT":           st.column_config.TextColumn(width=90),
+                    "EDS":          st.column_config.TextColumn(width=80),
+                    "Fin OT":       st.column_config.TextColumn(width=70),
+                    "Llegada casa": st.column_config.TextColumn(width=95),
+                    "Marca Buk":    st.column_config.TextColumn(width=80),
+                    "HHEE (min)":   st.column_config.NumberColumn(width=80, format="%d min"),
+                    "Razón":        st.column_config.TextColumn(width=450),
+                },
+            )
+
+            # ── Export a Excel ──
+            from io import BytesIO as _BIO_hhee
+            _buf_h = _BIO_hhee()
+            with pd.ExcelWriter(_buf_h, engine="openpyxl") as _wh:
+                _df_show[_cols_final].to_excel(_wh, sheet_name="Veredictos HHEE", index=False)
+                # Hoja 2: JSON de evidencia para auditoria
+                _df_aud = _df_f[["fecha", "nombre_completo", "veredicto",
+                                  "ultima_ot_folio", "tramo_esperado_min",
+                                  "tramo_real_min", "hhee_validadas_min",
+                                  "razon", "evidencia_json"]].copy()
+                _df_aud["evidencia_json"] = _df_aud["evidencia_json"].apply(
+                    lambda x: json.dumps(x, ensure_ascii=False) if x else "")
+                _df_aud.to_excel(_wh, sheet_name="Auditoria (json)", index=False)
+            _buf_h.seek(0)
+            st.download_button(
+                "⬇️ Descargar veredictos (Excel)",
+                data=_buf_h,
+                file_name=f"HHEE_veredictos_{_hhee_desde}_{_hhee_hasta}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_hhee",
+            )
+
+        # ── Diagnóstico: ver detalle de un caso puntual ──
+        st.divider()
+        st.markdown("### 🔍 Detalle de un caso")
+        if _df_f.empty:
+            st.info("Sin casos filtrados para ver detalle.")
+        else:
+            _opts_caso = [f"{r['fecha']} · {r['nombre_completo']} · {_VER_ICONO.get(r['veredicto'], r['veredicto'])}"
+                          for _, r in _df_f.iterrows()]
+            _sel_caso = st.selectbox("Seleccionar caso", _opts_caso, key="hhee_caso_sel")
+            if _sel_caso:
+                _idx = _opts_caso.index(_sel_caso)
+                _caso = _df_f.iloc[_idx].to_dict()
+                _ev = _caso.get("evidencia_json") or {}
+                _c1d, _c2d, _c3d = st.columns(3)
+                with _c1d:
+                    st.metric("Última OT", _caso.get("ultima_ot_folio", "—"))
+                    st.metric("EDS", _caso.get("ultima_ot_eds", "—"))
+                with _c2d:
+                    st.metric("Tramo esperado", f'{_caso.get("tramo_esperado_min") or "—"} min')
+                    st.metric("Tramo real", f'{_caso.get("tramo_real_min") or "—"} min')
+                with _c3d:
+                    st.metric("HHEE validadas", f'{_caso.get("hhee_validadas_min") or 0} min')
+                    st.metric("Diff Buk vs GPS", f'{_ev.get("diff_buk_gps_min") if _ev else "—"} min')
+                st.markdown("**Razón del veredicto:**")
+                st.info(_caso.get("razon", "—"))
+                with st.expander("📄 Evidencia completa (JSON)"):
+                    st.json(_ev)
+
         st.stop()
 
 
