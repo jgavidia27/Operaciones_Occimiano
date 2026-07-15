@@ -1,0 +1,41 @@
+name: Weekly Indicadores (email a seniors)
+
+# Corre TODOS los LUNES a las 11:00 hora Chile.
+# Chile en invierno UTC-4 → 15:00 UTC = 11:00 CLT
+# Chile en verano UTC-3 → 14:00 UTC = 11:00 CLT
+# Usamos 14:00 UTC (~10:00-11:00 CLT según DST). Aceptable.
+on:
+  schedule:
+    - cron: "0 14 * * 1"       # Lunes 14:00 UTC
+  workflow_dispatch:            # permite ejecutar manualmente
+
+jobs:
+  send-weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas openpyxl requests
+
+      - name: Send weekly indicadores emails
+        env:
+          SUPABASE_URL:            ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:            ${{ secrets.SUPABASE_KEY }}
+          FRACTTAL_CLIENT_ID:      ${{ secrets.FRACTTAL_CLIENT_ID }}
+          FRACTTAL_CLIENT_SECRET:  ${{ secrets.FRACTTAL_CLIENT_SECRET }}
+          BUK_API_TOKEN:           ${{ secrets.BUK_API_TOKEN }}
+          GMAIL_APP_PASSWORD:      ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python send_weekly_indicadores.py
