@@ -725,5 +725,70 @@ def build_excel_resumen(
             pd.DataFrame({"Sin OTs evaluadas": []}).to_excel(
                 wr, sheet_name="P. Fracttal", index=False)
 
+    # ═══ Post-proceso: estilar encabezados de todas las hojas ═══
     buf.seek(0)
-    return buf.getvalue()
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    _wb = load_workbook(buf)
+
+    _HDR_FILL  = PatternFill("solid", fgColor="1F4E78")
+    _HDR_FONT  = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+    _HDR_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    _thin = Side(style="thin", color="D9D9D9")
+    _BORDER    = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+    _SECTION_FILL = PatternFill("solid", fgColor="F2F2F2")
+    _SECTION_FONT = Font(name="Arial", size=11, bold=True, color="1F4E78")
+
+    # Palabras que identifican filas de "sección" (encabezados internos apilados en P. Fracttal)
+    _SECTION_LABELS = {
+        "DESEMPEÑO SLA", "EFECTIVIDAD MP", "PRECISIÓN FRACTTAL",
+        "RESUMEN TIEMPO", "RESUMEN CAUSA RAÍZ", "RESUMEN NUMERALES",
+        "PRECISION FRACTTAL", "RESUMEN CAUSA RAIZ",
+        "DETALLE COMPLETO",
+    }
+
+    def _es_fila_seccion(ws, row_idx: int) -> bool:
+        v = ws.cell(row=row_idx, column=1).value
+        if not isinstance(v, str):
+            return False
+        return v.strip().upper() in _SECTION_LABELS
+
+    for _ws in _wb.worksheets:
+        if _ws.max_row < 1:
+            continue
+        # Estilar cada fila que sea encabezado real de tabla (fila 1) o sección apilada
+        # Heurística: fila 1 SIEMPRE es encabezado; luego cualquier fila que empiece
+        # con un texto de _SECTION_LABELS marca inicio de sección — la fila SIGUIENTE
+        # (row+1) es su encabezado de tabla.
+        _header_rows = {1}
+        for r in range(1, _ws.max_row + 1):
+            if _es_fila_seccion(_ws, r):
+                # La fila de sección misma se estila diferente (banda gris + texto azul)
+                for c in range(1, _ws.max_column + 1):
+                    cell = _ws.cell(row=r, column=c)
+                    cell.fill = _SECTION_FILL
+                    cell.font = _SECTION_FONT
+                    cell.alignment = Alignment(horizontal="left", vertical="center")
+                _ws.row_dimensions[r].height = 22
+                # La fila siguiente es el encabezado de esa sub-tabla
+                if r + 1 <= _ws.max_row:
+                    _header_rows.add(r + 1)
+
+        for hr in _header_rows:
+            for c in range(1, _ws.max_column + 1):
+                cell = _ws.cell(row=hr, column=c)
+                if cell.value is None or cell.value == "":
+                    continue
+                cell.fill = _HDR_FILL
+                cell.font = _HDR_FONT
+                cell.alignment = _HDR_ALIGN
+                cell.border = _BORDER
+            _ws.row_dimensions[hr].height = 32
+
+        # Congelar primera fila (solo si es encabezado real de la hoja)
+        _ws.freeze_panes = "A2"
+
+    _out = BytesIO()
+    _wb.save(_out)
+    _out.seek(0)
+    return _out.getvalue()

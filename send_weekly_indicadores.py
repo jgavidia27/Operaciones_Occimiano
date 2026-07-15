@@ -131,17 +131,16 @@ def enviar_email(destinatario: str, asunto: str, cuerpo_html: str,
 
 
 # ── Cuerpo del email (HTML) ─────────────────────────────────────────────────
-def render_email_html(senior_nombre: str, mes_label: str, equipo_label: str) -> str:
-    """HTML del email. Basado en el formato original de Jesús."""
+def render_email_html(senior_nombre: str, mes_label: str, equipo_label: str, sem_iso: int) -> str:
+    """HTML del email. Cuerpo consensuado con Jesús."""
+    primer_nombre = senior_nombre.split()[0] if senior_nombre.strip() else senior_nombre
     return f"""\
 <!DOCTYPE html>
 <html><body style="font-family:Arial,sans-serif;color:#1f2937;max-width:680px;line-height:1.55;">
-<p>Hola {senior_nombre}, buenos días.</p>
+<p>Hola {primer_nombre}, buenos días.</p>
 
-<p>Te comparto el <strong>resumen semanal de indicadores</strong> del equipo
-<strong>{equipo_label}</strong> correspondiente a <strong>{mes_label}</strong>. La información
-está extraída directamente del dashboard, de forma que refleja fielmente
-los datos de tu equipo.</p>
+<p>Se adjunta el <strong>resumen semanal de indicadores</strong> de tu equipo a
+<strong>{mes_label}</strong>. <em>(Actualizado semana {sem_iso})</em></p>
 
 <p>El archivo adjunto contiene:</p>
 <ul>
@@ -151,12 +150,10 @@ los datos de tu equipo.</p>
   <li><strong>P. Fracttal</strong> — Detalle completo de OTs evaluadas (tiempo, causa raíz, numeral).</li>
 </ul>
 
-<p>Esto se enviará automáticamente todos los lunes con el avance mensual acumulado.
-Si algo no te hace sentido o detectas alguna inconsistencia, cualquier observación o
-ajuste que quieras hacer es bienvenida — así podemos ajustar el formato y
-mantener un seguimiento cercano de tu expertise.</p>
+<p>Cualquier observación o inconsistencia que detectes la puedes realizar para
+validarlo en interno en el transcurso de la semana.</p>
 
-<p>Saludos,</p>
+<p>Saludos.</p>
 <p style="margin-bottom:0"><strong>Operaciones Occimiano</strong><br>
 <a href="https://ops-occimiano-dashboard.streamlit.app/" style="color:#2563eb;">Dashboard de Operaciones</a></p>
 </body></html>"""
@@ -180,15 +177,16 @@ def main():
                          "Ej: --test-email jgavidia@occimiano.cl")
     args = ap.parse_args()
 
-    # Mes objetivo
+    # Mes objetivo + semana ISO (siempre calculada desde HOY en Chile)
+    from datetime import timedelta
+    _now_chile = datetime.now(timezone.utc) - timedelta(hours=4)
     if args.mes:
         mes_yyyy_mm = args.mes
     else:
-        from datetime import timedelta
-        _now_chile = datetime.now(timezone.utc) - timedelta(hours=4)
         mes_yyyy_mm = _now_chile.strftime("%Y-%m")
     _year, _mes_num = int(mes_yyyy_mm.split("-")[0]), int(mes_yyyy_mm.split("-")[1])
     mes_label = f"{MESES_ES_LARGO[_mes_num].capitalize()} {_year}"
+    sem_iso = _now_chile.isocalendar().week  # nº de semana ISO de HOY en Chile
 
     _log(f"═══ ENVÍO SEMANAL INDICADORES — {mes_label} ═══")
 
@@ -249,9 +247,9 @@ def main():
             _log(f"  Excel generado: {len(xlsx_bytes)//1024} KB")
 
             eq_slug = eq_lbl.replace(" ", "_").replace("(", "").replace(")", "")
-            filename = f"Resumen_{eq_slug}_{mes_yyyy_mm}.xlsx"
-            asunto = f"Resumen semanal indicadores ({MESES_ES_LARGO[_mes_num].capitalize()}). Eq. {nombre}"
-            cuerpo = render_email_html(nombre, mes_label, eq_lbl)
+            filename = f"Resumen_{eq_slug}_{mes_yyyy_mm} Sem. {sem_iso}.xlsx"
+            asunto = f"Resumen semanal indicadores ({MESES_ES_LARGO[_mes_num].capitalize()} — Sem. {sem_iso}). Eq. {nombre}"
+            cuerpo = render_email_html(nombre, mes_label, eq_lbl, sem_iso)
 
             # En dry-run guardar los Excel a disco para poder verificarlos
             if args.dry_run:
