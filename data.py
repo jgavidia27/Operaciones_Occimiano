@@ -39,6 +39,38 @@ _KEYWORDS_CLIENTE = (
 )
 _KEYWORDS_TECNICO = ("MANIOBRA", "REPUESTO", "DESGASTE", "NO REALIZ", "BYPASS", "BY PASS")
 
+# Categoría "ANULADO POR EDS": el concesionario pidió NO hacer la mantención.
+# La OT queda resuelta sin trabajo → no penaliza al técnico ni al KPI Llenado.
+# Puede aparecer en:
+#   - causes_description:       "05.1 ANULADO POR CORREO"
+#   - types_description:        "5.- ANULADO POR EDS"
+#   - detection_method_desc.:   "5.- ANULADO POR EDS"
+_PREFIJOS_ANULADO = {"05.1", "05.2"}   # 05.x = ANULADO POR EDS
+_KEYWORDS_ANULADO = ("ANULADO POR EDS", "ANULADO POR CORREO", "ANULADO EDS")
+
+
+def es_anulado_por_eds(*textos: str) -> bool:
+    """True si CUALQUIERA de los textos contiene 'ANULADO POR EDS/CORREO'."""
+    for t in textos:
+        if not t:
+            continue
+        s = str(t).strip().upper()
+        if not s:
+            continue
+        # Prefijo 05.x
+        import re as _re_anul
+        m = _re_anul.match(r"(\d{2}\.\d)", s)
+        if m and m.group(1) in _PREFIJOS_ANULADO:
+            return True
+        # Prefijo tipo "5.-" (sin punto decimal)
+        if _re_anul.match(r"^5[\.\-]", s):
+            if any(kw in s for kw in _KEYWORDS_ANULADO) or "ANULADO" in s:
+                return True
+        # Keywords directos
+        if any(kw in s for kw in _KEYWORDS_ANULADO):
+            return True
+    return False
+
 
 # ── Clasificación del tipo de falla (columna "Falla" en Fracttal) ─────────────
 # Catálogo real de Fracttal Occimiano (types_description):
@@ -95,6 +127,8 @@ def classify_causa_raiz(causa: str) -> str:
     Clasifica la causa raíz registrada en una OT correctiva.
 
     Returns:
+        "anulado"        → OT anulada por EDS (concesionario pidió NO hacer)
+                           → causa_ok automático, no penaliza al técnico
         "cliente"        → falla imputable al cliente/concesionario (no afecta técnico)
         "tecnico"        → falla imputable al técnico
         "sin_clasificar" → campo vacío, SIN CLASIFICAR, 01.7 OTROS u otro código
@@ -108,6 +142,8 @@ def classify_causa_raiz(causa: str) -> str:
     m = re.match(r"(\d{2}\.\d)", causa)
     prefix = m.group(1) if m else ""
 
+    if prefix in _PREFIJOS_ANULADO or es_anulado_por_eds(causa):
+        return "anulado"
     if prefix in _PREFIJOS_CLIENTE or any(kw in causa for kw in _KEYWORDS_CLIENTE):
         return "cliente"
     if prefix in _PREFIJOS_TECNICO or any(kw in causa for kw in _KEYWORDS_TECNICO):
@@ -938,9 +974,19 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
 
         # ── Causa raíz ────────────────────────────────────────────────────────
         raw_causa = (wo.get("causes_description") or "").strip()
+        raw_tipo_falla = (wo.get("types_description") or "").strip()
+        raw_deteccion  = (wo.get("detection_method_description") or "").strip()
         causa_clasif = classify_causa_raiz(raw_causa)
-        # maint_type_raw y es_correctiva ya calculados arriba (antes del
-        # bloque de duración). Se re-usan aquí para la lógica de causa.
+
+        # EXCEPCIÓN ANULADO POR EDS: el concesionario pidió no hacer la
+        # mantención. Aparece en cualquiera de estos 3 campos:
+        #   causes_description:            "05.1 ANULADO POR CORREO"
+        #   types_description:             "5.- ANULADO POR EDS"
+        #   detection_method_description:  "5.- ANULADO POR EDS"
+        # → causa_ok automático (no penaliza al técnico), sobreescribe causa_clasif.
+        _anulado = es_anulado_por_eds(raw_causa, raw_tipo_falla, raw_deteccion)
+        if _anulado:
+            causa_clasif = "anulado"
 
         # Causa raíz aplica a AMBOS tipos (MC y MP).
         # MC: debe tener código Fracttal válido (01.x – 04.x) o keyword reconocida.
@@ -948,7 +994,9 @@ def build_kpi_llenado_df(raw: list) -> pd.DataFrame:
         # Malo para MC: vacío, "SIN CLASIFICAR", números sueltos (150, 1, 12345, etc.).
         # Bueno para MC: código con prefijo Fracttal real (01.x, 02.x, 03.x, 04.x).
         _causa_tiene_codigo = bool(re.match(r"0[1-4]\.\d", raw_causa))
-        if es_correctiva:
+        if _anulado:
+            causa_ok = True   # ANULADO POR EDS: OT resuelta sin trabajo, no penaliza
+        elif es_correctiva:
             causa_ok = (
                 _causa_tiene_codigo                         # MC: código Fracttal (0X.X.-)
                 or causa_clasif in ("tecnico", "cliente")   # MC: también reconocido por keywords
@@ -1357,7 +1405,7 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     ot["causa_sin_clasif_con_desglose"] = ot.apply(
         lambda r: bool(
             r["es_correctiva"]
-            and r["causa_clasif"] not in ("tecnico", "cliente")
+            and r["causa_clasif"] not in ("tecnico", "cliente", "anulado")
             and _desglosa_falla(r.get("comentario_tecnico", ""))
         ),
         axis=1,
@@ -1923,6 +1971,7 @@ def build_reincidencias(df_wo: pd.DataFrame, excel_to_full: dict = None) -> pd.D
         cc = row["causa_clasif"]
         if ft == "especial":  return False   # Trabajo Especial → no es reincidencia
         if cc == "cliente":   return False   # Causa confirmada del cliente → no imputa
+        if cc == "anulado":   return False   # ANULADO POR EDS → concesionario, no imputa
         return True   # FAO + FNAO + sin_info + sin_dato → todos imputan
 
     merged["es_reincidencia_tecnico"] = merged.apply(_es_tecnico, axis=1)
