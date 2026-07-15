@@ -249,6 +249,14 @@ def main():
             asunto = f"Resumen semanal indicadores ({MESES_ES_LARGO[_mes_num].capitalize()}). Eq. {nombre}"
             cuerpo = render_email_html(nombre, mes_label, eq_lbl)
 
+            # En dry-run guardar los Excel a disco para poder verificarlos
+            if args.dry_run:
+                _dry_dir = Path(__file__).parent / "_dry_run_excels"
+                _dry_dir.mkdir(exist_ok=True)
+                _dry_path = _dry_dir / filename
+                _dry_path.write_bytes(xlsx_bytes)
+                _log(f"  💾 Guardado local: {_dry_path}")
+
             enviar_email(email, asunto, cuerpo, xlsx_bytes, filename,
                           cc=CC_FIJOS, dry_run=args.dry_run)
             ok += 1
