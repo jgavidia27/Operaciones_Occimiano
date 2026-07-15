@@ -7020,29 +7020,38 @@ elif _page == _NAV_PAGES[4]:
         )
 
         # Cargar veredictos de Supabase (cacheable)
+        # NOTA: imports locales para que st.cache_data no rompa scope
         @st.cache_data(ttl=300, show_spinner="Cargando veredictos HHEE...")
         def _load_hhee_veredictos(desde_iso: str, hasta_iso: str):
-            _sb_url_h = str(st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", "")))
-            _sb_key_h = str(st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", "")))
+            import os as _os_h, requests as _req_h
+            import pandas as _pd_h
+            try:
+                _sb_url_h = str(st.secrets["SUPABASE_URL"])
+                _sb_key_h = str(st.secrets["SUPABASE_KEY"])
+            except Exception:
+                _sb_url_h = _os_h.getenv("SUPABASE_URL", "")
+                _sb_key_h = _os_h.getenv("SUPABASE_KEY", "")
             if not _sb_url_h or not _sb_key_h:
-                return pd.DataFrame()
+                return _pd_h.DataFrame()
             _h = {"apikey": _sb_key_h, "Authorization": f"Bearer {_sb_key_h}"}
-            # Traer veredictos + nombre tecnico via join manual
-            _r = requests.get(
+            _r = _req_h.get(
                 f"{_sb_url_h}/rest/v1/hhee_veredictos"
                 f"?select=*&fecha=gte.{desde_iso}&fecha=lte.{hasta_iso}"
                 f"&order=fecha.desc,veredicto.asc",
                 headers=_h, timeout=30,
             )
             if _r.status_code != 200:
-                return pd.DataFrame()
-            _df = pd.DataFrame(_r.json())
-            # Agregar nombre técnico
-            _rt = requests.get(f"{_sb_url_h}/rest/v1/tecnicos_hhee?select=rut,nombre_completo,equipo,patente",
-                                headers=_h, timeout=15)
+                return _pd_h.DataFrame()
+            _df = _pd_h.DataFrame(_r.json())
+            _rt = _req_h.get(
+                f"{_sb_url_h}/rest/v1/tecnicos_hhee"
+                f"?select=rut,nombre_completo,equipo,patente",
+                headers=_h, timeout=15,
+            )
             if _rt.status_code == 200:
-                _tec_df = pd.DataFrame(_rt.json())
-                _df = _df.merge(_tec_df, on="rut", how="left")
+                _tec_df = _pd_h.DataFrame(_rt.json())
+                if not _tec_df.empty and not _df.empty:
+                    _df = _df.merge(_tec_df, on="rut", how="left")
             return _df
 
         # Filtros
