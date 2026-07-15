@@ -527,14 +527,19 @@ def main():
             print(f"\n[DRY-RUN] No se escribió a hhee_veredictos.")
             return 0
 
-        # Upsert en lotes
+        # Upsert en lotes.
+        # OJO: hhee_veredictos tiene PK id (autoincrement) + UNIQUE(rut, fecha).
+        # Para que PostgREST use esa UNIQUE constraint como dedup, hay que
+        # pasar ?on_conflict=rut,fecha en la URL.
         print(f"\n[UPSERT] Escribiendo {len(veredictos)} veredictos...")
         for i in range(0, len(veredictos), 500):
             batch = veredictos[i:i+500]
-            r = requests.post(f"{SUPABASE_URL}/rest/v1/hhee_veredictos",
-                              headers={**_sb_headers(),
-                                       "Prefer": "resolution=merge-duplicates,return=minimal"},
-                              json=batch, timeout=45)
+            r = requests.post(
+                f"{SUPABASE_URL}/rest/v1/hhee_veredictos?on_conflict=rut,fecha",
+                headers={**_sb_headers(),
+                         "Prefer": "resolution=merge-duplicates,return=minimal"},
+                json=batch, timeout=45,
+            )
             if r.status_code not in (200, 201, 204):
                 raise RuntimeError(f"Upsert {r.status_code}: {r.text[:300]}")
         print(f"  OK.")

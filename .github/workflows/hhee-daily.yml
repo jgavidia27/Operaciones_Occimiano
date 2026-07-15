@@ -14,10 +14,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout hhee-modulo branch
+      - name: Checkout main branch
         uses: actions/checkout@v4
         with:
-          ref: hhee-modulo
+          ref: main
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -40,6 +40,8 @@ jobs:
           BUK_API_TOKEN:                 ${{ secrets.BUK_API_TOKEN }}
           CTRLIT_USER:                   ${{ secrets.CTRLIT_USER }}
           CTRLIT_PASS:                   ${{ secrets.CTRLIT_PASS }}
+          FRACTTAL_CLIENT_ID:            ${{ secrets.FRACTTAL_CLIENT_ID }}
+          FRACTTAL_CLIENT_SECRET:        ${{ secrets.FRACTTAL_CLIENT_SECRET }}
           GOOGLE_SERVICE_ACCOUNT_JSON:   ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GDRIVE_HHEE_FOLDER_ID:         ${{ secrets.GDRIVE_HHEE_FOLDER_ID }}
         run: python hhee_daily.py --dias 14

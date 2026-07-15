@@ -25,6 +25,7 @@ Ambientes soportados:
 """
 
 import argparse
+import json
 import os
 import re
 import sys
