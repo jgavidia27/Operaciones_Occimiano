@@ -8,6 +8,15 @@ on:
   schedule:
     - cron: "0 14 * * 1"       # Lunes 14:00 UTC
   workflow_dispatch:            # permite ejecutar manualmente
+    inputs:
+      dry_run:
+        description: "Modo prueba (NO envía correos, solo genera los Excel)"
+        type: boolean
+        default: true            # DEFAULT TRUE → protege contra envíos accidentales
+      solo:
+        description: "Solo enviar a un senior (deja vacío para todos)"
+        type: string
+        default: ""
 
 jobs:
   send-weekly:
@@ -38,4 +47,17 @@ jobs:
           FRACTTAL_CLIENT_SECRET:  ${{ secrets.FRACTTAL_CLIENT_SECRET }}
           BUK_API_TOKEN:           ${{ secrets.BUK_API_TOKEN }}
           GMAIL_APP_PASSWORD:      ${{ secrets.GMAIL_APP_PASSWORD }}
-        run: python send_weekly_indicadores.py
+        # En cron programado (schedule) SIEMPRE se envía real.
+        # En trigger manual se respeta el input dry_run (default true).
+        run: |
+          ARGS=""
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              ARGS="$ARGS --dry-run"
+            fi
+            if [[ -n "${{ inputs.solo }}" ]]; then
+              ARGS="$ARGS --solo ${{ inputs.solo }}"
+            fi
+          fi
+          echo "Ejecutando: python send_weekly_indicadores.py $ARGS"
+          python send_weekly_indicadores.py $ARGS
