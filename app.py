@@ -5854,6 +5854,7 @@ elif _page == _NAV_PAGES[4]:
     _sub_tabs_util = ["🗓️ Programación STO", "📅 Cronograma de Turnos", "📡 En Vivo"]
     if _is_admin:
         _sub_tabs_util.append("⏰ Validación HHEE")
+        _sub_tabs_util.append("🚗 Consumo Vehículos")
     _util_sub_tab = st.radio(
         "",
         _sub_tabs_util,
@@ -7221,6 +7222,290 @@ elif _page == _NAV_PAGES[4]:
                 st.info(_caso.get("razon", "—"))
                 with st.expander("📄 Evidencia completa (JSON)"):
                     st.json(_ev)
+
+        st.stop()
+
+    # ── Sub-tab: Consumo Vehículos (solo admin) ───────────────────────────────
+    if _util_sub_tab == "🚗 Consumo Vehículos":
+        from datetime import date as _date_veh, timedelta as _td_veh
+
+        st.title("🚗 Consumo de Vehículos")
+        st.caption(
+            "KM recorridos por vehículo, con desglose por **día, semana o mes**. "
+            "Los usos en **fin de semana sin turno** aparecen destacados como "
+            "**⚠️ NO JUSTIFICADOS** al final. Data GPS proviene del reporte "
+            "semanal Rastreosat cargado en Drive."
+        )
+
+        # ── Loader: eventos GPS con km agregados por día×patente ──
+        @st.cache_data(ttl=300, show_spinner="Cargando consumo de vehículos...")
+        def _load_gps_km(desde_iso: str, hasta_iso: str):
+            import os as _o, requests as _r, pandas as _p
+            try:
+                _u = str(st.secrets["SUPABASE_URL"]); _k = str(st.secrets["SUPABASE_KEY"])
+            except Exception:
+                _u = _o.getenv("SUPABASE_URL", ""); _k = _o.getenv("SUPABASE_KEY", "")
+            if not _u or not _k: return _p.DataFrame()
+            _h = {"apikey": _k, "Authorization": f"Bearer {_k}"}
+            # Traer solo eventos motor_off (donde está el km del viaje que terminó)
+            _resp = _r.get(
+                f"{_u}/rest/v1/gps_eventos"
+                f"?select=patente,fecha,raw_data,timestamp&evento=eq.motor_off"
+                f"&fecha=gte.{desde_iso}&fecha=lte.{hasta_iso}",
+                headers=_h, timeout=30,
+            )
+            if _resp.status_code != 200: return _p.DataFrame()
+            _rows = _resp.json()
+            # Extraer km de raw_data
+            for _e in _rows:
+                _rd = _e.get("raw_data") or {}
+                _e["km"] = float(_rd.get("km") or 0)
+            _df = _p.DataFrame(_rows)
+            if _df.empty: return _df
+            # Agregar mapeo patente → técnico
+            _rt = _r.get(f"{_u}/rest/v1/tecnicos_hhee?select=patente,nombre_completo,equipo,rut,tipo_vehiculo",
+                          headers=_h, timeout=15)
+            if _rt.status_code == 200:
+                _tec = _p.DataFrame(_rt.json())
+                if not _tec.empty:
+                    _df = _df.merge(_tec, on="patente", how="left")
+            return _df
+
+        # ── Loader: turnos fin de semana desde Excel (celda amarilla=de turno) ──
+        @st.cache_data(ttl=1800, show_spinner=False)
+        def _load_turnos_finde(mes_yyyy_mm: str):
+            """Retorna set de (tecnico, fecha) que están de turno el fin de semana
+            en el mes indicado. fecha es date (no timestamp)."""
+            import calendar as _cal
+            from datetime import date as _dt
+            try:
+                anio, mes = mes_yyyy_mm.split("-")
+                _MESES = {1:"ENERO",2:"FEBRERO",3:"MARZO",4:"ABRIL",5:"MAYO",6:"JUNIO",
+                          7:"JULIO",8:"AGOSTO",9:"SEPTIEMBRE",10:"OCTUBRE",11:"NOVIEMBRE",12:"DICIEMBRE"}
+                _sheet = f"{_MESES[int(mes)]} {anio}"
+                _df_util, _, _err = load_utilizacion_tiempo(_sheet)
+                if _err or _df_util.empty:
+                    return set()
+                # Solo fines de semana Y con es_feriado=True (celda amarilla + con texto)
+                _df_util = _df_util.copy()
+                _df_util["fecha"] = pd.to_datetime(_df_util["fecha"]).dt.date
+                _df_util["dow"] = _df_util["fecha"].apply(lambda d: d.weekday())  # 5=sab, 6=dom
+                _wknd = _df_util[(_df_util["dow"].isin([5, 6])) & (_df_util["es_feriado"] == True)]
+                return set(zip(_wknd["tecnico"], _wknd["fecha"]))
+            except Exception:
+                return set()
+
+        # ── Vista selector ──
+        _c_view, _c_min = st.columns([1, 3])
+        with _c_view:
+            _veh_vista = st.radio(
+                "Vista", ["📅 Día", "🗓️ Semana", "📆 Mes"],
+                horizontal=True, key="veh_vista",
+            )
+        with _c_min:
+            _veh_min_km = st.number_input(
+                "Umbral KM para marcar 'uso' (0 = mostrar todo)",
+                min_value=0, max_value=100, value=0, step=1, key="veh_min_km",
+            )
+
+        # ── Vista Día ──
+        if _veh_vista == "📅 Día":
+            _fecha_sel = st.date_input(
+                "Fecha", value=_date_veh.today() - _td_veh(days=1),
+                key="veh_fecha_dia",
+            )
+            _df = _load_gps_km(_fecha_sel.isoformat(), _fecha_sel.isoformat())
+            if _df.empty:
+                st.info(f"No hay eventos GPS para {_fecha_sel}.")
+            else:
+                _g = _df.groupby(["patente", "nombre_completo", "equipo"], dropna=False).agg(
+                    km=("km", "sum"),
+                    viajes=("timestamp", "count"),
+                    primer=("timestamp", "min"),
+                    ultimo=("timestamp", "max"),
+                ).reset_index()
+                _g = _g[_g["km"] >= _veh_min_km].sort_values("km", ascending=False)
+                _g["km"] = _g["km"].round(1)
+                _g["primer"] = pd.to_datetime(_g["primer"], utc=True).dt.tz_convert("America/Santiago").dt.strftime("%H:%M")
+                _g["ultimo"] = pd.to_datetime(_g["ultimo"], utc=True).dt.tz_convert("America/Santiago").dt.strftime("%H:%M")
+                _g = _g.rename(columns={"patente":"Patente","nombre_completo":"Técnico",
+                                          "equipo":"Equipo","km":"KM","viajes":"Viajes",
+                                          "primer":"Primer viaje","ultimo":"Último viaje"})
+                st.markdown(f"**{len(_g)} vehículos con actividad** · Total: **{_g['KM'].sum():.1f} km**")
+                _show_df(_g.reset_index(drop=True), use_container_width=True, hide_index=True,
+                         column_config={"KM": st.column_config.NumberColumn(format="%.1f km")})
+
+        # ── Vista Semana ──
+        elif _veh_vista == "🗓️ Semana":
+            _hoy_v = _date_veh.today()
+            # Empezar en el lunes de la semana actual
+            _lun = _hoy_v - _td_veh(days=_hoy_v.weekday())
+            _lun_sel = st.date_input(
+                "Semana empieza el lunes:", value=_lun - _td_veh(days=7),
+                key="veh_semana_lun",
+            )
+            # Ajustar al lunes de la semana seleccionada
+            _lun_sel = _lun_sel - _td_veh(days=_lun_sel.weekday())
+            _dom_sel = _lun_sel + _td_veh(days=6)
+            st.caption(f"Semana: **{_lun_sel.strftime('%d-%m-%Y')} (Lun)** → **{_dom_sel.strftime('%d-%m-%Y')} (Dom)**")
+
+            _df = _load_gps_km(_lun_sel.isoformat(), _dom_sel.isoformat())
+            if _df.empty:
+                st.info("No hay eventos GPS para esta semana.")
+            else:
+                # Pivot: filas = patente/tecnico, columnas = días L-D, celdas = km
+                _df["km"] = _df["km"].astype(float)
+                _df["fecha_d"] = pd.to_datetime(_df["fecha"]).dt.date
+                _pt = _df.groupby(["patente","nombre_completo","fecha_d"])["km"].sum().reset_index()
+                _pivot = _pt.pivot_table(index=["patente","nombre_completo"], columns="fecha_d",
+                                           values="km", aggfunc="sum", fill_value=0).round(1)
+                # Asegurar 7 columnas (L-D)
+                _dias_sem = [_lun_sel + _td_veh(days=i) for i in range(7)]
+                for _d in _dias_sem:
+                    if _d not in _pivot.columns:
+                        _pivot[_d] = 0.0
+                _pivot = _pivot[_dias_sem]  # ordenar
+                # Renombrar columnas a "Lun 08-07", "Mar 09-07", etc
+                _DIAS_SEM = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"]
+                _pivot.columns = [f"{_DIAS_SEM[i]} {_d.strftime('%d-%m')}"
+                                    for i, _d in enumerate(_dias_sem)]
+                _pivot["Total"] = _pivot.sum(axis=1).round(1)
+                _pivot = _pivot.reset_index()
+                _pivot = _pivot.rename(columns={"patente":"Patente","nombre_completo":"Técnico"})
+                st.markdown(f"**{len(_pivot)} vehículos** · Total semana: **{_pivot['Total'].sum():.1f} km**")
+                _show_df(_pivot, use_container_width=True, hide_index=True)
+
+        # ── Vista Mes ──
+        else:  # "📆 Mes"
+            _hoy_v = _date_veh.today()
+            _mes_default = _hoy_v.strftime("%Y-%m")
+            _c1m, _c2m = st.columns(2)
+            with _c1m:
+                _anio = st.selectbox("Año", [2026, 2027, 2025], key="veh_anio")
+            with _c2m:
+                _mes_opts = list(range(1, 13))
+                _mes_lbl = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+                _mes = st.selectbox("Mes", _mes_opts,
+                                     format_func=lambda m: f"{m:02d} - {_mes_lbl[m-1]}",
+                                     index=_hoy_v.month - 1, key="veh_mes")
+            import calendar as _cal_m
+            _n_dias = _cal_m.monthrange(_anio, _mes)[1]
+            _primer = _date_veh(_anio, _mes, 1)
+            _ultimo = _date_veh(_anio, _mes, _n_dias)
+            _df = _load_gps_km(_primer.isoformat(), _ultimo.isoformat())
+            if _df.empty:
+                st.info(f"No hay eventos GPS para {_mes:02d}/{_anio}.")
+            else:
+                _df["fecha_d"] = pd.to_datetime(_df["fecha"]).dt.date
+                # Semana ISO (1..5) del mes: por día del mes → 1+(dia-1)//7
+                _df["sem_mes"] = _df["fecha_d"].apply(lambda d: 1 + (d.day - 1) // 7)
+                _pt = _df.groupby(["patente","nombre_completo","sem_mes"])["km"].sum().reset_index()
+                _pivot = _pt.pivot_table(index=["patente","nombre_completo"], columns="sem_mes",
+                                           values="km", aggfunc="sum", fill_value=0).round(1)
+                # Renombrar
+                _pivot.columns = [f"Sem {c}" for c in _pivot.columns]
+                _pivot["Total mes"] = _pivot.sum(axis=1).round(1)
+                _pivot = _pivot.reset_index().rename(columns={"patente":"Patente","nombre_completo":"Técnico"})
+                st.markdown(f"**{len(_pivot)} vehículos** · Total mes: **{_pivot['Total mes'].sum():.1f} km**")
+                _show_df(_pivot, use_container_width=True, hide_index=True)
+
+        # ── Alertas: uso fin de semana SIN turno ──
+        st.divider()
+        st.markdown("### ⚠️ Uso en fin de semana SIN turno asignado")
+        st.caption(
+            "Cruce con **Planificación STO** — si un técnico usa el vehículo "
+            "un sábado/domingo pero su celda en el excel de utilización NO "
+            "está en amarillo (no está de turno), el uso aparece aquí."
+        )
+
+        # Rango de alertas: últimos 30 días
+        _hoy_al = _date_veh.today()
+        _desde_al = (_hoy_al - _td_veh(days=30)).isoformat()
+        _hasta_al = _hoy_al.isoformat()
+        _df_alerta = _load_gps_km(_desde_al, _hasta_al)
+
+        if _df_alerta.empty:
+            st.info("Sin data GPS suficiente para alertas.")
+        else:
+            _df_alerta["fecha_d"] = pd.to_datetime(_df_alerta["fecha"]).dt.date
+            _df_alerta["dow"] = _df_alerta["fecha_d"].apply(lambda d: d.weekday())
+            # Solo fines de semana (sáb=5, dom=6)
+            _finde = _df_alerta[_df_alerta["dow"].isin([5, 6])].copy()
+            if _finde.empty:
+                st.info("No hay uso registrado en fines de semana de los últimos 30 días.")
+            else:
+                # Agregar km por (patente, técnico, fecha)
+                _agg = _finde.groupby(["patente","nombre_completo","fecha_d","dow"], dropna=False)["km"].sum().reset_index()
+                _agg["km"] = _agg["km"].round(1)
+                # Filtrar por umbral min
+                _agg = _agg[_agg["km"] >= max(0.5, _veh_min_km)]
+
+                # Turnos: cargar los meses relevantes del rango
+                _meses_rango = set()
+                _d_iter = _hoy_al - _td_veh(days=30)
+                while _d_iter <= _hoy_al:
+                    _meses_rango.add(f"{_d_iter.year:04d}-{_d_iter.month:02d}")
+                    _d_iter += _td_veh(days=1)
+                _turnos = set()
+                for _mm in _meses_rango:
+                    _turnos |= _load_turnos_finde(_mm)
+
+                # Función para detectar si técnico está de turno ese día
+                # Los nombres en el excel pueden ser cortos vs completos — hacer match tolerante
+                def _norm_nom(s):
+                    import unicodedata
+                    if not s: return set()
+                    _s = ''.join(c for c in unicodedata.normalize('NFD', str(s))
+                                 if unicodedata.category(c) != 'Mn')
+                    return set(w for w in _s.upper().split() if len(w) >= 3)
+
+                _turnos_por_fecha = {}
+                for _t, _f in _turnos:
+                    _turnos_por_fecha.setdefault(_f, []).append(_norm_nom(_t))
+
+                def _esta_de_turno(nombre_completo, fecha):
+                    _palabras = _norm_nom(nombre_completo)
+                    for _t_pal in _turnos_por_fecha.get(fecha, []):
+                        if len(_palabras & _t_pal) >= 2:
+                            return True
+                    return False
+
+                _agg["De turno"] = _agg.apply(
+                    lambda r: _esta_de_turno(r["nombre_completo"], r["fecha_d"]), axis=1)
+                _agg["Justificado"] = _agg["De turno"].map({True: "✅ Sí (de turno)", False: "⚠️ NO"})
+
+                # Filtrar solo NO justificados
+                _no_just = _agg[_agg["De turno"] == False].copy()
+                _sí_just = _agg[_agg["De turno"] == True].copy()
+
+                _cmet1, _cmet2, _cmet3 = st.columns(3)
+                with _cmet1:
+                    st.metric("Fines de semana con uso", len(_agg))
+                with _cmet2:
+                    st.metric("✅ Justificados (de turno)", len(_sí_just))
+                with _cmet3:
+                    st.metric("⚠️ SIN justificar", len(_no_just))
+
+                if _no_just.empty:
+                    st.success("👍 No hay usos de fin de semana sin justificar en los últimos 30 días.")
+                else:
+                    _no_just = _no_just.sort_values("fecha_d", ascending=False)
+                    _no_just["Día"] = _no_just["dow"].map({5: "Sábado", 6: "Domingo"})
+                    _no_just["Fecha"] = _no_just["fecha_d"].apply(lambda d: d.strftime("%d-%m-%Y"))
+                    _no_just = _no_just.rename(columns={
+                        "patente": "Patente", "nombre_completo": "Técnico",
+                        "km": "KM recorridos"})
+                    _cols_alerta = ["Fecha","Día","Patente","Técnico","KM recorridos"]
+                    st.markdown(f"### ⚠️ {len(_no_just)} usos SIN justificar")
+                    _show_df(_no_just[_cols_alerta].reset_index(drop=True),
+                             use_container_width=True, hide_index=True, height=400,
+                             column_config={
+                                 "Fecha":         st.column_config.TextColumn(width=95),
+                                 "Día":           st.column_config.TextColumn(width=80),
+                                 "Patente":       st.column_config.TextColumn(width=90),
+                                 "Técnico":       st.column_config.TextColumn(width=220),
+                                 "KM recorridos": st.column_config.NumberColumn(width=110, format="%.1f km"),
+                             })
 
         st.stop()
 
