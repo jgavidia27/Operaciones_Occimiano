@@ -20,3 +20,10 @@ Thumbs.db
 .DS_Store
 *.tmp
 *.log
+
+# Modulo HHEE — estado de sesion de scrapers Playwright
+_ctrlit_state.json
+_rastreosat_state.json
+_geocode_cache.json
+_ctrlit_screenshots/
+_rastreosat_screenshots/
