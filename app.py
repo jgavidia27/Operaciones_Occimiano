@@ -7271,29 +7271,41 @@ elif _page == _NAV_PAGES[4]:
                     _df = _df.merge(_tec, on="patente", how="left")
             return _df
 
-        # ── Loader: turnos fin de semana desde Excel (celda amarilla=de turno) ──
+        # ── Loader: turnos desde turnos_data.json (fuente Planificación Turnos STO) ──
         @st.cache_data(ttl=1800, show_spinner=False)
-        def _load_turnos_finde(mes_yyyy_mm: str):
-            """Retorna set de (tecnico, fecha) que están de turno el fin de semana
-            en el mes indicado. fecha es date (no timestamp)."""
-            import calendar as _cal
+        def _load_turnos_finde_desde_json():
+            """Retorna set de (tecnico_nombre_completo, fecha_date) que están de
+            turno en fin de semana (sábado o domingo) según turnos_data.json.
+            'De turno' = horario != 'Libre' y != '' en el índice del día."""
+            import os as _o, json as _j
             from datetime import date as _dt
+            _path = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "turnos_data.json")
+            if not _o.path.exists(_path):
+                return set()
             try:
-                anio, mes = mes_yyyy_mm.split("-")
-                _MESES = {1:"ENERO",2:"FEBRERO",3:"MARZO",4:"ABRIL",5:"MAYO",6:"JUNIO",
-                          7:"JULIO",8:"AGOSTO",9:"SEPTIEMBRE",10:"OCTUBRE",11:"NOVIEMBRE",12:"DICIEMBRE"}
-                _sheet = f"{_MESES[int(mes)]} {anio}"
-                _df_util, _, _err = load_utilizacion_tiempo(_sheet)
-                if _err or _df_util.empty:
-                    return set()
-                # Solo fines de semana Y con es_feriado=True (celda amarilla + con texto)
-                _df_util = _df_util.copy()
-                _df_util["fecha"] = pd.to_datetime(_df_util["fecha"]).dt.date
-                _df_util["dow"] = _df_util["fecha"].apply(lambda d: d.weekday())  # 5=sab, 6=dom
-                _wknd = _df_util[(_df_util["dow"].isin([5, 6])) & (_df_util["es_feriado"] == True)]
-                return set(zip(_wknd["tecnico"], _wknd["fecha"]))
+                _data = _j.loads(open(_path, "r", encoding="utf-8").read())
             except Exception:
                 return set()
+            _turnos_finde: set = set()
+            for _w in _data.get("weeks", []):
+                _dates = _w.get("dates", [])
+                for _zn in ("centro", "norte", "sur"):
+                    _z = _w.get("zones", {}).get(_zn) or {}
+                    for _t in _z.get("turnos", []):
+                        _nombre = (_t.get("tecnico") or "").strip()
+                        _horarios = _t.get("horarios", [])
+                        if not _nombre or _nombre.upper() in ("N/A", "-", ""): continue
+                        # sábado = índice 5, domingo = índice 6
+                        for _idx_dia in (5, 6):
+                            if _idx_dia >= len(_horarios) or _idx_dia >= len(_dates): continue
+                            _hr = str(_horarios[_idx_dia] or "").strip()
+                            if not _hr or _hr.upper() == "LIBRE": continue
+                            try:
+                                _f = _dt.fromisoformat(_dates[_idx_dia])
+                                _turnos_finde.add((_nombre, _f))
+                            except Exception:
+                                pass
+            return _turnos_finde
 
         # ── Vista selector ──
         _c_view, _c_min = st.columns([1, 3])
@@ -7440,15 +7452,8 @@ elif _page == _NAV_PAGES[4]:
                 # Filtrar por umbral min
                 _agg = _agg[_agg["km"] >= max(0.5, _veh_min_km)]
 
-                # Turnos: cargar los meses relevantes del rango
-                _meses_rango = set()
-                _d_iter = _hoy_al - _td_veh(days=30)
-                while _d_iter <= _hoy_al:
-                    _meses_rango.add(f"{_d_iter.year:04d}-{_d_iter.month:02d}")
-                    _d_iter += _td_veh(days=1)
-                _turnos = set()
-                for _mm in _meses_rango:
-                    _turnos |= _load_turnos_finde(_mm)
+                # Turnos: cargar TODO turnos_data.json (10 semanas ya viene todo)
+                _turnos = _load_turnos_finde_desde_json()
 
                 # Función para detectar si técnico está de turno ese día
                 # Los nombres en el excel pueden ser cortos vs completos — hacer match tolerante
