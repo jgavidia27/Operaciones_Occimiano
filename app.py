@@ -7326,6 +7326,17 @@ elif _page == _NAV_PAGES[4]:
                 "Fecha", value=_date_veh.today() - _td_veh(days=1),
                 key="veh_fecha_dia",
             )
+            # ¿Es fin de semana? (sábado=5, domingo=6)
+            _es_finde = _fecha_sel.weekday() in (5, 6)
+            _nombre_dia = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"][_fecha_sel.weekday()]
+
+            if _es_finde:
+                st.warning(
+                    f"📅 **{_nombre_dia} {_fecha_sel.strftime('%d-%m-%Y')}** — "
+                    f"día de fin de semana. Cada vehículo aparece marcado con su "
+                    f"estado de turno según **Planificación Turnos STO**."
+                )
+
             _df = _load_gps_km(_fecha_sel.isoformat(), _fecha_sel.isoformat())
             if _df.empty:
                 st.info(f"No hay eventos GPS para {_fecha_sel}.")
@@ -7340,12 +7351,67 @@ elif _page == _NAV_PAGES[4]:
                 _g["km"] = _g["km"].round(1)
                 _g["primer"] = pd.to_datetime(_g["primer"], utc=True).dt.tz_convert("America/Santiago").dt.strftime("%H:%M")
                 _g["ultimo"] = pd.to_datetime(_g["ultimo"], utc=True).dt.tz_convert("America/Santiago").dt.strftime("%H:%M")
+
+                # Si es fin de semana, agregar columna "Estado turno"
+                if _es_finde:
+                    _turnos_dia = _load_turnos_finde_desde_json()
+                    # Matching tolerante por conjunto de palabras
+                    def _norm_n_v(s):
+                        import unicodedata as _u
+                        if not s: return set()
+                        _s = ''.join(c for c in _u.normalize('NFD', str(s))
+                                     if _u.category(c) != 'Mn')
+                        return set(w for w in _s.upper().split() if len(w) >= 3)
+                    _t_por_fecha = {}
+                    for _tec_n, _f in _turnos_dia:
+                        if _f == _fecha_sel:
+                            _t_por_fecha.setdefault(_f, []).append(_norm_n_v(_tec_n))
+                    def _estado(nombre):
+                        # Vehículos auxiliares (sin técnico asignado) no aplican
+                        if not nombre or str(nombre).strip().lower() in ("none", "nan", ""):
+                            return "⚪ N/A (aux)"
+                        _pal = _norm_n_v(nombre)
+                        for _tp in _t_por_fecha.get(_fecha_sel, []):
+                            if len(_pal & _tp) >= 2:
+                                return "🟢 DE TURNO"
+                        return "🔴 SIN turno"
+                    _g["Estado turno"] = _g["nombre_completo"].apply(_estado)
+
                 _g = _g.rename(columns={"patente":"Patente","nombre_completo":"Técnico",
                                           "equipo":"Equipo","km":"KM","viajes":"Viajes",
                                           "primer":"Primer viaje","ultimo":"Último viaje"})
-                st.markdown(f"**{len(_g)} vehículos con actividad** · Total: **{_g['KM'].sum():.1f} km**")
-                _show_df(_g.reset_index(drop=True), use_container_width=True, hide_index=True,
-                         column_config={"KM": st.column_config.NumberColumn(format="%.1f km")})
+
+                # Header con totales — resaltar en rojo si hay usos sin turno el finde
+                if _es_finde:
+                    _n_sin = int((_g["Estado turno"] == "🔴 SIN turno").sum())
+                    _n_con = int((_g["Estado turno"] == "🟢 DE TURNO").sum())
+                    _n_aux = int((_g["Estado turno"] == "⚪ N/A (aux)").sum())
+                    _hdr_finde = (f"**{len(_g)} vehículos con actividad** · "
+                                    f"Total: **{_g['KM'].sum():.1f} km** · ")
+                    if _n_sin > 0:
+                        _hdr_finde += f'<span style="color:#dc2626;font-weight:700;">🔴 {_n_sin} SIN turno</span> · '
+                    _hdr_finde += f'🟢 {_n_con} de turno'
+                    if _n_aux > 0:
+                        _hdr_finde += f' · ⚪ {_n_aux} auxiliares'
+                    st.markdown(_hdr_finde, unsafe_allow_html=True)
+                    # Ordenar: SIN turno arriba (para revisar), luego DE TURNO, luego aux
+                    _orden = {"🔴 SIN turno": 0, "🟢 DE TURNO": 1, "⚪ N/A (aux)": 2}
+                    _g = _g.sort_values(
+                        by=["Estado turno", "KM"],
+                        key=lambda col: col.map(_orden) if col.name == "Estado turno" else -col,
+                        ascending=[True, True],
+                    )
+                    _cols_final = ["Estado turno","Patente","Técnico","Equipo","KM",
+                                    "Viajes","Primer viaje","Último viaje"]
+                else:
+                    st.markdown(f"**{len(_g)} vehículos con actividad** · Total: **{_g['KM'].sum():.1f} km**")
+                    _cols_final = ["Patente","Técnico","Equipo","KM","Viajes","Primer viaje","Último viaje"]
+
+                _cfg = {"KM": st.column_config.NumberColumn(format="%.1f km")}
+                if _es_finde:
+                    _cfg["Estado turno"] = st.column_config.TextColumn(width=115)
+                _show_df(_g[_cols_final].reset_index(drop=True), use_container_width=True,
+                         hide_index=True, column_config=_cfg)
 
         # ── Vista Semana ──
         elif _veh_vista == "🗓️ Semana":
