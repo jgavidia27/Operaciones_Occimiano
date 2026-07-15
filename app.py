@@ -1338,6 +1338,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
+# Emails autorizados para ver "Utilización del Tiempo" (contiene datos sensibles
+# de asignación de técnicos, cronograma, HHEE, etc.)
+_UTIL_TIEMPO_EMAILS_PERMITIDOS = {
+    "jgavidia@occimiano.cl",
+    "jcaceres@occimiano.cl",
+    "wsoto@occimiano.cl",
+}
+
+_auth_email_actual = (st.session_state.get("_auth_email", "") or "").strip().lower()
+_puede_ver_util_tiempo = _auth_email_actual in _UTIL_TIEMPO_EMAILS_PERMITIDOS
+
 _NAV_PAGES_BASE = [
     "🥇  Indicadores STO",
     "✅  Cumplimiento SLA",
@@ -1348,6 +1359,10 @@ _NAV_PAGES_BASE = [
 # La página Admin solo aparece para usuarios con rol admin
 _is_admin   = st.session_state.get("_auth_rol", "usuario") == "admin"
 _NAV_PAGES  = _NAV_PAGES_BASE + (["🔐  Administración"] if _is_admin else [])
+
+# Páginas VISIBLES en el sidebar (filtro por permiso, sin tocar los índices)
+_NAV_PAGES_VISIBLES = [p for p in _NAV_PAGES
+                        if p != "⌛  Utilización del Tiempo" or _puede_ver_util_tiempo]
 
 # ── CSS del sidebar: colapsado / expandido (controlado por _sb_open) ─────────
 _sb_open = st.session_state.get("_sb_open", True)
@@ -1441,7 +1456,7 @@ with st.sidebar:
         st.caption("Indicadores Operacionales")
     st.divider()
 
-    _page = st.radio("Navegación", _NAV_PAGES, label_visibility="collapsed", key="_nav_radio")
+    _page = st.radio("Navegación", _NAV_PAGES_VISIBLES, label_visibility="collapsed", key="_nav_radio")
 
 # ── Tracking de actividad de sesión (debounce 5 min) ─────────────────────────
 _session_id_track = st.session_state.get("_session_id", "")
@@ -5827,6 +5842,13 @@ elif _page == _NAV_PAGES[3]:
 # PÁGINA 4: UTILIZACIÓN DEL TIEMPO
 # ─────────────────────────────────────────────────────────────────────────────
 elif _page == _NAV_PAGES[4]:
+    # Bloqueo defensivo: si alguien accede aquí sin permiso (ej. via session state
+    # manipulado), mostrar mensaje y detener.
+    if not _puede_ver_util_tiempo:
+        st.error("🔒 No tienes permisos para acceder a **Utilización del Tiempo**.")
+        st.caption("Contacta a operaciones@occimiano.cl si necesitas acceso.")
+        st.stop()
+
     _hdr(_PAGE_TITLE[_NAV_PAGES[4]])
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
     _sub_tabs_util = ["🗓️ Programación STO", "📅 Cronograma de Turnos", "📡 En Vivo"]
