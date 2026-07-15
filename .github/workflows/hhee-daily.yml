@@ -44,7 +44,10 @@ jobs:
           FRACTTAL_CLIENT_SECRET:        ${{ secrets.FRACTTAL_CLIENT_SECRET }}
           GOOGLE_SERVICE_ACCOUNT_JSON:   ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GDRIVE_HHEE_FOLDER_ID:         ${{ secrets.GDRIVE_HHEE_FOLDER_ID }}
-        run: python hhee_daily.py --dias 14
+        # Skip ctrlit: la sesión cookie que genera el user en Windows no
+        # valida en el runner Linux (diferente fingerprint). Se corre
+        # manualmente desde la PC del usuario (ver hhee_ctrlit_local.bat)
+        run: python hhee_daily.py --dias 14 --skip ctrlit
 
       - name: Upload logs on failure
         if: failure()

@@ -91,8 +91,11 @@ def _sb_headers():
 def supabase_upsert(tabla: str, filas: list[dict]) -> int:
     if not filas:
         return 0
+    # gps_eventos tiene PK id + UNIQUE(patente, timestamp, evento) — hay que
+    # pasar on_conflict explícito para que PostgREST use esa constraint.
+    _on_conflict = "?on_conflict=patente,timestamp,evento" if tabla == "gps_eventos" else ""
     r = requests.post(
-        f"{SUPABASE_URL}/rest/v1/{tabla}",
+        f"{SUPABASE_URL}/rest/v1/{tabla}{_on_conflict}",
         headers={**_sb_headers(), "Prefer": "resolution=merge-duplicates,return=minimal"},
         json=filas, timeout=60,
     )
