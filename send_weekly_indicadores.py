@@ -174,6 +174,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="Genera Excels pero NO envía emails")
     ap.add_argument("--solo", help="Filtrar por nombre senior (subcadena)")
+    ap.add_argument("--test-email",
+                    help="Redirige TODOS los correos a este email (para pruebas). "
+                         "Prefijo '[PRUEBA]' en el asunto y sin CC. "
+                         "Ej: --test-email jgavidia@occimiano.cl")
     args = ap.parse_args()
 
     # Mes objetivo
@@ -257,8 +261,29 @@ def main():
                 _dry_path.write_bytes(xlsx_bytes)
                 _log(f"  💾 Guardado local: {_dry_path}")
 
-            enviar_email(email, asunto, cuerpo, xlsx_bytes, filename,
-                          cc=CC_FIJOS, dry_run=args.dry_run)
+            # Modo prueba: redirigir todo a un solo destinatario
+            _to = email
+            _cc = CC_FIJOS
+            _asunto = asunto
+            _cuerpo = cuerpo
+            if args.test_email:
+                _to = args.test_email
+                _cc = None
+                _asunto = f"[PRUEBA] {asunto}  →  original: {email}"
+                _cuerpo = (
+                    f'<div style="background:#fef3c7;border-left:4px solid #f59e0b;'
+                    f'padding:10px 14px;margin-bottom:14px;color:#78350f;'
+                    f'font-family:Arial,sans-serif;font-size:14px;">'
+                    f'<b>⚠️ MODO PRUEBA</b><br>'
+                    f'En envío real este correo iría a: <b>{email}</b><br>'
+                    f'CC original: <b>{", ".join(CC_FIJOS)}</b><br>'
+                    f'Equipo: <b>{eq_lbl}</b>'
+                    f'</div>' + cuerpo
+                )
+                _log(f"  🔀 Redirigido a {args.test_email} (original: {email})")
+
+            enviar_email(_to, _asunto, _cuerpo, xlsx_bytes, filename,
+                          cc=_cc, dry_run=args.dry_run)
             ok += 1
         except Exception as e:
             tb = traceback.format_exc()
