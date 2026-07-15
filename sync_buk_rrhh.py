@@ -64,7 +64,7 @@ PATENTES_STO: dict[str, str] = {
     "GASTON FULLER":            "SKTF86",
     "IGNACIO FERRARI":          "PSSX82",   # Iván Ignacio Ferrari Vergara (Buk) = Ignacio Ferrari
     "JAVIER HEIN":              "RRRW21",
-    "MARTIN FLORES":            "VCXZ49",
+    "MARTIN FLORES":            "LWLF91",   # antes VCXZ49; ahora usa LWLF91 (ex Operaciones)
     "VICTOR BAHAMONDE":         "RRRW20",
     "JORGE RODRIGUEZ":          "VDBZ48",
     "JUAN FRANCISCO TORO":      "SYGK68",
@@ -77,7 +77,7 @@ PATENTES_STO: dict[str, str] = {
 VEHICULOS_AUXILIARES: dict[str, str] = {
     "SRRX18": "Vehículo Auxiliar (ex Eduardo Toro)",
     "STKX93": "Camión Occimiano",
-    "LWLF91": "Operaciones",
+    "VCXZ49": "Vehículo Auxiliar - Eléctrico",  # ex Martín Flores, ahora auxiliar
 }
 
 # Mapa email → equipo (fuente: mobile_auth.py USERS)
