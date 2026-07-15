@@ -267,13 +267,96 @@ def procesar_csv(csv_path: str, patente_to_rut: dict[str, str],
 
 
 # ── Descubrir archivos ──────────────────────────────────────────────────────
+# ID de la carpeta "HHEE semanal - GPS" en Google Drive (viene del URL).
+# En el cron GitHub Actions se define via env var GDRIVE_HHEE_FOLDER_ID.
+_GDRIVE_HHEE_FOLDER_ID = os.getenv("GDRIVE_HHEE_FOLDER_ID", "")
+
+
+def _gdrive_service():
+    """Construye un servicio Google Drive API con service account.
+    Requiere env var GOOGLE_SERVICE_ACCOUNT_JSON con el JSON completo del
+    service account. Retorna None si no está configurado."""
+    sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    if not sa_json:
+        return None
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        info = json.loads(sa_json)
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/drive.readonly"])
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        print(f"[WARN] No pude inicializar Google Drive API: {e}")
+        return None
+
+
+def _listar_csvs_gdrive(folder_id: str) -> list[dict]:
+    """Lista archivos .csv en la carpeta Drive. Retorna [{id, name}]."""
+    svc = _gdrive_service()
+    if not svc or not folder_id:
+        return []
+    q = f"'{folder_id}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+    resp = svc.files().list(q=q, fields="files(id, name, mimeType, modifiedTime)",
+                             pageSize=100).execute()
+    files = resp.get("files", [])
+    # Filtrar CSVs (por nombre, ya que mimeType puede variar)
+    return [f for f in files if f["name"].lower().endswith(".csv")]
+
+
+def _descargar_csv_gdrive(file_id: str, dest_path: str) -> bool:
+    """Descarga un file de Drive por ID a dest_path. Retorna True si OK."""
+    svc = _gdrive_service()
+    if not svc:
+        return False
+    try:
+        import io
+        from googleapiclient.http import MediaIoBaseDownload
+        req = svc.files().get_media(fileId=file_id)
+        buf = io.BytesIO()
+        dl = MediaIoBaseDownload(buf, req)
+        done = False
+        while not done:
+            _st, done = dl.next_chunk()
+        with open(dest_path, "wb") as f:
+            f.write(buf.getvalue())
+        return True
+    except Exception as e:
+        print(f"[ERR] Descargando file {file_id}: {e}")
+        return False
+
+
 def listar_csvs_pendientes() -> list[str]:
-    """Lista archivos .csv en la carpeta local de Drive.
-    (Para deploy en Streamlit Cloud se puede reemplazar por Google Drive API.)"""
-    if not os.path.isdir(_DRIVE_LOCAL_PATH):
-        raise RuntimeError(f"No existe la carpeta {_DRIVE_LOCAL_PATH}. "
-                           "En Streamlit Cloud usar Google Drive API.")
-    return sorted(str(p) for p in Path(_DRIVE_LOCAL_PATH).glob("*.csv"))
+    """Retorna paths locales de CSVs a procesar.
+    - Modo LOCAL (tu PC): lista archivos en G:\\...\\HHEE semanal - GPS
+    - Modo CLOUD (cron): descarga desde Google Drive API a un temp local
+    """
+    # Modo 1: disco local (G:\)
+    if os.path.isdir(_DRIVE_LOCAL_PATH):
+        return sorted(str(p) for p in Path(_DRIVE_LOCAL_PATH).glob("*.csv"))
+
+    # Modo 2: Google Drive API
+    if not _GDRIVE_HHEE_FOLDER_ID:
+        raise RuntimeError(
+            f"No existe la carpeta local {_DRIVE_LOCAL_PATH}.\n"
+            f"Y no hay GDRIVE_HHEE_FOLDER_ID definido para usar Google Drive API.\n"
+            f"Configura GDRIVE_HHEE_FOLDER_ID + GOOGLE_SERVICE_ACCOUNT_JSON en env vars."
+        )
+
+    files = _listar_csvs_gdrive(_GDRIVE_HHEE_FOLDER_ID)
+    if not files:
+        return []
+
+    # Descargar todos a un directorio temporal local
+    import tempfile
+    tmp_dir = tempfile.mkdtemp(prefix="rsat_gdrive_")
+    paths = []
+    for f in files:
+        p = os.path.join(tmp_dir, f["name"])
+        if _descargar_csv_gdrive(f["id"], p):
+            paths.append(p)
+            print(f"  [gdrive] descargado: {f['name']}")
+    return sorted(paths)
 
 
 # ── Main ────────────────────────────────────────────────────────────────────

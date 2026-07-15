@@ -17,6 +17,7 @@ Variables .env / Streamlit Secrets:
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -57,10 +58,55 @@ MANDANTES: list[int] = [
     if x.strip()
 ]
 
-# Archivo con el storage state (cookies/localStorage) de la sesión ctrlit.
-# NO commitear a git.
+# Archivo local con el storage state (cookies/localStorage) de la sesión ctrlit.
+# NO commitear a git. En modo cloud (cron) el state vive en Supabase
+# tabla hhee_sync_state — ver funciones _load_state/_save_state.
 _STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "_ctrlit_state.json")
+_STATE_KEY_SUPABASE = "sync_ctrlit"   # clave en hhee_sync_state
+
+
+def _load_state_from_supabase() -> bool:
+    """Descarga el state JSON desde hhee_sync_state y lo escribe a _STATE_PATH.
+    Retorna True si tuvo éxito. En modo local, si el archivo ya existe, no
+    hace nada (prioridad al disco)."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/hhee_sync_state"
+            f"?script=eq.{_STATE_KEY_SUPABASE}&select=state_json",
+            headers=_sb_headers(), timeout=10,
+        )
+        if r.status_code != 200 or not r.json():
+            return False
+        state = r.json()[0].get("state_json")
+        if not state:
+            return False
+        with open(_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+        return True
+    except Exception:
+        return False
+
+
+def _save_state_to_supabase() -> bool:
+    """Sube el _STATE_PATH actual a hhee_sync_state (upsert por script key)."""
+    if not SUPABASE_URL or not SUPABASE_KEY or not os.path.exists(_STATE_PATH):
+        return False
+    try:
+        with open(_STATE_PATH, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/hhee_sync_state",
+            headers={**_sb_headers(),
+                     "Prefer": "resolution=merge-duplicates,return=minimal"},
+            json={"script": _STATE_KEY_SUPABASE, "state_json": state},
+            timeout=15,
+        )
+        return r.status_code in (200, 201, 204)
+    except Exception:
+        return False
 
 
 # ── Supabase helpers ────────────────────────────────────────────────────────
@@ -212,7 +258,16 @@ def login_manual_y_guardar_sesion():
             print(" puede que no sirva. Ejecuta este comando de nuevo si falla.")
 
         ctx.storage_state(path=_STATE_PATH)
-        print(f"\n Sesión guardada en: {_STATE_PATH}")
+        print(f"\n Sesión guardada localmente en: {_STATE_PATH}")
+
+        # Subir a Supabase para que el cron GitHub Actions pueda usarla
+        if _save_state_to_supabase():
+            print(" Sesión también subida a Supabase (hhee_sync_state).")
+            print(" El cron diario ya puede autenticarse automáticamente por ~30 días.")
+        else:
+            print(" [WARN] No se pudo subir a Supabase — el cron cloud NO podrá autenticarse.")
+            print("        Verifica SUPABASE_URL/SUPABASE_KEY en .env.")
+
         print(" Ya puedes correr:  python sync_ctrlit.py --dry-run --verbose")
         browser.close()
 
@@ -223,11 +278,16 @@ def fetch_marcaciones(fecha_desde: str, fecha_hasta: str,
                       screenshot_dir: str | None = None) -> list[dict]:
     """Carga sesion persistente y descarga la tabla de marcaciones para 1 mandante.
     Retorna lista de dicts. Fechas en formato DD-MM-YYYY."""
+    # Si no hay estado local, intentar bajar de Supabase (modo cron cloud)
     if not os.path.exists(_STATE_PATH):
-        raise RuntimeError(
-            f"No existe {_STATE_PATH}. Corre PRIMERO:\n"
-            f"    python sync_ctrlit.py --login-manual\n"
-            f"para generar la sesión ctrlit (login + captcha manual, 1 sola vez cada ~30 días).")
+        if _load_state_from_supabase():
+            if verbose:
+                print("  [ctrlit] Sesión descargada desde Supabase.")
+        else:
+            raise RuntimeError(
+                f"No existe {_STATE_PATH} ni hay sesión en Supabase.\n"
+                f"Corre PRIMERO:  python sync_ctrlit.py --login-manual\n"
+                f"para generar la sesión ctrlit (login + captcha manual, 1 sola vez cada ~30d).")
 
     filas: list[dict] = []
 

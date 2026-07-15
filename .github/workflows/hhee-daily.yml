@@ -1,0 +1,56 @@
+name: HHEE Daily Sync
+
+# Corre todos los días a las 09:30 hora Chile (UTC-4 en invierno / UTC-3 en verano).
+# GitHub Actions usa UTC — 12:30 UTC ≈ 09:30 CLT en verano austral (mayo-agosto)
+# y 08:30 CLT en invierno austral. Aceptable — a las 09:30 en 1 caso y 08:30 en otro.
+on:
+  schedule:
+    - cron: "30 12 * * *"    # 12:30 UTC diario
+  workflow_dispatch:          # permite ejecutar manualmente desde GitHub Actions UI
+
+jobs:
+  run-hhee-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout hhee-modulo branch
+        uses: actions/checkout@v4
+        with:
+          ref: hhee-modulo
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright google-api-python-client google-auth
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run HHEE daily sync
+        env:
+          SUPABASE_URL:                  ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:                  ${{ secrets.SUPABASE_KEY }}
+          BUK_API_TOKEN:                 ${{ secrets.BUK_API_TOKEN }}
+          CTRLIT_USER:                   ${{ secrets.CTRLIT_USER }}
+          CTRLIT_PASS:                   ${{ secrets.CTRLIT_PASS }}
+          GOOGLE_SERVICE_ACCOUNT_JSON:   ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_HHEE_FOLDER_ID:         ${{ secrets.GDRIVE_HHEE_FOLDER_ID }}
+        run: python hhee_daily.py --dias 14
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hhee-daily-logs
+          path: |
+            *.log
+            _ctrlit_screenshots/
+          retention-days: 7
+          if-no-files-found: ignore
