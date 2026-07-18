@@ -1344,6 +1344,7 @@ _UTIL_TIEMPO_EMAILS_PERMITIDOS = {
     "jgavidia@occimiano.cl",
     "jcaceres@occimiano.cl",
     "wsoto@occimiano.cl",
+    "dhevia@occimiano.cl",
 }
 
 _auth_email_actual = (st.session_state.get("_auth_email", "") or "").strip().lower()
