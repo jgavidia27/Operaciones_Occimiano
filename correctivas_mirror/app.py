@@ -825,22 +825,23 @@ elif vista == "📋 Tabla enriquecida":
         "PRUEBA ROBOT":     "🚫 Prueba",
     }
     def _estado_fracttal(row):
-        # Terminales primero (respetar por si fecha_finalizacion existe)
         est = str(row.get("_ot_estado") or "").strip()
+        # Terminales tienen prioridad
         if est in ("Finalizadas", "Finalizada", "Cancelado", "Canceladas",
                    "ERROR DE INGRESO", "DUPLICADO", "Duplicidad", "PRUEBA ROBOT"):
             return _CICLO_LABELS.get(est, est)
-        # OT completada por tecnico pero SIN cierre admin => 'En Revisión' (UI Fracttal)
+        # OT completada por tecnico pero aun no cerrada admin => 'En Revisión'
+        # (Fracttal UI usa esta misma logica). NO chequeamos fecha_finalizacion
+        # porque esa se llena con final_date (cierre tecnico), no wo_final_date.
+        # El indicador administrativo es que el estado NO sea "Finalizadas".
         completada = row.get("_ot_completada")
-        est_tarea  = str(row.get("_ot_estado_tarea") or "").strip()
-        fin_admin  = row.get("_ot_fin_admin")
-        if completada is True and est_tarea == "Finalizada" and (
-                fin_admin is None or (isinstance(fin_admin, float) and pd.isna(fin_admin))):
+        est_tarea  = str(row.get("_ot_estado_tarea") or "").strip().upper()
+        if completada is True and est_tarea in ("DONE", "FINALIZADA", "REVIEWED", "IN_REVIEW"):
             return "👀 En Revisión"
-        # Sino, usar el mapa normal sobre el estado crudo
+        # Sino, mapear el estado crudo
         if est:
             return _CICLO_LABELS.get(est, est)
-        # Fallback a estado_atencion (viejo mapa) si no hay data de ordenes_trabajo
+        # Fallback a estado_atencion (mapa viejo)
         est_alt = str(row.get("estado_atencion") or "").strip()
         return _CICLO_LABELS.get(est_alt, est_alt or "—")
     _dft["Estado Fracttal"] = _dft.apply(_estado_fracttal, axis=1)
