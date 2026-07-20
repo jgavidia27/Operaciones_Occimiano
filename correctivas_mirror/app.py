@@ -1073,11 +1073,37 @@ if vista == "🔍 Validación En Revisión":
                 .dt.tz_convert(_CL_TZ)
                 .dt.strftime("%d/%m/%Y %H:%M"))
 
-        st.dataframe(
+        # Controles de selección masiva
+        _sel1, _sel2, _sel3 = st.columns([1, 1, 4])
+        with _sel1:
+            _marcar_verdes = st.button("✅ Marcar todas VERDES",
+                help="Selecciona automáticamente todas las OTs con semáforo verde")
+        with _sel2:
+            _desmarcar = st.button("⬜ Desmarcar todo")
+
+        # Preparar dataframe con columna checkbox al inicio
+        _tbl.insert(0, "Cerrar", False)
+
+        # Init/actualizar estado con base en filas visibles
+        _folio_col = "N° OT"
+        if _marcar_verdes:
+            _tbl["Cerrar"] = _tbl["Semáforo"].str.contains("VERDE", na=False)
+        elif _desmarcar:
+            _tbl["Cerrar"] = False
+
+        _edited = st.data_editor(
             _tbl,
             use_container_width=True,
             hide_index=True,
+            disabled=[c for c in _tbl.columns if c != "Cerrar"],
+            key="tbl_revision_editor",
             column_config={
+                "Cerrar": st.column_config.CheckboxColumn(
+                    "☐",
+                    width=40,
+                    help="Marcá las OTs que querés cerrar automáticamente",
+                    default=False,
+                ),
                 "Fecha - pasó a revisión": st.column_config.TextColumn(width=110,
                     help="Fecha en que el técnico marcó DONE y quedó esperando validación"),
                 "N° OT":            st.column_config.TextColumn(width=90),
@@ -1106,6 +1132,27 @@ if vista == "🔍 Validación En Revisión":
                     help="Campo 'DESCRIPCIÓN DE LA FALLA ENCONTRADA' del técnico"),
             },
         )
+
+        # Folios seleccionados por el usuario
+        _folios_seleccionados = _edited.loc[
+            _edited["Cerrar"] == True, _folio_col].dropna().tolist()
+
+        if _folios_seleccionados:
+            st.success(
+                f"**{len(_folios_seleccionados)} OT(s) seleccionadas para cerrar:** "
+                f"{', '.join(_folios_seleccionados[:5])}"
+                f"{'...' if len(_folios_seleccionados) > 5 else ''}"
+            )
+            _cmd_sel = (
+                f"cd C:\\Users\\jgavi\\Documents\\occimiano_dashboard; "
+                f"python cierre_ots_playwright.py {' '.join(_folios_seleccionados)}"
+            )
+            st.code(_cmd_sel, language="powershell")
+            st.caption(
+                f"👆 Copiá el comando (icono 📋 arriba a la derecha del bloque) "
+                f"y pegalo en PowerShell. Chrome se abre, hace login solo, cierra "
+                f"las **{len(_folios_seleccionados)}** OTs seleccionadas y reporta."
+            )
 
         st.divider()
 
