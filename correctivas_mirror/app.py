@@ -676,21 +676,55 @@ if vista == "📰 Feed cronológico":
         if pd.notna(_fl) and pd.notna(_um) and float(_um) > 0:
             _deadline = _fl + timedelta(hours=float(_um))
             _dl_s = _deadline.strftime("%d/%m %H:%M")
+            _sla_total_sec = float(_um) * 3600
             if pd.isna(_fc):
                 _now = datetime.now(_CL_TZ).replace(tzinfo=None)
                 _diff_sec = int((_deadline - _now).total_seconds())
                 if _diff_sec > 0:
                     _hh, _rr = divmod(_diff_sec, 3600)
                     _mm = _rr // 60
+                    # % de holgura restante (0-100)
+                    _pct = max(0, min(100, round(100 * _diff_sec / _sla_total_sec)))
+                    # Color segun holgura
+                    if _pct >= 50:
+                        _bar_color, _txt_color, _icon = "#16a34a", "#16a34a", "🟢"  # verde
+                    elif _pct >= 25:
+                        _bar_color, _txt_color, _icon = "#eab308", "#a16207", "🟡"  # amarillo
+                    elif _pct >= 10:
+                        _bar_color, _txt_color, _icon = "#f97316", "#c2410c", "🟠"  # naranja
+                    else:
+                        _bar_color, _txt_color, _icon = "#dc2626", "#dc2626", "🔴"  # rojo critico
+                    _bar_html = (
+                        f'<div style="margin-top:4px;background:#f1f5f9;'
+                        f'border-radius:6px;height:8px;overflow:hidden;'
+                        f'border:1px solid #e2e8f0;">'
+                        f'<div style="height:100%;width:{_pct}%;'
+                        f'background:{_bar_color};transition:width .3s;"></div>'
+                        f'</div>'
+                        f'<div style="font-size:.7rem;color:#64748b;margin-top:2px;">'
+                        f'Holgura: <b style="color:{_txt_color};">{_pct}%</b> del SLA restante</div>'
+                    )
                     _sla_line = (f'<div class="meta" style="margin-top:2px;">'
                         f'⏱ <b>SLA:</b> inicio {_fl_s} · vence {_dl_s} '
-                        f'· <span style="color:#16a34a;font-weight:600;">quedan {_hh}h {_mm}min</span></div>')
+                        f'· <span style="color:{_txt_color};font-weight:600;">'
+                        f'{_icon} quedan {_hh}h {_mm}min</span>'
+                        f'{_bar_html}</div>')
                 else:
                     _hh, _rr = divmod(abs(_diff_sec), 3600)
                     _mm = _rr // 60
+                    _bar_html = (
+                        f'<div style="margin-top:4px;background:#fee2e2;'
+                        f'border-radius:6px;height:8px;overflow:hidden;'
+                        f'border:1px solid #fca5a5;">'
+                        f'<div style="height:100%;width:100%;background:#dc2626;"></div>'
+                        f'</div>'
+                        f'<div style="font-size:.7rem;color:#dc2626;margin-top:2px;'
+                        f'font-weight:600;">⚠️ SLA vencido</div>'
+                    )
                     _sla_line = (f'<div class="meta" style="margin-top:2px;">'
                         f'⏱ <b>SLA:</b> inicio {_fl_s} · vence {_dl_s} '
-                        f'· <span style="color:#dc2626;font-weight:600;">⚠️ vencida hace {_hh}h {_mm}min</span></div>')
+                        f'· <span style="color:#dc2626;font-weight:600;">'
+                        f'⚠️ vencida hace {_hh}h {_mm}min</span>{_bar_html}</div>')
             else:
                 _sla_line = (f'<div class="meta" style="margin-top:2px;">'
                     f'⏱ <b>SLA:</b> inicio {_fl_s} · límite {_dl_s} ({int(_um)}h)</div>')
