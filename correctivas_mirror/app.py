@@ -217,6 +217,31 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     })
     fuente_map = {r["os_fracttal"]: r.get("fuente")
                   for r in lc if r.get("os_fracttal")}
+
+    # 2c) Estado real Fracttal (para nueva columna 'Estado Fracttal' en
+    # tabla enriquecida). Fracttal UI muestra 'En Revisión' cuando el
+    # tecnico marca DONE (completada=true + estado_tarea=Finalizada +
+    # fecha_finalizacion IS NULL). Necesitamos esos campos crudos de
+    # ordenes_trabajo porque v_llamados_sla solo expone `estado_atencion`
+    # (que corresponde al id_status_work_order y no coincide con la UI).
+    ot_rows = []
+    for _pg in range(30):
+        _batch = _sb_get("ordenes_trabajo", {
+            "select": "id_ot,estado,estado_tarea,completada,fecha_finalizacion",
+            "fecha_creacion": f"gte.{fecha_desde}",
+            "limit": 1000,
+            "offset": _pg * 1000,
+        })
+        if not _batch:
+            break
+        ot_rows.extend(_batch)
+        if len(_batch) < 1000:
+            break
+    _ot_map = {r["id_ot"]: r for r in ot_rows if r.get("id_ot")}
+    df["_ot_estado"]       = df["os_fracttal"].map(lambda x: (_ot_map.get(x) or {}).get("estado"))
+    df["_ot_estado_tarea"] = df["os_fracttal"].map(lambda x: (_ot_map.get(x) or {}).get("estado_tarea"))
+    df["_ot_completada"]   = df["os_fracttal"].map(lambda x: (_ot_map.get(x) or {}).get("completada"))
+    df["_ot_fin_admin"]    = df["os_fracttal"].map(lambda x: (_ot_map.get(x) or {}).get("fecha_finalizacion"))
     falla_map = {r["os_fracttal"]: r["falla"]
                  for r in lc if r.get("os_fracttal") and r.get("falla")}
     n_aviso_map = {r["os_fracttal"]: r["n_aviso"]
@@ -777,33 +802,48 @@ elif vista == "📋 Tabla enriquecida":
                   if f in FUENTE_META else "❓ (sin fuente)")
     _dft["Estado"] = _dft["estado_ico"] + " " + _dft["estado_lbl"]
 
-    # Nueva columna: Ciclo OT (estado en Fracttal, independiente del SLA)
-    _CICLO_MAP = {
-        # Estados terminales
+    # Nueva columna: "Estado Fracttal" (ciclo de vida de la OT).
+    # Replica la logica que usa Fracttal UI: cuando el tecnico marca DONE
+    # (completada=True + estado_tarea='Finalizada') y NO hay cierre admin
+    # (fecha_finalizacion IS NULL) => la OT aparece en 'En Revisión' en
+    # la pantalla de Fracttal aunque id_status_work_order siga siendo 2.
+    _CICLO_LABELS = {
         "Finalizadas":  "✅ Finalizada",
         "Finalizada":   "✅ Finalizada",
         "Cancelado":    "🚫 Cancelada",
         "Canceladas":   "🚫 Cancelada",
-        # En curso
         "En Revisión":  "👀 En Revisión",
         "En Proceso":   "🔧 En Proceso",
         "En Progreso":  "🔧 En Proceso",
         "En Espera":    "⏸️ En Espera",
         "Por Validar":  "👀 En Revisión",
-        # Sin iniciar
         "No Iniciada":  "📋 Pendiente",
         "Por Iniciar":  "📋 Pendiente",
-        # Basura
         "ERROR DE INGRESO": "🚫 Error ingreso",
         "DUPLICADO":        "🚫 Duplicado",
         "Duplicidad":       "🚫 Duplicado",
         "PRUEBA ROBOT":     "🚫 Prueba",
     }
-    def _map_ciclo(v):
-        s = str(v or "").strip()
-        return _CICLO_MAP.get(s, s or "—")
-    _dft["Ciclo OT"] = _dft["estado_atencion"].map(_map_ciclo) \
-        if "estado_atencion" in _dft.columns else "—"
+    def _estado_fracttal(row):
+        # Terminales primero (respetar por si fecha_finalizacion existe)
+        est = str(row.get("_ot_estado") or "").strip()
+        if est in ("Finalizadas", "Finalizada", "Cancelado", "Canceladas",
+                   "ERROR DE INGRESO", "DUPLICADO", "Duplicidad", "PRUEBA ROBOT"):
+            return _CICLO_LABELS.get(est, est)
+        # OT completada por tecnico pero SIN cierre admin => 'En Revisión' (UI Fracttal)
+        completada = row.get("_ot_completada")
+        est_tarea  = str(row.get("_ot_estado_tarea") or "").strip()
+        fin_admin  = row.get("_ot_fin_admin")
+        if completada is True and est_tarea == "Finalizada" and (
+                fin_admin is None or (isinstance(fin_admin, float) and pd.isna(fin_admin))):
+            return "👀 En Revisión"
+        # Sino, usar el mapa normal sobre el estado crudo
+        if est:
+            return _CICLO_LABELS.get(est, est)
+        # Fallback a estado_atencion (viejo mapa) si no hay data de ordenes_trabajo
+        est_alt = str(row.get("estado_atencion") or "").strip()
+        return _CICLO_LABELS.get(est_alt, est_alt or "—")
+    _dft["Estado Fracttal"] = _dft.apply(_estado_fracttal, axis=1)
 
     _dft["F. Llamado"] = _dft["fecha_llamado"].dt.strftime("%d/%m/%Y %H:%M")
     _dft["F. Inicio"]  = _dft["fecha_inicio_atencion"].dt.strftime("%d/%m/%Y %H:%M").fillna("—") if "fecha_inicio_atencion" in _dft.columns else "—"
@@ -814,7 +854,7 @@ elif vista == "📋 Tabla enriquecida":
     _dft["Observación"] = _dft["excepcion_motivo"].fillna("")
 
     _cols = ["os_fracttal","n_llamado","cliente","eds_occim","eds_nombre",
-             "comuna","zona","prioridad","Fuente","Estado","Ciclo OT",
+             "comuna","zona","prioridad","Fuente","Estado","Estado Fracttal",
              "F. Llamado","F. Inicio","F. Cierre","Horas resp.","SLA (h)",
              "equipo","tecnico_disp","Observación","facturacion"]
     _ren = {
@@ -839,9 +879,10 @@ elif vista == "📋 Tabla enriquecida":
             "Fuente":      st.column_config.TextColumn(width=140),
             "Estado":      st.column_config.TextColumn(width=115,
                 help="Estado del SLA (cumple, no cumple, atendiendo, etc.)"),
-            "Ciclo OT":    st.column_config.TextColumn(width=130,
-                help="Estado del ciclo de vida de la OT en Fracttal: "
-                     "Pendiente / En Proceso / En Revisión / Finalizada / Cancelada"),
+            "Estado Fracttal": st.column_config.TextColumn(width=140,
+                help="Estado de la OT en Fracttal (misma clasificación que "
+                     "muestra la UI de Fracttal): Pendiente / En Proceso / "
+                     "En Revisión (esperando validación) / Finalizada / Cancelada"),
             "F. Llamado":  st.column_config.TextColumn(width=125),
             "F. Inicio":   st.column_config.TextColumn(width=125),
             "F. Cierre":   st.column_config.TextColumn(width=125),
