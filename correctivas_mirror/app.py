@@ -864,7 +864,9 @@ elif vista == "📋 Tabla enriquecida":
         "comuna":"Comuna", "zona":"Zona", "prioridad":"Prioridad",
         "equipo":"Equipo", "tecnico_disp":"Técnico", "facturacion":"Facturación",
     }
-    _show = _dft[_cols].rename(columns=_ren).sort_values("F. Llamado", ascending=False)
+    # Ordenar por datetime REAL antes de formatear (NaT al fondo)
+    _dft = _dft.sort_values("fecha_llamado", ascending=False, na_position="last")
+    _show = _dft[_cols].rename(columns=_ren)
 
     st.dataframe(
         _show, hide_index=True, use_container_width=True, height=680,
