@@ -22,6 +22,7 @@ import sys
 import time
 import requests
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # UTF-8 en Windows (log messages con acentos, arrows)
 try:
@@ -38,9 +39,13 @@ except ImportError:
     pass
 
 # ── Config ────────────────────────────────────────────────────────────
-FRACTTAL_BASE  = "https://app.fracttal.com"
-FRACTTAL_TOKEN = f"{FRACTTAL_BASE}/oauth/token"
-FRACTTAL_WO    = f"{FRACTTAL_BASE}/api/work_orders"
+FRACTTAL_BASE      = "https://app.fracttal.com"
+FRACTTAL_TOKEN     = f"{FRACTTAL_BASE}/oauth/token"
+FRACTTAL_WO        = f"{FRACTTAL_BASE}/api/work_orders"
+FRACTTAL_SUBTASKS  = f"{FRACTTAL_BASE}/api/work_orders_subtasks/"
+FRACTTAL_RESOURCES = f"{FRACTTAL_BASE}/api/wo_resources/"
+ID_COMPANY         = 1507
+WORKERS            = 8
 
 CLIENT_ID     = os.environ.get("FRACTTAL_CLIENT_ID") or "KtHFO5pMskBbJ3lhPr"
 CLIENT_SECRET = os.environ["FRACTTAL_CLIENT_SECRET"]
@@ -111,11 +116,85 @@ def fetch_en_revision(token: str) -> list:
     return result
 
 
-def calcular_semaforo(wo: dict) -> tuple:
-    """Devuelve (color, motivo)."""
+def fetch_subtareas_detalle(folio: str, token: str) -> dict:
+    """Extrae campos de formulario adicionales: descripcion_falla,
+    trabajo_realizado, entrega_repuestos, observaciones."""
+    h = {"Authorization": f"Bearer {token}"}
+    out = {"descripcion_falla": None, "trabajo_realizado": None,
+           "entrega_repuestos": None, "observaciones": None}
+    try:
+        r = requests.get(FRACTTAL_SUBTASKS, headers=h,
+            params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 500},
+            timeout=30)
+        items = r.json().get("data", []) or []
+    except Exception:
+        return out
+
+    for it in items:
+        desc = (it.get("description") or "").upper().strip()
+        val = it.get("value")
+        val_str = str(val).strip() if val is not None else ""
+        if not val_str or val_str.lower() in ("none", "null", ""):
+            continue
+
+        if "DESCRIP" in desc and "FALLA" in desc:
+            out["descripcion_falla"] = val_str[:500]
+        elif "TRABAJO REALIZADO" in desc:
+            out["trabajo_realizado"] = val_str[:1000]
+        elif "ENTREGA" in desc and "REPUESTO" in desc:
+            # Puede venir como 'true'/'false', 'SI'/'NO'/'N/A', o texto
+            v = val_str.upper()
+            if v in ("TRUE", "SI", "SÍ", "YES"):
+                out["entrega_repuestos"] = "SI"
+            elif v in ("FALSE", "NO"):
+                out["entrega_repuestos"] = "NO"
+            elif v in ("N/A", "NA", "NOT APPLICABLE"):
+                out["entrega_repuestos"] = "N/A"
+            else:
+                out["entrega_repuestos"] = val_str[:20]
+        elif "OBSERVACION" in desc:
+            out["observaciones"] = val_str[:500]
+    return out
+
+
+def fetch_recursos_detalle(folio: str, token: str) -> dict:
+    """Extrae detalle de recursos usados (repuestos, mano obra, servicios).
+    type=1 inventario, type=2 mano obra, type=3 servicio."""
+    h = {"Authorization": f"Bearer {token}"}
+    out = {"repuestos_detalle": None, "servicios_detalle": None,
+           "hh_detalle": None, "tiene_repuesto_real": False}
+    try:
+        r = requests.get(FRACTTAL_RESOURCES, headers=h,
+            params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 100},
+            timeout=30)
+        recursos = r.json().get("data", []) or []
+    except Exception:
+        return out
+
+    rep, hh, serv = [], [], []
+    for rr in recursos:
+        t = rr.get("type")
+        d = rr.get("description", "")
+        q = rr.get("qty", 0)
+        if t == 1:  # inventario/repuesto
+            rep.append(f"{q}x {d}")
+            out["tiene_repuesto_real"] = True
+        elif t == 2:  # mano obra
+            hh.append(f"{q} {d}")
+        elif t == 3:  # servicio
+            serv.append(f"{q}x {d}")
+    if rep:  out["repuestos_detalle"] = "; ".join(rep)[:500]
+    if serv: out["servicios_detalle"] = "; ".join(serv)[:500]
+    if hh:   out["hh_detalle"] = "; ".join(hh)[:500]
+    return out
+
+
+def calcular_semaforo(wo: dict, extras: dict) -> tuple:
+    """Devuelve (color, motivo, incongruencias).
+    extras incluye trabajo_realizado, entrega_repuestos, tiene_repuesto_real."""
     completed = wo.get("completed_percentage") or 0
     if completed < 100:
-        return ("ROJO", f"Completitud={completed}%")
+        return ("ROJO", f"Completitud={completed}%", None)
 
     has_recurso = any([
         wo.get("resources_inventory") is not None,
@@ -124,7 +203,7 @@ def calcular_semaforo(wo: dict) -> tuple:
         wo.get("resources_services") is not None,
     ])
     if not has_recurso:
-        return ("ROJO", "Sin recursos registrados (falta mano obra/repuestos/servicios)")
+        return ("ROJO", "Sin recursos registrados (falta mano obra/repuestos/servicios)", None)
 
     tipo = (wo.get("tasks_log_task_type_main") or "").upper()
     is_correctivo = tipo.startswith("CORRECT")
@@ -137,9 +216,27 @@ def calcular_semaforo(wo: dict) -> tuple:
             if not tiene_falla: missing.append("tipo falla")
             if not tiene_causa: missing.append("causa")
             if not tiene_det:   missing.append("deteccion")
-            return ("AMARILLO", f"Correctivo sin: {', '.join(missing)}")
+            return ("AMARILLO", f"Correctivo sin: {', '.join(missing)}", None)
 
-    return ("VERDE", "Lista para cerrar")
+    # Congruencia entrega_repuestos vs recursos reales
+    incong = []
+    entrega = extras.get("entrega_repuestos")
+    tiene_rep = extras.get("tiene_repuesto_real", False)
+    if entrega == "SI" and not tiene_rep:
+        incong.append("Dice 'SI' a entrega repuestos pero no hay repuesto registrado en recursos")
+    elif entrega == "NO" and tiene_rep:
+        incong.append("Dice 'NO' a entrega repuestos pero HAY repuestos en recursos")
+
+    # Congruencia trabajo_realizado (keyword de cambio) vs repuestos
+    trabajo = (extras.get("trabajo_realizado") or "").lower()
+    if trabajo and any(k in trabajo for k in ("cambio de", "cambio ", "reemplaz", "reemplaz")):
+        if not tiene_rep:
+            incong.append(f"Trabajo menciona 'cambio/reemplazo' pero no hay repuesto en recursos")
+
+    if incong:
+        return ("AMARILLO", "; ".join(incong), "; ".join(incong))
+
+    return ("VERDE", "Lista para cerrar", None)
 
 
 def dias_espera(review_date: str) -> int:
@@ -170,8 +267,8 @@ def extraer_eds(wo: dict) -> str:
     return str(g2) if g2 else ""
 
 
-def wo_to_row(wo: dict) -> dict:
-    color, motivo = calcular_semaforo(wo)
+def wo_to_row(wo: dict, extras: dict) -> dict:
+    color, motivo, incong = calcular_semaforo(wo, extras)
     return {
         "folio":              wo.get("wo_folio"),
         "id_wo":              wo.get("id_work_order"),
@@ -203,6 +300,15 @@ def wo_to_row(wo: dict) -> dict:
         "task_note":          (wo.get("task_note") or "")[:500],
         "color_semaforo":     color,
         "motivo_semaforo":    motivo,
+        "incongruencias":     incong,
+        # Enriquecimiento con datos de subtareas + recursos
+        "descripcion_falla":  extras.get("descripcion_falla"),
+        "trabajo_realizado":  extras.get("trabajo_realizado"),
+        "entrega_repuestos":  extras.get("entrega_repuestos"),
+        "observaciones":      extras.get("observaciones"),
+        "repuestos_detalle":  extras.get("repuestos_detalle"),
+        "servicios_detalle":  extras.get("servicios_detalle"),
+        "hh_detalle":         extras.get("hh_detalle"),
         "updated_at":         datetime.now(timezone.utc).isoformat(),
     }
 
@@ -249,6 +355,15 @@ def sb_upsert(rows: list):
         log(f"Upsert {i+1}-{i+len(chunk)} OK ({len(chunk)} filas)")
 
 
+def enriquecer_ot(wo: dict, tok: str) -> dict:
+    """Combina subtareas + recursos en un solo dict de extras."""
+    folio = wo.get("wo_folio")
+    extras = {}
+    extras.update(fetch_subtareas_detalle(folio, tok))
+    extras.update(fetch_recursos_detalle(folio, tok))
+    return extras
+
+
 def main():
     t0 = time.time()
     log("═══ SYNC OTs EN REVISION → Supabase ═══")
@@ -258,8 +373,24 @@ def main():
     log("Barriendo OTs En Revision...")
     ots = fetch_en_revision(tok)
 
+    log(f"Enriqueciendo {len(ots)} OTs con subtareas + recursos (paralelo x{WORKERS})...")
+    extras_por_folio = {}
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futs = {ex.submit(enriquecer_ot, wo, tok): wo.get("wo_folio") for wo in ots}
+        done = 0
+        for fut in as_completed(futs):
+            folio = futs[fut]
+            try:
+                extras_por_folio[folio] = fut.result()
+            except Exception as e:
+                extras_por_folio[folio] = {}
+                log(f"   error enriqueciendo {folio}: {e}", "WARN")
+            done += 1
+            if done % 25 == 0:
+                log(f"   {done}/{len(ots)} enriquecidas")
+
     log("Calculando semaforo...")
-    rows = [wo_to_row(wo) for wo in ots]
+    rows = [wo_to_row(wo, extras_por_folio.get(wo.get("wo_folio"), {})) for wo in ots]
     counts = {"VERDE": 0, "AMARILLO": 0, "ROJO": 0}
     for r in rows:
         counts[r["color_semaforo"]] += 1

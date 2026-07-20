@@ -1037,8 +1037,9 @@ if vista == "🔍 Validación En Revisión":
                 mime="text/csv",
             )
 
-        # Tabla principal
+        # Tabla principal - ORDEN: Fecha, N° OT, luego el resto
         _COL_MAP = {
+            "review_date":        "Fecha - pasó a revisión",
             "folio":              "N° OT",
             "tipo":               "Tipo",
             "personnel":          "Técnico",
@@ -1049,42 +1050,58 @@ if vista == "🔍 Validación En Revisión":
             "total_cost":         "Costo $",
             "color_semaforo":     "Semáforo",
             "motivo_semaforo":    "Motivo",
-            "review_date":        "Pasó a revisión",
+            "trabajo_realizado":  "Trabajo realizado (técnico)",
+            "entrega_repuestos":  "¿Entregó rep.?",
+            "repuestos_detalle":  "Repuestos usados",
+            "descripcion_falla":  "Descripción falla",
         }
         _cols_out = [c for c in _COL_MAP if c in _dff.columns]
         _tbl = _dff[_cols_out].rename(columns=_COL_MAP).copy()
 
-        # Emoji en semaforo
+        # Emoji en semaforo + emoji en entrega repuestos
         _emoji = {"VERDE": "🟢", "AMARILLO": "🟡", "ROJO": "🔴"}
         _tbl["Semáforo"] = _tbl["Semáforo"].map(lambda x: f"{_emoji.get(x,'')} {x}")
+        if "¿Entregó rep.?" in _tbl.columns:
+            _emoji_rep = {"SI": "✅ SI", "NO": "❌ NO", "N/A": "➖ N/A"}
+            _tbl["¿Entregó rep.?"] = _tbl["¿Entregó rep.?"].map(
+                lambda x: _emoji_rep.get(x, "—" if pd.isna(x) else str(x)))
 
         # Formatear review_date
-        if "Pasó a revisión" in _tbl.columns:
-            _tbl["Pasó a revisión"] = pd.to_datetime(
-                _tbl["Pasó a revisión"], errors="coerce").dt.strftime("%d/%m/%Y")
+        if "Fecha - pasó a revisión" in _tbl.columns:
+            _tbl["Fecha - pasó a revisión"] = pd.to_datetime(
+                _tbl["Fecha - pasó a revisión"], errors="coerce").dt.strftime("%d/%m/%Y")
 
         st.dataframe(
             _tbl,
             use_container_width=True,
             hide_index=True,
             column_config={
+                "Fecha - pasó a revisión": st.column_config.TextColumn(width=110,
+                    help="Fecha en que el técnico marcó DONE y quedó esperando validación"),
                 "N° OT":            st.column_config.TextColumn(width=90),
                 "Tipo":             st.column_config.TextColumn(width=110),
                 "Técnico":          st.column_config.TextColumn(width=180),
                 "Cliente":          st.column_config.TextColumn(width=90),
-                "Activo":           st.column_config.TextColumn(width=280),
+                "Activo":           st.column_config.TextColumn(width=250),
                 "Días":             st.column_config.NumberColumn(
                     width=60, format="%d",
-                    help="Días desde que el técnico marcó DONE"),
+                    help="Días esperando validación"),
                 "%":                st.column_config.NumberColumn(
-                    width=60, format="%d%%",
-                    help="Completitud de tareas"),
+                    width=60, format="%d%%"),
                 "Costo $":          st.column_config.NumberColumn(
-                    width=100, format="$%d",
-                    help="Costo total imputado"),
+                    width=100, format="$%d"),
                 "Semáforo":         st.column_config.TextColumn(width=110),
-                "Motivo":           st.column_config.TextColumn(width=280),
-                "Pasó a revisión":  st.column_config.TextColumn(width=110),
+                "Motivo":           st.column_config.TextColumn(width=250,
+                    help="Motivo del color del semáforo (incluye incongruencias)"),
+                "Trabajo realizado (técnico)": st.column_config.TextColumn(
+                    width=280,
+                    help="Comentario del técnico en 'TRABAJO REALIZADO PARA CORRECCIÓN'"),
+                "¿Entregó rep.?":   st.column_config.TextColumn(width=100,
+                    help="Campo 'ENTREGA DE REPUESTOS CAMBIADOS' del técnico"),
+                "Repuestos usados": st.column_config.TextColumn(width=220,
+                    help="Recursos tipo inventario/repuesto registrados en Fracttal"),
+                "Descripción falla": st.column_config.TextColumn(width=220,
+                    help="Campo 'DESCRIPCIÓN DE LA FALLA ENCONTRADA' del técnico"),
             },
         )
 
