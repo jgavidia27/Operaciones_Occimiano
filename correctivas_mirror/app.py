@@ -1210,42 +1210,6 @@ if vista == "🔍 Validación En Revisión":
                     f"**{len(_folios_seleccionados)}** OTs y reporta al final."
                 )
 
-        st.divider()
-
-        # ══════ Cierre automático (Playwright local) ══════
-        st.markdown("### 🚀 Cierre automático de OTs verdes")
-        st.markdown(
-            "El botón de abajo genera el comando PowerShell para cerrar las "
-            "OTs verdes automáticamente en Fracttal (usa Chrome real, no API). "
-            "Corre en tu PC — necesitás `.env` con `FRACTTAL_LOGIN_EMAIL` y "
-            "`FRACTTAL_LOGIN_PASSWORD`."
-        )
-
-        _cb1, _cb2, _cb3 = st.columns([1.2, 1.2, 3])
-        with _cb1:
-            _n_cerrar = st.number_input(
-                "Cuántas cerrar",
-                min_value=1, max_value=max(_n_verde, 1),
-                value=min(10, _n_verde) if _n_verde else 1,
-                help="Empezá con 3-5 la primera vez para validar")
-        with _cb2:
-            _modo_dry = st.checkbox("Modo prueba (dry-run)", value=True,
-                help="Navega pero no hace el click final. Recomendado la primera vez.")
-
-        if _n_verde > 0:
-            _folios_a_cerrar = _folios_verdes[:int(_n_cerrar)]
-            _dry_flag = " --dry-run" if _modo_dry else ""
-            _cmd = (
-                f"cd C:\\Users\\jgavi\\Documents\\occimiano_dashboard; "
-                f"python cierre_ots_playwright.py {' '.join(_folios_a_cerrar)}{_dry_flag}"
-            )
-            st.code(_cmd, language="powershell")
-            st.caption(
-                f"Copiá el comando arriba (icono 📋 arriba a la derecha del bloque) "
-                f"y pegalo en PowerShell. Se abre Chrome, hace login solo, cierra las "
-                f"**{len(_folios_a_cerrar)}** OTs y reporta al final."
-            )
-
         # ══════ Historial de cierres (auditoría) ══════
         st.divider()
         st.markdown("### 📜 Historial de cierres (últimos 50)")
