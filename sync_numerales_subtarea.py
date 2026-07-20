@@ -186,10 +186,10 @@ def fetch_subtareas_numeral(folio: str) -> list:
                 idx[kid]["form_tiene_tiempo"] = True
                 if not val_empty:
                     idx[kid]["tiempo_fichas_seg"] = val
-            elif "LT/HRS PRODUCCI" in desc and "FINAL" in desc:
-                # Ejemplo Fracttal: "LT/HRS PRODUCCIÓN FINAL" = "125"
-                # (Solo el FINAL; ignoramos LT/HRS PRODUCCIÓN INICIAL,
-                # LT/HRS DESCARGA INICIAL/FINAL — no son relevantes.)
+            elif ("LT/HRS PRODUCCI" in desc and "FINAL" in desc) \
+                    or ("CAUDAL" in desc and ("BBA" in desc or "BOMBA" in desc)):
+                # Variante 1: "LT/HRS PRODUCCIÓN FINAL" = "125"
+                # Variante 2: "DETERMINAR CAUDAL BBA (L/H)" = "3 L/H"
                 idx[kid]["form_tiene_produccion"] = True
                 if not val_empty:
                     idx[kid]["lts_hr_produccion_final"] = val
