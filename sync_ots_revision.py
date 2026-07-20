@@ -191,18 +191,28 @@ def fetch_recursos_detalle(folio: str, token: str) -> dict:
 
 def calcular_semaforo(wo: dict, extras: dict) -> tuple:
     """Devuelve (color, motivo, incongruencias).
-    extras incluye trabajo_realizado, entrega_repuestos, tiene_repuesto_real."""
+    extras incluye trabajo_realizado, entrega_repuestos, tiene_repuesto_real,
+    repuestos_detalle, servicios_detalle, hh_detalle."""
     completed = wo.get("completed_percentage") or 0
     if completed < 100:
         return ("ROJO", f"Completitud={completed}%", None)
 
-    has_recurso = any([
+    # Chequear recursos usando /wo_resources (fuente autoritativa) primero,
+    # y como fallback los flags de work_orders (que pueden estar en None para
+    # OTs compuestas con multiples activos - Fracttal devuelve 1 fila por
+    # activo y solo la fila con recursos los muestra en resources_*).
+    has_recurso_real = any([
+        extras.get("tiene_repuesto_real"),
+        bool(extras.get("servicios_detalle")),
+        bool(extras.get("hh_detalle")),
+    ])
+    has_recurso_flag = any([
         wo.get("resources_inventory") is not None,
         wo.get("resources_human_resources") is not None,
         wo.get("resources_hours") is not None,
         wo.get("resources_services") is not None,
     ])
-    if not has_recurso:
+    if not (has_recurso_real or has_recurso_flag):
         return ("ROJO", "Sin recursos registrados (falta mano obra/repuestos/servicios)", None)
 
     tipo = (wo.get("tasks_log_task_type_main") or "").upper()
