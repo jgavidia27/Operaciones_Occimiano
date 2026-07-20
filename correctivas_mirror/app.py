@@ -29,8 +29,8 @@ import streamlit as st
 # Config
 # ══════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Panel de Llamados Correctivos · Operaciones Occimiano",
-    page_icon="📞",
+    page_title="Panel de Órdenes · Operaciones Occimiano",
+    page_icon="🌐",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -387,7 +387,7 @@ h1 {font-size:1.7rem !important; margin-bottom:.3rem !important;}
 # ══════════════════════════════════════════════════════════════════════
 # Header
 # ══════════════════════════════════════════════════════════════════════
-st.markdown("# 📞 Panel de Llamados Correctivos — Operaciones Occimiano")
+st.markdown("# 🌐 Panel de Órdenes — Operaciones")
 st.markdown(
     f'<div class="hdr-sub">Fuente: <code>v_llamados_sla</code> (misma vista que el dashboard principal) · '
     f'Enriquecida con <code>fuente</code> desde <code>llamados_correctivos</code> · '
