@@ -1,0 +1,32 @@
+name: Sync OTs En Revisión
+
+# Corre cada 30 minutos.
+# Refresca la tabla `ots_en_revision` en Supabase con las OTs de
+# Fracttal que estan esperando validacion administrativa.
+# El panel de correctivas_mirror lee de esta tabla.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install requests
+
+      - name: Sync OTs En Revision
+        env:
+          SUPABASE_URL:            ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:            ${{ secrets.SUPABASE_KEY }}
+          FRACTTAL_CLIENT_ID:      ${{ secrets.FRACTTAL_CLIENT_ID }}
+          FRACTTAL_CLIENT_SECRET:  ${{ secrets.FRACTTAL_CLIENT_SECRET }}
+        run: python sync_ots_revision.py

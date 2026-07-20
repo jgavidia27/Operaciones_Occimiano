@@ -614,7 +614,8 @@ if _n_tot:
 st.markdown('<div class="section-hdr">Vista</div>', unsafe_allow_html=True)
 
 vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida",
-                           "📊 Estadísticas", "📝 Registro (Excel)"],
+                           "📊 Estadísticas", "📝 Registro (Excel)",
+                           "🔍 Validación En Revisión"],
                  horizontal=True, label_visibility="collapsed")
 
 
@@ -945,6 +946,230 @@ elif vista == "📝 Registro (Excel)":
         file_name=f"registro_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Vista: Validación En Revisión
+# ══════════════════════════════════════════════════════════════════════
+if vista == "🔍 Validación En Revisión":
+
+    @st.cache_data(ttl=300, show_spinner="Cargando OTs en revisión...")
+    def cargar_ots_revision() -> pd.DataFrame:
+        rows = _sb_get("ots_en_revision", {
+            "select": "*",
+            "order": "dias_en_revision.desc,folio.desc",
+            "limit": 2000,
+        })
+        return pd.DataFrame(rows)
+
+    _dfr = cargar_ots_revision()
+
+    if _dfr.empty:
+        st.info("No hay OTs En Revisión en este momento. Todo al día. 🎉")
+    else:
+        # KPIs arriba
+        _n_total = len(_dfr)
+        _n_verde = int((_dfr["color_semaforo"] == "VERDE").sum())
+        _n_amar  = int((_dfr["color_semaforo"] == "AMARILLO").sum())
+        _n_rojo  = int((_dfr["color_semaforo"] == "ROJO").sum())
+        _n_old   = int((_dfr["dias_en_revision"] >= 30).sum())
+        _monto_v = _dfr.loc[_dfr["color_semaforo"] == "VERDE", "total_cost"].sum()
+
+        _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+        _k1.metric("Total pendientes", f"{_n_total}")
+        _k2.metric("🟢 Cerrar hoy", f"{_n_verde}", f"${int(_monto_v):,}".replace(",", "."))
+        _k3.metric("🟡 Revisar", f"{_n_amar}")
+        _k4.metric("🔴 Devolver", f"{_n_rojo}")
+        _k5.metric("⚠️ >30 días", f"{_n_old}")
+
+        # Filtros
+        st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
+        _f1, _f2, _f3, _f4 = st.columns([1.2, 1.2, 1, 1.5])
+        with _f1:
+            _f_color = st.multiselect("Semáforo",
+                ["VERDE", "AMARILLO", "ROJO"],
+                default=["VERDE", "AMARILLO", "ROJO"])
+        with _f2:
+            _tecnicos_disp = sorted(t for t in _dfr["personnel"].dropna().unique() if t)
+            _f_tec = st.multiselect("Técnico", _tecnicos_disp, default=[])
+        with _f3:
+            _tipos_disp = sorted(t for t in _dfr["tipo"].dropna().unique() if t)
+            _f_tipo = st.multiselect("Tipo", _tipos_disp, default=[])
+        with _f4:
+            _f_buscar = st.text_input("Buscar (folio / activo / EDS)", "")
+
+        _dff = _dfr.copy()
+        if _f_color:
+            _dff = _dff[_dff["color_semaforo"].isin(_f_color)]
+        if _f_tec:
+            _dff = _dff[_dff["personnel"].isin(_f_tec)]
+        if _f_tipo:
+            _dff = _dff[_dff["tipo"].isin(_f_tipo)]
+        if _f_buscar:
+            q = _f_buscar.upper()
+            _mask = pd.Series(False, index=_dff.index)
+            for c in ("folio", "activo", "parent_desc", "eds_occim", "personnel"):
+                _mask = _mask | _dff[c].astype(str).str.upper().str.contains(
+                    q, na=False, regex=False)
+            _dff = _dff[_mask]
+
+        st.caption(f"Mostrando **{len(_dff)}** de {_n_total} OTs.")
+
+        # Acciones
+        _a1, _a2, _a3 = st.columns([1, 1, 3])
+        with _a1:
+            _folios_verdes = _dfr.loc[
+                _dfr["color_semaforo"] == "VERDE", "folio"].tolist()
+            if _folios_verdes:
+                st.download_button(
+                    f"📋 Copiar {_n_verde} folios verdes (TXT)",
+                    "\n".join(_folios_verdes),
+                    file_name=f"folios_verdes_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                    mime="text/plain",
+                    help="Descarga la lista de folios listos para cerrar. Copiar y pegar en Fracttal.",
+                )
+        with _a2:
+            _csv = _dff.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Exportar Excel/CSV",
+                _csv,
+                file_name=f"ots_en_revision_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+            )
+
+        # Tabla principal
+        _COL_MAP = {
+            "folio":              "N° OT",
+            "tipo":               "Tipo",
+            "personnel":          "Técnico",
+            "cliente":            "Cliente",
+            "activo":             "Activo",
+            "dias_en_revision":   "Días",
+            "completed_pct":      "%",
+            "total_cost":         "Costo $",
+            "color_semaforo":     "Semáforo",
+            "motivo_semaforo":    "Motivo",
+            "review_date":        "Pasó a revisión",
+        }
+        _cols_out = [c for c in _COL_MAP if c in _dff.columns]
+        _tbl = _dff[_cols_out].rename(columns=_COL_MAP).copy()
+
+        # Emoji en semaforo
+        _emoji = {"VERDE": "🟢", "AMARILLO": "🟡", "ROJO": "🔴"}
+        _tbl["Semáforo"] = _tbl["Semáforo"].map(lambda x: f"{_emoji.get(x,'')} {x}")
+
+        # Formatear review_date
+        if "Pasó a revisión" in _tbl.columns:
+            _tbl["Pasó a revisión"] = pd.to_datetime(
+                _tbl["Pasó a revisión"], errors="coerce").dt.strftime("%d/%m/%Y")
+
+        st.dataframe(
+            _tbl,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "N° OT":            st.column_config.TextColumn(width=90),
+                "Tipo":             st.column_config.TextColumn(width=110),
+                "Técnico":          st.column_config.TextColumn(width=180),
+                "Cliente":          st.column_config.TextColumn(width=90),
+                "Activo":           st.column_config.TextColumn(width=280),
+                "Días":             st.column_config.NumberColumn(
+                    width=60, format="%d",
+                    help="Días desde que el técnico marcó DONE"),
+                "%":                st.column_config.NumberColumn(
+                    width=60, format="%d%%",
+                    help="Completitud de tareas"),
+                "Costo $":          st.column_config.NumberColumn(
+                    width=100, format="$%d",
+                    help="Costo total imputado"),
+                "Semáforo":         st.column_config.TextColumn(width=110),
+                "Motivo":           st.column_config.TextColumn(width=280),
+                "Pasó a revisión":  st.column_config.TextColumn(width=110),
+            },
+        )
+
+        st.divider()
+
+        # ══════ Cierre automático (Playwright local) ══════
+        st.markdown("### 🚀 Cierre automático de OTs verdes")
+        st.markdown(
+            "El botón de abajo genera el comando PowerShell para cerrar las "
+            "OTs verdes automáticamente en Fracttal (usa Chrome real, no API). "
+            "Corre en tu PC — necesitás `.env` con `FRACTTAL_LOGIN_EMAIL` y "
+            "`FRACTTAL_LOGIN_PASSWORD`."
+        )
+
+        _cb1, _cb2, _cb3 = st.columns([1.2, 1.2, 3])
+        with _cb1:
+            _n_cerrar = st.number_input(
+                "Cuántas cerrar",
+                min_value=1, max_value=max(_n_verde, 1),
+                value=min(10, _n_verde) if _n_verde else 1,
+                help="Empezá con 3-5 la primera vez para validar")
+        with _cb2:
+            _modo_dry = st.checkbox("Modo prueba (dry-run)", value=True,
+                help="Navega pero no hace el click final. Recomendado la primera vez.")
+
+        if _n_verde > 0:
+            _folios_a_cerrar = _folios_verdes[:int(_n_cerrar)]
+            _dry_flag = " --dry-run" if _modo_dry else ""
+            _cmd = (
+                f"cd C:\\Users\\jgavi\\Documents\\occimiano_dashboard; "
+                f"python cierre_ots_playwright.py {' '.join(_folios_a_cerrar)}{_dry_flag}"
+            )
+            st.code(_cmd, language="powershell")
+            st.caption(
+                f"Copiá el comando arriba (icono 📋 arriba a la derecha del bloque) "
+                f"y pegalo en PowerShell. Se abre Chrome, hace login solo, cierra las "
+                f"**{len(_folios_a_cerrar)}** OTs y reporta al final."
+            )
+
+        # ══════ Historial de cierres (auditoría) ══════
+        st.divider()
+        st.markdown("### 📜 Historial de cierres (últimos 50)")
+
+        @st.cache_data(ttl=60, show_spinner=False)
+        def cargar_auditoria() -> pd.DataFrame:
+            try:
+                rows = _sb_get("ots_cierres_auditoria", {
+                    "select": "*",
+                    "order": "intento_at.desc",
+                    "limit": 50,
+                })
+                return pd.DataFrame(rows)
+            except Exception:
+                return pd.DataFrame()
+
+        _dfa = cargar_auditoria()
+        if _dfa.empty:
+            st.caption("Sin cierres registrados aún. Cuando corras el comando de arriba, "
+                       "cada cierre queda logueado acá.")
+        else:
+            _dfa["intento_at"] = pd.to_datetime(
+                _dfa["intento_at"], errors="coerce").dt.strftime("%d/%m %H:%M:%S")
+            _dfa["resultado"] = _dfa["resultado"].map(
+                lambda x: f"✅ {x}" if x in ("OK", "DRY_OK") else f"❌ {x}")
+            _dfa_show = _dfa[["intento_at", "folio", "resultado", "motivo",
+                              "duracion_ms", "ejecutado_por"]].rename(columns={
+                "intento_at": "Cuándo",
+                "folio": "N° OT",
+                "resultado": "Resultado",
+                "motivo": "Motivo/detalle",
+                "duracion_ms": "ms",
+                "ejecutado_por": "Por",
+            })
+            st.dataframe(_dfa_show, use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.markdown("### Cómo usar este panel")
+        st.markdown(
+            "- **🟢 Verdes**: usar el botón de cierre automático de arriba o descargar "
+            "la lista de folios y cerrar manual en Fracttal.\n"
+            "- **🟡 Amarillas**: correctivas sin falla completa. Consultar al técnico antes de cerrar.\n"
+            "- **🔴 Rojas**: devolvé al técnico — el motivo aparece en la columna. Los datos faltantes son obligatorios."
+        )
+        st.caption(f"Datos actualizados cada 30 min desde Fracttal API. "
+                   f"Fuente: tabla `ots_en_revision` en Supabase.")
 
 
 # Footer
