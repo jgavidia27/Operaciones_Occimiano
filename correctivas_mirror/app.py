@@ -911,7 +911,7 @@ elif vista == "📝 Registro (Excel)":
     _dfr["Codigo_EDS"] = _dfr["eds_occim"]
     _dfr["EDS_r"] = _dfr["eds_nombre"]
     _dfr["Facturacion_r"] = _dfr["facturacion"].fillna("—")
-    _dfr["Fecha"] = _dfr["fecha_llamado"].dt.strftime("%d/%m/%Y").fillna("—")
+    _dfr["Fecha_llamado"] = _dfr["fecha_llamado"].dt.strftime("%d/%m/%Y").fillna("—")
     _dfr["Hora"] = _dfr["fecha_llamado"].dt.strftime("%H:%M:%S").fillna("—")
     _dfr["Atencion"] = _dfr["tipo_tarea"].fillna("—") if "tipo_tarea" in _dfr.columns else "—"
     _dfr["Mecanico"] = _dfr["tecnico_disp"].fillna("—")
@@ -930,7 +930,7 @@ elif vista == "📝 Registro (Excel)":
 
     _excel_cols = [
         "Asunto", "N_llamado", "Codigo_EDS", "EDS_r",
-        "Facturacion_r", "Fecha", "Hora",
+        "Facturacion_r", "Fecha_llamado", "Hora",
         "Atencion", "Mecanico", "Fecha_atencion", "Hora_Atencion_FIN",
         "OS_FRACTTAL", "PRIORIDAD", "TMPO_RESP_ESP", "ZONA",
         "TMPO_RESP_REAL", "STATUS_CUMPLIMIENTO", "Mes", "Anio", "Dia",
@@ -939,6 +939,7 @@ elif vista == "📝 Registro (Excel)":
         "N_llamado": "N° llamado", "Codigo_EDS": "Codigo EDS",
         "EDS_r": "EDS",
         "Facturacion_r": "Facturación",
+        "Fecha_llamado": "Fecha llamado",
         "Fecha_atencion": "Fecha de atencion",
         "Hora_Atencion_FIN": "Hora Atencion (FIN)",
         "OS_FRACTTAL": "OS FRACTTAL",
@@ -947,8 +948,10 @@ elif vista == "📝 Registro (Excel)":
         "STATUS_CUMPLIMIENTO": "STATUS CUMPLIMIENTO",
         "Anio": "Año", "Dia": "Día",
     }
-    _show_r = _dfr[_excel_cols].rename(columns=_excel_ren).sort_values(
-        "Fecha", ascending=False)
+    # Ordenar por fecha_llamado datetime REAL desc (mas recientes primero)
+    # NaT al fondo asi no molestan
+    _dfr = _dfr.sort_values("fecha_llamado", ascending=False, na_position="last")
+    _show_r = _dfr[_excel_cols].rename(columns=_excel_ren)
 
     st.dataframe(
         _show_r, hide_index=True, use_container_width=True, height=680,
@@ -958,8 +961,10 @@ elif vista == "📝 Registro (Excel)":
             "Codigo EDS":   st.column_config.TextColumn(width=90),
             "EDS":          st.column_config.TextColumn(width=180),
             "Facturación":  st.column_config.TextColumn(width=120),
-            "Fecha":        st.column_config.TextColumn(width=100),
-            "Hora":         st.column_config.TextColumn(width=80),
+            "Fecha llamado": st.column_config.TextColumn(width=110,
+                help="Fecha en que se registró el llamado / aviso del cliente"),
+            "Hora":         st.column_config.TextColumn(width=80,
+                help="Hora del llamado"),
             "Atencion":     st.column_config.TextColumn(width=150),
             "Mecanico":     st.column_config.TextColumn(width=150),
             "Fecha de atencion": st.column_config.TextColumn(width=120),
