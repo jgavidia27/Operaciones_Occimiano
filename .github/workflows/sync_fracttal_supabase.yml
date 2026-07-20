@@ -26,3 +26,12 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+      # Sync de subtareas con numeral (1 fila por OT × activo). Poblar esta
+      # tabla es lo que hace visible cada OT en las vistas 'Registros
+      # relevantes' y las validaciones de calidad por subtarea. Corre después
+      # del sync principal para que las OTs ya estén cargadas.
+      - run: python sync_numerales_subtarea.py --modo incremental
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

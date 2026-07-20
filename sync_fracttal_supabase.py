@@ -21,6 +21,16 @@ from pathlib import Path
 
 import requests
 
+# Forzar UTF-8 en stdout/stderr para que los logs con caracteres unicode
+# (flechas →, tildes, etc.) no crasheen en Windows (cp1252 default).
+# GitHub Actions ya usa UTF-8, así que esto es no-op ahí. Necesario en local
+# para evitar UnicodeEncodeError que detuvo el sync el 15-jul-2026.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 # Credenciales Fracttal
 FRACTTAL_BASE      = "https://app.fracttal.com"
 FRACTTAL_TOKEN_URL = f"{FRACTTAL_BASE}/oauth/token"
