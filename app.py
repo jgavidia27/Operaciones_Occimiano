@@ -5197,7 +5197,7 @@ elif _page == _NAV_PAGES[3]:
         # Buscador tipeable para el listado (código, nombre, dirección, comuna, LOC)
         _lst_buscar = st.text_input(
             "🔍 Buscar estación",
-            placeholder="Código, nombre, dirección, comuna, LOC Fracttal…",
+            placeholder="Código, nombre, dirección, comuna…",
             key=f"lst_buscar_{_ck}",
         ).strip().upper()
 
@@ -5270,7 +5270,6 @@ elif _page == _NAV_PAGES[3]:
         # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío)
         _col_map = {
             "eds_occim":         "Cód. Occim",
-            "_loc_code":         "LOC Fracttal",
             "nombre":            "Nombre / Dirección",
             "direccion":         "Dirección",
             "comuna":            "Comuna",
@@ -5295,7 +5294,7 @@ elif _page == _NAV_PAGES[3]:
 
         # Aplicar filtro tipeado sobre TODAS las columnas de texto relevantes
         if _lst_buscar:
-            _cols_search = [c for c in ("Cód. Occim","LOC Fracttal",
+            _cols_search = [c for c in ("Cód. Occim",
                                         "Nombre / Dirección","Dirección","Comuna",
                                         "Zona","Región","Último Técnico")
                             if c in _df_display.columns]
@@ -5309,7 +5308,6 @@ elif _page == _NAV_PAGES[3]:
         _show_df(_df_display, use_container_width=True, hide_index=True,
             column_config={
                 "Cód. Occim":        st.column_config.TextColumn(width=90),
-                "LOC Fracttal":      st.column_config.TextColumn(width=95),
                 "Nombre / Dirección":st.column_config.TextColumn(width=220),
                 "Dirección":         st.column_config.TextColumn(width=200),
                 "Comuna":            st.column_config.TextColumn(width=110),
