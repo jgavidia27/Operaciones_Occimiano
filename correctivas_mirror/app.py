@@ -1066,10 +1066,12 @@ if vista == "🔍 Validación En Revisión":
             _tbl["¿Entregó rep.?"] = _tbl["¿Entregó rep.?"].map(
                 lambda x: _emoji_rep.get(x, "—" if pd.isna(x) else str(x)))
 
-        # Formatear review_date
+        # Formatear review_date (UTC -> Chile)
         if "Fecha - pasó a revisión" in _tbl.columns:
-            _tbl["Fecha - pasó a revisión"] = pd.to_datetime(
-                _tbl["Fecha - pasó a revisión"], errors="coerce").dt.strftime("%d/%m/%Y")
+            _tbl["Fecha - pasó a revisión"] = (pd.to_datetime(
+                _tbl["Fecha - pasó a revisión"], errors="coerce", utc=True)
+                .dt.tz_convert(_CL_TZ)
+                .dt.strftime("%d/%m/%Y %H:%M"))
 
         st.dataframe(
             _tbl,
@@ -1162,8 +1164,11 @@ if vista == "🔍 Validación En Revisión":
             st.caption("Sin cierres registrados aún. Cuando corras el comando de arriba, "
                        "cada cierre queda logueado acá.")
         else:
-            _dfa["intento_at"] = pd.to_datetime(
-                _dfa["intento_at"], errors="coerce").dt.strftime("%d/%m %H:%M:%S")
+            # Convertir UTC -> hora Chile
+            _dfa["intento_at"] = (pd.to_datetime(_dfa["intento_at"],
+                                                 errors="coerce", utc=True)
+                                  .dt.tz_convert(_CL_TZ)
+                                  .dt.strftime("%d/%m %H:%M:%S"))
             _dfa["resultado"] = _dfa["resultado"].map(
                 lambda x: f"✅ {x}" if x in ("OK", "DRY_OK") else f"❌ {x}")
             _dfa_show = _dfa[["intento_at", "folio", "resultado", "motivo",
