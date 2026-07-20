@@ -776,17 +776,47 @@ elif vista == "📋 Tabla enriquecida":
                    f"{FUENTE_META.get(f, ('','?','',''))[1]}")
                   if f in FUENTE_META else "❓ (sin fuente)")
     _dft["Estado"] = _dft["estado_ico"] + " " + _dft["estado_lbl"]
+
+    # Nueva columna: Ciclo OT (estado en Fracttal, independiente del SLA)
+    _CICLO_MAP = {
+        # Estados terminales
+        "Finalizadas":  "✅ Finalizada",
+        "Finalizada":   "✅ Finalizada",
+        "Cancelado":    "🚫 Cancelada",
+        "Canceladas":   "🚫 Cancelada",
+        # En curso
+        "En Revisión":  "👀 En Revisión",
+        "En Proceso":   "🔧 En Proceso",
+        "En Progreso":  "🔧 En Proceso",
+        "En Espera":    "⏸️ En Espera",
+        "Por Validar":  "👀 En Revisión",
+        # Sin iniciar
+        "No Iniciada":  "📋 Pendiente",
+        "Por Iniciar":  "📋 Pendiente",
+        # Basura
+        "ERROR DE INGRESO": "🚫 Error ingreso",
+        "DUPLICADO":        "🚫 Duplicado",
+        "Duplicidad":       "🚫 Duplicado",
+        "PRUEBA ROBOT":     "🚫 Prueba",
+    }
+    def _map_ciclo(v):
+        s = str(v or "").strip()
+        return _CICLO_MAP.get(s, s or "—")
+    _dft["Ciclo OT"] = _dft["estado_atencion"].map(_map_ciclo) \
+        if "estado_atencion" in _dft.columns else "—"
+
     _dft["F. Llamado"] = _dft["fecha_llamado"].dt.strftime("%d/%m/%Y %H:%M")
     _dft["F. Inicio"]  = _dft["fecha_inicio_atencion"].dt.strftime("%d/%m/%Y %H:%M").fillna("—") if "fecha_inicio_atencion" in _dft.columns else "—"
     _dft["F. Cierre"]  = _dft["fecha_atencion"].dt.strftime("%d/%m/%Y %H:%M").fillna("—")
     _dft["Horas resp."]= _dft["tiempo_resp_horas"].round(2)
     _dft["SLA (h)"]    = _dft["tiempo_resp_esp"]
-    _dft["Excepción"]  = _dft["excepcion_motivo"].fillna("")
+    # Renombrada: 'Excepción' -> 'Observación' (misma data)
+    _dft["Observación"] = _dft["excepcion_motivo"].fillna("")
 
     _cols = ["os_fracttal","n_llamado","cliente","eds_occim","eds_nombre",
-             "comuna","zona","prioridad","Fuente","Estado",
+             "comuna","zona","prioridad","Fuente","Estado","Ciclo OT",
              "F. Llamado","F. Inicio","F. Cierre","Horas resp.","SLA (h)",
-             "equipo","tecnico_disp","Excepción","facturacion"]
+             "equipo","tecnico_disp","Observación","facturacion"]
     _ren = {
         "os_fracttal":"OS Fracttal", "n_llamado":"N° Aviso",
         "cliente":"Cliente", "eds_occim":"Cód. EDS", "eds_nombre":"EDS",
@@ -807,7 +837,11 @@ elif vista == "📋 Tabla enriquecida":
             "Zona":        st.column_config.TextColumn(width=70),
             "Prioridad":   st.column_config.TextColumn(width=70),
             "Fuente":      st.column_config.TextColumn(width=140),
-            "Estado":      st.column_config.TextColumn(width=115),
+            "Estado":      st.column_config.TextColumn(width=115,
+                help="Estado del SLA (cumple, no cumple, atendiendo, etc.)"),
+            "Ciclo OT":    st.column_config.TextColumn(width=130,
+                help="Estado del ciclo de vida de la OT en Fracttal: "
+                     "Pendiente / En Proceso / En Revisión / Finalizada / Cancelada"),
             "F. Llamado":  st.column_config.TextColumn(width=125),
             "F. Inicio":   st.column_config.TextColumn(width=125),
             "F. Cierre":   st.column_config.TextColumn(width=125),
@@ -815,7 +849,8 @@ elif vista == "📋 Tabla enriquecida":
             "SLA (h)":     st.column_config.NumberColumn(width=70),
             "Equipo":      st.column_config.TextColumn(width=85),
             "Técnico":     st.column_config.TextColumn(width=140),
-            "Excepción":   st.column_config.TextColumn(width=200),
+            "Observación": st.column_config.TextColumn(width=200,
+                help="Observaciones y motivos de excepción SLA registrados por Operaciones"),
             "Facturación": st.column_config.TextColumn(width=115),
         },
     )
