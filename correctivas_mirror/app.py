@@ -998,6 +998,31 @@ if vista == "🔍 Validación En Revisión":
         with _f4:
             _f_buscar = st.text_input("Buscar (folio / activo / EDS)", "")
 
+        # Segunda fila de filtros: rango de fechas "pasó a revisión"
+        _dfr["_review_dt"] = pd.to_datetime(
+            _dfr["review_date"], errors="coerce", utc=True).dt.tz_convert(_CL_TZ)
+        _fechas_validas = _dfr["_review_dt"].dropna()
+        if not _fechas_validas.empty:
+            _min_date = _fechas_validas.min().date()
+            _max_date = _fechas_validas.max().date()
+
+            _ff1, _ff2 = st.columns([2, 4])
+            with _ff1:
+                _f_fechas = st.date_input(
+                    "Rango 'Pasó a revisión' (desde — hasta)",
+                    value=(_min_date, _max_date),
+                    min_value=_min_date,
+                    max_value=_max_date,
+                    format="DD/MM/YYYY",
+                    help="Filtra por la fecha en que el técnico marcó DONE",
+                )
+            with _ff2:
+                st.caption(f"OTs entre **{_min_date.strftime('%d/%m/%Y')}** "
+                           f"y **{_max_date.strftime('%d/%m/%Y')}** disponibles. "
+                           f"Ajustá el rango para acotar.")
+        else:
+            _f_fechas = None
+
         _dff = _dfr.copy()
         if _f_color:
             _dff = _dff[_dff["color_semaforo"].isin(_f_color)]
@@ -1012,6 +1037,14 @@ if vista == "🔍 Validación En Revisión":
                 _mask = _mask | _dff[c].astype(str).str.upper().str.contains(
                     q, na=False, regex=False)
             _dff = _dff[_mask]
+        # Filtro por rango de fechas
+        if _f_fechas and isinstance(_f_fechas, tuple) and len(_f_fechas) == 2:
+            _d0, _d1 = _f_fechas
+            _dff = _dff[
+                (_dff["_review_dt"].dt.date >= _d0) &
+                (_dff["_review_dt"].dt.date <= _d1)
+            ]
+        _dff = _dff.drop(columns=["_review_dt"], errors="ignore")
 
         st.caption(f"Mostrando **{len(_dff)}** de {_n_total} OTs.")
 
