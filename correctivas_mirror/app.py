@@ -398,8 +398,10 @@ st.markdown(
 
 _c1, _c2 = st.columns([6, 1])
 with _c2:
-    if st.button("🔄 Recargar", use_container_width=True):
-        cargar_llamados.clear()
+    if st.button("🔄 Recargar", use_container_width=True,
+                 help="Limpia todos los caches y trae los datos frescos de Supabase"):
+        # Limpiar TODOS los caches @st.cache_data (no solo llamados)
+        st.cache_data.clear()
         st.rerun()
 
 # Wrap toda la carga en try/except para que Streamlit Cloud muestre

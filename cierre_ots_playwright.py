@@ -77,6 +77,9 @@ def get_verdes() -> list:
 
 
 def log_auditoria(folio: str, resultado: str, motivo: str = "", duracion_ms: int = 0):
+    """Graba fila de auditoria. Si el cierre fue OK, borra la fila de
+    ots_en_revision para que el panel la vea desaparecer inmediatamente
+    (sin esperar al sync horario)."""
     if not SB_URL:
         return
     try:
@@ -93,6 +96,16 @@ def log_auditoria(folio: str, resultado: str, motivo: str = "", duracion_ms: int
             headers=_sb_headers(), timeout=10)
     except Exception as e:
         log(f"Auditoria fallo: {e}", "WARN")
+
+    # Si fue cierre real exitoso, remover de ots_en_revision al instante
+    if resultado == "OK":
+        try:
+            requests.delete(
+                f"{SB_URL}/rest/v1/ots_en_revision",
+                params={"folio": f"eq.{folio}"},
+                headers=_sb_headers(), timeout=10)
+        except Exception as e:
+            log(f"Delete de ots_en_revision fallo: {e}", "WARN")
 
 
 # ── Playwright ────────────────────────────────────────────────────────
