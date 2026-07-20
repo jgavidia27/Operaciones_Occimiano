@@ -1143,16 +1143,37 @@ if vista == "🔍 Validación En Revisión":
                 f"{', '.join(_folios_seleccionados[:5])}"
                 f"{'...' if len(_folios_seleccionados) > 5 else ''}"
             )
-            _cmd_sel = (
-                f"cd C:\\Users\\jgavi\\Documents\\occimiano_dashboard; "
-                f"python cierre_ots_playwright.py {' '.join(_folios_seleccionados)}"
+
+            # Generar contenido del .bat
+            _folios_arg = " ".join(_folios_seleccionados)
+            _bat_content = (
+                "@echo off\r\n"
+                f"REM Cierre automatico de {len(_folios_seleccionados)} OTs generado desde el panel\r\n"
+                "cd /d C:\\Users\\jgavi\\Documents\\occimiano_dashboard\r\n"
+                f"python cierre_ots_playwright.py {_folios_arg}\r\n"
+                "echo.\r\n"
+                "echo === Presiona ENTER para cerrar esta ventana ===\r\n"
+                "pause > nul\r\n"
             )
-            st.code(_cmd_sel, language="powershell")
-            st.caption(
-                f"👆 Copiá el comando (icono 📋 arriba a la derecha del bloque) "
-                f"y pegalo en PowerShell. Chrome se abre, hace login solo, cierra "
-                f"las **{len(_folios_seleccionados)}** OTs seleccionadas y reporta."
-            )
+            _bat_name = f"cerrar_{len(_folios_seleccionados)}_ots_{datetime.now().strftime('%Y%m%d_%H%M')}.bat"
+
+            _b1, _b2 = st.columns([1.5, 4])
+            with _b1:
+                st.download_button(
+                    label=f"⬇️ Descargar cerrar_{len(_folios_seleccionados)}_ots.bat",
+                    data=_bat_content.encode("utf-8"),
+                    file_name=_bat_name,
+                    mime="application/x-bat",
+                    type="primary",
+                    help=f"Descarga un archivo .bat que ejecuta el cierre automático de las {len(_folios_seleccionados)} OTs seleccionadas",
+                )
+            with _b2:
+                st.markdown(
+                    f"👉 **Pasos:** 1) Click en el botón azul de la izquierda "
+                    f"para descargar el archivo · 2) **Doble click** al archivo "
+                    f"descargado · Chrome se abre solo, hace login, cierra las "
+                    f"**{len(_folios_seleccionados)}** OTs y reporta al final."
+                )
 
         st.divider()
 
