@@ -5363,25 +5363,6 @@ elif _page == _NAV_PAGES[3]:
                 .sort_values("creation_date", ascending=False)
                 .drop_duplicates(subset=["folio"], keep="first")
             )
-            # Advertencia sobre plantilla Fracttal
-            st.markdown(
-                '<div style="background:#fef3c7;border-left:4px solid #f59e0b;'
-                'padding:8px 12px;border-radius:6px;margin-bottom:12px;'
-                'font-size:.82rem;color:#78350f">'
-                '⚠️ <b>Datos incompletos por plantilla Fracttal</b>: los campos '
-                '<i>tipo de bomba, producción Lts/hr, consumo insumos y tiempo fichas</i> '
-                'empezaron a registrarse el <b>08-jun-2026</b> (OS-37958). Sin embargo, '
-                'una muestra arrojó que <b>~88% de las OTs Shell post-08-jun siguen '
-                'generándose con la plantilla vieja</b> sin esos campos. '
-                '<b>Acción requerida:</b> actualizar el plan de mantención Shell en '
-                'Fracttal para que las nuevas OTs se generen con la plantilla completa. '
-                '<br>ℹ️ Solo se muestran OTs donde el técnico ya <b>trabajó</b> en la '
-                'estación (con fecha inicio/fin de subtarea). Las OTs <i>Por Iniciar</i> '
-                'no aparecen porque aún no hay datos que registrar.'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
             if _df_prev_all.empty:
                 st.info("Sin registros de mantención preventiva Shell.")
             else:
