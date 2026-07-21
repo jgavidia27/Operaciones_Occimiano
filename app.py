@@ -5498,6 +5498,47 @@ elif _page == _NAV_PAGES[3]:
                     return (b if b is not None else "—",
                             p if p is not None else "—")
 
+                # Parser de consumo viejo (texto libre): "cera 50 shampoo 60
+                # cepillo 85", "Cera 40% Shampoo 50%", "cera 30% prelavado 30%
+                # cepillo 30%", etc. Extrae cera/shampoo/cepillo por regex.
+                _re_consumo_key = _re_bomba.compile(
+                    r"(cera|shampoo|shampu|shamp|cepillo|prelavado|jabon|jab[oó]n)\s*[:=]?\s*(\d+)\s*%?",
+                    _re_bomba.IGNORECASE)
+                def _parse_consumo_libre(txt: str) -> dict:
+                    out = {"cera": None, "shampoo": None, "cepillo": None}
+                    if not txt:
+                        return out
+                    s = str(txt).strip()
+                    if not s or s.lower() in ("nan", "none", "null", "—", "-"):
+                        return out
+                    for k, v in _re_consumo_key.findall(s):
+                        k_low = k.lower()
+                        if k_low.startswith("cera"):
+                            out["cera"] = out["cera"] or v
+                        elif k_low.startswith("shamp") or k_low.startswith("jab"):
+                            out["shampoo"] = out["shampoo"] or v
+                        elif k_low.startswith("cep"):
+                            out["cepillo"] = out["cepillo"] or v
+                    return out
+
+                def _consumo_display(sub_df, insumo: str) -> str:
+                    """Devuelve el consumo del insumo (cera/shampoo/cepillo)
+                    con formato '50%'. Prioriza los campos separados nuevos;
+                    si están vacíos parsea el texto libre viejo."""
+                    col_new = f"consumo_{insumo}_pct"
+                    v_new = _rpval(sub_df, col_new, default=None)
+                    if v_new not in (None, "", "—", "-"):
+                        s = str(v_new).strip().rstrip("%").strip()
+                        if s:
+                            return f"{s}%"
+                    v_old = _rpval(sub_df, "consumo_insumos", default=None)
+                    if v_old not in (None, "", "—", "-"):
+                        parsed = _parse_consumo_libre(v_old)
+                        v = parsed.get(insumo)
+                        if v:
+                            return f"{v}%"
+                    return "—"
+
                 _reg_rows = []
                 for _, _ot in _df_prev_all.head(100).iterrows():
                     _fol = _ot["folio"]
@@ -5534,7 +5575,9 @@ elif _page == _NAV_PAGES[3]:
                         ("Fichas mantención", "Aspirado"):             _rpval(_asp, "fichas_periodo"),
                         ("Insumos", "Tipo de bomba"):                  _bomba_disp,
                         ("Insumos", "Producción Lts/hr"):              _prod_disp,
-                        ("Insumos", "Consumo (%)"):                    _rpval(_lav, "consumo_insumos"),
+                        ("Insumos", "Cera %"):                         _consumo_display(_lav, "cera"),
+                        ("Insumos", "Shampoo %"):                      _consumo_display(_lav, "shampoo"),
+                        ("Insumos", "Cepillo %"):                      _consumo_display(_lav, "cepillo"),
                         # 'Tiempo fichas' solo existe en el form de lavadora
                         # (aspiradora no lo tiene, quedaba siempre vacío).
                         ("Tiempo fichas", "Lavado (seg)"):             _rpval(_lav, "tiempo_fichas_seg"),

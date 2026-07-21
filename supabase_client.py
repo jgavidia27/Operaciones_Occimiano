@@ -279,6 +279,7 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
             "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
             "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
             "tiempo_fichas_seg,lts_hr_produccion_final,"
+            "consumo_shampoo_pct,consumo_cera_pct,consumo_cepillo_pct,"
             "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
             "form_tiene_produccion,"
             "fecha_inicio_subtarea,fecha_fin_subtarea"

@@ -142,6 +142,11 @@ def fetch_subtareas_numeral(folio: str) -> list:
             "consumo_insumos":        None,
             "tiempo_fichas_seg":      None,
             "lts_hr_produccion_final": None,
+            # Consumos separados por insumo (obligatorios desde jul-2026).
+            # Antes venia todo junto en consumo_insumos como texto libre.
+            "consumo_shampoo_pct":    None,
+            "consumo_cera_pct":       None,
+            "consumo_cepillo_pct":    None,
             "fecha_inicio_subtarea":  s.get("initial_date"),
             "fecha_fin_subtarea":     s.get("final_date"),
         }
@@ -179,9 +184,21 @@ def fetch_subtareas_numeral(folio: str) -> list:
                 if not val_empty:
                     idx[kid]["bomba_dosificadora"] = val
             elif "CONSUMO DE INSUMOS" in desc:
+                # Campo viejo (texto libre): "cera 50 shampoo 60 cepillo 85"
                 idx[kid]["form_tiene_consumo"] = True
                 if not val_empty:
                     idx[kid]["consumo_insumos"] = val
+            elif "% CONSUMO" in desc or ("CONSUMO" in desc and "MOMENTO DE LLEGADA" in desc):
+                # Nuevos campos separados (obligatorios desde jul-2026)
+                idx[kid]["form_tiene_consumo"] = True
+                if val_empty:
+                    continue
+                if "SHAMPOO" in desc:
+                    idx[kid]["consumo_shampoo_pct"] = val
+                elif "CERA" in desc:
+                    idx[kid]["consumo_cera_pct"] = val
+                elif "CEPILLO" in desc:
+                    idx[kid]["consumo_cepillo_pct"] = val
             elif "TIEMPO FICHAS" in desc:
                 idx[kid]["form_tiene_tiempo"] = True
                 if not val_empty:
