@@ -11735,16 +11735,16 @@ elif _page == _NAV_PAGES[0]:
 
                         drill_disp = drill_disp[[
                             "_fecha", "_cumple", "_x4", "folio", "_cliente", "_eds", "station", "tecnico",
-                            "_tipo", "_modalidad", "_estado_ot", "score_total",
-                            "_col_tiempo", "_col_causa", "_tipo_equipo", "_col_numeral",
-                            "_obs",
+                            "_tipo", "_estado_ot", "score_total",
+                            "_col_tiempo", "_col_causa", "_col_numeral", "_tipo_equipo",
+                            "_obs", "_modalidad",
                         ]].copy()
 
                         drill_disp.columns = [
                             "Fecha", "Estado", "X/3", "OT", "Cliente", "Codigo EDS", "Estación", "Técnico",
-                            "Tipo", "Modalidad", "Estado OT", "Score",
-                            "⏱ Tiempo", "🔍 Causa raíz", "🔧 Equipo", "🔢 Numeral",
-                            "💬 Observación",
+                            "Tipo", "Estado OT", "Score",
+                            "⏱ Tiempo", "🔍 Causa raíz", "🔢 Numeral", "🔧 Equipo",
+                            "💬 Observación", "Modalidad",
                         ]
 
                         # Orden por Fecha desc: más recientes arriba (parseando dd/mm/yyyy)
