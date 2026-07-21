@@ -11393,6 +11393,80 @@ elif _page == _NAV_PAGES[0]:
 
                 # (Tarjetas de bono movidas arriba, justo bajo los filtros)
 
+                # ── Evolución mensual por dimensión (últimos 6 meses) ─────────
+                st.divider()
+                st.markdown('<div class="section-header">📈 Evolución mensual del índice de llenado</div>',
+                            unsafe_allow_html=True)
+
+                ultimos_6 = meses_disp[:6]
+                ot_hist = df_ot_all[df_ot_all["mes"].isin(ultimos_6)].copy()
+                if equipo_kpi != "Todos":
+                    _grp_kpi_h = _LABEL_TO_GRUPO.get(equipo_kpi)
+                    if _grp_kpi_h:
+                        ot_hist = ot_hist[ot_hist["equipo"] == _grp_kpi_h]
+                if tec_kpi_sel != "Todos":
+                    ot_hist = ot_hist[ot_hist["tecnico"] == tec_kpi_sel]
+                if not ot_hist.empty:
+                    trend = (
+                        ot_hist.groupby("mes")
+                        .agg(
+                            score_global= ("score_total",  "mean"),
+                            pct_tiempo=   ("score_tiempo", lambda x: (x >= 34).mean() * 100),
+                            pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
+                            pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
+                            ots=          ("folio",        "count"),
+                        )
+                        .reset_index()
+                        .sort_values("mes")
+                    )
+                    trend = trend.round(1)
+
+                    _trend_k = f"_fig_prec_trend_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
+                    if _trend_k not in st.session_state:
+                        fig_trend = go.Figure()
+                        fig_trend.add_trace(go.Bar(
+                            name="⏱ Tiempo", x=trend["mes"], y=trend["pct_tiempo"],
+                            marker_color="#f59e0b", opacity=0.85,
+                            text=trend["pct_tiempo"].apply(lambda v: f"{v:.0f}%"),
+                            textposition="outside", textfont=dict(size=10),
+                        ))
+                        fig_trend.add_trace(go.Bar(
+                            name="🔍 Causa raíz", x=trend["mes"], y=trend["pct_causa"],
+                            marker_color="#3b82f6", opacity=0.85,
+                            text=trend["pct_causa"].apply(lambda v: f"{v:.0f}%"),
+                            textposition="outside", textfont=dict(size=10),
+                        ))
+                        fig_trend.add_trace(go.Bar(
+                            name="🔢 Numeral", x=trend["mes"], y=trend["pct_numeral"],
+                            marker_color="#22c55e", opacity=0.85,
+                            text=trend["pct_numeral"].apply(lambda v: f"{v:.0f}%"),
+                            textposition="outside", textfont=dict(size=10),
+                        ))
+                        fig_trend.add_trace(go.Scatter(
+                            name="Score global", x=trend["mes"], y=trend["score_global"],
+                            mode="lines+markers+text",
+                            text=trend["score_global"].apply(lambda v: f"{v:.1f}"),
+                            textposition="top center", textfont=dict(size=11, color="#ef4444"),
+                            line=dict(color="#ef4444", width=3),
+                            marker=dict(size=9, symbol="diamond", color="#ef4444"),
+                            yaxis="y2",
+                        ))
+                        fig_trend.update_layout(
+                            barmode="group",
+                            yaxis=dict(title="Cumplimiento por dimensión (%)", range=[0, 115],
+                                       showgrid=True, gridcolor="rgba(128,128,128,0.15)"),
+                            yaxis2=dict(title="Score global", overlaying="y", side="right",
+                                        range=[0, 105], showgrid=False),
+                            height=380,
+                            margin=dict(t=20, b=30, l=10, r=10),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                        xanchor="center", x=0.5),
+                            bargap=0.25, bargroupgap=0.08,
+                        )
+                        _apply_plot_theme(fig_trend)
+                        st.session_state[_trend_k] = fig_trend
+                    st.plotly_chart(st.session_state[_trend_k], width="stretch")
+
                 # ══════════════════════════════════════════════════════════════════
                 # SECCIÓN: CAUSA RAÍZ
                 # ══════════════════════════════════════════════════════════════════
@@ -11493,60 +11567,6 @@ elif _page == _NAV_PAGES[0]:
                             "Exactitud %":         st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f%%"),
                         },
                     )
-
-                # ── Evolución mensual (últimos 6 meses) ───────────────────────────────
-                st.divider()
-                st.markdown('<div class="section-header">📈 Evolución mensual del índice de llenado</div>',
-                            unsafe_allow_html=True)
-
-                ultimos_6 = meses_disp[:6]  # ya están ordenados desc
-                # Usar df_ot_all pre-computado: solo slice, sin recalcular scores
-                ot_hist = df_ot_all[df_ot_all["mes"].isin(ultimos_6)].copy()
-                if equipo_kpi != "Todos":
-                    _grp_kpi_h = _LABEL_TO_GRUPO.get(equipo_kpi)
-                    if _grp_kpi_h:
-                        ot_hist = ot_hist[ot_hist["equipo"] == _grp_kpi_h]
-                if tec_kpi_sel != "Todos":
-                    ot_hist = ot_hist[ot_hist["tecnico"] == tec_kpi_sel]
-                # df_ot_all ya trae columna "mes" — no hace falta recalcular
-                if not ot_hist.empty:
-                    trend = (
-                        ot_hist.groupby("mes")
-                        .agg(
-                            score_global= ("score_total",  "mean"),
-                            pct_tiempo=   ("score_tiempo", lambda x: (x >= 34).mean() * 100),
-                            pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
-                            pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
-                            ots=          ("folio",        "count"),
-                        )
-                        .reset_index()
-                        .sort_values("mes")
-                    )
-                    trend = trend.round(1)
-
-                    _trend_k = f"_fig_prec_trend_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
-                    if _trend_k not in st.session_state:
-                        fig_trend = px.line(
-                            trend, x="mes", y="score_global",
-                            markers=True, text="score_global",
-                            labels={"mes": "Mes", "score_global": "Score global (0-100)"},
-                            title="Score global de llenado por mes",
-                        )
-                        fig_trend.update_traces(
-                            textposition="top center",
-                            line_color="#3b82f6",
-                            marker=dict(size=8),
-                        )
-                        fig_trend.add_hline(y=100, line_dash="dash", line_color=_SCORE_COLOR["verde"],
-                                            annotation_text="Score perfecto (0 errores)")
-                        fig_trend.update_layout(
-                            yaxis=dict(range=[0, 105]),
-                            height=320,
-                            margin=dict(t=40, b=30),
-                        )
-                        _apply_plot_theme(fig_trend)
-                        st.session_state[_trend_k] = fig_trend
-                    st.plotly_chart(st.session_state[_trend_k], width="stretch")
 
                 # ── Drill-down: OTs individuales de un técnico ────────────────────────
                 st.divider()
