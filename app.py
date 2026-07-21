@@ -11322,81 +11322,14 @@ elif _page == _NAV_PAGES[0]:
 
 
             if _prec_view == _V_RES:
-                st.markdown('<div class="section-header">📊 Desglose del puntaje por dimensión</div>',
+                st.markdown('<div class="section-header">📊 Evolución del puntaje por dimensión</div>',
                             unsafe_allow_html=True)
                 st.caption(
                     f"Promedio mensual de **{total_ots_mes:,}** OTs  |  "
                     f"Técnicos: **{total_tecnicos}**  |  Período: **{_mes_lbl_prec}**"
                 )
 
-                # Usar pct_* ya calculadas con el denominador correcto:
-                #   pct_tiempo  → solo preventivas (MC tienen 25 auto, no cuentan)
-                #   pct_causa   → solo correctivas (MP tienen 25 auto, no aplica)
-                #   pct_numeral → toda lavadora/aspiradora (MC+MP) — el formulario lo exige
-                dim_avg = {
-                    "⏱ Tiempo ejecución (25 pts)":   pct_tiempo  / 100 * 25,
-                    "🔍 Causa raíz (25 pts)":         pct_causa   / 100 * 25,
-                    "🔢 Numeral registrado (25 pts)": pct_numeral / 100 * 25,
-                }
-                dim_max = {k: 25 for k in dim_avg}
-                dim_colors = ["#f59e0b", "#3b82f6", "#22c55e"]
-
-                dim_df = pd.DataFrame([
-                    {
-                        "Dimensión": k,
-                        "Puntaje promedio": round(v, 1),
-                        "Máximo": dim_max[k],
-                        "% de máximo": round(v / dim_max[k] * 100, 1),
-                    }
-                    for k, v in dim_avg.items()
-                ])
-
                 _prec_sig = f"{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}_{_trim_prec}"
-                dc1, dc2 = st.columns([3, 2])
-                with dc1:
-                    _dim_k = f"_fig_prec_dim_{_current_theme}_{_prec_sig}"
-                    if _dim_k not in st.session_state:
-                        fig_dim = px.bar(
-                            dim_df, x="Puntaje promedio", y="Dimensión",
-                            orientation="h",
-                            color="Dimensión",
-                            color_discrete_sequence=dim_colors,
-                            text=dim_df["Puntaje promedio"].apply(lambda v: f"{v:.1f}"),
-                            labels={"Puntaje promedio": "Puntaje promedio (escala de cada dimensión)"},
-                        )
-                        fig_dim.update_traces(textposition="outside")
-                        fig_dim.update_layout(
-                            showlegend=False, height=200,
-                            margin=dict(t=10, b=10, l=10, r=60),
-                            xaxis=dict(range=[0, 40]),
-                            yaxis={"categoryorder": "array",
-                                   "categoryarray": list(reversed(list(dim_avg.keys())))},
-                        )
-                        _apply_plot_theme(fig_dim)
-                        st.session_state[_dim_k] = fig_dim
-                    st.plotly_chart(st.session_state[_dim_k], width="stretch")
-                with dc2:
-                    for row in dim_df.itertuples():
-                        pct = row._4  # % de máximo
-                        color = "#22c55e" if pct >= 99 else ("#f59e0b" if pct >= 90 else "#ef4444")
-                        st.markdown(
-                            f'<div style="margin-bottom:10px;">'
-                            f'<div style="display:flex;justify-content:space-between;'
-                            f'font-size:0.82rem;color:{_t["muted"]};margin-bottom:2px;">'
-                            f'<span>{row.Dimensión}</span>'
-                            f'<span style="color:{color};font-weight:700">{pct:.0f}%</span></div>'
-                            f'<div style="background:{_t["prog_bg"]};border-radius:4px;height:10px;">'
-                            f'<div style="background:{color};width:{min(pct,100):.0f}%;'
-                            f'height:10px;border-radius:4px;"></div></div></div>',
-                            unsafe_allow_html=True,
-                        )
-
-                # (Tarjetas de bono movidas arriba, justo bajo los filtros)
-
-                # ── Evolución mensual por dimensión (últimos 6 meses) ─────────
-                st.divider()
-                st.markdown('<div class="section-header">📈 Evolución mensual del índice de llenado</div>',
-                            unsafe_allow_html=True)
 
                 ultimos_6 = meses_disp[:6]
                 ot_hist = df_ot_all[df_ot_all["mes"].isin(ultimos_6)].copy()
@@ -11410,7 +11343,6 @@ elif _page == _NAV_PAGES[0]:
                     trend = (
                         ot_hist.groupby("mes")
                         .agg(
-                            score_global= ("score_total",  "mean"),
                             pct_tiempo=   ("score_tiempo", lambda x: (x >= 34).mean() * 100),
                             pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
                             pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
@@ -11418,54 +11350,58 @@ elif _page == _NAV_PAGES[0]:
                         )
                         .reset_index()
                         .sort_values("mes")
-                    )
-                    trend = trend.round(1)
+                    ).round(1)
 
-                    _trend_k = f"_fig_prec_trend_{_current_theme}_{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}"
-                    if _trend_k not in st.session_state:
-                        fig_trend = go.Figure()
-                        fig_trend.add_trace(go.Bar(
-                            name="⏱ Tiempo", x=trend["mes"], y=trend["pct_tiempo"],
-                            marker_color="#f59e0b", opacity=0.85,
-                            text=trend["pct_tiempo"].apply(lambda v: f"{v:.0f}%"),
-                            textposition="outside", textfont=dict(size=10),
+                    _area_k = f"_fig_prec_area_{_current_theme}_{_prec_sig}"
+                    if _area_k not in st.session_state:
+                        fig_area = go.Figure()
+                        fig_area.add_trace(go.Scatter(
+                            name="🔢 Numeral",
+                            x=trend["mes"], y=trend["pct_numeral"],
+                            mode="lines+markers",
+                            line=dict(color="#22c55e", width=2, shape="spline"),
+                            marker=dict(size=7, color="#fff",
+                                        line=dict(color="#22c55e", width=2)),
+                            fillcolor="rgba(34,197,94,0.45)",
+                            stackgroup="one",
+                            hovertemplate="%{y:.1f}%<extra>Numeral</extra>",
                         ))
-                        fig_trend.add_trace(go.Bar(
-                            name="🔍 Causa raíz", x=trend["mes"], y=trend["pct_causa"],
-                            marker_color="#3b82f6", opacity=0.85,
-                            text=trend["pct_causa"].apply(lambda v: f"{v:.0f}%"),
-                            textposition="outside", textfont=dict(size=10),
+                        fig_area.add_trace(go.Scatter(
+                            name="⏱ Tiempo ejecución",
+                            x=trend["mes"], y=trend["pct_tiempo"],
+                            mode="lines+markers",
+                            line=dict(color="#f59e0b", width=2, shape="spline"),
+                            marker=dict(size=7, color="#fff",
+                                        line=dict(color="#f59e0b", width=2)),
+                            fillcolor="rgba(245,158,11,0.45)",
+                            stackgroup="one",
+                            hovertemplate="%{y:.1f}%<extra>Tiempo</extra>",
                         ))
-                        fig_trend.add_trace(go.Bar(
-                            name="🔢 Numeral", x=trend["mes"], y=trend["pct_numeral"],
-                            marker_color="#22c55e", opacity=0.85,
-                            text=trend["pct_numeral"].apply(lambda v: f"{v:.0f}%"),
-                            textposition="outside", textfont=dict(size=10),
+                        fig_area.add_trace(go.Scatter(
+                            name="🔍 Causa raíz",
+                            x=trend["mes"], y=trend["pct_causa"],
+                            mode="lines+markers",
+                            line=dict(color="#3b82f6", width=2, shape="spline"),
+                            marker=dict(size=7, color="#fff",
+                                        line=dict(color="#3b82f6", width=2)),
+                            fillcolor="rgba(59,130,246,0.45)",
+                            stackgroup="one",
+                            hovertemplate="%{y:.1f}%<extra>Causa raíz</extra>",
                         ))
-                        fig_trend.add_trace(go.Scatter(
-                            name="Score global", x=trend["mes"], y=trend["score_global"],
-                            mode="lines+markers+text",
-                            text=trend["score_global"].apply(lambda v: f"{v:.1f}"),
-                            textposition="top center", textfont=dict(size=11, color="#ef4444"),
-                            line=dict(color="#ef4444", width=3),
-                            marker=dict(size=9, symbol="diamond", color="#ef4444"),
-                            yaxis="y2",
-                        ))
-                        fig_trend.update_layout(
-                            barmode="group",
-                            yaxis=dict(title="Cumplimiento por dimensión (%)", range=[0, 115],
-                                       showgrid=True, gridcolor="rgba(128,128,128,0.15)"),
-                            yaxis2=dict(title="Score global", overlaying="y", side="right",
-                                        range=[0, 105], showgrid=False),
+                        fig_area.update_layout(
                             height=380,
                             margin=dict(t=20, b=30, l=10, r=10),
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                        xanchor="center", x=0.5),
-                            bargap=0.25, bargroupgap=0.08,
+                            yaxis=dict(title="Cumplimiento (%)",
+                                       showgrid=True,
+                                       gridcolor="rgba(128,128,128,0.15)"),
+                            xaxis=dict(title="Mes"),
+                            legend=dict(orientation="h", yanchor="bottom",
+                                        y=1.02, xanchor="center", x=0.5),
+                            hovermode="x unified",
                         )
-                        _apply_plot_theme(fig_trend)
-                        st.session_state[_trend_k] = fig_trend
-                    st.plotly_chart(st.session_state[_trend_k], width="stretch")
+                        _apply_plot_theme(fig_area)
+                        st.session_state[_area_k] = fig_area
+                    st.plotly_chart(st.session_state[_area_k], width="stretch")
 
                 # ══════════════════════════════════════════════════════════════════
                 # SECCIÓN: CAUSA RAÍZ
