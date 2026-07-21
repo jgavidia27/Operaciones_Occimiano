@@ -7659,10 +7659,10 @@ elif _page == _NAV_PAGES[0]:
     _MAX_PREC_TRM    = int(_BONO_TOTAL * _W_PREC)  # 150.000 (trimestral)
 
     def _score_level(score: float) -> tuple[str, str]:
-        """Color/label informativo para score promedio (display, no bono)."""
-        if score >= 90: return _SCORE_COLOR["verde"],    "✅ Excelente"
-        if score >= 70: return _SCORE_COLOR["amarillo"], "⚠️ Regular"
-        return               _SCORE_COLOR["rojo"],       "❌ Bajo"
+        """Color/label informativo para score promedio (escala 0-75)."""
+        if score >= 67.5: return _SCORE_COLOR["verde"],    "✅ Excelente"
+        if score >= 52.5: return _SCORE_COLOR["amarillo"], "⚠️ Regular"
+        return                   _SCORE_COLOR["rojo"],     "❌ Bajo"
 
     def _bono_sla(pct: float) -> tuple[int, str, str, int]:
         """
@@ -11090,7 +11090,7 @@ elif _page == _NAV_PAGES[0]:
             color_global, lbl_global = _score_level(score_global)
 
             gk1, gk2, gk3, gk4, gk5 = st.columns(5)
-            gk1.metric("Score global del mes", f"{score_global:.1f} / 100",
+            gk1.metric("Score global del mes", f"{score_global:.1f} / 75",
                        delta=lbl_global, delta_color="off")
             gk2.metric("OTs evaluadas", f"{total_ots_mes:,}")
             gk3.metric("Tiempo OK · solo MP (≥70%)", f"{pct_tiempo:.1f}%",
@@ -11403,6 +11403,44 @@ elif _page == _NAV_PAGES[0]:
                         st.session_state[_area_k] = fig_area
                     st.plotly_chart(st.session_state[_area_k], width="stretch")
 
+                    # ── Línea evolutiva de Cumplimiento Global ────────────────
+                    trend["pct_cumpl"] = (
+                        ot_hist.groupby("mes")["score_total"]
+                        .apply(lambda s: (s >= 75).mean() * 100)
+                        .reindex(trend["mes"]).values
+                    ).round(1)
+
+                    _cumpl_k = f"_fig_cumpl_line_{_current_theme}_{_prec_sig}"
+                    if _cumpl_k not in st.session_state:
+                        fig_cumpl = go.Figure()
+                        fig_cumpl.add_trace(go.Scatter(
+                            x=trend["mes"], y=trend["pct_cumpl"],
+                            mode="lines+markers+text",
+                            text=trend["pct_cumpl"].apply(lambda v: f"{v:.1f}%"),
+                            textposition="top center",
+                            textfont=dict(size=11, color="#6366f1"),
+                            line=dict(color="#6366f1", width=3, shape="spline"),
+                            marker=dict(size=9, color="#fff",
+                                        line=dict(color="#6366f1", width=2.5)),
+                            fill="tozeroy",
+                            fillcolor="rgba(99,102,241,0.12)",
+                            hovertemplate="%{y:.1f}% cumplimiento<extra></extra>",
+                        ))
+                        fig_cumpl.update_layout(
+                            title=dict(text="Cumplimiento global — % OTs perfectas (3/3)",
+                                       font=dict(size=14)),
+                            height=280,
+                            margin=dict(t=45, b=30, l=10, r=10),
+                            yaxis=dict(title="Cumplimiento (%)", range=[0, 105],
+                                       showgrid=True,
+                                       gridcolor="rgba(128,128,128,0.15)"),
+                            xaxis=dict(title="Mes"),
+                            showlegend=False,
+                        )
+                        _apply_plot_theme(fig_cumpl)
+                        st.session_state[_cumpl_k] = fig_cumpl
+                    st.plotly_chart(st.session_state[_cumpl_k], width="stretch")
+
                 # ══════════════════════════════════════════════════════════════════
                 # SECCIÓN: CAUSA RAÍZ
                 # ══════════════════════════════════════════════════════════════════
@@ -11539,7 +11577,7 @@ elif _page == _NAV_PAGES[0]:
                             f'<div style="background:{color_d}18;border-left:4px solid {color_d};'
                             f'border-radius:8px;padding:10px 14px;margin-bottom:8px;">'
                             f'<b style="color:{color_d}">{_tec_drill_lbl}</b> — '
-                            f'Score promedio: <b>{avg_drill:.1f}/100</b> &nbsp; {lbl_d} &nbsp; | &nbsp; '
+                            f'Score promedio: <b>{avg_drill:.1f}/75</b> &nbsp; {lbl_d} &nbsp; | &nbsp; '
                             f'<b>{len(df_drill)}</b> OTs en {_mes_lbl_prec}</div>',
                             unsafe_allow_html=True,
                         )
