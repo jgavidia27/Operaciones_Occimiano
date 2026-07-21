@@ -11325,39 +11325,69 @@ elif _page == _NAV_PAGES[0]:
                 st.markdown('<div class="section-header">📊 Evolución del puntaje por dimensión</div>',
                             unsafe_allow_html=True)
                 st.caption(
-                    f"Promedio mensual de **{total_ots_mes:,}** OTs  |  "
+                    f"Promedio de **{total_ots_mes:,}** OTs  |  "
                     f"Técnicos: **{total_tecnicos}**  |  Período: **{_mes_lbl_prec}**"
                 )
 
                 _prec_sig = f"{_wo_sig}_{equipo_kpi}_{tec_kpi_sel}_{'|'.join(_meses_prec_str)}_{_sem_prec}_{_trim_prec}"
 
-                ultimos_6 = meses_disp[:6]
-                ot_hist = df_ot_all[df_ot_all["mes"].isin(ultimos_6)].copy()
+                # ── Datos para gráficos evolutivos ────────────────────────
+                # Usar los meses seleccionados (no ultimos_6 fijos).
+                ot_hist = df_ot_all[
+                    df_ot_all["mes"].astype(str).isin(_meses_prec_str)
+                ].copy()
                 if equipo_kpi != "Todos":
                     _grp_kpi_h = _LABEL_TO_GRUPO.get(equipo_kpi)
                     if _grp_kpi_h:
                         ot_hist = ot_hist[ot_hist["equipo"] == _grp_kpi_h]
                 if tec_kpi_sel != "Todos":
                     ot_hist = ot_hist[ot_hist["tecnico"] == tec_kpi_sel]
+
+                # Decidir granularidad: 1 mes → semanas, 2+ meses → meses
+                _one_month = len(_meses_sel_raw) == 1
                 if not ot_hist.empty:
+                    if _one_month:
+                        _sel_m = str(_meses_sel_raw[0])
+                        _wks = _semanas_del_mes(_sel_m)
+                        _short_wk = {w[0]: f"Sem {i+1}" for i, w in enumerate(_wks)}
+                        def _assign_wk(d):
+                            for lbl, s, e in _wks:
+                                if s <= d <= e:
+                                    return lbl
+                            return None
+                        ot_hist["_periodo"] = ot_hist["creation_date_local"].apply(_assign_wk)
+                        ot_hist = ot_hist.dropna(subset=["_periodo"])
+                        _x_title = "Semana"
+                        _periodo_order = [w[0] for w in _wks]
+                    else:
+                        ot_hist["_periodo"] = ot_hist["mes"].astype(str)
+                        _x_title = "Mes"
+                        _periodo_order = sorted(ot_hist["_periodo"].unique())
+
+                if not ot_hist.empty and "_periodo" in ot_hist.columns:
                     trend = (
-                        ot_hist.groupby("mes")
+                        ot_hist.groupby("_periodo")
                         .agg(
-                            pct_tiempo=   ("score_tiempo", lambda x: (x >= 34).mean() * 100),
+                            pct_tiempo=   ("score_tiempo", lambda x: (x >= 25).mean() * 100),
                             pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
                             pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
+                            pct_cumpl=    ("score_total",   lambda x: (x >= 75).mean() * 100),
                             ots=          ("folio",        "count"),
                         )
+                        .reindex(_periodo_order)
                         .reset_index()
-                        .sort_values("mes")
                     ).round(1)
+                    if _one_month:
+                        trend["_x_lbl"] = trend["_periodo"].map(_short_wk)
+                    else:
+                        trend["_x_lbl"] = trend["_periodo"].apply(_prec_m2l)
 
                     _area_k = f"_fig_prec_area_{_current_theme}_{_prec_sig}"
                     if _area_k not in st.session_state:
                         fig_area = go.Figure()
                         fig_area.add_trace(go.Scatter(
                             name="🔢 Numeral",
-                            x=trend["mes"], y=trend["pct_numeral"],
+                            x=trend["_x_lbl"], y=trend["pct_numeral"],
                             mode="lines+markers",
                             line=dict(color="#22c55e", width=2, shape="spline"),
                             marker=dict(size=7, color="#fff",
@@ -11368,7 +11398,7 @@ elif _page == _NAV_PAGES[0]:
                         ))
                         fig_area.add_trace(go.Scatter(
                             name="⏱ Tiempo ejecución",
-                            x=trend["mes"], y=trend["pct_tiempo"],
+                            x=trend["_x_lbl"], y=trend["pct_tiempo"],
                             mode="lines+markers",
                             line=dict(color="#f59e0b", width=2, shape="spline"),
                             marker=dict(size=7, color="#fff",
@@ -11379,7 +11409,7 @@ elif _page == _NAV_PAGES[0]:
                         ))
                         fig_area.add_trace(go.Scatter(
                             name="🔍 Causa raíz",
-                            x=trend["mes"], y=trend["pct_causa"],
+                            x=trend["_x_lbl"], y=trend["pct_causa"],
                             mode="lines+markers",
                             line=dict(color="#3b82f6", width=2, shape="spline"),
                             marker=dict(size=7, color="#fff",
@@ -11394,7 +11424,9 @@ elif _page == _NAV_PAGES[0]:
                             yaxis=dict(title="Cumplimiento (%)",
                                        showgrid=True,
                                        gridcolor="rgba(128,128,128,0.15)"),
-                            xaxis=dict(title="Mes"),
+                            xaxis=dict(title=_x_title,
+                                       categoryorder="array",
+                                       categoryarray=trend["_x_lbl"].tolist()),
                             legend=dict(orientation="h", yanchor="bottom",
                                         y=1.02, xanchor="center", x=0.5),
                             hovermode="x unified",
@@ -11404,17 +11436,11 @@ elif _page == _NAV_PAGES[0]:
                     st.plotly_chart(st.session_state[_area_k], width="stretch")
 
                     # ── Línea evolutiva de Cumplimiento Global ────────────────
-                    trend["pct_cumpl"] = (
-                        ot_hist.groupby("mes")["score_total"]
-                        .apply(lambda s: (s >= 75).mean() * 100)
-                        .reindex(trend["mes"]).values
-                    ).round(1)
-
                     _cumpl_k = f"_fig_cumpl_line_{_current_theme}_{_prec_sig}"
                     if _cumpl_k not in st.session_state:
                         fig_cumpl = go.Figure()
                         fig_cumpl.add_trace(go.Scatter(
-                            x=trend["mes"], y=trend["pct_cumpl"],
+                            x=trend["_x_lbl"], y=trend["pct_cumpl"],
                             mode="lines+markers+text",
                             text=trend["pct_cumpl"].apply(lambda v: f"{v:.1f}%"),
                             textposition="top center",
@@ -11426,15 +11452,19 @@ elif _page == _NAV_PAGES[0]:
                             fillcolor="rgba(99,102,241,0.12)",
                             hovertemplate="%{y:.1f}% cumplimiento<extra></extra>",
                         ))
+                        _cumpl_title = ("Cumplimiento global — % OTs perfectas (3/3)"
+                                        if not _one_month
+                                        else f"Cumplimiento por semana — {_prec_m2l(_sel_m)}")
                         fig_cumpl.update_layout(
-                            title=dict(text="Cumplimiento global — % OTs perfectas (3/3)",
-                                       font=dict(size=14)),
+                            title=dict(text=_cumpl_title, font=dict(size=14)),
                             height=280,
                             margin=dict(t=45, b=30, l=10, r=10),
                             yaxis=dict(title="Cumplimiento (%)", range=[0, 105],
                                        showgrid=True,
                                        gridcolor="rgba(128,128,128,0.15)"),
-                            xaxis=dict(title="Mes"),
+                            xaxis=dict(title=_x_title,
+                                       categoryorder="array",
+                                       categoryarray=trend["_x_lbl"].tolist()),
                             showlegend=False,
                         )
                         _apply_plot_theme(fig_cumpl)
