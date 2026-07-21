@@ -219,6 +219,27 @@ TECNICOS_NO_APLICA: frozenset[str] = frozenset({
     "Jorge Cáceres Hormaechea",
 })
 
+
+# EDS que NO aplican a los indicadores KPI (SLA, Efectividad MP, Precisión
+# Fracttal). Estas son ubicaciones que Fracttal maneja como EDS pero no lo
+# son realmente — típicamente equipos internos de la oficina Occimiano.
+EDS_NO_APLICA: frozenset[str] = frozenset({
+    "OCCIM-01",   # Equipo interno oficina Occimiano — no es EDS real
+})
+
+
+def _norm_eds(v) -> str:
+    """Normaliza codigo EDS para comparacion (uppercase, strip)."""
+    try:
+        return str(v).strip().upper() if v is not None else ""
+    except Exception:
+        return ""
+
+
+def _es_eds_excluida(v) -> bool:
+    """True si el codigo EDS esta en EDS_NO_APLICA (case-insensitive)."""
+    return _norm_eds(v) in {_norm_eds(e) for e in EDS_NO_APLICA}
+
 # Lookup rápido: nombre corto → grupo
 _TECNICO_A_GRUPO: dict[str, str] = {
     tec: grupo

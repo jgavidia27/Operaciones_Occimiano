@@ -7907,6 +7907,10 @@ elif _page == _NAV_PAGES[0]:
             _src["equipo"] = _src["tecnico"].apply(_get_equipo)
             aplicar_transferencias(_src, "fecha_llamado_dt", "equipo", "tecnico")
             _src = _src[~_src["tecnico"].apply(_es_excluido)].copy()
+            # Excluir EDS internas (OCCIM-01, etc.) de KPI SLA
+            from data import _es_eds_excluida as _es_eds_excl_sla
+            if "eds_occim" in _src.columns:
+                _src = _src[~_src["eds_occim"].apply(_es_eds_excl_sla)].copy()
             _src["equipo_label"] = _src["equipo"].map(_EQUIPO_LABEL).fillna(_src["equipo"])
             st.session_state[_sla_key_dl] = _src
             _sla = _src.copy()
@@ -7929,7 +7933,11 @@ elif _page == _NAV_PAGES[0]:
             _reinc = st.session_state.get("df_reinc", pd.DataFrame()).copy()
         if _reinc.empty and not df_wo.empty:
             _CL_SLA_DL = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
+            from data import _es_eds_excluida as _es_eds_excl_reinc
             _wo_dl = df_wo[df_wo["client"].isin(_CL_SLA_DL)].copy() if "client" in df_wo.columns else df_wo
+            # Excluir EDS internas (OCCIM-01) de reincidencias/Efectividad MP
+            if "eds_occim" in _wo_dl.columns:
+                _wo_dl = _wo_dl[~_wo_dl["eds_occim"].apply(_es_eds_excl_reinc)].copy()
             _reinc = build_reincidencias(_wo_dl, _excel_to_full)
             if not _reinc.empty:
                 if "fecha_cm" in _reinc.columns:
@@ -7997,10 +8005,12 @@ elif _page == _NAV_PAGES[0]:
                         _fn = _excel_to_full.get(str(t).strip(), str(t).strip())
                         _fallas_by_tec[_fn] = int(n)
 
+            from data import _es_eds_excluida as _es_eds_excl_mp
             _pm_dl = df_wo[
                 (df_wo["maint_type"] == "Preventiva") &
                 (~df_wo["technician"].apply(_es_excluido)) &
-                (df_wo["equipo"] != "Sin equipo")
+                (df_wo["equipo"] != "Sin equipo") &
+                (~df_wo["eds_occim"].apply(_es_eds_excl_mp) if "eds_occim" in df_wo.columns else True)
             ].copy()
             if not _pm_dl.empty and "creation_date" in _pm_dl.columns:
                 _pmd = _pm_dl["creation_date"]
@@ -9670,11 +9680,13 @@ elif _page == _NAV_PAGES[0]:
 
         # ── KPIs globales: Total PMs y PMs sin reincidencia ──────────────────────
         # Solo se cuentan PMs de los mismos clientes que el numerador (COPEC/ESMAX/SHELL/Abastible).
+        from data import _es_eds_excluida as _es_eds_excl_pm
         _df_pm_filt = df_wo[
             (df_wo["maint_type"] == "Preventiva") &
             (~df_wo["technician"].apply(_es_excluido)) &
             (df_wo["equipo"] != "Sin equipo") &
-            (df_wo["client"].isin(_CLIENTES_SLA) if "client" in df_wo.columns else True)
+            (df_wo["client"].isin(_CLIENTES_SLA) if "client" in df_wo.columns else True) &
+            (~df_wo["eds_occim"].apply(_es_eds_excl_pm) if "eds_occim" in df_wo.columns else True)
         ].copy()
         # Columna auxiliar: nombre normalizado (sin acentos, sin espacios dobles, minúsculas).
         # Fracttal puede guardar el nombre con doble espacio o acentos distintos al TECH_NAME_MAP.
@@ -10519,6 +10531,10 @@ elif _page == _NAV_PAGES[0]:
                 _df["equipo"] = _df["tecnico"].apply(_get_equipo)
                 aplicar_transferencias(_df, "creation_date", "equipo", "tecnico")
                 _df = _df[~_df["tecnico"].apply(_es_excluido)].copy()
+                # Excluir EDS internas (OCCIM-01, etc.) de KPIs
+                from data import _es_eds_excluida as _es_eds_excl
+                if "eds_occim" in _df.columns:
+                    _df = _df[~_df["eds_occim"].apply(_es_eds_excl)].copy()
                 _tipo_upper = _df["maint_type"].str.upper()
                 _df = _df[
                     _tipo_upper.str.contains("CORRECTIVA", na=False) |

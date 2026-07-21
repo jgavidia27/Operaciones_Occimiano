@@ -223,6 +223,10 @@ def main():
         if "equipo" not in _src.columns or _src["equipo"].isna().all():
             _src["equipo"] = _src["tecnico"].apply(_get_equipo)
         _src = _src[~_src["tecnico"].apply(_es_excluido)].copy()
+        # Excluir EDS internas (OCCIM-01) de KPI SLA
+        from data import _es_eds_excluida as _es_eds_excl_sto
+        if "eds_occim" in _src.columns:
+            _src = _src[~_src["eds_occim"].apply(_es_eds_excl_sto)].copy()
         _src["mes_num"] = pd.to_datetime(_src["fecha_llamado"], errors="coerce").dt.month
         _sla_g = _src.groupby(["tecnico", "equipo", "mes_num"]).agg(
             cumple=("cumple_sla", "sum"), total=("cumple_sla", "count"),
@@ -238,6 +242,9 @@ def main():
     if not df_kpi.empty:
         df_kpi["equipo"] = df_kpi["tecnico"].apply(_get_equipo)
         df_kpi = df_kpi[~df_kpi["tecnico"].apply(_es_excluido)].copy()
+        # Excluir EDS internas (OCCIM-01) de KPI Precision
+        if "eds_occim" in df_kpi.columns:
+            df_kpi = df_kpi[~df_kpi["eds_occim"].apply(_es_eds_excl_sto)].copy()
         _tipo_upper = df_kpi["maint_type"].str.upper()
         df_kpi = df_kpi[
             _tipo_upper.str.contains("CORRECTIVA", na=False) |
@@ -284,6 +291,10 @@ def main():
     log("Calculando reincidencias...")
     _df_wo_reinc = df_wo[df_wo["client"].isin(_CLIENTES_SLA)].copy() \
                    if "client" in df_wo.columns else df_wo.copy()
+    # Excluir EDS internas (OCCIM-01) de reincidencias
+    from data import _es_eds_excluida as _es_eds_excl_sto2
+    if "eds_occim" in _df_wo_reinc.columns:
+        _df_wo_reinc = _df_wo_reinc[~_df_wo_reinc["eds_occim"].apply(_es_eds_excl_sto2)].copy()
     try:
         df_reinc = build_reincidencias(_df_wo_reinc, dict(TECH_NAME_MAP))
         if not df_reinc.empty:
@@ -326,7 +337,8 @@ def main():
             (df_wo["maint_type"] == "Preventiva") &
             (~df_wo["technician"].apply(_es_excluido)) &
             (df_wo["equipo"] != "Sin equipo") &
-            (df_wo["client"].isin(_CLIENTES_SLA) if "client" in df_wo.columns else True)
+            (df_wo["client"].isin(_CLIENTES_SLA) if "client" in df_wo.columns else True) &
+            (~df_wo["eds_occim"].apply(_es_eds_excl_sto) if "eds_occim" in df_wo.columns else True)
         ].copy()
         if not _pm_exp.empty:
             _pm_dates = _pm_exp["creation_date"].dt.tz_convert(None) \

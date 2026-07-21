@@ -86,8 +86,12 @@ def build_excel_resumen(
     NUMERAL_MOTIVO_LABEL = numeral_motivo_label
 
     # ── Precisión data: filtrar por mes/equipo/tec ──
+    from data import _es_eds_excluida as _es_eds_excl_er
     if not df_ot_scores.empty and "mes" in df_ot_scores.columns:
         _df_ot_sc = df_ot_scores[df_ot_scores["mes"].astype(str) == str(dl_mes)].copy()
+        # Excluir EDS internas (OCCIM-01) de Precision
+        if "eds_occim" in _df_ot_sc.columns:
+            _df_ot_sc = _df_ot_sc[~_df_ot_sc["eds_occim"].apply(_es_eds_excl_er)].copy()
         if sem_match is not None and "creation_date_local" in _df_ot_sc.columns:
             _df_ot_sc = _df_ot_sc[
                 (_df_ot_sc["creation_date_local"] >= sem_match[1]) &
@@ -169,6 +173,9 @@ def build_excel_resumen(
         if aplicar_transferencias_fn:
             aplicar_transferencias_fn(_src, "fecha_llamado_dt", "equipo", "tecnico")
         _src = _src[~_src["tecnico"].apply(_es_excluido)].copy()
+        # Excluir EDS internas (OCCIM-01) de SLA
+        if "eds_occim" in _src.columns:
+            _src = _src[~_src["eds_occim"].apply(_es_eds_excl_er)].copy()
         _src["equipo_label"] = _src["equipo"].map(_EQUIPO_LABEL).fillna(_src["equipo"])
         _sla = _src.copy()
 
@@ -191,6 +198,9 @@ def build_excel_resumen(
     if _reinc.empty and not df_wo.empty and build_reincidencias_fn is not None:
         _CL_SLA_DL = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
         _wo_dl = df_wo[df_wo["client"].isin(_CL_SLA_DL)].copy() if "client" in df_wo.columns else df_wo
+        # Excluir EDS internas (OCCIM-01) de reincidencias/Efectividad MP
+        if "eds_occim" in _wo_dl.columns:
+            _wo_dl = _wo_dl[~_wo_dl["eds_occim"].apply(_es_eds_excl_er)].copy()
         _reinc = build_reincidencias_fn(_wo_dl, _excel_to_full)
         if not _reinc.empty:
             if "fecha_cm" in _reinc.columns:
@@ -261,7 +271,8 @@ def build_excel_resumen(
         _pm_dl = df_wo[
             (df_wo["maint_type"] == "Preventiva") &
             (~df_wo["technician"].apply(_es_excluido)) &
-            (df_wo["equipo"] != "Sin equipo")
+            (df_wo["equipo"] != "Sin equipo") &
+            (~df_wo["eds_occim"].apply(_es_eds_excl_er) if "eds_occim" in df_wo.columns else True)
         ].copy()
         if not _pm_dl.empty and "creation_date" in _pm_dl.columns:
             _pmd = _pm_dl["creation_date"]
