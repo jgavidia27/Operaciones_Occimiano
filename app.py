@@ -11382,6 +11382,43 @@ elif _page == _NAV_PAGES[0]:
                     else:
                         trend["_x_lbl"] = trend["_periodo"].apply(_prec_m2l)
 
+                    # ── Línea evolutiva de Cumplimiento Global ────────────────
+                    _cumpl_k = f"_fig_cumpl_line_{_current_theme}_{_prec_sig}"
+                    if _cumpl_k not in st.session_state:
+                        fig_cumpl = go.Figure()
+                        fig_cumpl.add_trace(go.Scatter(
+                            x=trend["_x_lbl"], y=trend["pct_cumpl"],
+                            mode="lines+markers+text",
+                            text=trend["pct_cumpl"].apply(lambda v: f"{v:.1f}%"),
+                            textposition="top center",
+                            textfont=dict(size=11, color="#6366f1"),
+                            line=dict(color="#6366f1", width=3, shape="spline"),
+                            marker=dict(size=9, color="#fff",
+                                        line=dict(color="#6366f1", width=2.5)),
+                            fill="tozeroy",
+                            fillcolor="rgba(99,102,241,0.12)",
+                            hovertemplate="%{y:.1f}% cumplimiento<extra></extra>",
+                        ))
+                        _cumpl_title = ("Cumplimiento global — % OTs perfectas (3/3)"
+                                        if not _one_month
+                                        else f"Cumplimiento por semana — {_prec_m2l(_sel_m)}")
+                        fig_cumpl.update_layout(
+                            title=dict(text=_cumpl_title, font=dict(size=14)),
+                            height=280,
+                            margin=dict(t=45, b=30, l=10, r=10),
+                            yaxis=dict(title="Cumplimiento (%)", range=[0, 105],
+                                       showgrid=True,
+                                       gridcolor="rgba(128,128,128,0.15)"),
+                            xaxis=dict(title=_x_title,
+                                       categoryorder="array",
+                                       categoryarray=trend["_x_lbl"].tolist()),
+                            showlegend=False,
+                        )
+                        _apply_plot_theme(fig_cumpl)
+                        st.session_state[_cumpl_k] = fig_cumpl
+                    st.plotly_chart(st.session_state[_cumpl_k], width="stretch")
+
+                    # ── Área apilada: dimensiones ─────────────────────────────
                     _area_k = f"_fig_prec_area_{_current_theme}_{_prec_sig}"
                     if _area_k not in st.session_state:
                         fig_area = go.Figure()
@@ -11434,42 +11471,6 @@ elif _page == _NAV_PAGES[0]:
                         _apply_plot_theme(fig_area)
                         st.session_state[_area_k] = fig_area
                     st.plotly_chart(st.session_state[_area_k], width="stretch")
-
-                    # ── Línea evolutiva de Cumplimiento Global ────────────────
-                    _cumpl_k = f"_fig_cumpl_line_{_current_theme}_{_prec_sig}"
-                    if _cumpl_k not in st.session_state:
-                        fig_cumpl = go.Figure()
-                        fig_cumpl.add_trace(go.Scatter(
-                            x=trend["_x_lbl"], y=trend["pct_cumpl"],
-                            mode="lines+markers+text",
-                            text=trend["pct_cumpl"].apply(lambda v: f"{v:.1f}%"),
-                            textposition="top center",
-                            textfont=dict(size=11, color="#6366f1"),
-                            line=dict(color="#6366f1", width=3, shape="spline"),
-                            marker=dict(size=9, color="#fff",
-                                        line=dict(color="#6366f1", width=2.5)),
-                            fill="tozeroy",
-                            fillcolor="rgba(99,102,241,0.12)",
-                            hovertemplate="%{y:.1f}% cumplimiento<extra></extra>",
-                        ))
-                        _cumpl_title = ("Cumplimiento global — % OTs perfectas (3/3)"
-                                        if not _one_month
-                                        else f"Cumplimiento por semana — {_prec_m2l(_sel_m)}")
-                        fig_cumpl.update_layout(
-                            title=dict(text=_cumpl_title, font=dict(size=14)),
-                            height=280,
-                            margin=dict(t=45, b=30, l=10, r=10),
-                            yaxis=dict(title="Cumplimiento (%)", range=[0, 105],
-                                       showgrid=True,
-                                       gridcolor="rgba(128,128,128,0.15)"),
-                            xaxis=dict(title=_x_title,
-                                       categoryorder="array",
-                                       categoryarray=trend["_x_lbl"].tolist()),
-                            showlegend=False,
-                        )
-                        _apply_plot_theme(fig_cumpl)
-                        st.session_state[_cumpl_k] = fig_cumpl
-                    st.plotly_chart(st.session_state[_cumpl_k], width="stretch")
 
                 # ══════════════════════════════════════════════════════════════════
                 # SECCIÓN: CAUSA RAÍZ
