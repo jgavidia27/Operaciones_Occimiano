@@ -5,4 +5,4 @@ REM Sincroniza los ultimos 15 dias de OTs con formulario numeral.
 REM Programar en Task Scheduler de Windows cada 2 horas.
 REM ============================================================
 cd /d "C:\Users\jgavi\Documents\occimiano_dashboard"
-python sync_numerales_subtarea.py --modo incremental >> sync_numerales_subtarea.log 2>&1
+pythonw sync_numerales_subtarea.py --modo incremental >> sync_numerales_subtarea.log 2>&1
