@@ -5374,7 +5374,7 @@ elif _page == _NAV_PAGES[3]:
                     if "comuna" in df_eds_c.columns:
                         _eds_ciudad_map = dict(zip(
                             df_eds_c["eds_occim"].astype(str),
-                            df_eds_c["comuna"].fillna("—").astype(str),
+                            df_eds_c["comuna"].fillna("—").astype(str).str.title(),
                         ))
 
                 _fc1, _fc2, _fc3 = st.columns(3)
@@ -5560,10 +5560,10 @@ elif _page == _NAV_PAGES[3]:
 
                     _reg_rows.append({
                         ("Datos OT", "Fecha"):                         _fecha,
+                        ("Datos OT", "N° OT"):                         _fol,
                         ("Datos Estación", "Código EDS"):               _ec,
                         ("Datos Estación", "Nombre Estación"):          _eds_name_map.get(_ec, "—"),
                         ("Datos Estación", "Ciudad"):                   _eds_ciudad_map.get(_ec, "—"),
-                        ("Datos OT", "N° OT"):                         _fol,
                         ("Datos OT", "Hora inicio"):                   _rphora(_sub, "fecha_inicio_subtarea"),
                         ("Datos OT", "Hora término"):                  _rphora(_sub, "fecha_fin_subtarea"),
                         ("Datos OT", "Técnico"):                       _tec,
