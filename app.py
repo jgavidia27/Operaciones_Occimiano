@@ -11555,6 +11555,11 @@ elif _page == _NAV_PAGES[0]:
                         "Exactitud %", "Bono semanal",
                     ]
 
+                    _medals = {0: "🥇 ", 1: "🥈 ", 2: "🥉 "}
+                    tec_disp["Técnico"] = [
+                        _medals.get(i, "") + str(v) for i, v in enumerate(tec_disp["Técnico"])
+                    ]
+
                     _show_df(
                         tec_disp, width="stretch", hide_index=True,
                         column_config={
