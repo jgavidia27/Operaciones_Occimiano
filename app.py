@@ -8318,21 +8318,21 @@ elif _page == _NAV_PAGES[0]:
 
                 _det_completo = pd.DataFrame({
                     "Fecha": _pf["_fecha"],
-                    "Cumple": _pf["_cumple"],
-                    "X/3": _pf["_x3"],
+                    "Cumplimiento": _pf["_cumple"],
                     "OT": _pf.get("folio", "—"),
-                    "EDS": _pf.get("eds_occim", "—"),
                     "Técnico": _pf.get("tecnico", "—"),
+                    "Codigo EDS": _pf.get("eds_occim", "—"),
+                    "Cliente": _pf["client"].fillna("—").str.title() if "client" in _pf.columns else "—",
                     "Estación": _pf["station"].fillna("—").str.title() if "station" in _pf.columns else "—",
-                    "Tipo": _pf["_tipo"],
-                    "Modalidad": _pf["_modalidad"],
                     "Estado": _pf["_estado_ot"],
-                    "Score": _pf["score_total"],
+                    "Tipo": _pf["_tipo"],
+                    "X/3": _pf["_x3"],
                     "⏱ Tiempo": _pf["_col_tiempo"],
                     "🔍 Causa raíz": _pf["_col_causa"],
-                    "🔧 Equipo": _pf["_equipo"],
                     "🔢 Numeral": _pf["_col_numeral"],
+                    "🔧 Equipo": _pf["_equipo"],
                     "💬 Observación": _pf["_obs"],
+                    "Modalidad": _pf["_modalidad"],
                 })
 
                 # ── SECCIÓN 2: RESUMEN CAUSA RAIZ (solo correctivas) ──
@@ -8353,16 +8353,18 @@ elif _page == _NAV_PAGES[0]:
                         _cr["_comentario_cr"] = "—"
                     _det_causa = pd.DataFrame({
                         "Fecha": _cr["_fecha"],
-                        "Equipo": _cr["equipment_code"].fillna("—") if "equipment_code" in _cr.columns else "—",
-                        "EDS": _cr.get("eds_occim", "—"),
+                        "Cumplimiento": _cr["_estado_cr"],
                         "OT": _cr.get("folio", "—"),
-                        "Tipo": _cr["maint_type"].fillna("").str.title() if "maint_type" in _cr.columns else "—",
                         "Técnico": _cr.get("tecnico", "—"),
+                        "Codigo EDS": _cr.get("eds_occim", "—"),
+                        "Cliente": _cr["client"].fillna("—").str.title() if "client" in _cr.columns else "—",
                         "Nombre EDS": _cr["_eds_nombre"],
+                        "Estado": _cr["wo_status"].fillna("—") if "wo_status" in _cr.columns else "—",
+                        "Tipo": _cr["maint_type"].fillna("").str.title() if "maint_type" in _cr.columns else "—",
                         "Causa Raíz": _cr["causa_raiz_raw"].fillna("—") if "causa_raiz_raw" in _cr.columns else "—",
                         "Clasificación": _cr["causa_clasif"].fillna("—") if "causa_clasif" in _cr.columns else "—",
-                        "Estado": _cr["_estado_cr"],
-                        "Comentario técnico / qué hizo": _cr["_comentario_cr"],
+                        "Equipo": _cr["equipment_code"].fillna("—") if "equipment_code" in _cr.columns else "—",
+                        "💬 Observación": _cr["_comentario_cr"],
                     })
 
                 # ── SECCIÓN 3: RESUMEN TIEMPO (solo preventivas con estimado) ──
@@ -8417,13 +8419,15 @@ elif _page == _NAV_PAGES[0]:
                         _te["_diag"] = _te.apply(_diag_te_dl, axis=1)
                         _det_tiempo = pd.DataFrame({
                             "Fecha": _te["_fecha"],
-                            "Estado": _te["_estado_te"],
-                            "EDS": _te.get("eds_occim", "—"),
+                            "Cumplimiento": _te["_estado_te"],
                             "OT": _te.get("folio", "—"),
-                            "Tipo": _te["maint_type"].fillna("").str.title() if "maint_type" in _te.columns else "—",
                             "Técnico": _te.get("tecnico", "—"),
+                            "EDS": _te.get("eds_occim", "—"),
+                            "Cliente": _te["client"].fillna("—").str.title() if "client" in _te.columns else "—",
                             "Nombre EDS": _te["_eds_nombre_te"],
-                            "T. Estimado": _te["estimated_sec"].apply(_fmt_seg_dl),
+                            "Estado": _te["wo_status"].fillna("—") if "wo_status" in _te.columns else "—",
+                            "Tipo": _te["maint_type"].fillna("").str.title() if "maint_type" in _te.columns else "—",
+                            "T. Estimado fracttal": _te["estimated_sec"].apply(_fmt_seg_dl),
                             "T. Mínimo": _te["_minimo_sec"].apply(_fmt_seg_dl),
                             "Máx. 150%": _te["_maximo_sec"].apply(_fmt_seg_dl),
                             "T. Ejecución": _te["_effective_sec"].apply(_fmt_seg_dl),
@@ -8457,19 +8461,25 @@ elif _page == _NAV_PAGES[0]:
                         _nm["_com_num"] = _nm["comentario_tecnico"].fillna("").apply(_strip_comentario_headers)
                     else:
                         _nm["_com_num"] = "—"
+                    if "eds_occim" in _nm.columns:
+                        _nm["_eds_nombre_nm"] = _nm["eds_occim"].map(_eds_map_dl).fillna("—").str.title()
+                    else:
+                        _nm["_eds_nombre_nm"] = "—"
                     _det_numeral = pd.DataFrame({
                         "Fecha": _nm["_fecha"],
-                        "Equipo": _nm["equipment_code"].fillna("—") if "equipment_code" in _nm.columns else "—",
-                        "Cliente": _nm["client"].fillna("—").str.title() if "client" in _nm.columns else "—",
+                        "Cumplimiento": _nm["_estado_num"],
                         "OT": _nm.get("folio", "—"),
-                        "Tipo": _nm["maint_type"].fillna("").str.title() if "maint_type" in _nm.columns else "—",
                         "Técnico": _nm.get("tecnico", "—"),
                         "EDS": _nm.get("eds_occim", "—"),
+                        "Cliente": _nm["client"].fillna("—").str.title() if "client" in _nm.columns else "—",
+                        "Nombre EDS": _nm["_eds_nombre_nm"],
+                        "Estado": _nm["wo_status"].fillna("—") if "wo_status" in _nm.columns else "—",
+                        "Tipo": _nm["maint_type"].fillna("").str.title() if "maint_type" in _nm.columns else "—",
                         "N. Inicial": _nm["_n_ini"],
                         "N. Final": _nm["_n_fin"],
                         "Fichas período": _nm["_fichas"],
-                        "Estado": _nm["_estado_num"],
-                        "Comentario técnico / causa raíz": _nm["_com_num"],
+                        "Equipo": _nm["equipment_code"].fillna("—") if "equipment_code" in _nm.columns else "—",
+                        "💬 Observación": _nm["_com_num"],
                     })
 
                 # ── Escribir las 4 secciones apiladas en una sola hoja ──
