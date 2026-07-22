@@ -37,7 +37,7 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install pandas openpyxl requests
+          pip install pandas openpyxl requests streamlit
 
       - name: Send weekly indicadores emails
         env:

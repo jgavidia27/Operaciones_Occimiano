@@ -5879,7 +5879,7 @@ elif _page == _NAV_PAGES[4]:
     _sub_tabs_util = ["🗓️ Programación STO", "📅 Cronograma de Turnos", "📡 En Vivo"]
     if _is_admin:
         _sub_tabs_util.append("⏰ Validación HHEE")
-        _sub_tabs_util.append("🚗 Consumo Vehículos")
+        _sub_tabs_util.append("🚗 Uso de Vehículos")
     _util_sub_tab = st.radio(
         "",
         _sub_tabs_util,
@@ -7251,7 +7251,7 @@ elif _page == _NAV_PAGES[4]:
         st.stop()
 
     # ── Sub-tab: Consumo Vehículos (solo admin) ───────────────────────────────
-    if _util_sub_tab == "🚗 Consumo Vehículos":
+    if _util_sub_tab == "🚗 Uso de Vehículos":
         from datetime import date as _date_veh, timedelta as _td_veh
 
         st.title("🚗 Consumo de Vehículos")
