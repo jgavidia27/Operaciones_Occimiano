@@ -208,26 +208,33 @@ def ir_a_lista_ots(page):
         page.goto(FRACTTAL_WO_LIST, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(4000)
 
-    # Cambiar a vista LISTA — el boton correcto es title="Órdenes de Trabajo"
+    # Paso 1: salir de Kanban clickeando cualquier vista de lista
+    # Paso 2: ir a "Órdenes de Trabajo" que muestra TODAS las OTs con buscador
     cambiado = False
-    estrategias_lista = [
-        lambda: page.locator('button[title="Órdenes de Trabajo"]').first,
-        lambda: page.locator('button[title*="Ordenes" i]').first,
-        lambda: page.locator('button[title*="Órdenes" i]').first,
-    ]
-    for i, get_loc in enumerate(estrategias_lista):
-        try:
-            loc = get_loc()
-            loc.click(timeout=3000)
-            log(f"   cambiado a vista LISTA (estrategia {i+1})")
-            page.wait_for_timeout(2500)
-            cambiado = True
-            break
-        except Exception:
-            continue
+    for step, estrategias in enumerate([
+        [
+            lambda: page.locator('button.qa-btn-pending-tasks-list').first,
+            lambda: page.locator('button[title="Tareas Pendientes"]').first,
+        ],
+        [
+            lambda: page.locator('button[title="Órdenes de Trabajo"]').first,
+            lambda: page.locator('button[title*="Órdenes" i]').first,
+        ],
+    ]):
+        for i, get_loc in enumerate(estrategias):
+            try:
+                loc = get_loc()
+                loc.click(timeout=3000)
+                label = "Tareas Pendientes" if step == 0 else "Órdenes de Trabajo"
+                log(f"   cambiado a vista {label} (paso {step+1}, estrategia {i+1})")
+                page.wait_for_timeout(2500)
+                cambiado = True
+                break
+            except Exception:
+                continue
 
     if not cambiado:
-        log("   WARN: no se pudo cambiar a vista lista - dejando en Kanban", "WARN")
+        log("   WARN: no se pudo cambiar a vista lista", "WARN")
 
 
 def resetear_vista(page):
@@ -246,12 +253,21 @@ def resetear_vista(page):
     except Exception:
         pass
 
-    # 3. Asegurar vista Lista
-    try:
-        page.locator('button[title="Órdenes de Trabajo"]').first.click(timeout=3000)
-        page.wait_for_timeout(2000)
-    except Exception:
-        pass
+    # 3. Salir de Kanban → Tareas Pendientes, luego ir a Órdenes de Trabajo
+    for step_locs in [
+        [lambda: page.locator('button.qa-btn-pending-tasks-list').first,
+         lambda: page.locator('button[title="Tareas Pendientes"]').first],
+        [lambda: page.locator('button[title="Órdenes de Trabajo"]').first,
+         lambda: page.locator('button[title*="Órdenes" i]').first],
+    ]:
+        for get_loc in step_locs:
+            try:
+                loc = get_loc()
+                loc.click(timeout=3000)
+                page.wait_for_timeout(2000)
+                break
+            except Exception:
+                continue
 
     # 4. Limpiar buscador si tiene valor previo
     try:
