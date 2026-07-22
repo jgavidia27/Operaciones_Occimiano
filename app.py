@@ -5544,6 +5544,8 @@ elif _page == _NAV_PAGES[3]:
                     _fol = _ot["folio"]
                     _sub = df_num_sub_eds[df_num_sub_eds["id_ot"] == _fol]
                     _lav = _sub[_sub["tipo_activo"] == "lavadora"]
+                    if len(_lav) > 1 and "form_tiene_bomba" in _lav.columns:
+                        _lav = _lav.sort_values("form_tiene_bomba", ascending=False)
                     _asp = _sub[_sub["tipo_activo"] == "aspiradora"]
 
                     _cd = _ot["creation_date"]
