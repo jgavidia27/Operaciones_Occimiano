@@ -197,6 +197,10 @@ def calcular_semaforo(wo: dict, extras: dict) -> tuple:
     if completed < 100:
         return ("ROJO", f"Completitud={completed}%", None)
 
+    # Detectar atención remota (no requiere recursos/costos/repuestos)
+    metodo_det = (wo.get("detection_method_description") or "").upper()
+    es_remota = "REMOTA" in metodo_det
+
     # Chequear recursos usando /wo_resources (fuente autoritativa) primero,
     # y como fallback los flags de work_orders (que pueden estar en None para
     # OTs compuestas con multiples activos - Fracttal devuelve 1 fila por
@@ -212,7 +216,7 @@ def calcular_semaforo(wo: dict, extras: dict) -> tuple:
         wo.get("resources_hours") is not None,
         wo.get("resources_services") is not None,
     ])
-    if not (has_recurso_real or has_recurso_flag):
+    if not (has_recurso_real or has_recurso_flag) and not es_remota:
         return ("ROJO", "Sin recursos registrados (falta mano obra/repuestos/servicios)", None)
 
     tipo = (wo.get("tasks_log_task_type_main") or "").upper()
@@ -238,8 +242,9 @@ def calcular_semaforo(wo: dict, extras: dict) -> tuple:
         incong.append("Dice 'NO' a entrega repuestos pero HAY repuestos en recursos")
 
     # Congruencia trabajo_realizado (keyword de cambio) vs repuestos
+    # No aplica a OTs remotas (no hay intervención física)
     trabajo = (extras.get("trabajo_realizado") or "").lower()
-    if trabajo and any(k in trabajo for k in ("cambio de", "cambio ", "reemplaz", "reemplaz")):
+    if not es_remota and trabajo and any(k in trabajo for k in ("cambio de", "cambio ", "reemplaz")):
         if not tiene_rep:
             incong.append(f"Trabajo menciona 'cambio/reemplazo' pero no hay repuesto en recursos")
 
