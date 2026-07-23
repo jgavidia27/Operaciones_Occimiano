@@ -982,6 +982,110 @@ elif vista == "📊 Estadísticas":
         else:
             st.info("Sin OTs pendientes en el filtro actual.")
 
+    # ── Salud del backlog "En Revisión" ──────────────────────────────────
+    st.divider()
+    st.markdown("### 🔍 Backlog de validación — OTs En Revisión")
+    st.caption(
+        "Cuántas OTs están esperando validación administrativa (estado "
+        "*En Revisión* en Fracttal). Meta: mantener el backlog **bajo 25**. "
+        "· 🟢 <25  ·  🟡 25–49  ·  🔴 ≥50"
+    )
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cargar_revision_stats():
+        rows = _sb_get("ots_en_revision",
+                       {"select": "folio,review_date,dias_en_revision",
+                        "limit": 3000})
+        return pd.DataFrame(rows)
+
+    try:
+        _rev = _cargar_revision_stats()
+    except Exception:
+        _rev = pd.DataFrame()
+
+    if _rev.empty:
+        st.info("No hay OTs En Revisión en este momento. 🎉")
+    else:
+        _total_rev = len(_rev)
+        # Color de salud según umbrales
+        if _total_rev < 25:
+            _health_col, _health_lbl = "#16a34a", "Saludable"
+        elif _total_rev < 50:
+            _health_col, _health_lbl = "#eab308", "Atención"
+        else:
+            _health_col, _health_lbl = "#dc2626", "Crítico"
+
+        _g1, _g2 = st.columns([1, 1.4])
+
+        # Gauge de salud
+        with _g1:
+            _max_gauge = max(100, int(_total_rev * 1.15))
+            fig_g = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=_total_rev,
+                number=dict(font=dict(size=46, color=_health_col)),
+                title=dict(text=f"<b>{_health_lbl}</b>",
+                           font=dict(size=18, color=_health_col)),
+                gauge=dict(
+                    axis=dict(range=[0, _max_gauge], tickwidth=1),
+                    bar=dict(color=_health_col, thickness=0.3),
+                    steps=[
+                        dict(range=[0, 25],  color="rgba(22,163,74,0.18)"),
+                        dict(range=[25, 50], color="rgba(234,179,8,0.20)"),
+                        dict(range=[50, _max_gauge], color="rgba(220,38,38,0.18)"),
+                    ],
+                    threshold=dict(line=dict(color="#334155", width=3),
+                                   thickness=0.75, value=50),
+                ),
+            ))
+            fig_g.update_layout(height=300, margin=dict(t=50, b=10, l=30, r=30))
+            st.plotly_chart(fig_g, use_container_width=True)
+            st.caption(f"**{_total_rev}** OTs En Revisión · umbral crítico marcado en 50.")
+
+        # Desglose por semana de ingreso a revisión
+        with _g2:
+            _rev["_rd"] = pd.to_datetime(_rev["review_date"], errors="coerce", utc=True)
+            _rev_v = _rev.dropna(subset=["_rd"]).copy()
+            if _rev_v.empty:
+                st.info("Sin fecha de ingreso a revisión para segmentar.")
+            else:
+                _rev_v["_rd_cl"] = _rev_v["_rd"].dt.tz_convert(_CL_TZ)
+                # Lunes de la semana de ingreso
+                _rev_v["_wk_start"] = (_rev_v["_rd_cl"]
+                                       - pd.to_timedelta(_rev_v["_rd_cl"].dt.weekday, unit="D")
+                                       ).dt.normalize()
+                _wk = (_rev_v.groupby("_wk_start")
+                       .size().reset_index(name="n")
+                       .sort_values("_wk_start"))
+                _wk["_lbl"] = _wk["_wk_start"].dt.strftime("Sem %d/%m")
+                # Semanas más antiguas = más urgentes → color más cálido
+                _n_wk = len(_wk)
+                def _wk_color(i):
+                    # 0 = más antigua (rojo) → última (verde/gris)
+                    frac = i / max(1, _n_wk - 1)
+                    if frac < 0.34:  return "#dc2626"
+                    if frac < 0.67:  return "#eab308"
+                    return "#16a34a"
+                _colors = [_wk_color(i) for i in range(_n_wk)]
+                fig_wk = go.Figure(go.Bar(
+                    x=_wk["_lbl"], y=_wk["n"],
+                    marker_color=_colors,
+                    text=_wk["n"], textposition="outside",
+                ))
+                fig_wk.update_layout(
+                    height=300, margin=dict(t=30, b=30, l=10, r=10),
+                    title=dict(text="OTs en revisión por semana de ingreso",
+                               font=dict(size=14)),
+                    yaxis=dict(title="N° OTs", showgrid=True,
+                               gridcolor="rgba(128,128,128,0.15)"),
+                    xaxis=dict(title="Semana en que pasó a revisión"),
+                )
+                st.plotly_chart(fig_wk, use_container_width=True)
+                st.caption(
+                    "Las barras más antiguas (izquierda, en rojo) son las OTs "
+                    "que llevan más tiempo trabadas — priorizá cerrarlas primero."
+                )
+
 
 # ────────── Registro (Excel) ──────────
 elif vista == "📝 Registro (Excel)":
