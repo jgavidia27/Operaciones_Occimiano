@@ -994,7 +994,7 @@ elif vista == "📊 Estadísticas":
     @st.cache_data(ttl=300, show_spinner=False)
     def _cargar_revision_stats():
         rows = _sb_get("ots_en_revision",
-                       {"select": "folio,review_date,dias_en_revision",
+                       {"select": "folio,review_date,dias_en_revision,color_semaforo",
                         "limit": 3000})
         return pd.DataFrame(rows)
 
@@ -1042,7 +1042,7 @@ elif vista == "📊 Estadísticas":
             st.plotly_chart(fig_g, use_container_width=True)
             st.caption(f"**{_total_rev}** OTs En Revisión · umbral crítico marcado en 50.")
 
-        # Desglose por semana de ingreso a revisión
+        # Desglose por semana de ingreso a revisión (apilado por semáforo)
         with _g2:
             _rev["_rd"] = pd.to_datetime(_rev["review_date"], errors="coerce", utc=True)
             _rev_v = _rev.dropna(subset=["_rd"]).copy()
@@ -1050,40 +1050,54 @@ elif vista == "📊 Estadísticas":
                 st.info("Sin fecha de ingreso a revisión para segmentar.")
             else:
                 _rev_v["_rd_cl"] = _rev_v["_rd"].dt.tz_convert(_CL_TZ)
-                # Lunes de la semana de ingreso
+                # Lunes de la semana + número de semana ISO del año
                 _rev_v["_wk_start"] = (_rev_v["_rd_cl"]
                                        - pd.to_timedelta(_rev_v["_rd_cl"].dt.weekday, unit="D")
                                        ).dt.normalize()
-                _wk = (_rev_v.groupby("_wk_start")
-                       .size().reset_index(name="n")
-                       .sort_values("_wk_start"))
-                _wk["_lbl"] = _wk["_wk_start"].dt.strftime("Sem %d/%m")
-                # Semanas más antiguas = más urgentes → color más cálido
-                _n_wk = len(_wk)
-                def _wk_color(i):
-                    # 0 = más antigua (rojo) → última (verde/gris)
-                    frac = i / max(1, _n_wk - 1)
-                    if frac < 0.34:  return "#dc2626"
-                    if frac < 0.67:  return "#eab308"
-                    return "#16a34a"
-                _colors = [_wk_color(i) for i in range(_n_wk)]
-                fig_wk = go.Figure(go.Bar(
-                    x=_wk["_lbl"], y=_wk["n"],
-                    marker_color=_colors,
-                    text=_wk["n"], textposition="outside",
-                ))
+                _rev_v["_wk_iso"] = _rev_v["_rd_cl"].dt.isocalendar().week.astype(int)
+                _rev_v["_color"] = _rev_v["color_semaforo"].fillna("SIN").astype(str)
+
+                # Orden cronológico de semanas + etiqueta "Sem NN"
+                _wk_order = (_rev_v[["_wk_start", "_wk_iso"]]
+                             .drop_duplicates().sort_values("_wk_start"))
+                _wk_labels = [f"Sem {w}" for w in _wk_order["_wk_iso"]]
+
+                # Conteo por (semana, color)
+                _piv = (_rev_v.groupby(["_wk_iso", "_color"])
+                        .size().unstack(fill_value=0))
+                _piv = _piv.reindex(_wk_order["_wk_iso"].tolist())
+
+                _sem_defs = [
+                    ("VERDE",    "🟢 Cerrar hoy", "#16a34a"),
+                    ("AMARILLO", "🟡 Revisar",    "#eab308"),
+                    ("ROJO",     "🔴 Devolver",   "#dc2626"),
+                ]
+                fig_wk = go.Figure()
+                for _ckey, _clbl, _ccol in _sem_defs:
+                    if _ckey in _piv.columns:
+                        _yv = _piv[_ckey].tolist()
+                        fig_wk.add_trace(go.Bar(
+                            name=_clbl, x=_wk_labels, y=_yv,
+                            marker_color=_ccol,
+                            text=[v if v else "" for v in _yv],
+                            textposition="inside",
+                        ))
                 fig_wk.update_layout(
+                    barmode="stack",
                     height=300, margin=dict(t=30, b=30, l=10, r=10),
                     title=dict(text="OTs en revisión por semana de ingreso",
                                font=dict(size=14)),
                     yaxis=dict(title="N° OTs", showgrid=True,
                                gridcolor="rgba(128,128,128,0.15)"),
-                    xaxis=dict(title="Semana en que pasó a revisión"),
+                    xaxis=dict(title="Semana ISO en que pasó a revisión"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                xanchor="center", x=0.5),
                 )
                 st.plotly_chart(fig_wk, use_container_width=True)
                 st.caption(
-                    "Las barras más antiguas (izquierda, en rojo) son las OTs "
-                    "que llevan más tiempo trabadas — priorizá cerrarlas primero."
+                    "Cada barra = una semana ISO; los colores muestran cuántas de "
+                    "esas OTs están listas para cerrar (verde), por revisar (amarillo) "
+                    "o para devolver (rojo)."
                 )
 
 
