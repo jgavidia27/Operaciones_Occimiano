@@ -1065,9 +1065,9 @@ elif vista == "📊 Estadísticas":
                 _wk_order = (_rev_v[["_wk_start", "_wk_iso"]]
                              .drop_duplicates().sort_values("_wk_start"))
                 _wk_labels = [
-                    f"Sem {row._wk_iso}<br><span style='font-size:11px;color:#94a3b8'>"
-                    f"{_MES_ABR[(row._wk_start + pd.Timedelta(days=3)).month]}</span>"
-                    for row in _wk_order.itertuples()
+                    f"Sem {_iso}<br><span style='font-size:11px;color:#94a3b8'>"
+                    f"{_MES_ABR[(_start + pd.Timedelta(days=3)).month]}</span>"
+                    for _start, _iso in zip(_wk_order["_wk_start"], _wk_order["_wk_iso"])
                 ]
 
                 # Conteo por (semana, color)
