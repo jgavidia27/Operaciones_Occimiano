@@ -162,7 +162,8 @@ def fetch_recursos_detalle(folio: str, token: str) -> dict:
     type=1 inventario, type=2 mano obra, type=3 servicio."""
     h = {"Authorization": f"Bearer {token}"}
     out = {"repuestos_detalle": None, "servicios_detalle": None,
-           "hh_detalle": None, "tiene_repuesto_real": False}
+           "hh_detalle": None, "tiene_repuesto_real": False,
+           "costo_recursos": 0.0}
     try:
         r = requests.get(FRACTTAL_RESOURCES, headers=h,
             params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 100},
@@ -172,10 +173,18 @@ def fetch_recursos_detalle(folio: str, token: str) -> dict:
         return out
 
     rep, hh, serv = [], [], []
+    _costo = 0.0
     for rr in recursos:
         t = rr.get("type")
         d = rr.get("description", "")
         q = rr.get("qty", 0)
+        # Suma del costo real de TODOS los recursos (fuente autoritativa).
+        # En OTs multi-activo el total_cost_task del work_order viene
+        # repartido/None por activo, así que sumar aquí es lo confiable.
+        try:
+            _costo += float(rr.get("total_cost") or 0)
+        except (TypeError, ValueError):
+            pass
         if t == 1:  # inventario/repuesto
             rep.append(f"{q}x {d}")
             out["tiene_repuesto_real"] = True
@@ -186,6 +195,7 @@ def fetch_recursos_detalle(folio: str, token: str) -> dict:
     if rep:  out["repuestos_detalle"] = "; ".join(rep)[:500]
     if serv: out["servicios_detalle"] = "; ".join(serv)[:500]
     if hh:   out["hh_detalle"] = "; ".join(hh)[:500]
+    out["costo_recursos"] = round(_costo, 2)
     return out
 
 
@@ -306,7 +316,8 @@ def wo_to_row(wo: dict, extras: dict) -> dict:
         "tiene_recurso_hh":    wo.get("resources_human_resources") is not None,
         "tiene_recurso_hours": wo.get("resources_hours") is not None,
         "tiene_recurso_serv":  wo.get("resources_services") is not None,
-        "total_cost":         wo.get("total_cost_task") or 0,
+        "total_cost":         (extras.get("costo_recursos") or 0)
+                              or (wo.get("total_cost_task") or 0),
         "resources_serv_desc":(wo.get("resources_services") or "")[:500],
         "tipo_falla":         wo.get("types_description"),
         "causa_raiz":         wo.get("causes_description"),
