@@ -16,6 +16,7 @@ Es un espejo real de lo que ve el dashboard, en un formato más ameno
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 _CL_TZ = ZoneInfo("America/Santiago")
@@ -412,14 +413,20 @@ h1 {font-size:1.7rem !important; margin-bottom:.3rem !important;}
 # ══════════════════════════════════════════════════════════════════════
 # Header
 # ══════════════════════════════════════════════════════════════════════
-st.markdown("# 🌐 Panel de Órdenes — Operaciones")
-st.markdown(
-    f'<div class="hdr-sub">Fuente: <code>v_llamados_sla</code> (misma vista que el dashboard principal) · '
-    f'Enriquecida con <code>fuente</code> desde <code>llamados_correctivos</code> · '
-    f'Datos desde <b>{FECHA_CORTE}</b> · Cache 5 min · '
-    f'<span style="color:#94a3b8;">Build {APP_VERSION}</span></div>',
-    unsafe_allow_html=True,
-)
+_LOGO_PATH = Path(__file__).parent / "assets" / "logo_occim_25.png"
+_hdr_logo, _hdr_txt = st.columns([1, 8], vertical_alignment="center")
+with _hdr_logo:
+    if _LOGO_PATH.exists():
+        st.image(str(_LOGO_PATH), width=130)
+with _hdr_txt:
+    st.markdown("# 🌐 Panel de Órdenes — Operaciones")
+    st.markdown(
+        f'<div class="hdr-sub">Fuente: <code>v_llamados_sla</code> (misma vista que el dashboard principal) · '
+        f'Enriquecida con <code>fuente</code> desde <code>llamados_correctivos</code> · '
+        f'Datos desde <b>{FECHA_CORTE}</b> · Cache 5 min · '
+        f'<span style="color:#94a3b8;">Build {APP_VERSION}</span></div>',
+        unsafe_allow_html=True,
+    )
 
 _c1, _c2 = st.columns([6, 1])
 with _c2:
