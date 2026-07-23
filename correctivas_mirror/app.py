@@ -987,8 +987,8 @@ elif vista == "📊 Estadísticas":
     st.markdown("### 🔍 Backlog de validación — OTs En Revisión")
     st.caption(
         "Cuántas OTs están esperando validación administrativa (estado "
-        "*En Revisión* en Fracttal). Meta: mantener el backlog **bajo 25**. "
-        "· 🟢 <25  ·  🟡 25–49  ·  🔴 ≥50"
+        "*En Revisión* en Fracttal). Meta: mantener el backlog **≤35**. "
+        "· 🟢 ≤35  ·  🟡 36–75  ·  🔴 76–149  ·  🟤 ≥150"
     )
 
     @st.cache_data(ttl=300, show_spinner=False)
@@ -1007,19 +1007,21 @@ elif vista == "📊 Estadísticas":
         st.info("No hay OTs En Revisión en este momento. 🎉")
     else:
         _total_rev = len(_rev)
-        # Color de salud según umbrales
-        if _total_rev < 25:
+        # Color de salud según umbrales (4 niveles)
+        if _total_rev <= 35:
             _health_col, _health_lbl = "#16a34a", "Saludable"
-        elif _total_rev < 50:
+        elif _total_rev <= 75:
             _health_col, _health_lbl = "#eab308", "Atención"
-        else:
+        elif _total_rev < 150:
             _health_col, _health_lbl = "#dc2626", "Crítico"
+        else:
+            _health_col, _health_lbl = "#7f1d1d", "Crisis"   # vinotinto
 
         _g1, _g2 = st.columns([1, 1.4])
 
         # Gauge de salud
         with _g1:
-            _max_gauge = max(100, int(_total_rev * 1.15))
+            _max_gauge = max(180, int(_total_rev * 1.15))
             fig_g = go.Figure(go.Indicator(
                 mode="gauge+number",
                 value=_total_rev,
@@ -1030,17 +1032,18 @@ elif vista == "📊 Estadísticas":
                     axis=dict(range=[0, _max_gauge], tickwidth=1),
                     bar=dict(color=_health_col, thickness=0.3),
                     steps=[
-                        dict(range=[0, 25],  color="rgba(22,163,74,0.18)"),
-                        dict(range=[25, 50], color="rgba(234,179,8,0.20)"),
-                        dict(range=[50, _max_gauge], color="rgba(220,38,38,0.18)"),
+                        dict(range=[0, 35],   color="rgba(22,163,74,0.20)"),
+                        dict(range=[35, 75],  color="rgba(234,179,8,0.22)"),
+                        dict(range=[75, 150], color="rgba(220,38,38,0.20)"),
+                        dict(range=[150, _max_gauge], color="rgba(127,29,29,0.28)"),
                     ],
                     threshold=dict(line=dict(color="#334155", width=3),
-                                   thickness=0.75, value=50),
+                                   thickness=0.75, value=75),
                 ),
             ))
             fig_g.update_layout(height=300, margin=dict(t=50, b=10, l=30, r=30))
             st.plotly_chart(fig_g, use_container_width=True)
-            st.caption(f"**{_total_rev}** OTs En Revisión · umbral crítico marcado en 50.")
+            st.caption(f"**{_total_rev}** OTs En Revisión · umbral crítico marcado en 75.")
 
         # Desglose por semana de ingreso a revisión (apilado por semáforo)
         with _g2:
