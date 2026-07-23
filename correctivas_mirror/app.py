@@ -988,7 +988,7 @@ elif vista == "📊 Estadísticas":
     st.caption(
         "Cuántas OTs están esperando validación administrativa (estado "
         "*En Revisión* en Fracttal). Meta: mantener el backlog **≤35**. "
-        "· 🟢 ≤35  ·  🟡 36–75  ·  🔴 76–149  ·  🟤 ≥150"
+        "· 🟢 ≤35  ·  🟡 36–75  ·  🔴 76–149  ·  🟥 ≥150"
     )
 
     @st.cache_data(ttl=300, show_spinner=False)
@@ -1013,9 +1013,9 @@ elif vista == "📊 Estadísticas":
         elif _total_rev <= 75:
             _health_col, _health_lbl = "#eab308", "Atención"
         elif _total_rev < 150:
-            _health_col, _health_lbl = "#dc2626", "Crítico"
+            _health_col, _health_lbl = "#f87171", "Crítico"  # rojo suave / coral
         else:
-            _health_col, _health_lbl = "#7f1d1d", "Crisis"   # vinotinto
+            _health_col, _health_lbl = "#ff2800", "Crisis"   # rojo Ferrari intenso
 
         _g1, _g2 = st.columns([1, 1.4])
 
@@ -1034,8 +1034,8 @@ elif vista == "📊 Estadísticas":
                     steps=[
                         dict(range=[0, 35],   color="rgba(22,163,74,0.20)"),
                         dict(range=[35, 75],  color="rgba(234,179,8,0.22)"),
-                        dict(range=[75, 150], color="rgba(220,38,38,0.20)"),
-                        dict(range=[150, _max_gauge], color="rgba(127,29,29,0.28)"),
+                        dict(range=[75, 150], color="rgba(248,113,113,0.28)"),   # rojo suave
+                        dict(range=[150, _max_gauge], color="rgba(255,40,0,0.35)"),  # Ferrari
                     ],
                     threshold=dict(line=dict(color="#334155", width=3),
                                    thickness=0.75, value=75),
