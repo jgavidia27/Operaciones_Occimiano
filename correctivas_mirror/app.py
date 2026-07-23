@@ -1166,6 +1166,74 @@ if vista == "🔍 Validación En Revisión":
             ]
         _dff = _dff.drop(columns=["_review_dt"], errors="ignore")
 
+        # ── Resolución: conclusión breve sobre si cerrar o no ─────────────
+        def _s(v) -> str:
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return ""
+            return str(v)
+        def _resolucion(r) -> str:
+            color = _s(r.get("color_semaforo"))
+            motivo = _s(r.get("motivo_semaforo"))
+            tipo = _s(r.get("tipo")).upper()
+            metodo = _s(r.get("metodo_deteccion")).upper()
+            try:
+                pct = int(r.get("completed_pct") or 0)
+            except Exception:
+                pct = 0
+            try:
+                costo = float(r.get("total_cost") or 0)
+            except Exception:
+                costo = 0.0
+            es_remota = "REMOTA" in metodo
+            es_correctiva = tipo.startswith("CORRECT")
+
+            if color == "VERDE":
+                if es_remota:
+                    return "Atendida vía remota — 100% completa, sin necesidad de recursos físicos. Cerrar"
+                partes = ["100% completa"]
+                if costo > 0:
+                    partes.append(f"costos cargados (${int(costo):,})".replace(",", "."))
+                else:
+                    partes.append("con recursos cargados")
+                if es_correctiva:
+                    return "Correctiva OK — " + ", ".join(partes) + ", datos de falla registrados. Cerrar"
+                return ("Preventiva OK — " if tipo.startswith("PREVENT") else "OT OK — ") + ", ".join(partes) + ". Cerrar"
+
+            if color == "AMARILLO":
+                if "sin: tipo falla" in motivo.lower() or "sin: causa" in motivo.lower() or "sin: deteccion" in motivo.lower():
+                    return f"Correctiva incompleta — {motivo}. Pedir al técnico completar. NO cerrar"
+                if "dice 'si'" in motivo.lower() or "dice 'no'" in motivo.lower():
+                    return f"Incongruencia repuestos — {motivo}. Validar con técnico antes de cerrar"
+                if "cambio" in motivo.lower() or "reemplaz" in motivo.lower():
+                    return f"Trabajo menciona cambio de pieza pero no hay repuesto cargado. Validar antes de cerrar"
+                return f"Revisar: {motivo}. Confirmar con técnico antes de cerrar"
+
+            if color == "ROJO":
+                if "completitud" in motivo.lower():
+                    return f"Incompleta ({pct}%) — falta terminar el trabajo en Fracttal. NO cerrar"
+                if "sin recursos" in motivo.lower():
+                    return "Sin recursos registrados — pedir al técnico cargar mano de obra / repuestos / servicios. NO cerrar"
+                return f"Requiere corrección: {motivo}. NO cerrar"
+
+            return motivo or "—"
+
+        _dff = _dff.copy()
+        _dff["_resolucion"] = _dff.apply(_resolucion, axis=1)
+
+        # ── Método de atención simplificado (Presencial / Remota / etc) ──
+        def _metodo_corto(v) -> str:
+            s = _s(v).upper()
+            if not s:
+                return "—"
+            if "REMOTA" in s:
+                return "🌐 Remota"
+            if "PRESENCIAL" in s:
+                return "👷 Presencial"
+            # Fallback: quitar prefijo "N.-" si existe
+            import re as _re
+            return _re.sub(r"^\d+\.-\s*", "", _s(v)).title()
+        _dff["_metodo_short"] = _dff["metodo_deteccion"].apply(_metodo_corto)
+
         st.caption(f"Mostrando **{len(_dff)}** de {_n_total} OTs.")
 
         # Acciones
@@ -1195,6 +1263,7 @@ if vista == "🔍 Validación En Revisión":
             "review_date":        "Fecha - pasó a revisión",
             "folio":              "N° OT",
             "tipo":               "Tipo",
+            "_metodo_short":      "Método",
             "personnel":          "Técnico",
             "cliente":            "Cliente",
             "activo":             "Activo",
@@ -1207,6 +1276,7 @@ if vista == "🔍 Validación En Revisión":
             "entrega_repuestos":  "¿Entregó rep.?",
             "repuestos_detalle":  "Repuestos usados",
             "descripcion_falla":  "Descripción falla",
+            "_resolucion":        "Resolución",
         }
         _cols_out = [c for c in _COL_MAP if c in _dff.columns]
         _tbl = _dff[_cols_out].rename(columns=_COL_MAP).copy()
@@ -1261,6 +1331,8 @@ if vista == "🔍 Validación En Revisión":
                     help="Fecha en que el técnico marcó DONE y quedó esperando validación"),
                 "N° OT":            st.column_config.TextColumn(width=90),
                 "Tipo":             st.column_config.TextColumn(width=110),
+                "Método":           st.column_config.TextColumn(width=120,
+                    help="Método de detección/atención: Presencial, Remota, etc."),
                 "Técnico":          st.column_config.TextColumn(width=180),
                 "Cliente":          st.column_config.TextColumn(width=90),
                 "Activo":           st.column_config.TextColumn(width=250),
@@ -1283,6 +1355,8 @@ if vista == "🔍 Validación En Revisión":
                     help="Recursos tipo inventario/repuesto registrados en Fracttal"),
                 "Descripción falla": st.column_config.TextColumn(width=220,
                     help="Campo 'DESCRIPCIÓN DE LA FALLA ENCONTRADA' del técnico"),
+                "Resolución": st.column_config.TextColumn(width=320,
+                    help="Conclusión sugerida: por qué (o no) se debería cerrar esta OT"),
             },
         )
 
