@@ -1184,8 +1184,9 @@ if vista == "🔍 Validación En Revisión":
                 costo = float(r.get("total_cost") or 0)
             except Exception:
                 costo = 0.0
-            es_remota = "REMOTA" in metodo
             es_correctiva = tipo.startswith("CORRECT")
+            # Preventivas nunca son remotas (por definición del negocio)
+            es_remota = "REMOTA" in metodo and not tipo.startswith("PREVENT")
 
             if color == "VERDE":
                 if es_remota:
@@ -1220,19 +1221,26 @@ if vista == "🔍 Validación En Revisión":
         _dff = _dff.copy()
         _dff["_resolucion"] = _dff.apply(_resolucion, axis=1)
 
-        # ── Método de atención simplificado (Presencial / Remota / etc) ──
-        def _metodo_corto(v) -> str:
-            s = _s(v).upper()
-            if not s:
-                return "—"
-            if "REMOTA" in s:
+        # ── Método de atención simplificado ──────────────────────────────
+        # Preventivas → siempre Presencial MP (nunca remotas).
+        # Correctivas → Presencial MC o Remota según método de detección.
+        # Otros (Solicitud Comercial, etc.) → según método.
+        def _metodo_corto(row) -> str:
+            tipo = _s(row.get("tipo")).upper()
+            metodo = _s(row.get("metodo_deteccion")).upper()
+            if tipo.startswith("PREVENT"):
+                return "👷 Presencial MP"
+            if "REMOTA" in metodo:
                 return "🌐 Remota"
-            if "PRESENCIAL" in s:
+            if tipo.startswith("CORRECT"):
+                return "👷 Presencial MC"
+            if "PRESENCIAL" in metodo:
                 return "👷 Presencial"
-            # Fallback: quitar prefijo "N.-" si existe
+            if not metodo:
+                return "—"
             import re as _re
-            return _re.sub(r"^\d+\.-\s*", "", _s(v)).title()
-        _dff["_metodo_short"] = _dff["metodo_deteccion"].apply(_metodo_corto)
+            return _re.sub(r"^\d+\.-\s*", "", _s(row.get("metodo_deteccion"))).title()
+        _dff["_metodo_short"] = _dff.apply(_metodo_corto, axis=1)
 
         st.caption(f"Mostrando **{len(_dff)}** de {_n_total} OTs.")
 
