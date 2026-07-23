@@ -11443,49 +11443,49 @@ elif _page == _NAV_PAGES[0]:
                         st.session_state[_cumpl_k] = fig_cumpl
                     st.plotly_chart(st.session_state[_cumpl_k], width="stretch")
 
-                    # ── Área apilada: dimensiones ─────────────────────────────
+                    # ── Líneas por dimensión (0-100%, no apilado) ─────────────
+                    # Antes las 3 series estaban con stackgroup="one" → el eje
+                    # Y llegaba a ~250% (suma de las 3). Ahora cada línea es
+                    # independiente sobre 100%: se ve directamente qué
+                    # componente cumple mejor cada semana.
                     _area_k = f"_fig_prec_area_{_current_theme}_{_prec_sig}"
                     if _area_k not in st.session_state:
                         fig_area = go.Figure()
                         fig_area.add_trace(go.Scatter(
-                            name="🔢 Numeral",
-                            x=trend["_x_lbl"], y=trend["pct_numeral"],
+                            name="🔍 Causa raíz",
+                            x=trend["_x_lbl"], y=trend["pct_causa"],
                             mode="lines+markers",
-                            line=dict(color="#22c55e", width=2, shape="spline"),
-                            marker=dict(size=7, color="#fff",
-                                        line=dict(color="#22c55e", width=2)),
-                            fillcolor="rgba(34,197,94,0.45)",
-                            stackgroup="one",
-                            hovertemplate="%{y:.1f}%<extra>Numeral</extra>",
+                            line=dict(color="#3b82f6", width=2.5, shape="spline"),
+                            marker=dict(size=8, color="#fff",
+                                        line=dict(color="#3b82f6", width=2)),
+                            hovertemplate="%{y:.1f}%<extra>Causa raíz</extra>",
                         ))
                         fig_area.add_trace(go.Scatter(
                             name="⏱ Tiempo ejecución",
                             x=trend["_x_lbl"], y=trend["pct_tiempo"],
                             mode="lines+markers",
-                            line=dict(color="#f59e0b", width=2, shape="spline"),
-                            marker=dict(size=7, color="#fff",
+                            line=dict(color="#f59e0b", width=2.5, shape="spline"),
+                            marker=dict(size=8, color="#fff",
                                         line=dict(color="#f59e0b", width=2)),
-                            fillcolor="rgba(245,158,11,0.45)",
-                            stackgroup="one",
                             hovertemplate="%{y:.1f}%<extra>Tiempo</extra>",
                         ))
                         fig_area.add_trace(go.Scatter(
-                            name="🔍 Causa raíz",
-                            x=trend["_x_lbl"], y=trend["pct_causa"],
+                            name="🔢 Numeral",
+                            x=trend["_x_lbl"], y=trend["pct_numeral"],
                             mode="lines+markers",
-                            line=dict(color="#3b82f6", width=2, shape="spline"),
-                            marker=dict(size=7, color="#fff",
-                                        line=dict(color="#3b82f6", width=2)),
-                            fillcolor="rgba(59,130,246,0.45)",
-                            stackgroup="one",
-                            hovertemplate="%{y:.1f}%<extra>Causa raíz</extra>",
+                            line=dict(color="#22c55e", width=2.5, shape="spline"),
+                            marker=dict(size=8, color="#fff",
+                                        line=dict(color="#22c55e", width=2)),
+                            hovertemplate="%{y:.1f}%<extra>Numeral</extra>",
                         ))
                         fig_area.update_layout(
                             height=380,
                             margin=dict(t=20, b=30, l=10, r=10),
                             yaxis=dict(title="Cumplimiento (%)",
+                                       range=[0, 105],
                                        showgrid=True,
-                                       gridcolor="rgba(128,128,128,0.15)"),
+                                       gridcolor="rgba(128,128,128,0.15)",
+                                       ticksuffix="%"),
                             xaxis=dict(title=_x_title,
                                        categoryorder="array",
                                        categoryarray=trend["_x_lbl"].tolist()),
