@@ -1099,15 +1099,19 @@ if vista == "🔍 Validación En Revisión":
         _n_verde = int((_dfr["color_semaforo"] == "VERDE").sum())
         _n_amar  = int((_dfr["color_semaforo"] == "AMARILLO").sum())
         _n_rojo  = int((_dfr["color_semaforo"] == "ROJO").sum())
+        _n_15    = int((_dfr["dias_en_revision"] >= 15).sum())
         _n_old   = int((_dfr["dias_en_revision"] >= 30).sum())
         _monto_v = _dfr.loc[_dfr["color_semaforo"] == "VERDE", "total_cost"].sum()
 
-        _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+        _k1, _k2, _k3, _k4, _k5, _k6 = st.columns(6)
         _k1.metric("Total pendientes", f"{_n_total}")
         _k2.metric("🟢 Cerrar hoy", f"{_n_verde}", f"${int(_monto_v):,}".replace(",", "."))
         _k3.metric("🟡 Revisar", f"{_n_amar}")
         _k4.metric("🔴 Devolver", f"{_n_rojo}")
-        _k5.metric("⚠️ >30 días", f"{_n_old}")
+        _k5.metric("⏳ >15 días", f"{_n_15}",
+                   help="OTs con 15 días o más esperando validación")
+        _k6.metric("⚠️ >30 días", f"{_n_old}",
+                   help="OTs con 30 días o más — priorizar cierre urgente")
 
         # Filtros
         st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
