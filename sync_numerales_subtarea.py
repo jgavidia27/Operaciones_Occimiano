@@ -147,6 +147,9 @@ def fetch_subtareas_numeral(folio: str) -> list:
             "consumo_shampoo_pct":    None,
             "consumo_cera_pct":       None,
             "consumo_cepillo_pct":    None,
+            # ¿El equipo posee cubre fichero? (Shell, plantilla nueva 2026).
+            # None = la plantilla no traía el campo; "SI"/"NO" = respuesta real.
+            "cubre_fichero":          None,
             "fecha_inicio_subtarea":  s.get("initial_date"),
             "fecha_fin_subtarea":     s.get("final_date"),
         }
@@ -210,6 +213,16 @@ def fetch_subtareas_numeral(folio: str) -> list:
                 idx[kid]["form_tiene_produccion"] = True
                 if not val_empty:
                     idx[kid]["lts_hr_produccion_final"] = val
+            elif "CUBRE FICHERO" in desc:
+                # "¿EL EQUIPO POSEE CUBRE FICHERO?" = 'true'/'false'
+                if not val_empty:
+                    _v = val.lower()
+                    if _v in ("true", "si", "sí", "yes", "1"):
+                        idx[kid]["cubre_fichero"] = "SI"
+                    elif _v in ("false", "no", "0"):
+                        idx[kid]["cubre_fichero"] = "NO"
+                    else:
+                        idx[kid]["cubre_fichero"] = val[:10]
 
     # 3) Filtrar: solo subtareas cuyo formulario tiene campos NUMERAL.
     #    Subtareas duplicadas del mismo equipo con plantilla sin numeral
@@ -263,6 +276,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "form_tiene_consumo":    r.get("form_tiene_consumo", False),
             "form_tiene_tiempo":     r.get("form_tiene_tiempo", False),
             "form_tiene_produccion": r.get("form_tiene_produccion", False),
+            "cubre_fichero":         r.get("cubre_fichero"),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
             "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
             "updated_at":         datetime.now(timezone.utc).isoformat(),
@@ -282,13 +296,15 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             # esas 3 columnas del payload y reintentar sin ellas (backward
             # compat). Detectamos por el mensaje PGRST204 "column ... does
             # not exist".
-            if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text):
+            if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text
+                                         or "cubre_fichero" in r.text):
                 for rec in payload:
                     rec.pop("form_tiene_bomba", None)
                     rec.pop("form_tiene_consumo", None)
                     rec.pop("form_tiene_tiempo", None)
                     rec.pop("form_tiene_produccion", None)
                     rec.pop("lts_hr_produccion_final", None)
+                    rec.pop("cubre_fichero", None)
                 r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
                 if r2.status_code in (200, 201, 204):
                     return len(payload), 0

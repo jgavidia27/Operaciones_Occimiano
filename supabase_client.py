@@ -281,7 +281,7 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
             "tiempo_fichas_seg,lts_hr_produccion_final,"
             "consumo_shampoo_pct,consumo_cera_pct,consumo_cepillo_pct,"
             "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
-            "form_tiene_produccion,"
+            "form_tiene_produccion,cubre_fichero,"
             "fecha_inicio_subtarea,fecha_fin_subtarea"
             "&order=id_ot.desc",
             limit=20_000,

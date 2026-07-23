@@ -5410,9 +5410,27 @@ elif _page == _NAV_PAGES[3]:
                     _prod_raw  = _rpval(_lav, "lts_hr_produccion_final", default=None)
                     _bomba_disp, _prod_disp = _reclasificar(_bomba_raw, _prod_raw)
 
+                    # Código de equipo (EQ-XXXX): prioriza la lavadora; si no hay,
+                    # toma cualquier subtarea de la OT.
+                    _eq_code = _rpval(_lav, "codigo_activo", default=None) \
+                        or _rpval(_asp, "codigo_activo", default=None) \
+                        or _rpval(_sub, "codigo_activo", default="—")
+
+                    # ¿Cubre fichero? (SI/NO/—). El valor está en la lavadora.
+                    _cf_raw = (_rpval(_lav, "cubre_fichero", default=None)
+                               or _rpval(_sub, "cubre_fichero", default=None))
+                    if _cf_raw is None:
+                        _cf_disp = "—"
+                    else:
+                        _cf_up = str(_cf_raw).strip().upper()
+                        _cf_disp = ("✅ Sí" if _cf_up in ("SI", "SÍ", "TRUE", "YES")
+                                    else "❌ No" if _cf_up in ("NO", "FALSE")
+                                    else str(_cf_raw))
+
                     _reg_rows.append({
                         ("Datos OT", "Fecha"):                         _fecha,
                         ("Datos OT", "N° OT"):                         _fol,
+                        ("Datos OT", "Equipo"):                        _eq_code,
                         ("Datos Estación", "Código EDS"):               _ec,
                         ("Datos Estación", "Nombre Estación"):          _eds_name_map.get(_ec, "—"),
                         ("Datos Estación", "Ciudad"):                   _eds_ciudad_map.get(_ec, "—"),
@@ -5433,6 +5451,7 @@ elif _page == _NAV_PAGES[3]:
                         # 'Tiempo fichas' solo existe en el form de lavadora
                         # (aspiradora no lo tiene, quedaba siempre vacío).
                         ("Tiempo fichas", "Lavado (seg)"):             _rpval(_lav, "tiempo_fichas_seg"),
+                        ("Tiempo fichas", "Cubre Fichero"):            _cf_disp,
                     })
 
                 if _reg_rows:
