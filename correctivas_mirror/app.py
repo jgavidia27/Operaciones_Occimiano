@@ -1243,7 +1243,36 @@ if vista == "🔍 Validación En Revisión":
             return _re.sub(r"^\d+\.-\s*", "", _s(row.get("metodo_deteccion"))).title()
         _dff["_metodo_short"] = _dff.apply(_metodo_corto, axis=1)
 
-        # Normalizar Tipo y Activo a formato título (no todo en MAYÚSCULA)
+        # ── Separar activo y estación ─────────────────────────────────────
+        # Fracttal devuelve el activo como "LAVADORA MSELF 2021 ... COPEC LOMAS
+        # COLORADAS" — pegado con el nombre de la estación. El parent_desc
+        # trae la ruta: "// COPEC/ COPEC LOMAS COLORADAS/". Usamos eso para
+        # separar limpiamente en dos columnas: Activo (solo equipo) y Estación.
+        def _extraer_estacion_full(pd_val) -> str:
+            parts = [p.strip() for p in _s(pd_val).replace("//", "").split("/") if p.strip()]
+            return parts[1] if len(parts) >= 2 else (parts[0] if parts else "")
+
+        def _limpiar_activo(activo_val, pd_val) -> str:
+            act = _s(activo_val).strip()
+            est_full = _extraer_estacion_full(pd_val)
+            if est_full and act.upper().endswith(est_full.upper()):
+                act = act[:-len(est_full)].strip().rstrip("-").strip()
+            return act
+
+        def _estacion_sin_cliente(pd_val, cliente_val) -> str:
+            est = _extraer_estacion_full(pd_val)
+            cli = _s(cliente_val).strip().upper()
+            if cli and est.upper().startswith(cli + " "):
+                est = est[len(cli) + 1:].strip()
+            return est
+
+        _dff["_estacion"] = _dff.apply(
+            lambda r: _estacion_sin_cliente(r.get("parent_desc"), r.get("cliente")), axis=1)
+        if "activo" in _dff.columns:
+            _dff["activo"] = _dff.apply(
+                lambda r: _limpiar_activo(r.get("activo"), r.get("parent_desc")), axis=1)
+
+        # Normalizar Tipo, Activo y Estación a formato título
         if "tipo" in _dff.columns:
             _dff["tipo"] = _dff["tipo"].astype(str).apply(
                 lambda x: x.title() if x and x.lower() not in ("nan", "none") else "—"
@@ -1252,6 +1281,9 @@ if vista == "🔍 Validación En Revisión":
             _dff["activo"] = _dff["activo"].astype(str).apply(
                 lambda x: x.title() if x and x.lower() not in ("nan", "none") else "—"
             )
+        _dff["_estacion"] = _dff["_estacion"].astype(str).apply(
+            lambda x: x.title() if x and x.lower() not in ("nan", "none") else "—"
+        )
 
         st.caption(f"Mostrando **{len(_dff)}** de {_n_total} OTs.")
 
@@ -1287,6 +1319,8 @@ if vista == "🔍 Validación En Revisión":
             "personnel":          "Técnico",
             "cliente":            "Cliente",
             "activo":             "Activo",
+            "_estacion":          "Estación",
+            "eds_occim":          "Cód. EDS",
             "dias_en_revision":   "Días",
             "completed_pct":      "%",
             "total_cost":         "Costo $",
@@ -1354,7 +1388,12 @@ if vista == "🔍 Validación En Revisión":
                     help="Método de detección/atención: Presencial, Remota, etc."),
                 "Técnico":          st.column_config.TextColumn(width=180),
                 "Cliente":          st.column_config.TextColumn(width=90),
-                "Activo":           st.column_config.TextColumn(width=250),
+                "Activo":           st.column_config.TextColumn(width=200,
+                    help="Equipo (sin la estación — la estación va en su propia columna)"),
+                "Estación":         st.column_config.TextColumn(width=180,
+                    help="Nombre de la estación de servicio (extraído del árbol Fracttal)"),
+                "Cód. EDS":         st.column_config.TextColumn(width=80,
+                    help="Código Occimiano de la estación (ej. SH_211, 60072, EE_S195)"),
                 "Días":             st.column_config.NumberColumn(
                     width=60, format="%d",
                     help="Días esperando validación"),
