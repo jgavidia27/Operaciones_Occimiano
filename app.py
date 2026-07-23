@@ -11106,16 +11106,23 @@ elif _page == _NAV_PAGES[0]:
             total_tecnicos = len(df_tec_scores_rank)
 
             color_global, lbl_global = _score_level(score_global)
+            # Score global como porcentaje sobre 100 (regla de 3: score/75*100)
+            score_global_pct = (score_global / 75) * 100
 
-            gk1, gk2, gk3, gk4, gk5 = st.columns(5)
-            gk1.metric("Score global del mes", f"{score_global:.1f} / 75",
-                       delta=lbl_global, delta_color="off")
+            gk1, gk2, gk3, gk4, gk5, gk6 = st.columns(6)
+            gk1.metric("Score global del mes", f"{score_global_pct:.1f}%",
+                       delta=lbl_global, delta_color="off",
+                       help=f"Puntaje normalizado a 100. Equivale a {score_global:.1f} / 75 pts "
+                            f"(3 componentes de 25 pts: Tiempo, Causa raíz, Numeral).")
             gk2.metric("OTs evaluadas", f"{total_ots_mes:,}")
             gk3.metric("Tiempo OK · solo MP (≥70%)", f"{pct_tiempo:.1f}%",
                        delta=f"{'✅' if pct_tiempo >= 70 else '⚠️'}")
             gk4.metric("Causa raíz OK · solo MC", f"{pct_causa:.1f}%",
                        delta=f"{'✅' if pct_causa >= 80 else '⚠️'}")
-            gk5.metric("Técnicos con bono (≥90% exactitud)", f"{tecnicos_con_bono} / {total_tecnicos}")
+            gk5.metric("Numerales OK · lavadora/aspiradora", f"{pct_numeral:.1f}%",
+                       delta=f"{'✅' if pct_numeral >= 80 else '⚠️'}",
+                       help="OTs de lavadora/aspiradora (MC + MP) con numeral registrado correctamente.")
+            gk6.metric("Técnicos con bono (≥90% exactitud)", f"{tecnicos_con_bono} / {total_tecnicos}")
 
             # ── Barra de puntaje global con desglose ──────────────────────────────
             # ── Helper: ranking por técnico ───────────────────────────────
