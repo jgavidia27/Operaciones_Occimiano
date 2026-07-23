@@ -1057,10 +1057,18 @@ elif vista == "📊 Estadísticas":
                 _rev_v["_wk_iso"] = _rev_v["_rd_cl"].dt.isocalendar().week.astype(int)
                 _rev_v["_color"] = _rev_v["color_semaforo"].fillna("SIN").astype(str)
 
-                # Orden cronológico de semanas + etiqueta "Sem NN"
+                # Orden cronológico de semanas + etiqueta "Sem NN" con el mes
+                # debajo (el mes del jueves de esa semana ISO, que define a qué
+                # mes "pertenece" la semana).
+                _MES_ABR = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                            "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
                 _wk_order = (_rev_v[["_wk_start", "_wk_iso"]]
                              .drop_duplicates().sort_values("_wk_start"))
-                _wk_labels = [f"Sem {w}" for w in _wk_order["_wk_iso"]]
+                _wk_labels = [
+                    f"Sem {row._wk_iso}<br><span style='font-size:11px;color:#94a3b8'>"
+                    f"{_MES_ABR[(row._wk_start + pd.Timedelta(days=3)).month]}</span>"
+                    for row in _wk_order.itertuples()
+                ]
 
                 # Conteo por (semana, color)
                 _piv = (_rev_v.groupby(["_wk_iso", "_color"])
