@@ -11383,7 +11383,10 @@ elif _page == _NAV_PAGES[0]:
                         ot_hist["_periodo"] = ot_hist["creation_date_local"].apply(_assign_wk)
                         ot_hist = ot_hist.dropna(subset=["_periodo"])
                         _x_title = "Semana"
-                        _periodo_order = [w[0] for w in _wks]
+                        # Solo semanas que YA tienen OTs — evita dibujar semanas
+                        # futuras (ej. Sem 5 sin datos) cayendo a 0% en el gráfico.
+                        _wks_con_datos = set(ot_hist["_periodo"].unique())
+                        _periodo_order = [w[0] for w in _wks if w[0] in _wks_con_datos]
                     else:
                         ot_hist["_periodo"] = ot_hist["mes"].astype(str)
                         _x_title = "Mes"
