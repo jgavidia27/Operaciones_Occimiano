@@ -1108,7 +1108,8 @@ if vista == "🔍 Validación En Revisión":
         with _f1:
             _f_color = st.multiselect("Semáforo",
                 ["VERDE", "AMARILLO", "ROJO"],
-                default=["VERDE", "AMARILLO", "ROJO"])
+                default=["VERDE", "AMARILLO", "ROJO"],
+                format_func=lambda x: x.capitalize())
         with _f2:
             _tecnicos_disp = sorted(t for t in _dfr["personnel"].dropna().unique() if t)
             _f_tec = st.multiselect("Técnico", _tecnicos_disp, default=[])
@@ -1276,8 +1277,9 @@ if vista == "🔍 Validación En Revisión":
                 mime="text/csv",
             )
 
-        # Tabla principal - ORDEN: Fecha, N° OT, luego el resto
+        # Tabla principal - ORDEN: Semáforo, Fecha, N° OT, luego el resto
         _COL_MAP = {
+            "color_semaforo":     "Semáforo",
             "review_date":        "Fecha - pasó a revisión",
             "folio":              "N° OT",
             "tipo":               "Tipo",
@@ -1288,7 +1290,6 @@ if vista == "🔍 Validación En Revisión":
             "dias_en_revision":   "Días",
             "completed_pct":      "%",
             "total_cost":         "Costo $",
-            "color_semaforo":     "Semáforo",
             "motivo_semaforo":    "Motivo",
             "trabajo_realizado":  "Trabajo realizado (técnico)",
             "entrega_repuestos":  "¿Entregó rep.?",
@@ -1299,9 +1300,9 @@ if vista == "🔍 Validación En Revisión":
         _cols_out = [c for c in _COL_MAP if c in _dff.columns]
         _tbl = _dff[_cols_out].rename(columns=_COL_MAP).copy()
 
-        # Emoji en semaforo + emoji en entrega repuestos
+        # Emoji en semaforo (solo icono) + emoji en entrega repuestos
         _emoji = {"VERDE": "🟢", "AMARILLO": "🟡", "ROJO": "🔴"}
-        _tbl["Semáforo"] = _tbl["Semáforo"].map(lambda x: f"{_emoji.get(x,'')} {x}")
+        _tbl["Semáforo"] = _tbl["Semáforo"].map(lambda x: _emoji.get(x, x or ""))
         if "¿Entregó rep.?" in _tbl.columns:
             _emoji_rep = {"SI": "✅ SI", "NO": "❌ NO", "N/A": "➖ N/A"}
             _tbl["¿Entregó rep.?"] = _tbl["¿Entregó rep.?"].map(
@@ -1328,7 +1329,7 @@ if vista == "🔍 Validación En Revisión":
         # Init/actualizar estado con base en filas visibles
         _folio_col = "N° OT"
         if _marcar_verdes:
-            _tbl["Cerrar"] = _tbl["Semáforo"].str.contains("VERDE", na=False)
+            _tbl["Cerrar"] = _tbl["Semáforo"].eq("🟢")
         elif _desmarcar:
             _tbl["Cerrar"] = False
 
@@ -1361,7 +1362,8 @@ if vista == "🔍 Validación En Revisión":
                     width=60, format="%d%%"),
                 "Costo $":          st.column_config.NumberColumn(
                     width=100, format="$%d"),
-                "Semáforo":         st.column_config.TextColumn(width=110),
+                "Semáforo":         st.column_config.TextColumn(width=60,
+                    help="🟢 listo para cerrar · 🟡 revisar · 🔴 no cerrar"),
                 "Motivo":           st.column_config.TextColumn(width=250,
                     help="Motivo del color del semáforo (incluye incongruencias)"),
                 "Trabajo realizado (técnico)": st.column_config.TextColumn(
