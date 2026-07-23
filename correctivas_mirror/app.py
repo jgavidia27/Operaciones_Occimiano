@@ -1242,6 +1242,16 @@ if vista == "🔍 Validación En Revisión":
             return _re.sub(r"^\d+\.-\s*", "", _s(row.get("metodo_deteccion"))).title()
         _dff["_metodo_short"] = _dff.apply(_metodo_corto, axis=1)
 
+        # Normalizar Tipo y Activo a formato título (no todo en MAYÚSCULA)
+        if "tipo" in _dff.columns:
+            _dff["tipo"] = _dff["tipo"].astype(str).apply(
+                lambda x: x.title() if x and x.lower() not in ("nan", "none") else "—"
+            )
+        if "activo" in _dff.columns:
+            _dff["activo"] = _dff["activo"].astype(str).apply(
+                lambda x: x.title() if x and x.lower() not in ("nan", "none") else "—"
+            )
+
         st.caption(f"Mostrando **{len(_dff)}** de {_n_total} OTs.")
 
         # Acciones
