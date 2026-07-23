@@ -1091,6 +1091,63 @@ if vista == "🔍 Validación En Revisión":
 
     _dfr = cargar_ots_revision()
 
+    # ── Barra de actualización: última sincronización + botón manual ──────
+    _upd_lbl = "—"
+    if not _dfr.empty and "updated_at" in _dfr.columns:
+        try:
+            _last = pd.to_datetime(_dfr["updated_at"], errors="coerce", utc=True).max()
+            if pd.notna(_last):
+                _upd_lbl = _last.tz_convert(_CL_TZ).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            pass
+
+    _uc1, _uc2 = st.columns([3, 1])
+    with _uc1:
+        st.caption(
+            f"🕒 Última sincronización con Fracttal: **{_upd_lbl}**  ·  "
+            f"El sync automático corre en segundo plano; usá el botón para "
+            f"traer los datos más recientes al instante."
+        )
+    with _uc2:
+        _do_sync = st.button("🔄 Actualizar ahora", use_container_width=True,
+            help="Trae en vivo las OTs En Revisión desde Fracttal (~2 min).")
+
+    if _do_sync:
+        import sys as _sys
+        _need = ("SUPABASE_URL", "SUPABASE_KEY",
+                 "FRACTTAL_CLIENT_ID", "FRACTTAL_CLIENT_SECRET")
+        _missing = []
+        for _k in _need:
+            _v = None
+            try:
+                _v = st.secrets[_k]
+            except Exception:
+                _v = os.getenv(_k)
+            if _v:
+                os.environ[_k] = str(_v)
+            else:
+                _missing.append(_k)
+        if _missing:
+            st.error(
+                f"Faltan credenciales para sincronizar: **{', '.join(_missing)}**. "
+                f"Agrégalas en Streamlit Cloud → Settings → Secrets."
+            )
+        else:
+            _root = str(Path(__file__).parent.parent)
+            if _root not in _sys.path:
+                _sys.path.insert(0, _root)
+            try:
+                with st.spinner("Sincronizando con Fracttal… puede tardar ~2 min."):
+                    import importlib
+                    import sync_ots_revision as _sync
+                    importlib.reload(_sync)   # re-lee las env vars recién seteadas
+                    _sync.main()
+                st.cache_data.clear()
+                st.success("✅ Datos actualizados desde Fracttal.")
+                st.rerun()
+            except (Exception, SystemExit) as _e:
+                st.error(f"No se pudo sincronizar: {_e}")
+
     if _dfr.empty:
         st.info("No hay OTs En Revisión en este momento. Todo al día. 🎉")
     else:
