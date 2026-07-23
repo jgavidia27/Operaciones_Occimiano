@@ -11390,18 +11390,35 @@ elif _page == _NAV_PAGES[0]:
                         _periodo_order = sorted(ot_hist["_periodo"].unique())
 
                 if not ot_hist.empty and "_periodo" in ot_hist.columns:
-                    trend = (
-                        ot_hist.groupby("_periodo")
-                        .agg(
-                            pct_tiempo=   ("score_tiempo", lambda x: (x >= 25).mean() * 100),
-                            pct_causa=    ("causa_ok",     lambda x: x.mean() * 100),
-                            pct_numeral=  ("numeral_ok",   lambda x: x.mean() * 100),
-                            pct_cumpl=    ("score_total",   lambda x: (x >= 75).mean() * 100),
-                            ots=          ("folio",        "count"),
-                        )
-                        .reindex(_periodo_order)
-                        .reset_index()
-                    ).round(1)
+                    # IMPORTANTE: cada dimensión se promedia solo sobre las OTs
+                    # a las que APLICA (mismo criterio que los KPIs de arriba):
+                    #   - Tiempo   → solo MP (correctivas no tienen ventana esperada)
+                    #   - Causa    → solo MC (preventivas no responden a falla)
+                    #   - Numeral  → solo lavadora/aspiradora (el resto no aplica)
+                    # Sin este filtro, promediar sobre todas hunde artificialmente
+                    # el % (ej. las preventivas cuentan como "sin causa raíz").
+                    _has_es_corr = "es_correctiva" in ot_hist.columns
+                    _has_es_lav  = "es_lavadora"   in ot_hist.columns
+
+                    _grp_all = ot_hist.groupby("_periodo")
+                    _mp = ot_hist[~ot_hist["es_correctiva"]] if _has_es_corr else ot_hist
+                    _mc = ot_hist[ ot_hist["es_correctiva"]] if _has_es_corr else ot_hist.iloc[0:0]
+                    _lv = ot_hist[ ot_hist["es_lavadora"]]   if _has_es_lav  else ot_hist
+
+                    _tiempo  = _mp.groupby("_periodo")["score_tiempo"].apply(lambda x: (x >= 25).mean() * 100) if not _mp.empty else pd.Series(dtype=float)
+                    _causa   = _mc.groupby("_periodo")["causa_ok"].apply(lambda x: x.mean() * 100)             if not _mc.empty else pd.Series(dtype=float)
+                    _numeral = _lv.groupby("_periodo")["numeral_ok"].apply(lambda x: x.mean() * 100)           if not _lv.empty else pd.Series(dtype=float)
+                    _cumpl   = _grp_all["score_total"].apply(lambda x: (x >= 75).mean() * 100)
+                    _ots     = _grp_all["folio"].count()
+
+                    trend = pd.DataFrame({
+                        "_periodo":    _periodo_order,
+                        "pct_tiempo":  [_tiempo.get(p, 0.0)  for p in _periodo_order],
+                        "pct_causa":   [_causa.get(p, 0.0)   for p in _periodo_order],
+                        "pct_numeral": [_numeral.get(p, 0.0) for p in _periodo_order],
+                        "pct_cumpl":   [_cumpl.get(p, 0.0)   for p in _periodo_order],
+                        "ots":         [_ots.get(p, 0)       for p in _periodo_order],
+                    }).round(1)
                     if _one_month:
                         trend["_x_lbl"] = trend["_periodo"].map(_short_wk)
                     else:
