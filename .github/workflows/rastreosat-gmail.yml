@@ -1,0 +1,56 @@
+name: Rastreosat Gmail Ingest
+
+# Ingesta diaria del reporte "Viajes" de Rastreosat vía Gmail.
+# Rastreosat envía el reporte cada día a las 11:00 hora Chile
+# (UTC-4 invierno / UTC-3 verano) a jgavidia@occimiano.cl.
+# Corremos 15:30 UTC ≈ 11:30-12:30 CLT para asegurar que ya llegó.
+# También se puede lanzar manualmente desde la pestaña Actions.
+on:
+  schedule:
+    - cron: "30 15 * * *"     # 15:30 UTC diario
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Modo prueba (no escribe a Supabase ni etiqueta Gmail)"
+        type: boolean
+        default: false
+      limit:
+        description: "Procesar solo los últimos N correos (vacío = todos)"
+        type: string
+        default: ""
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests
+
+      - name: Sync Rastreosat viajes desde Gmail
+        env:
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          GMAIL_USER:         "jgavidia@occimiano.cl"
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: |
+          ARGS=""
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              ARGS="$ARGS --dry-run"
+            fi
+            if [[ -n "${{ inputs.limit }}" ]]; then
+              ARGS="$ARGS --limit ${{ inputs.limit }}"
+            fi
+          fi
+          echo "Ejecutando: python sync_rastreosat_gmail.py $ARGS"
+          python sync_rastreosat_gmail.py $ARGS
