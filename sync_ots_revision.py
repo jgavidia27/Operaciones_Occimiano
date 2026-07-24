@@ -78,11 +78,20 @@ def get_token() -> str:
     return r.json()["access_token"]
 
 
-def fetch_en_revision(token: str) -> list:
-    """Barre paginacion de work_orders y filtra los que estan En Revision."""
+def fetch_en_revision(token: str) -> tuple[list, dict]:
+    """Barre paginacion de work_orders y filtra los que estan En Revision.
+    Devuelve (lista_representativa_por_folio, subtareas_pendientes_por_folio).
+
+    Cada folio en Fracttal tiene 1 fila por SUBTAREA. Guardamos:
+      - result: una fila representativa (primera con task_status=DONE) por folio.
+      - subs_pend: dict {folio: [{task, activo}]} con las subtareas cuyo
+        done=False, para poder decir en el panel qué falta por completar.
+    """
     h = {"Authorization": f"Bearer {token}"}
     seen_folios = set()
+    seen_repre  = set()   # folios que ya tienen fila representativa
     result = []
+    subs_pend: dict[str, list[dict]] = {}
     start = 0
     pages = 0
     while pages < MAX_PAGES:
@@ -93,27 +102,40 @@ def fetch_en_revision(token: str) -> list:
         if not data:
             break
         for wo in data:
-            # Filtro estricto: DONE + done=True + sin wo_final_date
-            if wo.get("task_status") != "DONE":
-                continue
-            if wo.get("done") is not True:
-                continue
-            if wo.get("wo_final_date") is not None:
-                continue
-            cs = (wo.get("work_orders_status_custom_description") or "").upper()
-            if any(x in cs for x in _BASURA):
-                continue
             fol = wo.get("wo_folio")
-            if not fol or fol in seen_folios:
+            if not fol:
                 continue
-            seen_folios.add(fol)
-            result.append(wo)
+
+            # Filtro estricto: la OT debe estar En Revisión.
+            # Esto se evalúa sobre la fila principal (task_status=DONE +
+            # done=True + sin cierre admin + custom_status limpio).
+            wo_ok = (
+                wo.get("task_status") == "DONE"
+                and wo.get("done") is True
+                and wo.get("wo_final_date") is None
+                and not any(x in (wo.get("work_orders_status_custom_description") or "").upper()
+                            for x in _BASURA)
+            )
+            if wo_ok:
+                if fol not in seen_repre:
+                    seen_repre.add(fol)
+                    seen_folios.add(fol)
+                    result.append(wo)
+                # Acumular subtareas pendientes de esa OT (done=False)
+                # SOLO para folios que quedaron marcados En Revisión.
+            if fol in seen_folios and wo.get("done") is False:
+                subs_pend.setdefault(fol, []).append({
+                    "task":   (wo.get("description") or "").strip(),
+                    "activo": (wo.get("items_log_description") or "").strip(),
+                })
         start += 100
         pages += 1
         if len(data) < 100:
             break
-    log(f"Fracttal: {pages} paginas barridas, {len(result)} OTs En Revision", "OK")
-    return result
+    log(f"Fracttal: {pages} paginas barridas, {len(result)} OTs En Revision "
+        f"({sum(len(v) for v in subs_pend.values())} subtareas pendientes acumuladas)",
+        "OK")
+    return result, subs_pend
 
 
 def fetch_subtareas_detalle(folio: str, token: str) -> dict:
@@ -292,8 +314,29 @@ def extraer_eds(wo: dict) -> str:
     return str(g2) if g2 else ""
 
 
+def _fmt_subtareas_pendientes(subs: list[dict] | None) -> str | None:
+    """Formatea la lista de subtareas pendientes como texto compacto:
+    'CAMBIO DE ACEITE (Bomba CAT 3CP...); PLAN MTTO... (Aspiradora N°1)'."""
+    if not subs:
+        return None
+    partes = []
+    vistas = set()
+    for s in subs:
+        t = (s.get("task") or "").strip()
+        a = (s.get("activo") or "").strip()
+        # activo abreviado a las primeras 3 palabras para que quepa
+        a_short = " ".join(a.split()[:4])
+        key = (t.upper(), a_short.upper())
+        if key in vistas or not t:
+            continue
+        vistas.add(key)
+        partes.append(f"{t} ({a_short})" if a_short else t)
+    return "; ".join(partes) if partes else None
+
+
 def wo_to_row(wo: dict, extras: dict) -> dict:
     color, motivo, incong = calcular_semaforo(wo, extras)
+    subs_pend_txt = _fmt_subtareas_pendientes(extras.get("subtareas_pendientes"))
     return {
         "folio":              wo.get("wo_folio"),
         "id_wo":              wo.get("id_work_order"),
@@ -335,6 +378,7 @@ def wo_to_row(wo: dict, extras: dict) -> dict:
         "repuestos_detalle":  extras.get("repuestos_detalle"),
         "servicios_detalle":  extras.get("servicios_detalle"),
         "hh_detalle":         extras.get("hh_detalle"),
+        "subtareas_pendientes": subs_pend_txt,
         "updated_at":         datetime.now(timezone.utc).isoformat(),
     }
 
@@ -375,6 +419,16 @@ def sb_upsert(rows: list):
             json=chunk,
             headers=_sb_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
             timeout=60)
+        # Fallback: si la columna subtareas_pendientes aún no está
+        # aplicada en la BD, quitar el campo del payload y reintentar.
+        if r.status_code == 400 and "subtareas_pendientes" in r.text:
+            for rec in chunk:
+                rec.pop("subtareas_pendientes", None)
+            r = requests.post(
+                f"{SUPABASE_URL}/rest/v1/{SB_TABLE}",
+                json=chunk,
+                headers=_sb_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
+                timeout=60)
         if r.status_code >= 400:
             log(f"Upsert {i}-{i+len(chunk)} FAIL {r.status_code}: {r.text[:400]}", "ERR")
             raise SystemExit(1)
@@ -397,7 +451,7 @@ def main():
     tok = get_token()
 
     log("Barriendo OTs En Revision...")
-    ots = fetch_en_revision(tok)
+    ots, subs_pend_por_folio = fetch_en_revision(tok)
 
     log(f"Enriqueciendo {len(ots)} OTs con subtareas + recursos (paralelo x{WORKERS})...")
     extras_por_folio = {}
@@ -414,6 +468,10 @@ def main():
             done += 1
             if done % 25 == 0:
                 log(f"   {done}/{len(ots)} enriquecidas")
+
+    # Inyectar subtareas pendientes (viene del barrido inicial de work_orders)
+    for _fol, _subs in subs_pend_por_folio.items():
+        extras_por_folio.setdefault(_fol, {})["subtareas_pendientes"] = _subs
 
     log("Calculando semaforo...")
     rows = [wo_to_row(wo, extras_por_folio.get(wo.get("wo_folio"), {})) for wo in ots]

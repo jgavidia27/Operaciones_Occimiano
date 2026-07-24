@@ -1892,6 +1892,9 @@ if vista == "🔍 Validación En Revisión":
 
             if color == "ROJO":
                 if "completitud" in motivo.lower():
+                    subs = _s(r.get("subtareas_pendientes"))
+                    if subs:
+                        return f"Incompleta ({pct}%) — falta: {subs}. NO cerrar"
                     return f"Incompleta ({pct}%) — falta terminar el trabajo en Fracttal. NO cerrar"
                 if "sin recursos" in motivo.lower():
                     return "Sin recursos registrados — pedir al técnico cargar mano de obra / repuestos / servicios. NO cerrar"
