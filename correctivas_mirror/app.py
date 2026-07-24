@@ -651,8 +651,8 @@ def _render_panorama():
 st.markdown('<div class="section-hdr">Vista</div>', unsafe_allow_html=True)
 
 vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida",
-                           "📊 Estadísticas", "📝 Registro (Excel)",
-                           "🔍 Validación En Revisión"],
+                           "📝 Registro (Excel)", "🔍 Validación En Revisión",
+                           "🔧 Repuestos", "📊 Estadísticas"],
                  horizontal=True, label_visibility="collapsed")
 
 
@@ -1264,6 +1264,243 @@ elif vista == "📝 Registro (Excel)":
         "⬇️ Descargar CSV (formato registro)", _csv_r,
         file_name=f"registro_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Vista: Repuestos — catálogo consolidado (Occim + Copec)
+# ══════════════════════════════════════════════════════════════════════
+elif vista == "🔧 Repuestos":
+
+    _DATA_DIR = Path(__file__).parent / "data"
+
+    @st.cache_data(ttl=3600, show_spinner="Cargando catálogo de repuestos…")
+    def _cargar_catalogo_repuestos() -> pd.DataFrame:
+        """Consolida el catálogo desde los dos Excel oficiales:
+        - lista_precios_occim.xlsx  → precios 1S/2S, %variación, vigencia comercial
+        - lista_precios_copec.xlsx  → código Copec + estado (Vigente/Inactivo/Próximo)
+        """
+        import re as _re
+
+        _copec_path = _DATA_DIR / "lista_precios_copec.xlsx"
+        _occim_path = _DATA_DIR / "lista_precios_occim.xlsx"
+
+        def _extraer_cod_occim(desc):
+            if desc is None or (isinstance(desc, float) and pd.isna(desc)):
+                return None
+            m = _re.search(r"((?:REP|INS)-\d{3,4})", str(desc).upper())
+            return m.group(1) if m else None
+
+        def _limpiar_desc(desc, cod=None):
+            s = str(desc or "").strip()
+            if cod and s.upper().startswith(cod):
+                s = s[len(cod):].strip()
+            s = _re.sub(r"^\{\s*(?:REP|INS)-\d+\s*\}\s*", "", s).strip()
+            return s
+
+        # ── COPEC (3 bloques horizontales) ────────────────────────
+        copec_raw = pd.read_excel(_copec_path, sheet_name="Hoja1", header=1)
+
+        def _bloque(df, ix, estado):
+            b = df.iloc[:, ix].copy()
+            b.columns = ["cod_copec", "desc_raw", "cod_occim_raw",
+                         "vigente_bloque", "precio"]
+            b = b.dropna(how="all")
+            b["cod_occim"] = b.apply(
+                lambda r: (str(r["cod_occim_raw"]).strip()
+                           if pd.notna(r["cod_occim_raw"])
+                           else _extraer_cod_occim(r["desc_raw"])), axis=1)
+            b["desc"] = b.apply(
+                lambda r: _limpiar_desc(r["desc_raw"], r["cod_occim"]), axis=1)
+            b["cod_copec"] = b["cod_copec"].apply(
+                lambda v: str(v).strip() if pd.notna(v) else None)
+            b["precio"] = pd.to_numeric(b["precio"], errors="coerce").round(0)
+            b["estado"] = estado
+            return b[["cod_occim", "cod_copec", "desc",
+                      "precio", "estado"]].dropna(subset=["cod_occim"])
+
+        df_copec = pd.concat([
+            _bloque(copec_raw, [0, 1, 2, 3, 4],     "Vigente"),
+            _bloque(copec_raw, [7, 8, 9, 10, 11],   "Inactivo"),
+            _bloque(copec_raw, [14, 15, 16, 17, 18], "Próximo"),
+        ], ignore_index=True)
+
+        # ── OCCIM ─────────────────────────────────────────────────
+        occ = pd.read_excel(_occim_path, sheet_name="REPUESTOS", header=0)
+        occ = occ.rename(columns={
+            "Código": "cod_occim", "Nombre": "nombre",
+            "Precio 1S 2026": "precio_1s", "Precio 2S 2026": "precio_2s",
+            "%Variación": "variacion", "VIGENCIA": "vigencia_comercial",
+        })[["cod_occim", "nombre", "precio_1s", "precio_2s",
+             "variacion", "vigencia_comercial"]]
+        occ["cod_occim"] = occ["cod_occim"].astype(str).str.strip().str.upper()
+        for _c in ("precio_1s", "precio_2s", "variacion"):
+            occ[_c] = pd.to_numeric(occ[_c], errors="coerce")
+
+        serv = pd.read_excel(_occim_path, sheet_name="SERVICIOS", header=0)
+        serv = serv.rename(columns={
+            "CÓDIGO": "cod_occim", "ITEM": "nombre",
+            "PRECIO 1S 2026": "precio_1s", "PRECIO 2S 2026": "precio_2s",
+        })[["cod_occim", "nombre", "precio_1s", "precio_2s"]].dropna(
+            subset=["cod_occim"])
+        serv["cod_occim"] = serv["cod_occim"].astype(str).str.strip().str.upper()
+        for _c in ("precio_1s", "precio_2s"):
+            serv[_c] = pd.to_numeric(serv[_c], errors="coerce")
+        serv["variacion"] = (
+            (serv["precio_2s"] - serv["precio_1s"])
+            / serv["precio_1s"].replace(0, pd.NA)
+        )
+        serv["vigencia_comercial"] = "Si"
+
+        # ── Merge: OCCIM (maestro) + COPEC (cod_copec + estado) ───
+        copec_lookup = df_copec.set_index("cod_occim")[["cod_copec", "estado"]]
+        copec_lookup = copec_lookup[~copec_lookup.index.duplicated()]
+
+        occ["fuente"] = "Repuesto"
+        serv["fuente"] = "Servicio"
+        occ = occ.merge(copec_lookup, left_on="cod_occim",
+                        right_index=True, how="left")
+        serv["cod_copec"] = None
+        serv["estado"] = "Vigente"
+
+        def _estado_final(row):
+            if pd.notna(row.get("estado")):
+                return row["estado"]
+            if str(row.get("vigencia_comercial", "")).strip().lower() in ("no", "n"):
+                return "Inactivo"
+            return "Vigente"
+        occ["estado"] = occ.apply(_estado_final, axis=1)
+
+        # Faltantes: items en COPEC pero no en OCCIM
+        faltantes = df_copec[~df_copec["cod_occim"].isin(occ["cod_occim"])].copy()
+        faltantes = faltantes.rename(columns={"desc": "nombre",
+                                              "precio": "precio_2s"})
+        faltantes["precio_1s"] = None
+        faltantes["variacion"] = None
+        faltantes["vigencia_comercial"] = "Si"
+        faltantes["fuente"] = "Repuesto"
+
+        cons = pd.concat([occ, serv, faltantes], ignore_index=True, sort=False)
+        return cons[["cod_occim", "cod_copec", "nombre", "precio_1s",
+                     "precio_2s", "variacion", "estado", "fuente"]]
+
+    try:
+        _rep = _cargar_catalogo_repuestos()
+    except FileNotFoundError as _e:
+        st.error(f"No se encontraron los archivos de precios en `data/`: {_e}")
+        st.stop()
+
+    # ── Contadores por estado ────────────────────────────────────────
+    _n_vig = int((_rep["estado"] == "Vigente").sum())
+    _n_ina = int((_rep["estado"] == "Inactivo").sum())
+    _n_pro = int((_rep["estado"] == "Próximo").sum())
+    _n_tot_rep = len(_rep)
+
+    _rk1, _rk2, _rk3, _rk4 = st.columns(4)
+    _rk1.metric("📦 Total catálogo", f"{_n_tot_rep}",
+                help="Suma de repuestos + servicios en el consolidado")
+    _rk2.metric("✅ Vigentes", f"{_n_vig}",
+                help="Items activos, en uso actualmente")
+    _rk3.metric("🟡 Próximos", f"{_n_pro}",
+                help="Items nuevos por agregar a la compañía")
+    _rk4.metric("⛔ Inactivos", f"{_n_ina}",
+                help="Items dados de baja / descontinuados")
+
+    st.markdown('<div class="section-hdr">Filtros</div>',
+                unsafe_allow_html=True)
+    _rf1, _rf2, _rf3 = st.columns([1.3, 1, 3])
+    with _rf1:
+        # Los VIGENTES son la vista por defecto (siempre marcados);
+        # Inactivos/Próximos se muestran solo si el usuario los cliquea.
+        _estados_sel = st.multiselect(
+            "Estado", ["Vigente", "Próximo", "Inactivo"],
+            default=["Vigente"],
+            help="Vigentes por defecto. Marca Próximo/Inactivo para verlos.")
+    with _rf2:
+        _fuentes_sel = st.multiselect(
+            "Tipo", ["Repuesto", "Servicio"],
+            default=["Repuesto", "Servicio"])
+    with _rf3:
+        _rep_buscar = st.text_input(
+            "🔍 Buscar por código o descripción",
+            placeholder="Ej: REP-0087, boquilla, mangueras, etc.",
+            key="rep_buscar")
+
+    _view = _rep.copy()
+    if _estados_sel:
+        _view = _view[_view["estado"].isin(_estados_sel)]
+    if _fuentes_sel:
+        _view = _view[_view["fuente"].isin(_fuentes_sel)]
+    if _rep_buscar:
+        q = _rep_buscar.strip().upper()
+        _m = (
+            _view["cod_occim"].fillna("").str.upper().str.contains(q, na=False, regex=False)
+            | _view["cod_copec"].fillna("").str.upper().str.contains(q, na=False, regex=False)
+            | _view["nombre"].fillna("").str.upper().str.contains(q, na=False, regex=False)
+        )
+        _view = _view[_m]
+
+    # Orden: primero Repuestos por código, luego Servicios
+    _view = _view.sort_values(["fuente", "cod_occim"],
+                              ascending=[True, True]).reset_index(drop=True)
+
+    st.caption(f"Mostrando **{len(_view):,}** de {_n_tot_rep} items del catálogo.")
+
+    # Emojis para el estado (visual)
+    _est_emoji = {"Vigente": "✅ Vigente",
+                  "Próximo": "🟡 Próximo",
+                  "Inactivo": "⛔ Inactivo"}
+    _fte_emoji = {"Repuesto": "🔧 Repuesto", "Servicio": "🛠 Servicio"}
+    _tbl = _view.rename(columns={
+        "cod_occim": "Código Occim",
+        "cod_copec": "Código Copec",
+        "nombre": "Descripción",
+        "precio_1s": "Precio 1S 2026",
+        "precio_2s": "Precio 2S 2026",
+        "variacion": "% Variación",
+        "estado": "Estado",
+        "fuente": "Tipo",
+    }).copy()
+    _tbl["Estado"] = _tbl["Estado"].map(lambda x: _est_emoji.get(x, x))
+    _tbl["Tipo"] = _tbl["Tipo"].map(lambda x: _fte_emoji.get(x, x))
+    _tbl["Código Copec"] = _tbl["Código Copec"].fillna("—")
+
+    st.dataframe(
+        _tbl,
+        hide_index=True, use_container_width=True, height=560,
+        column_config={
+            "Código Occim":   st.column_config.TextColumn(width=110),
+            "Código Copec":   st.column_config.TextColumn(width=110,
+                help="Código interno de Copec para cruzar con su sistema"),
+            "Descripción":    st.column_config.TextColumn(width=340),
+            "Precio 1S 2026": st.column_config.NumberColumn(
+                width=120, format="$%d",
+                help="Precio primer semestre 2026 (base para %variación)"),
+            "Precio 2S 2026": st.column_config.NumberColumn(
+                width=120, format="$%d",
+                help="Precio vigente segundo semestre 2026"),
+            "% Variación":    st.column_config.NumberColumn(
+                width=100, format="%.2f%%",
+                help="Variación 1S → 2S 2026 (fracción, se multiplica por 100)"),
+            "Estado":         st.column_config.TextColumn(width=110),
+            "Tipo":           st.column_config.TextColumn(width=110),
+        },
+    )
+
+    # Descarga CSV
+    _csv_rep = _view.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "⬇️ Descargar CSV del filtro",
+        _csv_rep,
+        file_name=f"repuestos_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+    )
+
+    st.caption(
+        "Consolidado desde las dos listas oficiales: "
+        "**Lista de Precios Vigente 2S 2026** (Occim) + "
+        "**Lista de Precios COPEC — ENLACE** (con código interno de Copec y estados). "
+        "Actualiza reemplazando los archivos en `correctivas_mirror/data/`."
     )
 
 
