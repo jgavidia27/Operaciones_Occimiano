@@ -556,10 +556,10 @@ if _solo_pend:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# KPIs
+# KPIs — se calculan siempre (Feed usa _n_tot en el caption), pero el
+# bloque visual "Panorama" solo se renderiza en la Tabla enriquecida
+# porque en Feed/Estadísticas/Registro no aporta contexto.
 # ══════════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-hdr">Panorama</div>', unsafe_allow_html=True)
-
 _hoy = pd.Timestamp.now(tz="America/Santiago").tz_localize(None).date()
 _semana = _hoy - timedelta(days=7)
 
@@ -577,69 +577,72 @@ _n_terr   = int((_df["estado_lbl"] == "Técnico atendiendo").sum())
 _evaluadas = _n_cumple + _n_nocump
 _pct_cumpl = (_n_cumple / _evaluadas * 100) if _evaluadas else 0
 
-_k1, _k2, _k3, _k4, _k5 = st.columns(5)
-_k1.metric("Total (filtrado)", f"{_n_tot:,}",
-           delta=f"{_n_hoy} hoy" if _n_hoy else "", delta_color="off")
-_k2.metric("✅ Finalizada · Cumple SLA", f"{_n_cumple:,}",
-           delta=f"{_pct_cumpl:.1f}% del SLA evaluado", delta_color="off")
-_k3.metric("❌ Finalizada · No cumple", f"{_n_nocump:,}",
-           delta_color="inverse")
-_k4.metric("🟢 OT atendida", f"{_n_trab:,}",
-           delta="pend. cierre en Fracttal", delta_color="off",
-           help="Técnico terminó y registró fecha_finalizacion, pero la "
-                "OT sigue abierta en Fracttal por cierre administrativo.")
-_k5.metric("🔴 Sin atender / 🟡 Atendiendo", f"{_n_sinat:,} / {_n_terr:,}",
-           delta=f"{_n_terr} técnico en vivo" if _n_terr else "sin atender",
-           delta_color="off",
-           help="🔴 Sin fecha de inicio = nadie la ha tomado · "
-                "🟡 Con fecha de inicio, sin final = técnico trabajando en vivo.")
 
-# Distribución por fuente
-if _n_tot:
-    _dist = _df["fuente"].fillna("(sin fuente)").value_counts()
+def _render_panorama():
+    """Bloque visual del Panorama (KPIs + distribución por canal).
+    Solo se muestra dentro de la Tabla enriquecida."""
+    st.markdown('<div class="section-hdr">Panorama</div>', unsafe_allow_html=True)
 
-    # Barra visual con count + % inline
-    _bar = '<div style="display:flex;gap:4px;margin-top:14px;height:42px;overflow:hidden;border-radius:6px;">'
-    for _f, _n in _dist.items():
-        _meta = FUENTE_META.get(_f, ("❓", _f or "(sin fuente)", "#64748b", "#f1f5f9"))
-        _pct = _n / _n_tot * 100
-        _bar += (
-            f'<div style="flex:{_n};background:{_meta[2]};color:#fff;'
-            f'display:flex;flex-direction:column;align-items:center;'
-            f'justify-content:center;font-weight:600;min-width:110px;padding:0 6px;'
-            f'text-align:center;line-height:1.15" '
-            f'title="{_meta[1]}: {_n:,} · {_pct:.1f}%">'
-            f'<div style="font-size:.78rem">{_meta[0]} {_meta[1]}</div>'
-            f'<div style="font-size:.72rem;opacity:.9">{_n:,} · {_pct:.1f}%</div>'
-            f'</div>')
-    _bar += "</div>"
-    st.markdown(_bar, unsafe_allow_html=True)
+    _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+    _k1.metric("Total (filtrado)", f"{_n_tot:,}",
+               delta=f"{_n_hoy} hoy" if _n_hoy else "", delta_color="off")
+    _k2.metric("✅ Finalizada · Cumple SLA", f"{_n_cumple:,}",
+               delta=f"{_pct_cumpl:.1f}% del SLA evaluado", delta_color="off")
+    _k3.metric("❌ Finalizada · No cumple", f"{_n_nocump:,}",
+               delta_color="inverse")
+    _k4.metric("🟢 OT atendida", f"{_n_trab:,}",
+               delta="pend. cierre en Fracttal", delta_color="off",
+               help="Técnico terminó y registró fecha_finalizacion, pero la "
+                    "OT sigue abierta en Fracttal por cierre administrativo.")
+    _k5.metric("🔴 Sin atender / 🟡 Atendiendo", f"{_n_sinat:,} / {_n_terr:,}",
+               delta=f"{_n_terr} técnico en vivo" if _n_terr else "sin atender",
+               delta_color="off",
+               help="🔴 Sin fecha de inicio = nadie la ha tomado · "
+                    "🟡 Con fecha de inicio, sin final = técnico trabajando en vivo.")
 
-    # Resumen numérico agrupado (Robots vs Directa)
-    _n_robots = int(_df["fuente"].isin(
-        ["robot_esmax","robot_shell","robot_email"]).sum())
-    _n_directa = int((_df["fuente"] == "ot_directa").sum())
-    _pct_r = _n_robots / _n_tot * 100 if _n_tot else 0
-    _pct_d = _n_directa / _n_tot * 100 if _n_tot else 0
+    # Distribución por fuente
+    if _n_tot:
+        _dist = _df["fuente"].fillna("(sin fuente)").value_counts()
+        _bar = '<div style="display:flex;gap:4px;margin-top:14px;height:42px;overflow:hidden;border-radius:6px;">'
+        for _f, _n in _dist.items():
+            _meta = FUENTE_META.get(_f, ("❓", _f or "(sin fuente)", "#64748b", "#f1f5f9"))
+            _pct = _n / _n_tot * 100
+            _bar += (
+                f'<div style="flex:{_n};background:{_meta[2]};color:#fff;'
+                f'display:flex;flex-direction:column;align-items:center;'
+                f'justify-content:center;font-weight:600;min-width:110px;padding:0 6px;'
+                f'text-align:center;line-height:1.15" '
+                f'title="{_meta[1]}: {_n:,} · {_pct:.1f}%">'
+                f'<div style="font-size:.78rem">{_meta[0]} {_meta[1]}</div>'
+                f'<div style="font-size:.72rem;opacity:.9">{_n:,} · {_pct:.1f}%</div>'
+                f'</div>')
+        _bar += "</div>"
+        st.markdown(_bar, unsafe_allow_html=True)
 
-    _resumen = (
-        '<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;'
-        'font-size:.85rem;color:#475569;">'
-        f'<div>🤖 <b>Robots</b>: {_n_robots:,} ({_pct_r:.1f}%)</div>'
-        f'<div>📞 <b>Directa Fracttal</b>: {_n_directa:,} ({_pct_d:.1f}%)</div>'
-        f'<div>📊 <b>Total</b>: {_n_tot:,}</div>'
-        '</div>'
-    )
-    st.markdown(_resumen, unsafe_allow_html=True)
+        _n_robots = int(_df["fuente"].isin(
+            ["robot_esmax","robot_shell","robot_email"]).sum())
+        _n_directa = int((_df["fuente"] == "ot_directa").sum())
+        _pct_r = _n_robots / _n_tot * 100 if _n_tot else 0
+        _pct_d = _n_directa / _n_tot * 100 if _n_tot else 0
 
-    _n_inf = int(_df["fuente_inferida"].sum()) if "fuente_inferida" in _df.columns else 0
-    st.caption(
-        f"Distribución por canal · **{_n_inf:,}** OTs con fuente corregida "
-        f"(BD decía 'ot_directa' pero cliente tiene robot activo). "
-        f"Robots iniciaron: Copec 02-jun-2026 · Shell 12-jun-2026 · "
-        f"Aramco 12-jun-2026. OTs anteriores al inicio del robot se "
-        f"mantienen como aparecen en la BD."
-    )
+        _resumen = (
+            '<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;'
+            'font-size:.85rem;color:#475569;">'
+            f'<div>🤖 <b>Robots</b>: {_n_robots:,} ({_pct_r:.1f}%)</div>'
+            f'<div>📞 <b>Directa Fracttal</b>: {_n_directa:,} ({_pct_d:.1f}%)</div>'
+            f'<div>📊 <b>Total</b>: {_n_tot:,}</div>'
+            '</div>'
+        )
+        st.markdown(_resumen, unsafe_allow_html=True)
+
+        _n_inf = int(_df["fuente_inferida"].sum()) if "fuente_inferida" in _df.columns else 0
+        st.caption(
+            f"Distribución por canal · **{_n_inf:,}** OTs con fuente corregida "
+            f"(BD decía 'ot_directa' pero cliente tiene robot activo). "
+            f"Robots iniciaron: Copec 02-jun-2026 · Shell 12-jun-2026 · "
+            f"Aramco 12-jun-2026. OTs anteriores al inicio del robot se "
+            f"mantienen como aparecen en la BD."
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -655,6 +658,44 @@ vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida",
 
 # ────────── Feed ──────────
 if vista == "📰 Feed cronológico":
+
+    # ── Panel "En curso ahora": 3 grupos separados de OTs vivas ─────────
+    # Sin atender SLA vencido  |  Sin atender SLA vigente  |  Atendiendo.
+    # Solo se calcula sobre las OTs no finalizadas; el resto del Feed
+    # cronológico se mantiene igual debajo.
+    _now_naive = datetime.now(_CL_TZ).replace(tzinfo=None)
+
+    def _sla_vencido(row) -> bool:
+        _fl = row.get("fecha_llamado")
+        _um = row.get("tiempo_resp_esp")
+        if pd.isna(_fl) or pd.isna(_um) or float(_um or 0) <= 0:
+            return False
+        return _now_naive > (_fl + timedelta(hours=float(_um)))
+
+    _pendientes_todas = _df[_df["estado_lbl"] == "OT Pendiente - Sin atender"].copy()
+    _atendiendo = _df[_df["estado_lbl"] == "Técnico atendiendo"].copy()
+
+    if not _pendientes_todas.empty:
+        _pendientes_todas["_vencida"] = _pendientes_todas.apply(_sla_vencido, axis=1)
+        _sin_at_venc = _pendientes_todas[_pendientes_todas["_vencida"]]
+        _sin_at_vig  = _pendientes_todas[~_pendientes_todas["_vencida"]]
+    else:
+        _sin_at_venc = _pendientes_todas
+        _sin_at_vig  = _pendientes_todas
+
+    _n_venc = len(_sin_at_venc)
+    _n_vig  = len(_sin_at_vig)
+    _n_atd  = len(_atendiendo)
+
+    st.markdown('<div class="section-hdr">En curso ahora</div>', unsafe_allow_html=True)
+    _pk1, _pk2, _pk3 = st.columns(3)
+    _pk1.metric("🔴 Vencidas · sin atender", f"{_n_venc}",
+                help="Sin fecha de inicio de atención y el SLA ya pasó.")
+    _pk2.metric("🟠 Sin atender · SLA vigente", f"{_n_vig}",
+                help="Sin fecha de inicio pero todavía dentro del SLA.")
+    _pk3.metric("🟡 Atendiendo (técnico en curso)", f"{_n_atd}",
+                help="Técnico marcó fecha de inicio pero no ha cerrado.")
+
     _c_lim, _ = st.columns([1, 5])
     with _c_lim:
         _lim = st.selectbox("Mostrar", [50, 100, 250, 500, "Todo"], index=1, key="feed_lim")
@@ -797,11 +838,33 @@ if vista == "📰 Feed cronológico":
             f'</div>'
         )
 
+    # ── Detalle de las 3 categorías vivas (arriba del feed cronológico) ──
+    # Cada expander lista las tarjetas para poder actuar rápido.
+    def _mostrar_tarjetas(df_sub, vacio_msg):
+        if df_sub.empty:
+            st.caption(vacio_msg)
+            return
+        _dfs = df_sub.sort_values("fecha_llamado", ascending=False, na_position="last")
+        st.markdown("".join(_card(r) for _, r in _dfs.iterrows()),
+                    unsafe_allow_html=True)
+
+    if _n_venc or _n_vig or _n_atd:
+        with st.expander(f"🔴 Vencidas · sin atender ({_n_venc})", expanded=(_n_venc > 0)):
+            _mostrar_tarjetas(_sin_at_venc, "Ninguna. 🎉")
+        with st.expander(f"🟠 Sin atender · SLA vigente ({_n_vig})", expanded=False):
+            _mostrar_tarjetas(_sin_at_vig, "Ninguna sin atender con SLA vigente.")
+        with st.expander(f"🟡 Atendiendo (técnico en curso) ({_n_atd})", expanded=False):
+            _mostrar_tarjetas(_atendiendo, "Sin técnicos atendiendo en este momento.")
+        st.divider()
+
+    st.markdown('<div class="section-hdr">Feed cronológico completo</div>',
+                unsafe_allow_html=True)
     st.markdown("".join(_card(r) for _, r in _dff.iterrows()), unsafe_allow_html=True)
 
 
 # ────────── Tabla ──────────
 elif vista == "📋 Tabla enriquecida":
+    _render_panorama()
     _dft = _df.copy()
     _dft["Fuente"] = _dft["fuente"].map(
         lambda f: (f"{FUENTE_META.get(f, ('❓','?','',''))[0]} "
