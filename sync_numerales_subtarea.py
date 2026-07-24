@@ -202,6 +202,23 @@ def fetch_subtareas_numeral(folio: str) -> list:
                     idx[kid]["consumo_cera_pct"] = val
                 elif "CEPILLO" in desc:
                     idx[kid]["consumo_cepillo_pct"] = val
+            elif "CALIBRACION INICIAL" in desc or "CALIBRACIÓN INICIAL" in desc:
+                # Plantilla vieja: un único % global "al momento de la llegada"
+                # aplicable a cera + shampoo + cepillo (el técnico calibraba
+                # todas las bombas al mismo valor). Se replica como fallback
+                # SOLO si los campos separados están vacíos, para no pisar
+                # datos más precisos de la plantilla nueva.
+                idx[kid]["form_tiene_consumo"] = True
+                if not val_empty:
+                    # Extraer solo el número (ej. "30%" → "30", "50" → "50")
+                    import re as _re_pct
+                    _mnum = _re_pct.search(r"(\d+(?:[.,]\d+)?)", val)
+                    if _mnum:
+                        v_pct = _mnum.group(1)
+                        for _c in ("consumo_cera_pct", "consumo_shampoo_pct",
+                                   "consumo_cepillo_pct"):
+                            if idx[kid].get(_c) is None:
+                                idx[kid][_c] = v_pct
             elif "TIEMPO FICHAS" in desc:
                 idx[kid]["form_tiene_tiempo"] = True
                 if not val_empty:
