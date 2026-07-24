@@ -775,13 +775,34 @@ if vista == "📰 Feed cronológico":
     _c_lim, _ = st.columns([1, 5])
     with _c_lim:
         _lim = st.selectbox("Mostrar", [50, 100, 250, 500, "Todo"], index=1, key="feed_lim")
-    # NaT al fondo, resto por fecha_llamado desc (última llegada primero)
-    _dff = _df.sort_values("fecha_llamado", ascending=False, na_position="last")
+
+    # Orden dinámico:
+    #  - Solo pendientes ON  → por urgencia SLA (más próximas a vencer arriba;
+    #                          vencidas primero, luego menos holgura, y las
+    #                          sin SLA definido al final).
+    #  - Solo pendientes OFF → cronológico: más recientes primero.
+    if _solo_pend:
+        _sec = _df.copy()
+        _fl = _sec["fecha_llamado"]
+        _um = pd.to_numeric(_sec["tiempo_resp_esp"], errors="coerce")
+        _deadline = _fl + pd.to_timedelta(_um.fillna(0), unit="h")
+        _rest_s = (_deadline - _now_naive).dt.total_seconds()
+        # OTs sin SLA definido → NaN → al final
+        _rest_s = _rest_s.where(_fl.notna() & _um.notna() & (_um > 0), other=pd.NA)
+        _sec["_holgura_seg"] = _rest_s
+        _dff = _sec.sort_values("_holgura_seg", ascending=True, na_position="last")
+        _dff = _dff.drop(columns=["_holgura_seg"])
+        _orden_msg = "orden: más próximas a vencer arriba (vencidas primero)."
+    else:
+        # NaT al fondo, resto por fecha_llamado desc (última llegada primero)
+        _dff = _df.sort_values("fecha_llamado", ascending=False, na_position="last")
+        _orden_msg = "orden: más recientes primero."
+
     if _lim != "Todo":
         _dff = _dff.head(int(_lim))
 
     st.caption(f"Mostrando **{len(_dff):,}** de {_n_tot:,} llamados · "
-               "orden: más recientes primero.")
+               f"{_orden_msg}")
 
     def _v(x, default="—"):
         """Sanea NaN / None / '' para display."""
