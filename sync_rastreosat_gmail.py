@@ -55,6 +55,9 @@ _load_env()
 GMAIL_USER      = os.getenv("GMAIL_USER", "jgavidia@occimiano.cl")
 GMAIL_PW        = os.getenv("GMAIL_APP_PASSWORD", "")
 GMAIL_LABEL_OK  = os.getenv("RASTREOSAT_LABEL", "Rastreosat/Procesado")
+# Carpeta/etiqueta Gmail donde caen los correos de Rastreosat (por el filtro
+# que aplicaste). Fallback a INBOX si no existe.
+GMAIL_FOLDER    = os.getenv("RASTREOSAT_FOLDER", "GPS - Reportes")
 FROM_ADDR       = "noreply@reddsystem.com"
 SUBJECT_MATCH   = "Reporte_viajes"
 
@@ -108,9 +111,20 @@ def _ensure_label(m: imaplib.IMAP4_SSL, label: str) -> None:
         m.create(f'"{label}"')
 
 
+def _select_folder(m: imaplib.IMAP4_SSL, folder: str) -> str:
+    """Intenta seleccionar la etiqueta/carpeta pedida; si no existe, cae a INBOX."""
+    typ, _ = m.select(f'"{folder}"')
+    if typ == "OK":
+        return folder
+    log(f"  Etiqueta '{folder}' no accesible; buscando en INBOX.", "WARN")
+    m.select("INBOX")
+    return "INBOX"
+
+
 def _buscar_pendientes(m: imaplib.IMAP4_SSL, limit: Optional[int] = None) -> list[bytes]:
     """Devuelve UIDs de correos Rastreosat sin la etiqueta 'Procesado'."""
-    m.select("INBOX")
+    used = _select_folder(m, GMAIL_FOLDER)
+    log(f"Carpeta IMAP activa: {used}")
     # Filtro Gmail X-GM-RAW: usa la sintaxis de búsqueda de Gmail (labels, etc.)
     query = (f'(X-GM-RAW "from:{FROM_ADDR} subject:{SUBJECT_MATCH} '
              f'-label:\\"{GMAIL_LABEL_OK}\\"")')
@@ -121,6 +135,30 @@ def _buscar_pendientes(m: imaplib.IMAP4_SSL, limit: Optional[int] = None) -> lis
     if limit is not None:
         ids = ids[-limit:]
     return ids
+
+
+def _ordenar_por_fecha(m: imaplib.IMAP4_SSL, uids: list[bytes]) -> list[bytes]:
+    """Ordena los UIDs por INTERNALDATE (más antiguo primero, más reciente
+    último). Fetch explícito de la fecha porque m.sort() no siempre
+    funciona en etiquetas custom de Gmail."""
+    if not uids or len(uids) == 1:
+        return uids
+    fechas: dict[bytes, imaplib.Time2Internaldate] = {}
+    for uid in uids:
+        try:
+            typ, resp = m.fetch(uid, "(INTERNALDATE)")
+            if typ != "OK" or not resp or not resp[0]:
+                continue
+            s = resp[0].decode("utf-8", errors="ignore") if isinstance(resp[0], bytes) else str(resp[0])
+            m2 = re.search(r'INTERNALDATE "([^"]+)"', s)
+            if m2:
+                fechas[uid] = imaplib.Internaldate2tuple(
+                    f'INTERNALDATE "{m2.group(1)}"'.encode("utf-8"))
+        except Exception:
+            continue
+    if len(fechas) != len(uids):
+        return uids  # fallback si falló algún fetch
+    return sorted(uids, key=lambda u: fechas.get(u) or (0,))
 
 
 def _extraer_url_s3(msg: email.message.Message) -> Optional[str]:
@@ -209,7 +247,26 @@ def main() -> int:
             m.logout()
             return 0
 
-        for uid in ids:
+        # Orden cronológico ascendente + solo el más reciente → procesar.
+        # Los anteriores se etiquetan como 'Procesado' sin cargarlos, para
+        # que no se confunda la información y no se duplique carga.
+        ids = _ordenar_por_fecha(m, ids)
+        a_descartar = ids[:-1]
+        a_procesar  = [ids[-1]]
+
+        if a_descartar and not args.dry_run:
+            log(f"Descartando {len(a_descartar)} correo(s) anterior(es) "
+                f"(se etiquetan como '{GMAIL_LABEL_OK}' sin cargarlos)…")
+            for uid in a_descartar:
+                try:
+                    m.store(uid, "+X-GM-LABELS", f'"{GMAIL_LABEL_OK}"')
+                except Exception as e:
+                    log(f"  ⚠ No se pudo etiquetar UID={uid.decode()}: {e}", "WARN")
+        elif a_descartar and args.dry_run:
+            log(f"[DRY-RUN] Se descartarían {len(a_descartar)} correo(s) "
+                f"anterior(es) sin cargarlos.")
+
+        for uid in a_procesar:
             typ, msg_data = m.fetch(uid, "(RFC822)")
             if typ != "OK":
                 errores.append(f"UID {uid!r}: fetch fallo")
