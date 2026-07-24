@@ -406,6 +406,58 @@ h1 {font-size:1.7rem !important; margin-bottom:.3rem !important;}
     border-bottom:1px solid #e2e8f0;
 }
 [data-testid="stMetricValue"] {font-size:1.6rem;}
+
+/* ── Filtros ejecutivos: chips azul marino sobre blanco ─────────── */
+/* Multiselect: label más pequeño y espacio compacto */
+[data-testid="stMultiSelect"] label,
+[data-testid="stTextInput"] label,
+[data-testid="stDateInput"] label,
+[data-testid="stSelectbox"] label {
+    font-size:.72rem !important; font-weight:600 !important;
+    color:#475569 !important; text-transform:uppercase;
+    letter-spacing:.04em; margin-bottom:2px !important;
+}
+/* Chip seleccionado dentro del multiselect (BaseWeb "Tag") */
+[data-testid="stMultiSelect"] span[data-baseweb="tag"] {
+    background:#1e3a8a !important;      /* navy */
+    border-color:#1e3a8a !important;
+    color:#fff !important;
+    border-radius:4px !important;
+    padding:2px 8px !important;
+    font-size:.72rem !important;
+    font-weight:600 !important;
+    line-height:1.15 !important;
+    margin:1px 3px 1px 0 !important;
+}
+[data-testid="stMultiSelect"] span[data-baseweb="tag"] * {
+    color:#fff !important; fill:#fff !important;
+}
+[data-testid="stMultiSelect"] span[data-baseweb="tag"] svg {
+    color:#fff !important; fill:#fff !important; opacity:.85;
+}
+[data-testid="stMultiSelect"] span[data-baseweb="tag"]:hover {
+    background:#1e40af !important;      /* hover un tono más claro */
+}
+/* Contenedor del multiselect: borde suave, más denso */
+[data-testid="stMultiSelect"] > div > div {
+    min-height:34px !important;
+    border-radius:6px !important;
+    border-color:#e2e8f0 !important;
+    background:#f8fafc !important;
+}
+/* Inputs de texto y date: mismo look que multiselect */
+[data-testid="stTextInput"] input,
+[data-testid="stDateInput"] input {
+    background:#f8fafc !important;
+    border-radius:6px !important;
+    font-size:.85rem !important;
+}
+/* Compactar el bloque completo de filtros */
+[data-testid="stHorizontalBlock"] > div:has(> [data-testid="stMultiSelect"]),
+[data-testid="stHorizontalBlock"] > div:has(> [data-testid="stTextInput"]),
+[data-testid="stHorizontalBlock"] > div:has(> [data-testid="stDateInput"]) {
+    padding-top:0 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -454,70 +506,94 @@ if df.empty:
 # ══════════════════════════════════════════════════════════════════════
 # Filtros
 # ══════════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
+# ── Barra ejecutiva compacta: buscador + rango + toggle siempre visibles;
+#    el resto de filtros vive dentro de un expander colapsado por defecto.
+_fuentes = sorted([f for f in df["fuente"].dropna().unique() if f])
+_clientes = sorted(df["cliente"].dropna().unique())
+_prios = sorted(df["prioridad"].dropna().unique())
+_est_opts = [
+    "Finalizada - Cumple SLA",
+    "Finalizada - No cumple SLA",
+    "OT atendida - Cumple SLA (Pend. Cierre)",
+    "OT atendida - No cumple SLA (Pend. Cierre)",
+    "OT atendida (Pend. Cierre)",
+    "Técnico atendiendo",
+    "OT Pendiente - Sin atender",
+    "Excepción",
+    "Descartada",
+]
+_est_default = [e for e in _est_opts if e != "Descartada"]
 
-_f1, _f2, _f3, _f4, _f5 = st.columns([1.3, 1.3, 1.1, 1.2, 2])
+_hoy_date = datetime.now(_CL_TZ).date()
+_max_dt = df["fecha_llamado"].max()
+_min_dt = df["fecha_llamado"].min()
+_fmax_data = _max_dt.date() if pd.notna(_max_dt) else _hoy_date
+_fmax = max(_fmax_data, _hoy_date)
+_fmin_data = _min_dt.date() if pd.notna(_min_dt) else _fmax
+_fmin = min(_fmin_data, _fmax)
 
-with _f1:
-    _fuentes = sorted([f for f in df["fuente"].dropna().unique() if f])
-    fuente_sel = st.multiselect(
-        "Fuente", _fuentes, default=_fuentes, key="fuente_v2",
-        format_func=lambda f: f"{FUENTE_META.get(f, ('❓','?','',''))[0]} {FUENTE_META.get(f, ('','?','',''))[1]}"
-                              if f in FUENTE_META else f,
-    )
-with _f2:
-    _clientes = sorted(df["cliente"].dropna().unique())
-    cliente_sel = st.multiselect("Cliente", _clientes, default=_clientes, key="cliente_v2")
-with _f3:
-    _prios = sorted(df["prioridad"].dropna().unique())
-    pri_sel = st.multiselect("Prioridad", _prios, default=_prios, key="pri_v2")
-with _f4:
-    _est_opts = [
-        "Finalizada - Cumple SLA",
-        "Finalizada - No cumple SLA",
-        "OT atendida - Cumple SLA (Pend. Cierre)",
-        "OT atendida - No cumple SLA (Pend. Cierre)",
-        "OT atendida (Pend. Cierre)",
-        "Técnico atendiendo",
-        "OT Pendiente - Sin atender",
-        "Excepción",
-        "Descartada",
-    ]
-    # Por defecto ocultamos Descartada (basura de Fracttal)
-    _est_default = [e for e in _est_opts if e != "Descartada"]
-    est_sel = st.multiselect("Estado / SLA", _est_opts,
-                             default=_est_default, key="estado_v2")
-with _f5:
+_bar1, _bar2, _bar3 = st.columns([3, 2, 1.5])
+with _bar1:
     buscar = st.text_input(
         "Buscar",
         placeholder="OS-XXXXX · N° aviso · código EDS · nombre · falla · técnico · comuna",
         key="q",
     )
-
-_r1, _r2, _r3 = st.columns([1.6, 1.4, 3.6])
-with _r1:
-    _hoy_date = datetime.now(_CL_TZ).date()
-    _max_dt = df["fecha_llamado"].max()
-    _min_dt = df["fecha_llamado"].min()
-    _fmax_data = _max_dt.date() if pd.notna(_max_dt) else _hoy_date
-    _fmax = max(_fmax_data, _hoy_date)
-    _fmin_data = _min_dt.date() if pd.notna(_min_dt) else _fmax
-    _fmin = min(_fmin_data, _fmax)
-    # Defensivo: date_input puede crashear si state stale queda fuera de rango.
-    # Damos key explícita + fallback si excepta.
+with _bar2:
     try:
         fecha_rng = st.date_input(
             "Rango de fechas", (_fmin, _fmax),
             min_value=_fmin, max_value=_fmax, key="fecha_rng_v3",
         )
     except Exception:
-        # Reset state y reintentar
         st.session_state.pop("fecha_rng_v3", None)
         fecha_rng = (_fmin, _fmax)
-with _r2:
+with _bar3:
     st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-    _solo_pend = st.toggle("Solo pendientes (abiertas)", key="solo_pend",
-                           help="Muestra únicamente OTs sin atender + técnico atendiendo")
+    _solo_pend = st.toggle("Solo pendientes", key="solo_pend",
+                           help="Solo OTs sin atender + técnico atendiendo")
+
+# Resumen inline del estado de los filtros avanzados
+def _mini(sel, total):
+    if not sel or len(sel) == total:
+        return f"Todas ({total})"
+    return f"{len(sel)}/{total}"
+_fuente_sel_prev = st.session_state.get("fuente_v2", _fuentes)
+_cliente_sel_prev = st.session_state.get("cliente_v2", _clientes)
+_pri_sel_prev = st.session_state.get("pri_v2", _prios)
+_est_sel_prev = st.session_state.get("estado_v2", _est_default)
+_resumen_fltr = (
+    f"Fuente · {_mini(_fuente_sel_prev, len(_fuentes))}  |  "
+    f"Cliente · {_mini(_cliente_sel_prev, len(_clientes))}  |  "
+    f"Prioridad · {_mini(_pri_sel_prev, len(_prios))}  |  "
+    f"Estado · {_mini(_est_sel_prev, len(_est_opts))}"
+)
+
+with st.expander(f"🎛 Filtros avanzados  ·  {_resumen_fltr}", expanded=False):
+    _f1, _f2, _f3, _f4 = st.columns([1.3, 1.3, 1.1, 2])
+    with _f1:
+        fuente_sel = st.multiselect(
+            "Fuente", _fuentes, default=_fuentes, key="fuente_v2",
+            format_func=lambda f: f"{FUENTE_META.get(f, ('❓','?','',''))[0]} {FUENTE_META.get(f, ('','?','',''))[1]}"
+                                  if f in FUENTE_META else f,
+        )
+    with _f2:
+        cliente_sel = st.multiselect("Cliente", _clientes,
+                                     default=_clientes, key="cliente_v2")
+    with _f3:
+        pri_sel = st.multiselect("Prioridad", _prios,
+                                 default=_prios, key="pri_v2")
+    with _f4:
+        est_sel = st.multiselect("Estado / SLA", _est_opts,
+                                 default=_est_default, key="estado_v2")
+
+# Fuera del expander leemos el estado (Streamlit persiste por session_state
+# gracias a las keys). Si el expander nunca se abrió esta corrida, usamos
+# el default para inicializar la variable local.
+fuente_sel  = st.session_state.get("fuente_v2", _fuentes)
+cliente_sel = st.session_state.get("cliente_v2", _clientes)
+pri_sel     = st.session_state.get("pri_v2", _prios)
+est_sel     = st.session_state.get("estado_v2", _est_default)
 
 # Aplicar filtros
 _df = df.copy()
