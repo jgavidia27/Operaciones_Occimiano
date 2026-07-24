@@ -247,9 +247,45 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
                  for r in lc if r.get("os_fracttal") and r.get("falla")}
     n_aviso_map = {r["os_fracttal"]: r["n_aviso"]
                    for r in lc if r.get("os_fracttal") and r.get("n_aviso")}
+
+    # Fuente adicional del aviso: solicitudes_trabajo (id_solicitud ↔ wo_folio).
+    # Rescata la gran mayoría de OTs COPEC/Shell/Aramco cuyo n_llamado
+    # en v_llamados_sla viene NULL. El robot de correo suele quedar
+    # sin matchear a la OT, pero solicitudes_trabajo sí registra el par.
+    try:
+        st_rows = _sb_get("solicitudes_trabajo", {
+            "select": "wo_folio,id_solicitud",
+            "wo_folio": "not.is.null",
+            "fecha_solicitud": f"gte.{fecha_desde}",
+            "limit": 5000,
+        })
+    except Exception:
+        st_rows = []
+    n_solicitud_map = {r["wo_folio"]: str(r["id_solicitud"])
+                       for r in st_rows
+                       if r.get("wo_folio") and r.get("id_solicitud") is not None}
+
     df["falla"] = df["os_fracttal"].map(falla_map)
     df["n_aviso"] = df["os_fracttal"].map(n_aviso_map)
+    df["n_solicitud"] = df["os_fracttal"].map(n_solicitud_map)
     df["fuente_bd"] = df["os_fracttal"].map(fuente_map)
+
+    # Coalesce del aviso: prioriza n_llamado de v_llamados_sla → n_aviso
+    # de llamados_correctivos → id_solicitud de solicitudes_trabajo.
+    # Sobreescribe n_llamado para que el resto del código lo consuma tal cual.
+    def _first_non_null(*vals):
+        for v in vals:
+            if v is None: continue
+            if isinstance(v, float) and pd.isna(v): continue
+            s = str(v).strip()
+            if s and s.lower() not in ("nan", "none", "null"):
+                return s
+        return None
+    df["n_llamado"] = [
+        _first_non_null(nl, na, ns)
+        for nl, na, ns in zip(df.get("n_llamado", pd.Series([None]*len(df))),
+                              df["n_aviso"], df["n_solicitud"])
+    ]
 
     # ── Fechas vectorizado (antes: .apply(_ts) x3 = O(N) Python) ─────────────
     def _vec_ts(col):
