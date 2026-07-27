@@ -100,13 +100,19 @@ def enviar_email(destinatarios: list[str], asunto: str, cuerpo_html: str,
 def render_email_html(mes_label: str, sem_iso: int, stats: dict) -> str:
     top_html = ""
     if stats["top_eds"]:
-        rows = "".join(
-            f'<tr><td style="padding:4px 10px;border:1px solid #d1d5db;">{cod}</td>'
-            f'<td style="padding:4px 10px;border:1px solid #d1d5db;">{nombre}</td>'
-            f'<td style="padding:4px 10px;border:1px solid #d1d5db;text-align:center;'
-            f'font-weight:bold;color:#b91c1c;">{n}</td></tr>'
-            for cod, nombre, n in stats["top_eds"]
-        )
+        # Cuadro simple: Cód. Occim, EDS, Llamados. El detalle de origen/tipo
+        # se muestra ya en el desglose por EDS más abajo.
+        rows_html = ""
+        for t in stats["top_eds"]:
+            cod, nombre, n = t[0], t[1], t[2]
+            rows_html += (
+                f'<tr>'
+                f'<td style="padding:4px 10px;border:1px solid #d1d5db;">{cod}</td>'
+                f'<td style="padding:4px 10px;border:1px solid #d1d5db;">{nombre}</td>'
+                f'<td style="padding:4px 10px;border:1px solid #d1d5db;text-align:center;'
+                f'font-weight:bold;color:#b91c1c;">{n}</td>'
+                f'</tr>'
+            )
         top_html = f"""
 <p><strong>Top 5 EDS con más correctivos {mes_label}:</strong></p>
 <table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;margin-bottom:14px;">
@@ -117,13 +123,109 @@ def render_email_html(mes_label: str, sem_iso: int, stats: dict) -> str:
   <th style="padding:6px 10px;border:1px solid #1F4E78;">Llamados</th>
 </tr>
 </thead>
-<tbody>{rows}</tbody>
+<tbody>{rows_html}</tbody>
 </table>
+"""
+
+    # ── Desglose OT-por-OT de cada EDS del Top 5 ──
+    desglose_html = ""
+    desglose = stats.get("desglose_por_eds") or {}
+    top_ids = [t[0] for t in stats.get("top_eds", [])]
+    # Nombres (para el título de cada tarjeta) desde top_eds
+    nombre_map = {t[0]: t[1] for t in stats.get("top_eds", [])}
+    for eds in top_ids:
+        ots = desglose.get(eds) or []
+        if not ots:
+            continue
+        _rows = ""
+        # Detección de valores mal llenados por el técnico → resaltar en rojo
+        def _color_mal(v: str) -> str:
+            up = (v or "").upper()
+            if "SIN CLASIFICAR" in up or "SIN INFORMACION" in up or "SIN INFORMACIÓN" in up:
+                return "#dc2626"   # rojo alerta
+            return "#0f172a"
+
+        for i, ot in enumerate(ots, 1):
+            fecha = ot["fecha_llam"] or "—"
+            atn   = ot["fecha_atn"] or "—"
+            tec   = ot["tecnico"] or "—"
+            pri   = ot["prioridad"] or "—"
+            org   = ot["origen"] or "—"
+            tip   = ot["tipo"] or "—"
+            obs   = (ot["obs"] or "—").replace("\r\n", " · ").replace("\n", " · ")
+            c_org = _color_mal(org); c_tip = _color_mal(tip)
+            # font-weight rojo cuando es mal-llenado
+            w_org = "700" if c_org == "#dc2626" else "400"
+            w_tip = "700" if c_tip == "#dc2626" else "400"
+            _rows += (
+                f'<tr>'
+                f'<td style="padding:6px 6px;border:1px solid #e5e7eb;'
+                f'color:#64748b;font-size:11px;text-align:center;'
+                f'vertical-align:top;">#{i}</td>'
+                f'<td style="padding:6px 8px;border:1px solid #e5e7eb;'
+                f'font-weight:600;vertical-align:top;">{ot["os"]}</td>'
+                f'<td style="padding:6px 6px;border:1px solid #e5e7eb;color:#334155;'
+                f'font-size:11px;text-align:center;vertical-align:top;">{fecha}</td>'
+                f'<td style="padding:6px 6px;border:1px solid #e5e7eb;color:#334155;'
+                f'font-size:11px;text-align:center;vertical-align:top;">{atn}</td>'
+                f'<td style="padding:6px 6px;border:1px solid #e5e7eb;color:#334155;'
+                f'font-size:11px;text-align:center;vertical-align:top;">{pri}</td>'
+                f'<td style="padding:6px 8px;border:1px solid #e5e7eb;color:#334155;'
+                f'font-size:11px;vertical-align:top;">{tec}</td>'
+                f'<td style="padding:6px 8px;border:1px solid #e5e7eb;background:#fefce8;'
+                f'font-size:11px;color:{c_org};font-weight:{w_org};vertical-align:top;">{org}</td>'
+                f'<td style="padding:6px 8px;border:1px solid #e5e7eb;background:#fefce8;'
+                f'font-size:11px;color:{c_tip};font-weight:{w_tip};vertical-align:top;">{tip}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e5e7eb;color:#0f172a;'
+                f'font-size:12px;line-height:1.5;vertical-align:top;">{obs}</td>'
+                f'</tr>'
+            )
+        _title_edss = nombre_map.get(eds, "")
+        # Nuevos anchos: Observación 50%, resto ajustado.
+        # Sin white-space:nowrap → el texto envuelve naturalmente.
+        desglose_html += f"""
+<h4 style="margin:18px 0 6px 0;color:#1F4E78;font-family:Arial,sans-serif;">
+  📍 {eds} — {_title_edss}
+  <span style="color:#dc2626;">({len(ots)} llamados)</span></h4>
+<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px;
+              margin-bottom:12px;width:100%;table-layout:fixed;">
+<colgroup>
+  <col style="width:3%">   <!-- # -->
+  <col style="width:7%">   <!-- OS Fracttal -->
+  <col style="width:5%">   <!-- F. llamado -->
+  <col style="width:5%">   <!-- F. atención -->
+  <col style="width:4%">   <!-- Prioridad -->
+  <col style="width:7%">   <!-- Técnico -->
+  <col style="width:8%">   <!-- Origen falla -->
+  <col style="width:6%">   <!-- Tipo falla -->
+  <col style="width:55%">  <!-- Observación (más de la mitad) -->
+</colgroup>
+<thead>
+<tr style="background:#e5e7eb;color:#1f2937;">
+  <th style="padding:6px 6px;border:1px solid #d1d5db;">#</th>
+  <th style="padding:6px 6px;border:1px solid #d1d5db;">OS Fracttal</th>
+  <th style="padding:6px 6px;border:1px solid #d1d5db;">F. llamado</th>
+  <th style="padding:6px 6px;border:1px solid #d1d5db;">F. atención</th>
+  <th style="padding:6px 6px;border:1px solid #d1d5db;">Prioridad</th>
+  <th style="padding:6px 6px;border:1px solid #d1d5db;">Técnico</th>
+  <th style="padding:6px 6px;border:1px solid #d1d5db;background:#fbbf24;">Origen falla</th>
+  <th style="padding:6px 6px;border:1px solid #d1d5db;background:#fbbf24;">Tipo falla</th>
+  <th style="padding:6px 6px;border:1px solid #d1d5db;">Observación del técnico</th>
+</tr>
+</thead>
+<tbody>{_rows}</tbody>
+</table>
+"""
+    if desglose_html:
+        top_html += f"""
+<p style="margin-top:18px;"><strong>Desglose por EDS (Top 5):</strong> —
+qué pasó en cada llamado, causa/tipo y observaciones del técnico.</p>
+{desglose_html}
 """
 
     return f"""\
 <!DOCTYPE html>
-<html><body style="font-family:Arial,sans-serif;color:#1f2937;max-width:720px;line-height:1.55;">
+<html><body style="font-family:Arial,sans-serif;color:#1f2937;max-width:1100px;line-height:1.55;">
 <p>Buenos días equipo,</p>
 
 <p>Se adjunta el <strong>resumen de reincidencias por EDS</strong> del mes

@@ -1,17 +1,17 @@
 name: Weekly Reincidencias EDS (email grupal)
 
-# Corre TODOS los MIÉRCOLES a las 11:00 hora Chile.
-# Chile en invierno UTC-4 → 15:00 UTC = 11:00 CLT
-# Chile en verano UTC-3 → 14:00 UTC = 11:00 CLT
-# Usamos 14:00 UTC (~10:00-11:00 CLT según DST). Aceptable.
+# Corre TODOS los LUNES a las 10:30 hora Chile.
+# Chile en invierno UTC-4 → 14:30 UTC = 10:30 CLT
+# Chile en verano UTC-3 → 13:30 UTC = 10:30 CLT
+# Usamos 14:30 UTC como principal (~10:30-11:30 CLT según DST).
 on:
   schedule:
     # 3 crons escalonados como redundancia — GitHub Actions a veces se
     # salta el primer disparo. Dedupe idempotente en el script evita
     # re-envíos si el primero ya funcionó.
-    - cron: "0 14 * * 3"       # Miércoles 14:00 UTC (~10 AM CLT)
-    - cron: "30 14 * * 3"      # Backup +30 min
-    - cron: "0 15 * * 3"       # Backup +1 h
+    - cron: "30 14 * * 1"      # Lunes 14:30 UTC (~10:30 CLT)
+    - cron: "0 15 * * 1"       # Backup +30 min
+    - cron: "30 15 * * 1"      # Backup +1 h
   workflow_dispatch:            # permite ejecutar manualmente
     inputs:
       dry_run:

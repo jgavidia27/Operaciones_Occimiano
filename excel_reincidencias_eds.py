@@ -181,16 +181,43 @@ def build_excel_reincidencias(
         ws1.cell(row=i, column=5).number_format = "0"
         ws1.cell(row=i, column=6).number_format = '0.0"%"'
 
-    # Hoja 2: Detalle OTs
+    # ── Cross-fetch a ordenes_trabajo: causa/tipo/observación técnico ──
+    # Fuente única para (a) enriquecer detalle Excel y (b) desglose HTML.
+    import os as _os
+    import requests as _rq
+    ot_info: dict[str, dict] = {}
+    _sb_url = _os.getenv("SUPABASE_URL", "")
+    _sb_key = _os.getenv("SUPABASE_KEY", "")
+    if _sb_url and _sb_key and not df_det.empty and "os_fracttal" in df_det.columns:
+        os_list = [str(x) for x in df_det["os_fracttal"].dropna().unique().tolist()]
+        for i in range(0, len(os_list), 80):
+            chunk = os_list[i:i+80]
+            try:
+                r = _rq.get(f"{_sb_url}/rest/v1/ordenes_trabajo",
+                    params={"select": "id_ot,causa_raiz,tipo_falla,comentario_tecnico",
+                            "id_ot": f"in.({','.join(chunk)})", "limit": 200},
+                    headers={"apikey": _sb_key,
+                             "Authorization": f"Bearer {_sb_key}"},
+                    timeout=20)
+                if r.status_code == 200:
+                    for row in (r.json() or []):
+                        ot_info[row["id_ot"]] = row
+            except Exception:
+                pass
+
+    # Hoja 2: Detalle OTs (con causa/tipo/observación agregados)
     ws2 = wb.create_sheet("Detalle OTs")
     headers2 = ["OS Fracttal", "N° Aviso", "Fecha llamado", "Fecha atención",
-                "Cód. EDS", "EDS", "Cliente", "Técnico", "Prioridad"]
-    widths2 = [14, 15, 15, 15, 14, 45, 16, 32, 10]
+                "Cód. EDS", "EDS", "Cliente", "Técnico", "Prioridad",
+                "Origen falla", "Tipo falla", "Observación técnico"]
+    widths2 = [14, 15, 15, 15, 14, 45, 16, 32, 10, 32, 22, 60]
     _write_headers(ws2, headers2, widths2)
 
     for i, (_, r) in enumerate(df_det.iterrows(), start=2):
+        os_f = _clean_str(r.get("os_fracttal"))
+        info = ot_info.get(os_f, {})
         _write_row(ws2, i, [
-            _clean_str(r.get("os_fracttal")),
+            os_f,
             _clean_str(r.get("n_llamado")),
             _fecha_str(r.get("fecha_llamado")),
             _fecha_str(r.get("fecha_atencion")),
@@ -199,15 +226,60 @@ def build_excel_reincidencias(
             _clean_str(r.get("cliente")),
             _clean_str(r.get("tecnico")),
             _clean_str(r.get("prioridad")),
+            _clean_str(info.get("causa_raiz")),
+            _clean_str(info.get("tipo_falla")),
+            _clean_str(info.get("comentario_tecnico")),
         ])
 
     buf = io.BytesIO()
     wb.save(buf)
 
-    top_eds = [(r["cod"], r["nombre"], r["llamados"]) for r in ranking_rows[:5]]
+    # ── Enriquecer TOP 5 con origen/tipo (moda) + desglose OT por EDS ──
+    top5_rows = ranking_rows[:5]
+    top5_codes = {r["cod"] for r in top5_rows}
+    df_top = df_det[df_det["eds_occim"].isin(top5_codes)].copy() if not df_det.empty else df_det
+
+    from collections import Counter
+    causa_por_eds: dict[str, str] = {}
+    tipo_por_eds: dict[str, str] = {}
+    desglose_por_eds: dict[str, list[dict]] = {}   # para el HTML del correo
+
+    if not df_top.empty:
+        df_top = df_top.sort_values("fecha_llamado", ascending=True)
+        for eds in top5_codes:
+            df_eds = df_top[df_top["eds_occim"] == eds]
+            causas, tipos = [], []
+            ots_lst = []
+            for _, row in df_eds.iterrows():
+                os_f = _clean_str(row.get("os_fracttal"))
+                info = ot_info.get(os_f, {})
+                c = _clean_str(info.get("causa_raiz"))
+                t = _clean_str(info.get("tipo_falla"))
+                if c and c != "—": causas.append(c)
+                if t and t != "—": tipos.append(t)
+                ots_lst.append({
+                    "os":         os_f,
+                    "fecha_llam": _fecha_str(row.get("fecha_llamado")),
+                    "fecha_atn":  _fecha_str(row.get("fecha_atencion")),
+                    "tecnico":    _clean_str(row.get("tecnico")),
+                    "prioridad":  _clean_str(row.get("prioridad")),
+                    "origen":     c,
+                    "tipo":       t,
+                    "obs":        _clean_str(info.get("comentario_tecnico")),
+                })
+            causa_por_eds[eds] = Counter(causas).most_common(1)[0][0] if causas else "—"
+            tipo_por_eds[eds]  = Counter(tipos).most_common(1)[0][0] if tipos else "—"
+            desglose_por_eds[eds] = ots_lst
+
+    # top_eds: (cod, nombre, llamados, origen_moda, tipo_moda)
+    top_eds = [(r["cod"], r["nombre"], r["llamados"],
+                causa_por_eds.get(r["cod"], "—"),
+                tipo_por_eds.get(r["cod"],  "—"))
+               for r in top5_rows]
     stats = {
         "eds_reincidentes": len(ranking_rows),
         "ots_totales":      len(df_det),
         "top_eds":          top_eds,
+        "desglose_por_eds": desglose_por_eds,
     }
     return buf.getvalue(), stats
