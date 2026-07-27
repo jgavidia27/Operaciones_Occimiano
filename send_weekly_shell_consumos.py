@@ -397,9 +397,14 @@ def _walk_named(shapes):
 
 
 def build_ppt(df_sem: pd.DataFrame, mes_lbl: str, sem_iso: int,
-              semana_ini: date, semana_fin: date) -> tuple[bytes, list[str]]:
+              semana_ini: date, semana_fin: date,
+              corte_hasta: date | None = None) -> tuple[bytes, list[str]]:
     """Devuelve (pptx_bytes, resumen_lines) para reutilizar el resumen
-    también en el cuerpo del correo."""
+    también en el cuerpo del correo.
+
+    Nota: `df_sem` puede ser en realidad `df_mes` (consolidado del mes)
+    — el nombre se mantiene por compatibilidad interna.
+    """
     from pptx import Presentation
 
     if not _PPT_TEMPLATE.exists():
@@ -514,9 +519,12 @@ def build_ppt(df_sem: pd.DataFrame, mes_lbl: str, sem_iso: int,
         prod_items.append(("", 0, 0))
 
     # ── Mapeo textos plantilla ──
-    subtitulo_s1 = (f"SHELL  ·  {mes_lbl}  ·  Semana {sem_iso} "
-                    f"({semana_ini.strftime('%d/%m')} – {semana_fin.strftime('%d/%m')})"
-                    f"  ·  {total} registros analizados")
+    # Rango del mes (desde 01 del mes hasta el corte de datos = ayer)
+    _ini_mes = corte_hasta.replace(day=1) if corte_hasta else semana_ini.replace(day=1)
+    _fin_rango = corte_hasta if corte_hasta else semana_fin
+    _rango_mes = f"{_ini_mes.strftime('%d/%m')} – {_fin_rango.strftime('%d/%m')}"
+    subtitulo_s1 = (f"SHELL  ·  {mes_lbl}  ·  {_rango_mes}"
+                    f"  ·  {total} registros analizados (consolidado del mes)")
     subtitulo_s2 = (f"SHELL  ·  {mes_lbl}  ·  Distribución de los datos disponibles")
 
     replacements_s1 = {
@@ -679,7 +687,7 @@ def build_ppt(df_sem: pd.DataFrame, mes_lbl: str, sem_iso: int,
             bombas_raras_str = "  · Bombas de baja frecuencia (1 vez): " + ", ".join(raras[:5])
 
     resumen_lines = [
-        f"Resumen — Semana {sem_iso} ({semana_ini.strftime('%d/%m')} – {semana_fin.strftime('%d/%m')})   ·   {total} registros analizados",
+        f"Resumen — {mes_lbl} ({_rango_mes})   ·   {total} registros analizados (mes completo)",
     ]
     if faltantes_alertas:
         resumen_lines.append("Faltantes de datos:")
@@ -770,24 +778,11 @@ def build_ppt(df_sem: pd.DataFrame, mes_lbl: str, sem_iso: int,
                 except Exception:
                     pass
 
-    # 4) Achicar card PRODUCCIÓN LTS/HR (Shape 29) según filas activas y
-    #    ocultar textos de filas producción vacías. Deja espacio para resumen.
+    # 4) Ocultar filas vacías del card de PRODUCCIÓN (las que no tienen
+    #    datos). El card mismo NO se toca — solo se limpian los textos.
     from pptx.util import Emu, Pt
-    ROW_STEP = 228600   # separación entre filas
-    ROW_H    = 201168
-    FIRST_TOP = 3429000
-    CARD_TOP  = 3017520
-    # Nueva altura del card = margen sup + N filas + margen inf
     n_filas = max(1, filas_prod_activas)
-    ultima_bottom = FIRST_TOP + ROW_STEP * (n_filas - 1) + ROW_H
-    nueva_h_card = ultima_bottom - CARD_TOP + 100_000   # +margen
     for name, sh in _walk_named(slides[1].shapes):
-        if name == "Shape 29":     # card producción
-            try:
-                sh.height = nueva_h_card
-            except Exception:
-                pass
-        # Ocultar filas de producción no usadas
         for i in range(n_filas, 6):
             t_n, t_v, t_p = prod_positions[i]
             if name in (t_n, t_v, t_p):
@@ -796,30 +791,76 @@ def build_ppt(df_sem: pd.DataFrame, mes_lbl: str, sem_iso: int,
                 except Exception:
                     pass
 
-    # 5) Insertar textbox de resumen debajo del card achicado
+    # 5) Solo mover HACIA ARRIBA los shapes de los cards INFERIORES.
+    #    Header, logos y cards superiores intactos.
+    DELTA_UP = 500_000     # ~0.55 in (moderado — evita amontonamiento del LAVADO)
+    SLIDE_H  = 5_143_500
+    # Ajustes finos de textos que se solapaban visualmente:
+    #  - Text 63 (Distribución Cera): tap. por "Más frecuente"; lo bajamos
+    #  - Text 69 (Excepciones lavado contenido): lo bajamos para separarlo
+    #    del subtítulo Text 68.
+    _EXTRA_DOWN = {"Text 63": 180_000, "Text 69": 200_000}
+    for name, sh in _walk_named(slides[1].shapes):
+        try:
+            if sh.top is None or sh.top < 0:
+                continue
+            # Solo aplicar delta a cards INFERIORES (top original >= 3M)
+            if sh.top >= 3_000_000:
+                new_top = sh.top - DELTA_UP
+                if new_top > 0:
+                    sh.top = new_top
+            # Después de mover, aplicar extra_down si aplica
+            if name in _EXTRA_DOWN:
+                sh.top = (sh.top or 0) + _EXTRA_DOWN[name]
+        except Exception:
+            pass
+
+    # 6) Insertar textbox de Resumen en la zona libre abajo (todo el ancho)
     try:
-        top_resumen = CARD_TOP + nueva_h_card + 60_000
-        available_h = 5_143_500 - top_resumen - 40_000    # slide alto 5.62in
+        # Nueva base: bottom de cards inferiores = 3017520 + 1920240 - DELTA_UP
+        # (además debe respetar el Text 69 extra_down)
+        top_resumen = 3_017_520 + 1_920_240 - DELTA_UP + 220_000
+        available_h = SLIDE_H - top_resumen - 60_000
+        left_resumen  = 228_600
+        width_resumen = 9_144_000 - 2 * 228_600
         box = slides[1].shapes.add_textbox(
-            Emu(228_600), Emu(top_resumen),
-            Emu(4_297_680), Emu(max(available_h, 400_000)))
+            Emu(left_resumen), Emu(top_resumen),
+            Emu(width_resumen), Emu(max(available_h, 500_000)))
         tf = box.text_frame
         tf.word_wrap = True
-        tf.margin_left = tf.margin_right = Emu(30_000)
+        tf.margin_left = tf.margin_right = Emu(50_000)
         tf.margin_top = Emu(20_000); tf.margin_bottom = Emu(0)
-        lines = resumen_texto.split("\n")
+        lines_all = resumen_texto.split("\n")
+        titulo = lines_all[0]
+        items = lines_all[1:]
+        # Acotar sub-items de "Faltantes de datos" a los 3 primeros
+        limpio = []
+        sub_shown = 0
+        for ln in items:
+            if not ln.strip():
+                continue
+            if ln.strip().startswith("Faltantes"):
+                limpio.append(ln); continue
+            if ln.startswith("  ·"):
+                if sub_shown < 3:
+                    limpio.append(ln); sub_shown += 1
+                continue
+            limpio.append(ln)
         p0 = tf.paragraphs[0]
-        r0 = p0.add_run(); r0.text = lines[0]
-        r0.font.bold = True; r0.font.size = Pt(9)
+        r0 = p0.add_run(); r0.text = titulo
+        r0.font.bold = True; r0.font.size = Pt(11)
         r0.font.color.rgb = RGBColor(0x1F, 0x4E, 0x78)
-        for ln in lines[1:]:
+        for ln in limpio:
             p = tf.add_paragraph()
             r = p.add_run(); r.text = ln
-            r.font.size = Pt(7.5)
+            r.font.size = Pt(9)
             if "atípico" in ln.lower() or "≠" in ln or "sin cubre" in ln.lower():
                 r.font.color.rgb = RED_ALERT
+            elif ln.strip().startswith("Faltantes"):
+                r.font.color.rgb = RGBColor(0x1F, 0x4E, 0x78)
+                r.font.bold = True
             else:
-                r.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+                r.font.color.rgb = RGBColor(0x33, 0x41, 0x55)
     except Exception as e:
         log(f"  ⚠ No se pudo agregar textbox de resumen: {e}")
 
@@ -868,14 +909,14 @@ def _cuerpo_html(mes_lbl: str, sem_iso: int, semana_ini: date, semana_fin: date,
 <html><body style="font-family:Arial,sans-serif;color:#1f2937;max-width:720px;line-height:1.55;">
 <p>Estimados, buenos días.</p>
 
-<p>A continuación comparto el resumen de la <b>semana {sem_iso}</b>
-({semana_ini.strftime('%d/%m/%Y')} – {semana_fin.strftime('%d/%m/%Y')})
-de los registros de equipos y consumos <b>Shell</b>.</p>
+<p>A continuación comparto el resumen consolidado de <b>{mes_lbl}</b>
+(hasta el {semana_fin.strftime('%d/%m/%Y')}) de los registros de equipos
+y consumos <b>Shell</b>. Semana ISO {sem_iso}.</p>
 
 <ul>
-  <li>📎 <b>Presentación (PPT)</b> con el resumen de la semana:
-      <b>{n_sem}</b> registros analizados.</li>
-  <li>📎 <b>Excel</b> con el detalle del mes completo
+  <li>📎 <b>Presentación (PPT)</b> — consolidado del mes:
+      <b>{n_mes}</b> registros analizados.</li>
+  <li>📎 <b>Excel</b> con el detalle OT-por-OT del mes
       ({mes_lbl}): <b>{n_mes}</b> OTs.</li>
 </ul>
 
@@ -943,6 +984,9 @@ def main() -> int:
                     help="Simular fecha del lunes de envío (YYYY-MM-DD)")
     ap.add_argument("--force-new-thread", action="store_true",
                     help="Ignora hilo existente y abre uno nuevo")
+    ap.add_argument("--mensaje-inicio", default=None,
+                    help="Texto HTML que se antepone al cuerpo estándar "
+                         "(ej. para 'fe de erratas' o notas puntuales)")
     args = ap.parse_args()
 
     # Fecha del lunes de envío
@@ -989,7 +1033,11 @@ def main() -> int:
     xlsx = build_excel(df_mes)
     log(f"  Excel: {len(xlsx)//1024} KB")
     log("Generando PPT…")
-    pptx, resumen_lines = build_ppt(df_sem, mes_lbl, sem_iso, semana_ini, semana_fin)
+    # El PPT ahora usa el mes COMPLETO (igual que el Excel). Pasamos
+    # semana_ini/semana_fin solo como contexto para el subtítulo pero
+    # el análisis se hace sobre df_mes.
+    pptx, resumen_lines = build_ppt(df_mes, mes_lbl, sem_iso, semana_ini, semana_fin,
+                                     corte_hasta=corte_hasta)
     log(f"  PPT: {len(pptx)//1024} KB · resumen: {len(resumen_lines)} líneas")
 
     # Nombres de archivo
@@ -1027,6 +1075,9 @@ def main() -> int:
     to_list = [args.test_email] if args.test_email else DESTINATARIOS
     cuerpo = _cuerpo_html(mes_lbl, sem_iso, semana_ini, semana_fin,
                           len(df_sem), len(df_mes), resumen_lines)
+    # Prepend "mensaje inicio" (ej. fe de erratas)
+    if args.mensaje_inicio:
+        cuerpo = args.mensaje_inicio + cuerpo
     if args.test_email:
         asunto = f"[PRUEBA] {asunto}"
         cuerpo = (f'<div style="background:#fef3c7;border-left:4px solid #f59e0b;'
