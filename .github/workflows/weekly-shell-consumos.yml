@@ -1,0 +1,53 @@
+name: Weekly Shell Consumos (Comercial)
+
+# Lunes a las 09:45 hora Chile (UTC-4 invierno / UTC-3 verano).
+# Cron en UTC: 13:45 UTC ≈ 09:45-10:45 CLT según DST. Aceptable.
+on:
+  schedule:
+    - cron: "45 13 * * 1"     # Lunes 13:45 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Modo prueba (no envía)"
+        type: boolean
+        default: true
+      test_email:
+        description: "Redirigir a este email"
+        type: string
+        default: ""
+      fecha:
+        description: "Simular fecha lunes (YYYY-MM-DD, vacío = hoy)"
+        type: string
+        default: ""
+      force_new_thread:
+        description: "Ignorar hilo existente y abrir uno nuevo"
+        type: boolean
+        default: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        run: pip install pandas openpyxl python-pptx requests
+      - name: Send Shell consumos report
+        env:
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: |
+          ARGS=""
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then ARGS="$ARGS --dry-run"; fi
+            if [[ -n "${{ inputs.test_email }}" ]]; then ARGS="$ARGS --test-email ${{ inputs.test_email }}"; fi
+            if [[ -n "${{ inputs.fecha }}" ]]; then ARGS="$ARGS --fecha ${{ inputs.fecha }}"; fi
+            if [[ "${{ inputs.force_new_thread }}" == "true" ]]; then ARGS="$ARGS --force-new-thread"; fi
+          fi
+          echo "Ejecutando: python send_weekly_shell_consumos.py $ARGS"
+          python send_weekly_shell_consumos.py $ARGS
