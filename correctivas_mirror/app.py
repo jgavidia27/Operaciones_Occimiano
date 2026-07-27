@@ -1209,7 +1209,7 @@ elif vista == "📊 Estadísticas":
         elif _total_rev <= 75:
             _health_col, _health_lbl = "#eab308", "Atención"
         elif _total_rev < 150:
-            _health_col, _health_lbl = "#f87171", "Crítico"  # rojo suave / coral
+            _health_col, _health_lbl = "#f97316", "Crítico"  # naranja intenso
         else:
             _health_col, _health_lbl = "#ff2800", "Crisis"   # rojo Ferrari intenso
 
@@ -1230,7 +1230,7 @@ elif vista == "📊 Estadísticas":
                     steps=[
                         dict(range=[0, 35],   color="rgba(22,163,74,0.20)"),
                         dict(range=[35, 75],  color="rgba(234,179,8,0.22)"),
-                        dict(range=[75, 150], color="rgba(248,113,113,0.28)"),   # rojo suave
+                        dict(range=[75, 150], color="rgba(249,115,22,0.28)"),   # naranja
                         dict(range=[150, _max_gauge], color="rgba(255,40,0,0.35)"),  # Ferrari
                     ],
                     threshold=dict(line=dict(color="#334155", width=3),
