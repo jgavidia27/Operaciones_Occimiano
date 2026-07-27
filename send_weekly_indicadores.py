@@ -188,6 +188,15 @@ def main():
     mes_label = f"{MESES_ES_LARGO[_mes_num].capitalize()} {_year}"
     sem_iso = _now_chile.isocalendar().week  # nº de semana ISO de HOY en Chile
 
+    # ── Dedupe idempotente: si ya se envió hoy, salir sin re-enviar ────
+    # Necesario porque el workflow tiene 3 crons escalonados como backup.
+    from email_dedupe import ya_enviado_hoy, marcar_enviado_hoy
+    if not args.dry_run and not args.test_email and ya_enviado_hoy("weekly_indicadores"):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] "
+              "═══ SKIP: ya se envió el resumen semanal hoy (dedupe) ═══",
+              flush=True)
+        return 0
+
     _log(f"═══ ENVÍO SEMANAL INDICADORES — {mes_label} ═══")
 
     # ── Cargar data (imports pesados solo cuando ejecutamos) ──
@@ -290,6 +299,10 @@ def main():
             err += 1
 
     _log(f"\n═══ RESUMEN: {ok} OK, {err} errores ═══")
+    # Marcar como enviado solo si al menos un correo salió OK y no hubo errores
+    if ok > 0 and err == 0 and not args.dry_run and not args.test_email:
+        marcar_enviado_hoy("weekly_indicadores",
+                           f"Resumen semanal indicadores — {mes_label} Sem. {sem_iso}")
     return 0 if err == 0 else 1
 
 

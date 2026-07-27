@@ -966,6 +966,13 @@ def main() -> int:
     log(f"Lunes envío: {hoy}  ·  Semana anterior: {semana_ini} → {semana_fin} (ISO {sem_iso})")
     log(f"Mes hilo: {mes_yyyy_mm} ({mes_lbl})")
 
+    # ── Dedupe idempotente (3 crons backup) ──
+    from email_dedupe import ya_enviado_hoy, marcar_enviado_hoy
+    if not args.dry_run and not args.test_email and ya_enviado_hoy(
+            "shell_consumos", fecha=hoy.strftime("%Y-%m-%d")):
+        log("═══ SKIP: ya se envió el reporte Shell de hoy (dedupe) ═══")
+        return 0
+
     # 1. Cargar datos (corte = ayer inclusive; hoy se excluye porque puede
     # tener OTs sin cerrar o data aún no sincronizada desde Fracttal)
     corte_hasta = hoy - timedelta(days=1)
@@ -1050,6 +1057,12 @@ def main() -> int:
     if mid and not thread and not args.test_email:
         ok = _save_thread(TOPIC, mes_yyyy_mm, mid, subject_base_for_body)
         log(f"  Thread guardado: {ok}")
+
+    # 8. Marcar envío del día (dedupe backup)
+    if mid and not args.test_email:
+        marcar_enviado_hoy("shell_consumos",
+                           subject_base_for_body,
+                           fecha=hoy.strftime("%Y-%m-%d"))
 
     log("═══ DONE ═══")
     return 0

@@ -182,6 +182,12 @@ def main():
 
     _log(f"═══ REINCIDENCIAS EDS — {mes_label} (Sem. {sem_iso}) ═══")
 
+    # ── Dedupe idempotente (3 crons backup) ──
+    from email_dedupe import ya_enviado_hoy, marcar_enviado_hoy
+    if not args.dry_run and not args.test_email and ya_enviado_hoy("weekly_reincidencias"):
+        _log("═══ SKIP: ya se envió el resumen de hoy (dedupe) ═══")
+        return 0
+
     # ── Cargar data ──
     _log("Cargando df_llamados desde Supabase...")
     from cron_data_loader import load_dashboard_data
@@ -240,6 +246,9 @@ def main():
         _log(traceback.format_exc()[:600])
         return 1
 
+    if not args.dry_run and not args.test_email:
+        marcar_enviado_hoy("weekly_reincidencias",
+                           f"Resumen semanal reincidencias EDS — {mes_label} Sem. {sem_iso}")
     _log("═══ DONE ═══")
     return 0
 

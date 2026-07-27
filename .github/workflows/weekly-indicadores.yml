@@ -6,7 +6,12 @@ name: Weekly Indicadores (email a seniors)
 # Usamos 14:00 UTC (~10:00-11:00 CLT según DST). Aceptable.
 on:
   schedule:
-    - cron: "0 14 * * 1"       # Lunes 14:00 UTC
+    # 3 crons escalonados como redundancia — GitHub Actions a veces se
+    # salta el primer disparo. El script tiene dedupe idempotente:
+    # si ya se envió hoy, los intentos posteriores salen sin re-enviar.
+    - cron: "0 14 * * 1"       # Lunes 14:00 UTC (~10 AM CLT)
+    - cron: "30 14 * * 1"      # Backup +30 min
+    - cron: "0 15 * * 1"       # Backup +1 h
   workflow_dispatch:            # permite ejecutar manualmente
     inputs:
       dry_run:
