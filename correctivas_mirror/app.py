@@ -1882,6 +1882,10 @@ if vista == "🔍 Validación En Revisión":
                 return ("Preventiva OK — " if tipo.startswith("PREVENT") else "OT OK — ") + ", ".join(partes) + ". Cerrar"
 
             if color == "AMARILLO":
+                if "solo falta cambio de aceite" in motivo.lower():
+                    return (f"Solo falta cambio de aceite ({pct}%) — "
+                            "aceptable si el equipo tuvo poco uso. Puede cerrarse "
+                            "tras confirmar con el técnico")
                 if "sin: tipo falla" in motivo.lower() or "sin: causa" in motivo.lower() or "sin: deteccion" in motivo.lower():
                     return f"Correctiva incompleta — {motivo}. Pedir al técnico completar. NO cerrar"
                 if "dice 'si'" in motivo.lower() or "dice 'no'" in motivo.lower():

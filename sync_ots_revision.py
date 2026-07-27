@@ -224,9 +224,21 @@ def fetch_recursos_detalle(folio: str, token: str) -> dict:
 def calcular_semaforo(wo: dict, extras: dict) -> tuple:
     """Devuelve (color, motivo, incongruencias).
     extras incluye trabajo_realizado, entrega_repuestos, tiene_repuesto_real,
-    repuestos_detalle, servicios_detalle, hh_detalle."""
+    repuestos_detalle, servicios_detalle, hh_detalle, subtareas_pendientes."""
     completed = wo.get("completed_percentage") or 0
     if completed < 100:
+        # Excepción de negocio: si lo ÚNICO pendiente es "cambio de aceite",
+        # la OT se marca AMARILLA (no roja). Justificación: en equipos con
+        # poco uso el aceite sigue en buen estado y omitir el cambio no es
+        # crítico. Si además del aceite hay otra subtarea pendiente → ROJO.
+        subs = extras.get("subtareas_pendientes") or []
+        if subs:
+            names = [(s.get("task") or "").upper() for s in subs]
+            solo_aceite = names and all("CAMBIO DE ACEITE" in n for n in names)
+            if solo_aceite:
+                return ("AMARILLO",
+                        f"Solo falta cambio de aceite ({completed}%) — "
+                        "puede omitirse si el equipo tuvo poco uso", None)
         return ("ROJO", f"Completitud={completed}%", None)
 
     # Detectar atención remota (no requiere recursos/costos/repuestos)
