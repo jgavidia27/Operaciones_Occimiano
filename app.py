@@ -2116,126 +2116,154 @@ if _page == _NAV_PAGES[1]:
                 unsafe_allow_html=True,
             )
 
-            _sla_evol_sig = f"{len(df_llamados)}_{sel_trim_c}_{sel_cl_c}_{sel_pr_c}"
+            _sla_evol_sig = (f"{len(df_ll)}_{sel_trim_c}"
+                             f"_{tuple(sel_mes_c) if sel_mes_c else ''}"
+                             f"_{sel_cl_c}_{sel_pr_c}")
             _sla_evol_k   = f"_fig_ll_sla_evol_{_current_theme}_{_sla_evol_sig}"
             if _sla_evol_k not in st.session_state:
-                # Base: filtrar por período y cliente pero NO por cumplimiento
-                # para medir la tasa SLA real mes a mes
-                _ev_base = df_llamados.copy()
-                _fl_ev = _ev_base["fecha_llamado"]
-                if _fl_ev.dt.tz is not None:
-                    _fl_ev = _fl_ev.dt.tz_convert(None)
-                _ev_base["_mes"]   = _fl_ev.dt.to_period("M").astype(str)
-                _ev_base["_month"] = _fl_ev.dt.month.astype("Int64")
-                if sel_trim_c != "Todos":
-                    _ev_base = _ev_base[_ev_base["_month"].isin(_TRIMESTRES_DEF[sel_trim_c])]
-                if sel_cl_c  != "Todos":
-                    _ev_base = _ev_base[_ev_base["cliente"] == sel_cl_c]
-                if sel_pr_c  != "Todas":
-                    _ev_base = _ev_base[_ev_base["prioridad"].str.upper() == sel_pr_c.upper()]
+                # Base: usar df_ll que ya viene con TODOS los filtros aplicados
+                # (trimestre, mes múltiple, cliente, prioridad, zona).
+                _ev_base = df_ll.copy()
 
-                _ev_grp = (
-                    _ev_base.groupby("_mes").agg(
-                        llamados =("_mes", "count"),
-                        cumple   =("cumplimiento", lambda x: (x == "CUMPLE").sum()),
-                        no_cumple=("cumplimiento", lambda x: (x == "NO CUMPLE").sum()),
-                    ).reset_index().sort_values("_mes")
-                )
-                _ev_grp["pct_sla"] = (
-                    (_ev_grp["cumple"] / (_ev_grp["cumple"] + _ev_grp["no_cumple"]) * 100)
-                    .where((_ev_grp["cumple"] + _ev_grp["no_cumple"]) > 0, 0)
-                    .astype(float).round(1)
-                )
-                _ev_grp["mes_lbl"] = _ev_grp["_mes"].apply(_ym_a_lbl)
+                # Si el usuario seleccionó UN SOLO mes → agrupar por SEMANA ISO.
+                # En cualquier otro caso (varios meses o ninguno) → por mes.
+                _por_semana = len(sel_mes_c) == 1
+
+                if _por_semana:
+                    _sel_period = _lbl_to_period.get(sel_mes_c[0])
+                    _sem_list = _semanas_del_mes(_sel_period) if _sel_period else []
+                    _rows = []
+                    _fl = _ev_base["fecha_llamado"]
+                    if getattr(_fl.dt, "tz", None) is not None:
+                        _fl = _fl.dt.tz_convert(None)
+                    _fdate = _fl.dt.date
+                    for _lbl, _ini, _fin in _sem_list:
+                        _mask = _fdate.between(_ini, _fin)
+                        _sub = _ev_base[_mask]
+                        if _sub.empty:
+                            continue
+                        _rows.append({
+                            "bucket_lbl": _lbl,
+                            "llamados":  len(_sub),
+                            "cumple":    int((_sub["cumplimiento"] == "CUMPLE").sum()),
+                            "no_cumple": int((_sub["cumplimiento"] == "NO CUMPLE").sum()),
+                        })
+                    _ev_grp = pd.DataFrame(_rows)
+                else:
+                    _ev_grp = (
+                        _ev_base.groupby("_mes").agg(
+                            llamados =("_mes", "count"),
+                            cumple   =("cumplimiento", lambda x: (x == "CUMPLE").sum()),
+                            no_cumple=("cumplimiento", lambda x: (x == "NO CUMPLE").sum()),
+                        ).reset_index().sort_values("_mes")
+                    )
+                    _ev_grp["bucket_lbl"] = _ev_grp["_mes"].apply(_ym_a_lbl)
+
+                # % SLA y % NC (evaluados solo sobre CUMPLE + NO CUMPLE,
+                # los "sin evaluar" no se cuentan)
+                if not _ev_grp.empty:
+                    _ev_grp["_eval"] = _ev_grp["cumple"] + _ev_grp["no_cumple"]
+                    _ev_grp = _ev_grp[_ev_grp["_eval"] > 0].copy()
+                if not _ev_grp.empty:
+                    _ev_grp["pct_sla"] = (_ev_grp["cumple"] / _ev_grp["_eval"] * 100).round(1)
+                    _ev_grp["pct_nc"]  = (100 - _ev_grp["pct_sla"]).round(1)
 
                 if not _ev_grp.empty:
                     _fig_sla_evol = make_subplots(specs=[[{"secondary_y": True}]])
 
-                    # Color de barra según cliente seleccionado
-                    _bar_color_evol = CLIENT_COLORS.get(sel_cl_c, "#94a3b8")
-                    # Texto oscuro sobre amarillo (Shell), blanco sobre el resto
-                    _bar_txt_evol = "#1e293b" if sel_cl_c == "SHELL (Enex)" else "#ffffff"
-
-                    # Barras: llamados por mes
+                    # Barras apiladas: Cumple SLA (verde) + No cumple (rojo)
+                    _txt_ok = _ev_grp.apply(
+                        lambda r: f"<b>{r['pct_sla']:.1f}%</b><br>"
+                                  f"<span style='font-size:10px;'>"
+                                  f"{int(r['cumple'])}/{int(r['_eval'])}</span>",
+                        axis=1).tolist()
                     _fig_sla_evol.add_trace(
                         go.Bar(
-                            x=_ev_grp["mes_lbl"], y=_ev_grp["llamados"],
-                            name="Llamados correctivos",
-                            marker_color=_bar_color_evol, opacity=0.9,
-                            text=_ev_grp["llamados"],
-                            textposition="inside",
-                            insidetextanchor="start",
-                            textfont=dict(size=13, color=_bar_txt_evol, family="Arial"),
-                        ),
-                        secondary_y=False,
-                    )
-
-                    # Línea: tendencia de llamados — naranja
-                    _fig_sla_evol.add_trace(
-                        go.Scatter(
-                            x=_ev_grp["mes_lbl"], y=_ev_grp["llamados"],
-                            name="Tendencia llamados",
-                            mode="lines+markers",
-                            line=dict(color="#f97316", width=2.5, dash="dot"),
-                            marker=dict(size=7, color="#f97316",
-                                        line=dict(color="#ffffff", width=1)),
-                        ),
-                        secondary_y=False,
-                    )
-
-                    # Línea: % SLA cumplimiento — verde (eje derecho)
-                    _fig_sla_evol.add_trace(
-                        go.Scatter(
-                            x=_ev_grp["mes_lbl"], y=_ev_grp["pct_sla"],
-                            name="% Cumplimiento SLA",
-                            mode="lines+markers",
-                            line=dict(color="#22c55e", width=3),
-                            marker=dict(size=11, color="#22c55e",
-                                        line=dict(color="#ffffff", width=2)),
-                            customdata=list(zip(
-                                _ev_grp["cumple"], _ev_grp["no_cumple"], _ev_grp["llamados"]
-                            )),
-                            hovertemplate=(
-                                "<b>%{x}</b><br>"
-                                "% SLA: %{y:.1f}%<br>"
-                                "Cumple: %{customdata[0]}<br>"
-                                "No cumple: %{customdata[1]}<br>"
-                                "Total llamados: %{customdata[2]}<br>"
-                                "<extra></extra>"
-                            ),
+                            x=_ev_grp["bucket_lbl"], y=_ev_grp["pct_sla"],
+                            name="Cumple SLA",
+                            marker_color="#22c55e", opacity=0.95,
+                            text=_txt_ok, textposition="inside",
+                            insidetextanchor="middle",
+                            textfont=dict(size=13, color="#ffffff", family="Arial"),
                         ),
                         secondary_y=True,
                     )
-                    # Anotaciones con fondo blanco bordeado en verde — debajo del punto
-                    for _, _ann_row in _ev_grp.iterrows():
-                        _fig_sla_evol.add_annotation(
-                            x=_ann_row["mes_lbl"],
-                            y=_ann_row["pct_sla"],
-                            yref="y2",
-                            text=f"<b>{_ann_row['pct_sla']:.1f}%</b>  {int(_ann_row['cumple'])} cumple",
-                            showarrow=False,
-                            yanchor="top",
-                            yshift=-8,
-                            font=dict(size=11, color="#16a34a", family="Arial"),
-                            bgcolor="rgba(255,255,255,0.88)",
-                            bordercolor="#22c55e",
-                            borderwidth=1.5,
-                            borderpad=4,
-                        )
+                    _txt_nc = _ev_grp["pct_nc"].apply(
+                        lambda v: f"<b>{v:.1f}%</b>" if v >= 10 else "").tolist()
+                    _fig_sla_evol.add_trace(
+                        go.Bar(
+                            x=_ev_grp["bucket_lbl"], y=_ev_grp["pct_nc"],
+                            name="No cumple SLA",
+                            marker_color="#ef4444", opacity=0.92,
+                            text=_txt_nc, textposition="inside",
+                            insidetextanchor="middle",
+                            textfont=dict(size=12, color="#ffffff"),
+                        ),
+                        secondary_y=True,
+                    )
+                    # Anotación pct_nc pequeña (<10%) con flecha externa roja
+                    for _, _r in _ev_grp.iterrows():
+                        if 0 < _r["pct_nc"] < 10:
+                            _fig_sla_evol.add_annotation(
+                                x=_r["bucket_lbl"], y=100, yref="y2",
+                                ax=0, ay=-35, axref="pixel", ayref="pixel",
+                                showarrow=True, arrowhead=2, arrowsize=1,
+                                arrowwidth=1.5, arrowcolor="#ef4444",
+                                text=f"<b style='color:#ef4444;'>{_r['pct_nc']:.1f}%</b>",
+                                font=dict(size=11, color="#ef4444"),
+                                bgcolor="rgba(255,255,255,0.95)",
+                                bordercolor="#ef4444", borderwidth=1, borderpad=3,
+                            )
+                    # Línea de meta 95%
+                    _fig_sla_evol.add_hline(
+                        y=95, line_dash="dash", line_color="#22c55e",
+                        annotation_text="Meta 95%",
+                        annotation_position="top left",
+                        line_width=1.5, secondary_y=True,
+                    )
 
+                    # Línea encima: TOTAL llamados atendidos (eje izquierdo)
+                    _fig_sla_evol.add_trace(
+                        go.Scatter(
+                            x=_ev_grp["bucket_lbl"], y=_ev_grp["llamados"],
+                            name="Total llamados",
+                            mode="lines+markers+text",
+                            line=dict(color="#334155", width=2.5),
+                            marker=dict(size=10, color="#334155",
+                                        line=dict(color="#ffffff", width=2),
+                                        symbol="circle"),
+                            text=[f"<b>{int(v)}</b>" for v in _ev_grp["llamados"]],
+                            textposition="top center",
+                            textfont=dict(size=12, color="#0f172a", family="Arial"),
+                            hovertemplate=(
+                                "<b>%{x}</b><br>"
+                                "Llamados atendidos: <b>%{y}</b><br>"
+                                "<extra></extra>"
+                            ),
+                        ),
+                        secondary_y=False,
+                    )
+                    # Título dinámico según agrupación
+                    _titulo_evol = ("Evolución por semanas — Cumplimiento SLA"
+                                    if _por_semana
+                                    else "Evolución mensual — Cumplimiento SLA")
                     _fig_sla_evol.update_layout(
-                        title=f"Evolución mensual — Llamados correctivos vs % SLA",
+                        title=_titulo_evol,
                         height=430,
                         legend=dict(orientation="h", y=1.08, x=0),
                         margin=dict(t=60, b=20),
                         bargap=0.3,
+                        barmode="stack",
                     )
-                    _fig_sla_evol.update_yaxes(title_text="Llamados correctivos", secondary_y=False)
+                    _fig_sla_evol.update_yaxes(
+                        title_text="Total llamados", secondary_y=False,
+                        showgrid=False,
+                    )
                     _fig_sla_evol.update_yaxes(
                         title_text="% Cumplimiento SLA",
                         secondary_y=True,
                         tickformat=".1f", ticksuffix="%",
-                        range=[0, 110],
+                        range=[0, 115],
                     )
                     _apply_plot_theme(_fig_sla_evol)
                     st.session_state[_sla_evol_k] = _fig_sla_evol
