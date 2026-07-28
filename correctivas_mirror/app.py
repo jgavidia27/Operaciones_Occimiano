@@ -2155,17 +2155,22 @@ if vista == "🔗 Enlace Copec":
         _prev = d[d["tipo_aviso"] == "PREVENTIVO"].copy()
         _corr = d[d["tipo_aviso"] != "PREVENTIVO"].copy()
 
+        def _cierre_enlace(estados, fechas_ult):
+            """Devuelve la fecha_ultimo_cambio MAX cuando TODOS están cerrados;
+            si algún estado != CERRADO, devuelve NaT (no cerrado todavía)."""
+            if all(e == "CERRADO" for e in estados):
+                fechas = [f for f in fechas_ult if pd.notna(f)]
+                return max(fechas) if fechas else pd.NaT
+            return pd.NaT
+
         _consumed = set()
         # Pareo: N Plans + M Repuestos con misma EDS+día se agrupan en 1 fila.
-        # Casos habituales: 1P+1R (normal), 1P+2R (EDS con 2 equipos, ej 10238).
         for pk, g in _prev.groupby("_par_key"):
             if pk.endswith("|"):
                 continue
             plans = g[g["_clase"] == "PLAN"]
             reps  = g[g["_clase"] == "REPUESTOS"]
             if len(plans) >= 1 and len(reps) >= 1:
-                # Tomamos el Plan más "temprano" como cabecera; guardamos todos
-                # los ids en _ids para el detalle expandido.
                 plan = plans.iloc[0]
                 todos_ids = list(plans["id_sap"]) + list(reps["id_sap"])
                 todos_estados = list(plans["estado"]) + list(reps["estado"])
@@ -2174,7 +2179,6 @@ if vista == "🔗 Enlace Copec":
                 desc = f"Plan Mtto {comuna}" if comuna else "Plan Mtto Preventivo"
                 if len(reps) > 1:
                     desc += f" · ({len(reps)} equipos)"
-                # N° Plan / Rep: si hay múltiples, los concatenamos con "+"
                 n_plan = " + ".join(str(x) for x in plans["id_sap"])
                 n_rep  = " + ".join(str(x) for x in reps["id_sap"])
                 # OS Fracttal: el primero no vacío entre todos
@@ -2183,6 +2187,16 @@ if vista == "🔗 Enlace Copec":
                     row = g[g["id_sap"] == _id].iloc[0]
                     if row.get("os_fracttal"):
                         os_fr = row["os_fracttal"]; break
+                # Cierre Fracttal: fecha_finalizacion de la OT matcheada
+                fecha_cierre_frac = pd.NaT
+                if os_fr and _ots_detalle.get(os_fr):
+                    ff = _ots_detalle[os_fr].get("fecha_finalizacion")
+                    if ff:
+                        fecha_cierre_frac = pd.to_datetime(ff, errors="coerce", utc=True)
+                # Cierre Enlace: MAX(fecha_ultimo_cambio) si TODOS cerrados
+                fechas_ult = [pd.to_datetime(g[g["id_sap"] == i].iloc[0]["fecha_ultimo_cambio"],
+                                             errors="coerce", utc=True) for i in todos_ids]
+                fecha_cierre_enl = _cierre_enlace(todos_estados, fechas_ult)
                 rows_view.append({
                     "_key":         f"PREV|{pk}",
                     "_tipo":        "PREVENTIVO",
@@ -2200,6 +2214,8 @@ if vista == "🔗 Enlace Copec":
                     "Dirección":    _title_smart(plan.get("descripcion_instalacion") or ""),
                     "Contacto":     _title_smart(plan.get("nombre_contacto") or ""),
                     "Últ. cambio":  pd.to_datetime(plan["fecha_ultimo_cambio"], errors="coerce", utc=True),
+                    "Cierre Fracttal": fecha_cierre_frac,
+                    "Cierre Enlace":   fecha_cierre_enl,
                 })
 
         # Preventivos huérfanos (o no clasificados por prefijo raro)
@@ -2221,6 +2237,13 @@ if vista == "🔗 Enlace Copec":
             desc = f"{prefijo} {comuna} · (sin par)" if comuna else f"{prefijo} · (sin par)"
             no_cerr = 0 if r["estado"] == "CERRADO" else 1
             estado_ui = "✅ Cerrado" if no_cerr == 0 else "🟠 Cierre pendiente (1)"
+            os_fr = r.get("os_fracttal") or ""
+            fecha_cierre_frac = pd.NaT
+            if os_fr and _ots_detalle.get(os_fr):
+                ff = _ots_detalle[os_fr].get("fecha_finalizacion")
+                if ff: fecha_cierre_frac = pd.to_datetime(ff, errors="coerce", utc=True)
+            fecha_cierre_enl = pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True) \
+                if r["estado"] == "CERRADO" else pd.NaT
             rows_view.append({
                 "_key":         f"SOLO|{r['id_sap']}",
                 "_tipo":        "PREVENTIVO_HUERFANO",
@@ -2228,7 +2251,7 @@ if vista == "🔗 Enlace Copec":
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
                 "N° MP Fija":      n_plan,
                 "N° MP Variable":       n_rep,
-                "N° OT Fracttal":  r.get("os_fracttal") or "",
+                "N° OT Fracttal":  os_fr,
                 "Tipo":         "Preventivo",
                 "Prioridad":    "",
                 "Estado":       estado_ui,
@@ -2238,10 +2261,19 @@ if vista == "🔗 Enlace Copec":
                 "Dirección":    _title_smart(r.get("descripcion_instalacion") or ""),
                 "Contacto":     _title_smart(r.get("nombre_contacto") or ""),
                 "Últ. cambio":  pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True),
+                "Cierre Fracttal": fecha_cierre_frac,
+                "Cierre Enlace":   fecha_cierre_enl,
             })
 
-        # Correctivos (1 fila cada uno; sí llevan prioridad; nº en col N° Plan)
+        # Correctivos (1 fila cada uno; sí llevan prioridad; nº en col MP Fija)
         for _, r in _corr.iterrows():
+            os_fr = r.get("os_fracttal") or ""
+            fecha_cierre_frac = pd.NaT
+            if os_fr and _ots_detalle.get(os_fr):
+                ff = _ots_detalle[os_fr].get("fecha_finalizacion")
+                if ff: fecha_cierre_frac = pd.to_datetime(ff, errors="coerce", utc=True)
+            fecha_cierre_enl = pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True) \
+                if r["estado"] == "CERRADO" else pd.NaT
             rows_view.append({
                 "_key":         f"CORR|{r['id_sap']}",
                 "_tipo":        "CORRECTIVO",
@@ -2249,7 +2281,7 @@ if vista == "🔗 Enlace Copec":
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
                 "N° MP Fija":      str(r["id_sap"]),
                 "N° MP Variable":       "",
-                "N° OT Fracttal":  r.get("os_fracttal") or "",
+                "N° OT Fracttal":  os_fr,
                 "Tipo":         "Correctivo",
                 "Prioridad":    r.get("prioridad") or "",
                 "Estado":       _label_estado_uno(r["estado"]),
@@ -2259,6 +2291,8 @@ if vista == "🔗 Enlace Copec":
                 "Dirección":    _title_smart(r.get("descripcion_instalacion") or ""),
                 "Contacto":     _title_smart(r.get("nombre_contacto") or ""),
                 "Últ. cambio":  pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True),
+                "Cierre Fracttal": fecha_cierre_frac,
+                "Cierre Enlace":   fecha_cierre_enl,
             })
 
         tab = pd.DataFrame(rows_view).sort_values("Creado", ascending=False).reset_index(drop=True)
@@ -2267,10 +2301,17 @@ if vista == "🔗 Enlace Copec":
         tab["_creado_dt"] = tab["Creado"]
         tab["Creado"]      = tab["Creado"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
         tab["Últ. cambio"] = tab["Últ. cambio"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
+        def _fmt_dt(s):
+            if pd.isna(s): return ""
+            try: return s.tz_convert(_CL_TZ).strftime("%d/%m %H:%M")
+            except Exception: return ""
+        tab["Cierre Fracttal"] = tab["Cierre Fracttal"].map(_fmt_dt)
+        tab["Cierre Enlace"]   = tab["Cierre Enlace"].map(_fmt_dt)
 
         cols_show = ["Creado", "N° MP Fija", "N° MP Variable", "N° OT Fracttal", "Tipo",
                      "Prioridad", "Estado", "Descripción", "EDS", "Dirección",
-                     "Últ. cambio", "Equipo", "Contacto"]
+                     "Últ. cambio", "Cierre Fracttal", "Cierre Enlace",
+                     "Equipo", "Contacto"]
 
         st.markdown(
             f"**{len(tab)} registros** "
@@ -2298,6 +2339,8 @@ if vista == "🔗 Enlace Copec":
                 "Dirección":   st.column_config.TextColumn(width=240),
                 "Contacto":    st.column_config.TextColumn(width=140),
                 "Últ. cambio": st.column_config.TextColumn(width=100),
+                "Cierre Fracttal": st.column_config.TextColumn(width=110),
+                "Cierre Enlace":   st.column_config.TextColumn(width=110),
             },
         )
 
@@ -2346,7 +2389,9 @@ if vista == "🔗 Enlace Copec":
                         f"{('· ' + av.get('telefono_contacto')) if av.get('telefono_contacto') else ''}  \n"
                         f"**N° orden Enlace:** `{av.get('numero_orden') or '—'}`  \n"
                         f"**Creado:** {_fmt(av.get('fecha_creacion'))}  \n"
-                        f"**Últ. cambio:** {_fmt(av.get('fecha_ultimo_cambio'))}"
+                        f"**Últ. cambio:** {_fmt(av.get('fecha_ultimo_cambio'))}  \n"
+                        f"**Cierre Enlace:** "
+                        f"{_fmt(av.get('fecha_ultimo_cambio')) if av.get('estado') == 'CERRADO' else '— (no cerrado aún)'}"
                     )
                     st.markdown(bloque_enlace)
 
