@@ -1894,9 +1894,14 @@ if vista == "🔗 Enlace Copec":
     # Ambos con misma EDS y mismo día. El técnico debe cerrar los DOS.
     def _clase(f: str | None) -> str | None:
         f = (f or "").upper().strip()
-        # Acepta variantes "Mto" (una T) y "Mtto" (dos T) — Copec no es consistente
-        if f.startswith(("PLAN MTTO", "PLAN MTO ")):          return "PLAN"
-        if f.startswith(("REPUESTOS MTTO", "REPUESTOS MTO ")): return "REPUESTOS"
+        # Acepta variantes "Mto" (1T) / "Mtto" (2T) — Copec no es consistente.
+        # "Atención Llamado" también cuenta como PLAN (es la orden principal
+        # del servicio para ciertas EDS remotas, sustituye al "Plan Mtto").
+        if f.startswith(("PLAN MTTO", "PLAN MTO ",
+                         "ATENCIÓN LLAMADO", "ATENCION LLAMADO")):
+            return "PLAN"
+        if f.startswith(("REPUESTOS MTTO", "REPUESTOS MTO ")):
+            return "REPUESTOS"
         return None
     df["_clase"] = df["descripcion_falla"].map(_clase)
     _dia = pd.to_datetime(df["fecha_creacion"], errors="coerce", utc=True) \
