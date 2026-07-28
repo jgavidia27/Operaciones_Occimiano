@@ -1952,6 +1952,20 @@ if vista == "🔗 Enlace Copec":
     _ots_ids = tuple(sorted({x for x in df["os_fracttal"].dropna().unique() if x}))
     _ots_detalle = cargar_ots_detalle(_ots_ids)
 
+    def _title_smart(s):
+        """Title-case que preserva siglas cortas (LVX, LT, EDS, N°)."""
+        if not s or not isinstance(s, str):
+            return s or ""
+        out = []
+        for w in s.split():
+            if len(w) <= 3 and w.isupper() and w.isalpha():
+                out.append(w)
+            elif "°" in w:
+                out.append(w[0].upper() + w[1:].lower())
+            else:
+                out.append(w.capitalize())
+        return " ".join(out)
+
     # ── Detectar pareos Plan/Repuestos (solo preventivos) ───────────
     # Copec divide cada mantención preventiva en 2 avisos separados:
     #   "Plan Mtto Preventivo..." (o "Plan Mto...", inconsistente Copec)
@@ -1989,9 +2003,14 @@ if vista == "🔗 Enlace Copec":
         plans = g[g["_clase"] == "PLAN"]
         reps  = g[g["_clase"] == "REPUESTOS"]
         plan = plans.iloc[0]
+        # OS Fracttal (única para el par): primera no vacía del grupo
+        os_fr = ""
+        for _v in g["os_fracttal"]:
+            if _v:
+                os_fr = _v; break
         _desbal.append({
             "EDS": plan["eds_codigo"],
-            "Dirección": plan["descripcion_instalacion"],
+            "Dirección": _title_smart(plan["descripcion_instalacion"] or ""),
             "Fecha": pk.split("|")[-1],
             "N° MP Fija": " + ".join(str(x) for x in plans["id_sap"]),
             "Estado Plan": " / ".join(sorted({
@@ -2003,6 +2022,7 @@ if vista == "🔗 Enlace Copec":
                 ESTADO_META.get(e, ("⚪", e))[0] + " " + ESTADO_META.get(e, ("", e))[1]
                 for e in reps["estado"]
             })),
+            "N° OT Fracttal": os_fr or "⏳ pendiente",
         })
 
     if _desbal:
@@ -2122,22 +2142,6 @@ if vista == "🔗 Enlace Copec":
         st.info("Ningún aviso cumple los filtros.")
     else:
         _comuna_by_eds = cargar_estaciones_comuna()
-
-        def _title_smart(s):
-            """Title-case que preserva siglas cortas (LVX, LT, EDS, N°)."""
-            if not s or not isinstance(s, str):
-                return s or ""
-            out = []
-            for w in s.split():
-                # palabras <=3 chars todo-mayus quedan igual (LVX, LT, EDS, RM, GNC)
-                if len(w) <= 3 and w.isupper() and w.isalpha():
-                    out.append(w)
-                # palabras con "°" (N°1, N°5903) preservan formato
-                elif "°" in w:
-                    out.append(w[0].upper() + w[1:].lower())
-                else:
-                    out.append(w.capitalize())
-            return " ".join(out)
 
         def _label_estado_uno(est):
             emo, lbl = ESTADO_META.get(est, ("⚪", est or ""))
