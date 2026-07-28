@@ -2071,7 +2071,7 @@ if vista == "🔗 Enlace Copec":
                 _seen.add(lbl); _labels_unicos.append(lbl)
         _labels_unicos = sorted(_labels_unicos)
         estado_sel = st.multiselect(
-            "Estado", _labels_unicos,
+            "Estado Enlace", _labels_unicos,
             default=[l for l in _labels_unicos if l != "Cerrado"],
             format_func=lambda x: f"{next((m[0] for e,m in ESTADO_META.items() if m[1]==x), '⚪')} {x}",
             key="enlace_estado",
@@ -2139,6 +2139,30 @@ if vista == "🔗 Enlace Copec":
             emo, lbl = ESTADO_META.get(est, ("⚪", est or ""))
             return f"{emo} {lbl}"
 
+        def _estado_fracttal_ui(ot):
+            """Traduce estado + estado_tarea + fecha_finalizacion de Fracttal
+            a las 3 categorías del negocio Occimiano:
+              • En Progreso: técnico aún no cierra la OT
+              • En Revisión: técnico cerró (DONE) pero admin no ha validado
+              • Finalizada: segunda validación OK (fecha_finalizacion poblada)
+              • Excepción: ERROR DE INGRESO / DUPLICADO / etc.
+            """
+            if not ot:
+                return ""
+            estado = (ot.get("estado") or "").strip()
+            et     = (ot.get("estado_tarea") or "").strip().upper()
+            ff     = ot.get("fecha_finalizacion")
+            e_up   = estado.upper()
+            if "ERROR" in e_up or "DUPLIC" in e_up or "CANCEL" in e_up or "RECHAZ" in e_up:
+                return f"🚫 {estado}"
+            if estado == "Finalizadas" and ff:
+                return "✅ Finalizada"
+            if et == "DONE":
+                return "🟡 En Revisión"
+            if estado == "Por Iniciar":
+                return "🔵 Por Iniciar"
+            return f"🟠 {estado or 'En Progreso'}"
+
         def _estado_grupo(estados):
             """Estado combinado para N avisos (típicamente 1 Plan + 1..N Repuestos).
               - Todos CERRADO   → ✅ Cerrado
@@ -2187,12 +2211,15 @@ if vista == "🔗 Enlace Copec":
                     row = g[g["id_sap"] == _id].iloc[0]
                     if row.get("os_fracttal"):
                         os_fr = row["os_fracttal"]; break
-                # Cierre Fracttal: fecha_finalizacion de la OT matcheada
+                # Cierre Fracttal + Estado Fracttal: de la OT matcheada
                 fecha_cierre_frac = pd.NaT
+                estado_frac = ""
                 if os_fr and _ots_detalle.get(os_fr):
-                    ff = _ots_detalle[os_fr].get("fecha_finalizacion")
+                    _ot = _ots_detalle[os_fr]
+                    ff = _ot.get("fecha_finalizacion")
                     if ff:
                         fecha_cierre_frac = pd.to_datetime(ff, errors="coerce", utc=True)
+                    estado_frac = _estado_fracttal_ui(_ot)
                 # Cierre Enlace: MAX(fecha_ultimo_cambio) si TODOS cerrados
                 fechas_ult = [pd.to_datetime(g[g["id_sap"] == i].iloc[0]["fecha_ultimo_cambio"],
                                              errors="coerce", utc=True) for i in todos_ids]
@@ -2207,7 +2234,8 @@ if vista == "🔗 Enlace Copec":
                     "N° OT Fracttal":  os_fr,
                     "Tipo":         "Preventivo",
                     "Prioridad":    "",
-                    "Estado":       _estado_grupo(todos_estados),
+                    "Estado Enlace":   _estado_grupo(todos_estados),
+                    "Estado Fracttal": estado_frac,
                     "Descripción":  desc,
                     "Equipo":       _title_smart(plan.get("descripcion_equipo") or ""),
                     "EDS":          plan.get("eds_codigo") or "",
@@ -2239,9 +2267,12 @@ if vista == "🔗 Enlace Copec":
             estado_ui = "✅ Cerrado" if no_cerr == 0 else "🟠 Cierre pendiente (1)"
             os_fr = r.get("os_fracttal") or ""
             fecha_cierre_frac = pd.NaT
+            estado_frac = ""
             if os_fr and _ots_detalle.get(os_fr):
-                ff = _ots_detalle[os_fr].get("fecha_finalizacion")
+                _ot = _ots_detalle[os_fr]
+                ff = _ot.get("fecha_finalizacion")
                 if ff: fecha_cierre_frac = pd.to_datetime(ff, errors="coerce", utc=True)
+                estado_frac = _estado_fracttal_ui(_ot)
             fecha_cierre_enl = pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True) \
                 if r["estado"] == "CERRADO" else pd.NaT
             rows_view.append({
@@ -2254,7 +2285,8 @@ if vista == "🔗 Enlace Copec":
                 "N° OT Fracttal":  os_fr,
                 "Tipo":         "Preventivo",
                 "Prioridad":    "",
-                "Estado":       estado_ui,
+                "Estado Enlace":   estado_ui,
+                "Estado Fracttal": estado_frac,
                 "Descripción":  desc,
                 "Equipo":       _title_smart(r.get("descripcion_equipo") or ""),
                 "EDS":          r.get("eds_codigo") or "",
@@ -2269,9 +2301,12 @@ if vista == "🔗 Enlace Copec":
         for _, r in _corr.iterrows():
             os_fr = r.get("os_fracttal") or ""
             fecha_cierre_frac = pd.NaT
+            estado_frac = ""
             if os_fr and _ots_detalle.get(os_fr):
-                ff = _ots_detalle[os_fr].get("fecha_finalizacion")
+                _ot = _ots_detalle[os_fr]
+                ff = _ot.get("fecha_finalizacion")
                 if ff: fecha_cierre_frac = pd.to_datetime(ff, errors="coerce", utc=True)
+                estado_frac = _estado_fracttal_ui(_ot)
             fecha_cierre_enl = pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True) \
                 if r["estado"] == "CERRADO" else pd.NaT
             rows_view.append({
@@ -2284,7 +2319,8 @@ if vista == "🔗 Enlace Copec":
                 "N° OT Fracttal":  os_fr,
                 "Tipo":         "Correctivo",
                 "Prioridad":    r.get("prioridad") or "",
-                "Estado":       _label_estado_uno(r["estado"]),
+                "Estado Enlace":   _label_estado_uno(r["estado"]),
+                "Estado Fracttal": estado_frac,
                 "Descripción":  _title_smart(r.get("descripcion_falla") or ""),
                 "Equipo":       _title_smart(r.get("descripcion_equipo") or ""),
                 "EDS":          r.get("eds_codigo") or "",
@@ -2309,7 +2345,8 @@ if vista == "🔗 Enlace Copec":
         tab["Cierre Enlace"]   = tab["Cierre Enlace"].map(_fmt_dt)
 
         cols_show = ["Creado", "N° MP Fija", "N° MP Variable", "N° OT Fracttal", "Tipo",
-                     "Prioridad", "Estado", "Descripción", "EDS", "Dirección",
+                     "Prioridad", "Estado Enlace", "Estado Fracttal",
+                     "Descripción", "EDS", "Dirección",
                      "Últ. cambio", "Cierre Fracttal", "Cierre Enlace",
                      "Equipo", "Contacto"]
 
@@ -2332,7 +2369,8 @@ if vista == "🔗 Enlace Copec":
                 "N° OT Fracttal": st.column_config.TextColumn(width=100),
                 "Tipo":        st.column_config.TextColumn(width=100),
                 "Prioridad":   st.column_config.TextColumn(width=80),
-                "Estado":      st.column_config.TextColumn(width=200),
+                "Estado Enlace":   st.column_config.TextColumn(width=200),
+                "Estado Fracttal": st.column_config.TextColumn(width=160),
                 "Descripción": st.column_config.TextColumn(width=240),
                 "Equipo":      st.column_config.TextColumn(width=150),
                 "EDS":         st.column_config.TextColumn(width=70),
