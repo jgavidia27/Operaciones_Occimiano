@@ -2155,7 +2155,10 @@ if vista == "🔗 Enlace Copec":
             ff     = ot.get("fecha_finalizacion")
             e_up   = estado.upper()
             if any(x in e_up for x in ("ERROR", "DUPLIC", "CANCEL", "RECHAZ")):
-                return f"🚫 {estado}"
+                # 'ERROR DE INGRESO' se muestra como 'Cancelada' (nomenclatura Occimiano)
+                if "ERROR" in e_up or "CANCEL" in e_up:
+                    return "🚫 Cancelada"
+                return f"🚫 {estado.title()}"
             if estado == "Finalizadas" and ff:
                 return "✅ Finalizada"
             if et == "DONE":
