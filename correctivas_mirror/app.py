@@ -1361,6 +1361,12 @@ elif vista == "📝 Registro (Excel)":
     _dfr["Anio"] = _dfr["fecha_llamado"].dt.year
     _dfr["Dia"] = _dfr["fecha_llamado"].dt.day_name()
 
+    # Title-case a los campos que Fracttal/Copec envian en MAYUSCULAS
+    for _c in ("Asunto", "EDS_r", "Mecanico", "Atencion", "Facturacion_r"):
+        if _c in _dfr.columns:
+            _dfr[_c] = _dfr[_c].fillna("—").astype(str).map(
+                lambda x: _title_smart(x) if x and x != "—" else "—")
+
     _excel_cols = [
         "Asunto", "N_llamado", "Codigo_EDS", "EDS_r",
         "Facturacion_r", "Fecha_llamado", "Hora",
