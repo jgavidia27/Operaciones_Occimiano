@@ -1740,9 +1740,9 @@ if vista == "🔗 Enlace Copec":
                 out[str(r["eds_occim"])] = c.title()
         return out
 
-    @st.cache_data(ttl=120, show_spinner="Cruzando con Fracttal...")
-    def cargar_match_fracttal(n_avisos: list[str]) -> dict:
-        """Devuelve {n_aviso: os_fracttal} usando llamados_correctivos."""
+    @st.cache_data(ttl=120, show_spinner="Cruzando correctivos con Fracttal...")
+    def cargar_match_fracttal_correctivo(n_avisos: list[str]) -> dict:
+        """Correctivos: match directo id_sap -> llamados_correctivos.n_aviso -> os_fracttal."""
         if not n_avisos:
             return {}
         by_aviso = {}
@@ -1757,6 +1757,30 @@ if vista == "🔗 Enlace Copec":
                 if r.get("n_aviso") and r.get("os_fracttal"):
                     by_aviso[str(r["n_aviso"])] = r["os_fracttal"]
         return by_aviso
+
+    @st.cache_data(ttl=300, show_spinner="Cruzando preventivos con Fracttal...")
+    def cargar_ots_preventivas_por_eds_mes() -> dict:
+        """Preventivos: no hay match 1:1 por nº aviso porque Enlace genera
+        2 avisos (Plan+Repuestos) por 1 OT preventiva en Fracttal.
+        Cruce por (codigo_eds + año-mes de fecha_programada). Ambos avisos
+        del mismo mes apuntan a la misma OT Fracttal."""
+        rows = _sb_get("ordenes_trabajo", {
+            "select": "id_ot,codigo_eds,fecha_programada,tipo_tarea,estado",
+            "tipo_tarea": "like.PREVENTIVA*",
+            "fecha_programada": "gte.2026-01-01",
+            "order": "fecha_programada.desc",
+            "limit": "5000",
+        })
+        by_key = {}   # {(eds, YYYY-MM): id_ot}  (más reciente si hay duplicados)
+        for r in rows:
+            eds = r.get("codigo_eds"); prog = r.get("fecha_programada")
+            if not eds or not prog:
+                continue
+            ym = prog[:7]  # YYYY-MM
+            key = (str(eds), ym)
+            if key not in by_key:
+                by_key[key] = r["id_ot"]
+        return by_key
 
     @st.cache_data(ttl=60)
     def cargar_enlace_auth_status() -> dict:
@@ -1794,9 +1818,25 @@ if vista == "🔗 Enlace Copec":
         )
         st.stop()
 
-    # ── Cruce con Fracttal (id_sap = llamados_correctivos.n_aviso) ──
-    _os_map = cargar_match_fracttal(df["id_sap"].dropna().astype(str).tolist())
-    df["os_fracttal"] = df["id_sap"].astype(str).map(_os_map)
+    # ── Cruce con Fracttal (2 estrategias según tipo_aviso) ─────────
+    # Correctivos: id_sap -> llamados_correctivos.n_aviso -> os_fracttal (1:1)
+    # Preventivos: (EDS + año-mes) -> ordenes_trabajo con tipo_tarea PREVENTIVA
+    _corr_map = cargar_match_fracttal_correctivo(
+        df[df["tipo_aviso"] == "CORRECTIVO"]["id_sap"].dropna().astype(str).tolist()
+    )
+    _prev_by_eds_mes = cargar_ots_preventivas_por_eds_mes()
+
+    def _resolve_os(row):
+        if row["tipo_aviso"] == "CORRECTIVO":
+            return _corr_map.get(str(row["id_sap"]))
+        # Preventivo: eds + YYYY-MM de fecha_creacion
+        eds = str(row.get("eds_codigo") or "")
+        fc  = row.get("fecha_creacion") or ""
+        if not eds or not fc:
+            return None
+        return _prev_by_eds_mes.get((eds, fc[:7]))
+
+    df["os_fracttal"] = df.apply(_resolve_os, axis=1)
 
     # ── Detectar pareos Plan/Repuestos (solo preventivos) ───────────
     # Copec divide cada mantención preventiva en 2 avisos separados:
