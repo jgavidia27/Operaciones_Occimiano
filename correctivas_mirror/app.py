@@ -1762,9 +1762,20 @@ if vista == "🔗 Enlace Copec":
     def cargar_ots_preventivas_por_eds() -> dict:
         """Preventivos: no hay match 1:1 por nº aviso porque Enlace genera
         2 avisos (Plan+Repuestos) por 1 OT preventiva en Fracttal.
-        Devuelve {eds: [(fecha_iso, id_ot), ...]} para hacer match por
-        cercanía temporal (ventana ±45 días). Cubre 92% de casos."""
+        Devuelve {eds: [(fecha_iso, id_ot), ...]} para match por cercanía
+        temporal (ventana ±45 días).
+
+        Incluye tipos: PREVENTIVA* (típico), ENTREGA DE INSUMOS Y/O
+        REPUESTOS (EDS del norte que no tienen preventiva mensual),
+        INSPECCIÓN y GARANTIA. Excluye CORRECTIVA (esas se cruzan por
+        nº aviso directo)."""
+        # PostgREST no soporta OR nativo en un solo campo con múltiples
+        # patrones like — usamos "in" para valores exactos + "like" para
+        # preventivas. Traemos ambos y unimos.
+        tipos_exactos = ("ENTREGA DE INSUMOS Y/O REPUESTOS", "INSPECCIÓN",
+                         "GARANTIA (sin cobro)", "PREVENTIVA CUATRIMESTRAL")
         all_rows = []
+        # Preventivas
         for off in range(0, 10000, 1000):
             rows = _sb_get("ordenes_trabajo", {
                 "select": "id_ot,codigo_eds,fecha_programada,tipo_tarea",
@@ -1773,11 +1784,22 @@ if vista == "🔗 Enlace Copec":
                 "order": "fecha_programada.desc",
                 "limit": "1000", "offset": str(off),
             })
-            if not rows:
-                break
+            if not rows: break
             all_rows.extend(rows)
-            if len(rows) < 1000:
-                break
+            if len(rows) < 1000: break
+        # Otros tipos
+        for tt in tipos_exactos:
+            for off in range(0, 5000, 1000):
+                rows = _sb_get("ordenes_trabajo", {
+                    "select": "id_ot,codigo_eds,fecha_programada,tipo_tarea",
+                    "tipo_tarea": f"eq.{tt}",
+                    "fecha_programada": "gte.2026-01-01",
+                    "order": "fecha_programada.desc",
+                    "limit": "1000", "offset": str(off),
+                })
+                if not rows: break
+                all_rows.extend(rows)
+                if len(rows) < 1000: break
         by_eds: dict[str, list] = {}
         for r in all_rows:
             eds = r.get("codigo_eds"); prog = r.get("fecha_programada")
@@ -1867,13 +1889,14 @@ if vista == "🔗 Enlace Copec":
 
     # ── Detectar pareos Plan/Repuestos (solo preventivos) ───────────
     # Copec divide cada mantención preventiva en 2 avisos separados:
-    #   "Plan Mtto Preventivo..."      → la mantención
-    #   "Repuestos Mtto Prev..."       → los repuestos usados
+    #   "Plan Mtto Preventivo..." (o "Plan Mto...", inconsistente Copec)
+    #   "Repuestos Mtto Prev..." (o "Repuestos Mto...")
     # Ambos con misma EDS y mismo día. El técnico debe cerrar los DOS.
     def _clase(f: str | None) -> str | None:
-        f = (f or "").upper()
-        if f.startswith("PLAN MTTO"):      return "PLAN"
-        if f.startswith("REPUESTOS MTTO"): return "REPUESTOS"
+        f = (f or "").upper().strip()
+        # Acepta variantes "Mto" (una T) y "Mtto" (dos T) — Copec no es consistente
+        if f.startswith(("PLAN MTTO", "PLAN MTO ")):          return "PLAN"
+        if f.startswith(("REPUESTOS MTTO", "REPUESTOS MTO ")): return "REPUESTOS"
         return None
     df["_clase"] = df["descripcion_falla"].map(_clase)
     _dia = pd.to_datetime(df["fecha_creacion"], errors="coerce", utc=True) \
@@ -2113,13 +2136,22 @@ if vista == "🔗 Enlace Copec":
                     "Últ. cambio":  pd.to_datetime(plan["fecha_ultimo_cambio"], errors="coerce", utc=True),
                 })
 
-        # Preventivos huérfanos
+        # Preventivos huérfanos (o no clasificados por prefijo raro)
         for _, r in _prev.iterrows():
             if r["id_sap"] in _consumed:
                 continue
             comuna = _comuna_by_eds.get(str(r["eds_codigo"] or ""), "")
-            clase = r["_clase"] or ""
-            prefijo = "Plan Mtto" if clase == "PLAN" else ("Repuestos Mtto" if clase == "REPUESTOS" else "Mtto")
+            clase = r["_clase"]  # puede ser None si el prefijo es raro (ej: "Atención Llamado")
+            if clase == "PLAN":
+                prefijo = "Plan Mtto"; n_plan = str(r["id_sap"]); n_rep = ""
+            elif clase == "REPUESTOS":
+                prefijo = "Repuestos Mtto"; n_plan = ""; n_rep = str(r["id_sap"])
+            else:
+                # Prefijo raro. Preservamos el original truncado y ponemos
+                # el id en N° Plan por defecto (nunca dejar ambas vacías).
+                falla = r.get("descripcion_falla") or "Preventivo sin clasificar"
+                prefijo = falla[:40]
+                n_plan = str(r["id_sap"]); n_rep = ""
             desc = f"{prefijo} {comuna} · (sin par)" if comuna else f"{prefijo} · (sin par)"
             no_cerr = 0 if r["estado"] == "CERRADO" else 1
             estado_ui = "✅ Cerrado" if no_cerr == 0 else "🟠 Cierre pendiente (1)"
@@ -2128,8 +2160,8 @@ if vista == "🔗 Enlace Copec":
                 "_tipo":        "PREVENTIVO_HUERFANO",
                 "_ids":         [r["id_sap"]],
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
-                "N° Plan":      str(r["id_sap"]) if clase == "PLAN" else "",
-                "N° Rep":       str(r["id_sap"]) if clase == "REPUESTOS" else "",
+                "N° Plan":      n_plan,
+                "N° Rep":       n_rep,
                 "OS Fracttal":  r.get("os_fracttal") or "",
                 "Tipo":         "Preventivo",
                 "Prioridad":    "",
