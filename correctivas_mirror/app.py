@@ -1784,6 +1784,61 @@ if vista == "🔗 Enlace Copec":
     _os_map = cargar_match_fracttal(df["id_sap"].dropna().astype(str).tolist())
     df["os_fracttal"] = df["id_sap"].astype(str).map(_os_map)
 
+    # ── Detectar pareos Plan/Repuestos (solo preventivos) ───────────
+    # Copec divide cada mantención preventiva en 2 avisos separados:
+    #   "Plan Mtto Preventivo..."      → la mantención
+    #   "Repuestos Mtto Prev..."       → los repuestos usados
+    # Ambos con misma EDS y mismo día. El técnico debe cerrar los DOS.
+    def _clase(f: str | None) -> str | None:
+        f = (f or "").upper()
+        if f.startswith("PLAN MTTO"):      return "PLAN"
+        if f.startswith("REPUESTOS MTTO"): return "REPUESTOS"
+        return None
+    df["_clase"] = df["descripcion_falla"].map(_clase)
+    _dia = pd.to_datetime(df["fecha_creacion"], errors="coerce", utc=True) \
+              .dt.tz_convert(_CL_TZ).dt.strftime("%Y-%m-%d")
+    df["_par_key"] = df["eds_codigo"].fillna("") + "|" + _dia.fillna("")
+
+    # Buscar pares desbalanceados: mismo par_key con Plan y Repuestos
+    # en estados distintos (uno más avanzado que el otro).
+    _pares_df = df[df["_clase"].notna() & (df["tipo_aviso"] == "PREVENTIVO")].copy()
+    _desbal = []
+    for pk, g in _pares_df.groupby("_par_key"):
+        if pk.endswith("|"):
+            continue
+        clases = set(g["_clase"])
+        if clases != {"PLAN", "REPUESTOS"}:
+            continue
+        plan = g[g["_clase"] == "PLAN"].iloc[0]
+        rep  = g[g["_clase"] == "REPUESTOS"].iloc[0]
+        if plan["estado"] != rep["estado"]:
+            _desbal.append({
+                "EDS": plan["eds_codigo"],
+                "Dirección": plan["descripcion_instalacion"],
+                "Fecha": pk.split("|")[-1],
+                "Plan (nº aviso)": plan["id_sap"],
+                "Estado Plan": ESTADO_META.get(plan["estado"], ("⚪", plan["estado"]))[0] + " " +
+                               ESTADO_META.get(plan["estado"], ("", plan["estado"]))[1],
+                "Repuestos (nº aviso)": rep["id_sap"],
+                "Estado Repuestos": ESTADO_META.get(rep["estado"], ("⚪", rep["estado"]))[0] + " " +
+                                    ESTADO_META.get(rep["estado"], ("", rep["estado"]))[1],
+            })
+
+    if _desbal:
+        st.markdown(
+            f'<div style="background:#fff7ed;border-left:4px solid #ea580c;'
+            f'padding:12px 16px;border-radius:6px;margin:12px 0">'
+            f'<b style="color:#9a3412">⚖️ {len(_desbal)} pares Plan/Repuestos desbalanceados</b>'
+            f'<div style="color:#7c2d12;font-size:0.85em;margin-top:4px">'
+            f'Copec divide cada mantención preventiva en 2 avisos (Plan + Repuestos). '
+            f'Ambos deben cerrarse para que Copec pague. Los que aparecen aquí tienen '
+            f'una pata más avanzada que la otra — el técnico debe completar la que quedó atrás.'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(pd.DataFrame(_desbal), hide_index=True, use_container_width=True,
+                     height=min(280, 55 + 35 * len(_desbal)))
+
     # ── ALERTA: "En Progreso" sin cierre ────────────────────────────
     # EN_PROGRESO_EN_CURSO / EN_PROGRESO_EN_CIERRE que llevan >0 días abiertas
     # son avisos donde el técnico terminó pero olvidó cerrar en Enlace.
