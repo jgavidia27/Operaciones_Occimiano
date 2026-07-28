@@ -2426,7 +2426,7 @@ if vista == "🔗 Enlace Copec":
                         f"**{clase_label} · N° aviso {av['id_sap']}**  \n"
                         f"{_emo} {_lbl}  ·  **Prioridad:** {prio_ui or '—'}  \n"
                         f"**Falla:** {_title_smart(av.get('descripcion_falla') or '') or '—'}  \n"
-                        f"**Descripción:** {av.get('descripcion') or '—'}  \n"
+                        f"**Descripción:** {_title_smart(av.get('descripcion') or '') or '—'}  \n"
                         f"**Equipo:** {_title_smart(av.get('descripcion_equipo') or '') or '—'}  \n"
                         f"**EDS:** {av.get('eds_codigo') or '—'} · "
                         f"{_title_smart(av.get('descripcion_instalacion') or '')}  \n"
@@ -2473,9 +2473,9 @@ if vista == "🔗 Enlace Copec":
                     if "PREVENTIVA" in tt:
                         lineas.append("**Modalidad / Tipo falla / Causa raíz:** _No aplica (es MP)_")
                     else:
-                        lineas.append(f"**Modalidad:** {ot.get('modalidad_atencion') or '—'}")
-                        lineas.append(f"**Tipo falla:** {ot.get('tipo_falla') or '—'}")
-                        lineas.append(f"**Causa raíz:** {ot.get('causa_raiz') or '—'}")
+                        lineas.append(f"**Modalidad:** {_title_smart(ot.get('modalidad_atencion') or '') or '—'}")
+                        lineas.append(f"**Tipo falla:** {_title_smart(ot.get('tipo_falla') or '') or '—'}")
+                        lineas.append(f"**Causa raíz:** {_title_smart(ot.get('causa_raiz') or '') or '—'}")
                     lineas.append(f"**Inicio técnico:** {_fmt(ot.get('fecha_inicio'))}")
                     lineas.append(f"**Finalización:** {_fmt(ot.get('fecha_finalizacion'))}")
                     # Tiempo de ejecución: prioriza tiempo_ejecucion (string HH:MM),
