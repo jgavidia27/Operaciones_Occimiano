@@ -1,0 +1,30 @@
+name: Sync Portal Enlace Copec
+
+# Corre cada 15 minutos.
+# Refresca enlace_avisos en Supabase con el pool de avisos del portal
+# https://portalenlace.copec.cl. Usa OAuth refresh_token flow (FusionAuth)
+# — el refresh_token vive en la tabla enlace_auth (rotado cada corrida).
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install requests
+
+      - name: Sync Enlace
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python sync_enlace.py

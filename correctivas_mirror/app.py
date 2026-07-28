@@ -764,7 +764,7 @@ st.markdown('<div class="section-hdr">Vista</div>', unsafe_allow_html=True)
 
 vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida",
                            "📝 Registro (Excel)", "🔍 Validación En Revisión",
-                           "🔧 Repuestos", "📊 Estadísticas"],
+                           "🔧 Repuestos", "🔗 Enlace Copec", "📊 Estadísticas"],
                  horizontal=True, label_visibility="collapsed")
 
 
@@ -1685,6 +1685,168 @@ elif vista == "🔧 Repuestos":
         "**Lista de Precios COPEC — ENLACE** (con código interno de Copec y estados). "
         "Actualiza reemplazando los archivos en `correctivas_mirror/data/`."
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Vista: Enlace Copec (pool de avisos del portal portalenlace.copec.cl)
+# ══════════════════════════════════════════════════════════════════════
+if vista == "🔗 Enlace Copec":
+
+    ESTADO_META = {
+        "ASIGNADO_RESOLUTOR":    ("🔵", "Asignado a técnico"),
+        "ASIGNADO_EMPRESA":      ("🟣", "Asignado a empresa"),
+        "ASIGNADO_EN_CAMINO":    ("🟡", "En camino"),
+        "EN_PROGRESO_EN_CURSO":  ("🟠", "En curso"),
+        "EN_PROGRESO_EN_CIERRE": ("🟢", "En cierre"),
+        "CERRADO":               ("✅", "Cerrado"),
+    }
+
+    @st.cache_data(ttl=120, show_spinner="Cargando avisos Enlace...")
+    def cargar_enlace_avisos() -> pd.DataFrame:
+        rows = _sb_get("enlace_avisos", {
+            "select": ("id_sap,numero_orden,tipo_aviso,tipo_atencion_mantenimiento,"
+                       "estado,prioridad,descripcion_falla,descripcion,"
+                       "descripcion_equipo,descripcion_instalacion,eds_codigo,"
+                       "nombre_usuario_asignado,razon_social_empresa,"
+                       "nombre_contacto,telefono_contacto,sla,"
+                       "fecha_creacion,fecha_ultimo_cambio,sync_at"),
+            "order": "fecha_creacion.desc",
+            "limit": "5000",
+        })
+        return pd.DataFrame(rows)
+
+    @st.cache_data(ttl=60)
+    def cargar_enlace_auth_status() -> dict:
+        try:
+            rows = _sb_get("enlace_auth", {"select": "updated_at,expires_at,last_error", "id": "eq.1"})
+            return rows[0] if rows else {}
+        except Exception:
+            return {}
+
+    # ── Header con estado del sync ──────────────────────────────────
+    auth = cargar_enlace_auth_status()
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        st.markdown("### Portal Enlace Copec — Pool de avisos")
+        st.caption(
+            "Espejo del panel de avisos de https://portalenlace.copec.cl. "
+            "Sincroniza cada 15 minutos vía API oficial de Copec."
+        )
+    with c2:
+        if auth.get("last_error"):
+            st.error(f"⚠️ Sync falló: {auth['last_error'][:80]}")
+            st.caption("Corre `bootstrap_enlace_auth.py` con un token nuevo.")
+        elif auth.get("updated_at"):
+            try:
+                ts = pd.to_datetime(auth["updated_at"]).tz_convert(_CL_TZ)
+                st.metric("Última sync", ts.strftime("%d/%m %H:%M"))
+            except Exception:
+                st.caption(f"Última sync: {auth.get('updated_at')}")
+
+    df = cargar_enlace_avisos()
+    if df.empty:
+        st.info(
+            "Aún no hay avisos sincronizados. Ejecuta `sync_enlace.py` "
+            "(o espera a que corra el workflow de GitHub Actions)."
+        )
+        st.stop()
+
+    # ── Filtros ─────────────────────────────────────────────────────
+    st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
+    f1, f2, f3, f4 = st.columns([1.2, 1.5, 1.2, 2.5])
+    with f1:
+        tipos = ["Todos"] + sorted(df["tipo_aviso"].dropna().unique().tolist())
+        tipo_sel = st.selectbox("Tipo", tipos, key="enlace_tipo")
+    with f2:
+        estados = sorted(df["estado"].dropna().unique().tolist())
+        estado_sel = st.multiselect(
+            "Estado", estados,
+            default=[e for e in estados if e != "CERRADO"],
+            format_func=lambda x: f"{ESTADO_META.get(x, ('⚪', x))[0]} {ESTADO_META.get(x, ('', x))[1]}",
+            key="enlace_estado",
+        )
+    with f3:
+        prioridades = sorted([p for p in df["prioridad"].dropna().unique() if p])
+        prio_sel = st.multiselect("Prioridad", prioridades, default=prioridades, key="enlace_prio")
+    with f4:
+        q = st.text_input("Buscar (aviso, EDS, dirección, técnico...)",
+                          key="enlace_q", placeholder="Ej: 60066 · Roberto · lavadora")
+
+    d = df.copy()
+    if tipo_sel != "Todos":
+        d = d[d["tipo_aviso"] == tipo_sel]
+    if estado_sel:
+        d = d[d["estado"].isin(estado_sel)]
+    if prio_sel:
+        d = d[d["prioridad"].isin(prio_sel)]
+    if q:
+        ql = q.strip().lower()
+        mask = pd.Series(False, index=d.index)
+        for col in ("id_sap", "numero_orden", "eds_codigo", "descripcion_falla",
+                    "descripcion", "descripcion_instalacion", "descripcion_equipo",
+                    "nombre_usuario_asignado", "razon_social_empresa"):
+            if col in d.columns:
+                mask |= d[col].fillna("").astype(str).str.lower().str.contains(ql, na=False)
+        d = d[mask]
+
+    # ── KPIs rápidos ────────────────────────────────────────────────
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total", len(d))
+    k2.metric("Correctivos", int((d["tipo_aviso"] == "CORRECTIVO").sum()))
+    k3.metric("Preventivos", int((d["tipo_aviso"] == "PREVENTIVO").sum()))
+    k4.metric("Cerrados", int((d["estado"] == "CERRADO").sum()))
+
+    # ── Tabla ───────────────────────────────────────────────────────
+    if d.empty:
+        st.info("Ningún aviso cumple los filtros.")
+    else:
+        tab = d.copy()
+        tab["Estado"] = tab["estado"].map(
+            lambda x: f"{ESTADO_META.get(x, ('⚪', x))[0]} {ESTADO_META.get(x, (None, x))[1]}"
+        )
+        tab["Creado"] = pd.to_datetime(tab["fecha_creacion"], errors="coerce", utc=True) \
+                          .dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
+        tab["Últ. cambio"] = pd.to_datetime(tab["fecha_ultimo_cambio"], errors="coerce", utc=True) \
+                               .dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
+        tab = tab.rename(columns={
+            "id_sap":                  "N° aviso",
+            "numero_orden":            "N° orden",
+            "tipo_aviso":              "Tipo",
+            "prioridad":               "Prioridad",
+            "descripcion_falla":       "Falla",
+            "descripcion_equipo":      "Equipo",
+            "eds_codigo":              "EDS",
+            "descripcion_instalacion": "Dirección",
+            "nombre_usuario_asignado": "Técnico",
+            "razon_social_empresa":    "Empresa",
+            "nombre_contacto":         "Contacto",
+            "telefono_contacto":       "Teléfono",
+        })
+        cols_show = ["N° aviso", "Tipo", "Prioridad", "Estado", "Falla", "Equipo",
+                     "EDS", "Dirección", "Técnico", "Empresa", "Contacto",
+                     "Creado", "Últ. cambio"]
+        cols_show = [c for c in cols_show if c in tab.columns]
+
+        st.dataframe(
+            tab[cols_show],
+            hide_index=True, use_container_width=True, height=650,
+            column_config={
+                "N° aviso":   st.column_config.TextColumn(width=95),
+                "Tipo":       st.column_config.TextColumn(width=100),
+                "Prioridad":  st.column_config.TextColumn(width=75),
+                "Estado":     st.column_config.TextColumn(width=170),
+                "Falla":      st.column_config.TextColumn(width=260),
+                "Equipo":     st.column_config.TextColumn(width=150),
+                "EDS":        st.column_config.TextColumn(width=75),
+                "Dirección":  st.column_config.TextColumn(width=220),
+                "Técnico":    st.column_config.TextColumn(width=160),
+                "Empresa":    st.column_config.TextColumn(width=180),
+                "Contacto":   st.column_config.TextColumn(width=140),
+                "Teléfono":   st.column_config.TextColumn(width=120),
+                "Creado":     st.column_config.TextColumn(width=105),
+                "Últ. cambio": st.column_config.TextColumn(width=105),
+            },
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════
