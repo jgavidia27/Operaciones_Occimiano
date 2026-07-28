@@ -2466,12 +2466,16 @@ if vista == "🔗 Enlace Copec":
                                   f"**Estado tarea:** {et_es}")
                     if ot.get("responsable"):
                         lineas.append(f"**Técnico:** {ot['responsable']}")
-                    if ot.get("modalidad_atencion"):
-                        lineas.append(f"**Modalidad:** {ot['modalidad_atencion']}")
-                    if ot.get("tipo_falla"):
-                        lineas.append(f"**Tipo falla:** {ot['tipo_falla']}")
-                    if ot.get("causa_raiz"):
-                        lineas.append(f"**Causa raíz:** {ot['causa_raiz']}")
+                    # Modalidad / Tipo falla / Causa raíz aplican SOLO a correctivas.
+                    # En preventivas mostramos una nota unificada; en correctivas
+                    # mostramos cada campo con su valor (o "—" si viene vacío).
+                    tt = (ot.get("tipo_tarea") or "").upper()
+                    if "PREVENTIVA" in tt:
+                        lineas.append("**Modalidad / Tipo falla / Causa raíz:** _No aplica (es MP)_")
+                    else:
+                        lineas.append(f"**Modalidad:** {ot.get('modalidad_atencion') or '—'}")
+                        lineas.append(f"**Tipo falla:** {ot.get('tipo_falla') or '—'}")
+                        lineas.append(f"**Causa raíz:** {ot.get('causa_raiz') or '—'}")
                     lineas.append(f"**Inicio técnico:** {_fmt(ot.get('fecha_inicio'))}")
                     lineas.append(f"**Finalización:** {_fmt(ot.get('fecha_finalizacion'))}")
                     # Tiempo de ejecución: prioriza tiempo_ejecucion (string HH:MM),
