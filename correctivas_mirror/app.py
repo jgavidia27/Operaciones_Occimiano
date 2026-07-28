@@ -1726,6 +1726,20 @@ if vista == "🔗 Enlace Copec":
                 break
         return pd.DataFrame(all_rows)
 
+    @st.cache_data(ttl=3600)
+    def cargar_estaciones_comuna() -> dict:
+        """Devuelve {eds_occim: comuna_capitalizada} para etiquetar preventivos."""
+        try:
+            rows = _sb_get("estaciones_servicio", {"select": "eds_occim,comuna", "limit": "2000"})
+        except Exception:
+            return {}
+        out = {}
+        for r in rows:
+            c = (r.get("comuna") or "").strip()
+            if c and len(c) > 1 and r.get("eds_occim"):
+                out[str(r["eds_occim"])] = c.title()
+        return out
+
     @st.cache_data(ttl=120, show_spinner="Cruzando con Fracttal...")
     def cargar_match_fracttal(n_avisos: list[str]) -> dict:
         """Devuelve {n_aviso: os_fracttal} usando llamados_correctivos."""
@@ -1932,54 +1946,176 @@ if vista == "🔗 Enlace Copec":
     k4.metric("En Progreso", int(d["estado"].str.startswith("EN_PROGRESO", na=False).sum()))
     k5.metric("Cerrados", int((d["estado"] == "CERRADO").sum()))
 
-    # ── Tabla ───────────────────────────────────────────────────────
+    # ── Tabla colapsada (pareos Plan+Repuestos = 1 fila) ────────────
     if d.empty:
         st.info("Ningún aviso cumple los filtros.")
     else:
-        tab = d.copy()
-        tab["Estado"] = tab["estado"].map(
-            lambda x: f"{ESTADO_META.get(x, ('⚪', x))[0]} {ESTADO_META.get(x, (None, x))[1]}"
-        )
-        tab["Creado"] = pd.to_datetime(tab["fecha_creacion"], errors="coerce", utc=True) \
-                          .dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
-        tab["Últ. cambio"] = pd.to_datetime(tab["fecha_ultimo_cambio"], errors="coerce", utc=True) \
-                               .dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
-        tab = tab.rename(columns={
-            "id_sap":                  "N° aviso",
-            "os_fracttal":             "OS Fracttal",
-            "tipo_aviso":              "Tipo",
-            "prioridad":               "Prioridad",
-            "descripcion_falla":       "Falla",
-            "descripcion_equipo":      "Equipo",
-            "eds_codigo":              "EDS",
-            "descripcion_instalacion": "Dirección",
-            "nombre_contacto":         "Contacto",
-            "telefono_contacto":       "Teléfono",
-        })
-        cols_show = ["N° aviso", "OS Fracttal", "Tipo", "Prioridad", "Estado",
-                     "Falla", "Equipo", "EDS", "Dirección", "Contacto",
-                     "Creado", "Últ. cambio"]
-        cols_show = [c for c in cols_show if c in tab.columns]
+        _comuna_by_eds = cargar_estaciones_comuna()
 
-        st.dataframe(
+        def _label_estado(est: str) -> str:
+            emo, lbl = ESTADO_META.get(est, ("⚪", est or ""))
+            return f"{emo} {lbl}"
+
+        # Armamos filas colapsadas: preventivos pareados en 1 fila,
+        # correctivos como están.
+        rows_view = []
+        # Preventivos con par (Plan + Repuestos, mismo par_key)
+        _prev = d[d["tipo_aviso"] == "PREVENTIVO"].copy()
+        _corr = d[d["tipo_aviso"] != "PREVENTIVO"].copy()
+
+        _consumed = set()  # id_sap ya integrados en un par
+        for pk, g in _prev.groupby("_par_key"):
+            if pk.endswith("|"):
+                continue
+            plans = g[g["_clase"] == "PLAN"]
+            reps  = g[g["_clase"] == "REPUESTOS"]
+            if len(plans) == 1 and len(reps) == 1:
+                plan = plans.iloc[0]; rep = reps.iloc[0]
+                _consumed.update([plan["id_sap"], rep["id_sap"]])
+                comuna = _comuna_by_eds.get(str(plan["eds_codigo"] or ""), "")
+                desc = f"Plan Mtto {comuna}" if comuna else "Plan Mtto Preventivo"
+                # Estado combinado
+                if plan["estado"] == rep["estado"]:
+                    estado_ui = _label_estado(plan["estado"])
+                else:
+                    estado_ui = (f"{ESTADO_META.get(plan['estado'], ('⚪',''))[0]} Plan · "
+                                 f"{ESTADO_META.get(rep['estado'],  ('⚪',''))[0]} Rep")
+                rows_view.append({
+                    "_key":         f"PREV|{pk}",
+                    "_tipo":        "PREVENTIVO",
+                    "_ids":         [plan["id_sap"], rep["id_sap"]],
+                    "Creado":       pd.to_datetime(plan["fecha_creacion"], errors="coerce", utc=True),
+                    "N° aviso":     f"{plan['id_sap']} + {rep['id_sap']}",
+                    "OS Fracttal":  plan.get("os_fracttal") or rep.get("os_fracttal") or "",
+                    "Tipo":         "PREVENTIVO",
+                    "Prioridad":    "",   # preventivos no llevan prioridad
+                    "Estado":       estado_ui,
+                    "Descripción":  desc,
+                    "Equipo":       plan.get("descripcion_equipo") or "",
+                    "EDS":          plan.get("eds_codigo") or "",
+                    "Dirección":    plan.get("descripcion_instalacion") or "",
+                    "Contacto":     plan.get("nombre_contacto") or "",
+                    "Últ. cambio":  pd.to_datetime(plan["fecha_ultimo_cambio"], errors="coerce", utc=True),
+                })
+
+        # Preventivos huérfanos (Plan sin Repuestos o al revés) → como filas sueltas
+        for _, r in _prev.iterrows():
+            if r["id_sap"] in _consumed:
+                continue
+            comuna = _comuna_by_eds.get(str(r["eds_codigo"] or ""), "")
+            clase = r["_clase"] or ""
+            prefijo = "Plan Mtto" if clase == "PLAN" else ("Repuestos Mtto" if clase == "REPUESTOS" else "Mtto")
+            desc = f"{prefijo} {comuna} · (sin par)" if comuna else f"{prefijo} · (sin par)"
+            rows_view.append({
+                "_key":         f"SOLO|{r['id_sap']}",
+                "_tipo":        "PREVENTIVO_HUERFANO",
+                "_ids":         [r["id_sap"]],
+                "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
+                "N° aviso":     str(r["id_sap"]),
+                "OS Fracttal":  r.get("os_fracttal") or "",
+                "Tipo":         "PREVENTIVO",
+                "Prioridad":    "",
+                "Estado":       _label_estado(r["estado"]),
+                "Descripción":  desc,
+                "Equipo":       r.get("descripcion_equipo") or "",
+                "EDS":          r.get("eds_codigo") or "",
+                "Dirección":    r.get("descripcion_instalacion") or "",
+                "Contacto":     r.get("nombre_contacto") or "",
+                "Últ. cambio":  pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True),
+            })
+
+        # Correctivos (1 fila cada uno; sí llevan prioridad)
+        for _, r in _corr.iterrows():
+            rows_view.append({
+                "_key":         f"CORR|{r['id_sap']}",
+                "_tipo":        "CORRECTIVO",
+                "_ids":         [r["id_sap"]],
+                "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
+                "N° aviso":     str(r["id_sap"]),
+                "OS Fracttal":  r.get("os_fracttal") or "",
+                "Tipo":         "CORRECTIVO",
+                "Prioridad":    r.get("prioridad") or "",
+                "Estado":       _label_estado(r["estado"]),
+                "Descripción":  r.get("descripcion_falla") or "",
+                "Equipo":       r.get("descripcion_equipo") or "",
+                "EDS":          r.get("eds_codigo") or "",
+                "Dirección":    r.get("descripcion_instalacion") or "",
+                "Contacto":     r.get("nombre_contacto") or "",
+                "Últ. cambio":  pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True),
+            })
+
+        tab = pd.DataFrame(rows_view).sort_values("Creado", ascending=False).reset_index(drop=True)
+
+        # Formatear fechas para display
+        tab["_creado_dt"] = tab["Creado"]
+        tab["Creado"]      = tab["Creado"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
+        tab["Últ. cambio"] = tab["Últ. cambio"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
+
+        cols_show = ["Creado", "N° aviso", "OS Fracttal", "Tipo", "Prioridad",
+                     "Estado", "Descripción", "Equipo", "EDS", "Dirección",
+                     "Contacto", "Últ. cambio"]
+
+        st.markdown(
+            f"**{len(tab)} registros** "
+            f"<span style='color:#64748b;font-size:0.85em'>· Cliquea una fila para ver el detalle "
+            f"(preventivos: Plan + Repuestos)</span>",
+            unsafe_allow_html=True,
+        )
+
+        event = st.dataframe(
             tab[cols_show],
-            hide_index=True, use_container_width=True, height=650,
+            hide_index=True, use_container_width=True, height=550,
+            on_select="rerun", selection_mode="single-row",
+            key="enlace_table",
             column_config={
-                "N° aviso":    st.column_config.TextColumn(width=95),
-                "OS Fracttal": st.column_config.TextColumn(width=105),
-                "Tipo":        st.column_config.TextColumn(width=100),
-                "Prioridad":   st.column_config.TextColumn(width=75),
-                "Estado":      st.column_config.TextColumn(width=170),
-                "Falla":       st.column_config.TextColumn(width=280),
-                "Equipo":      st.column_config.TextColumn(width=160),
-                "EDS":         st.column_config.TextColumn(width=75),
+                "Creado":      st.column_config.TextColumn(width=100),
+                "N° aviso":    st.column_config.TextColumn(width=155),
+                "OS Fracttal": st.column_config.TextColumn(width=100),
+                "Tipo":        st.column_config.TextColumn(width=105),
+                "Prioridad":   st.column_config.TextColumn(width=80),
+                "Estado":      st.column_config.TextColumn(width=175),
+                "Descripción": st.column_config.TextColumn(width=260),
+                "Equipo":      st.column_config.TextColumn(width=150),
+                "EDS":         st.column_config.TextColumn(width=70),
                 "Dirección":   st.column_config.TextColumn(width=240),
                 "Contacto":    st.column_config.TextColumn(width=140),
-                "Teléfono":    st.column_config.TextColumn(width=120),
-                "Creado":      st.column_config.TextColumn(width=105),
-                "Últ. cambio": st.column_config.TextColumn(width=105),
+                "Últ. cambio": st.column_config.TextColumn(width=100),
             },
         )
+
+        # ── Detalle expandido ───────────────────────────────────────
+        sel = getattr(event, "selection", None)
+        sel_rows = sel.get("rows", []) if isinstance(sel, dict) else (getattr(sel, "rows", []) or [])
+        if sel_rows:
+            row = tab.iloc[sel_rows[0]]
+            ids = row["_ids"]
+            _detalle = d[d["id_sap"].isin(ids)].copy()
+
+            st.markdown("---")
+            st.markdown(f"### Detalle · {row['Descripción']}")
+            _cols = st.columns(len(_detalle) if len(_detalle) > 1 else 1)
+            for i, (_, av) in enumerate(_detalle.iterrows()):
+                col = _cols[i] if len(_detalle) > 1 else _cols[0]
+                with col:
+                    clase = av.get("_clase") or av.get("tipo_aviso")
+                    _emo, _lbl = ESTADO_META.get(av["estado"], ("⚪", av["estado"]))
+                    st.markdown(
+                        f"**{clase} · N° aviso {av['id_sap']}**  \n"
+                        f"{_emo} {_lbl}  \n"
+                        f"**Falla:** {av.get('descripcion_falla') or '—'}  \n"
+                        f"**Descripción:** {av.get('descripcion') or '—'}  \n"
+                        f"**Equipo:** {av.get('descripcion_equipo') or '—'}  \n"
+                        f"**EDS:** {av.get('eds_codigo') or '—'} · "
+                        f"{av.get('descripcion_instalacion') or ''}  \n"
+                        f"**Contacto:** {av.get('nombre_contacto') or '—'} "
+                        f"{('· ' + av.get('telefono_contacto')) if av.get('telefono_contacto') else ''}  \n"
+                        f"**N° orden Enlace:** `{av.get('numero_orden') or '—'}`  \n"
+                        f"**OS Fracttal:** `{av.get('os_fracttal') or '—'}`  \n"
+                        f"**Creado:** "
+                        f"{pd.to_datetime(av['fecha_creacion'], errors='coerce', utc=True).tz_convert(_CL_TZ).strftime('%d/%m/%Y %H:%M') if pd.notna(av.get('fecha_creacion')) else '—'}  \n"
+                        f"**Últ. cambio:** "
+                        f"{pd.to_datetime(av['fecha_ultimo_cambio'], errors='coerce', utc=True).tz_convert(_CL_TZ).strftime('%d/%m/%Y %H:%M') if pd.notna(av.get('fecha_ultimo_cambio')) else '—'}"
+                    )
 
 
 # ══════════════════════════════════════════════════════════════════════
