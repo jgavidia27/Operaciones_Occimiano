@@ -764,7 +764,7 @@ st.markdown('<div class="section-hdr">Vista</div>', unsafe_allow_html=True)
 
 vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida",
                            "📝 Registro (Excel)", "🔍 Validación En Revisión",
-                           "🔧 Repuestos", "🔗 Enlace Copec", "📊 Estadísticas"],
+                           "🔗 Enlace Copec", "🔧 Repuestos", "📊 Estadísticas"],
                  horizontal=True, label_visibility="collapsed")
 
 
