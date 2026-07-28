@@ -1774,6 +1774,7 @@ if vista == "🔗 Enlace Copec":
                 "select": ("id_ot,responsable,estado,estado_tarea,prioridad_calc,"
                            "modalidad_atencion,tipo_falla,causa_raiz,"
                            "fecha_inicio,fecha_finalizacion,tiempo_ejecucion,"
+                           "duracion_real_seg,duracion_real_neta_seg,"
                            "comentario_tecnico,tipo_tarea"),
                 "id_ot": f"in.({','.join(chunk)})",
                 "limit": "500",
@@ -2473,8 +2474,30 @@ if vista == "🔗 Enlace Copec":
                         lineas.append(f"**Causa raíz:** {ot['causa_raiz']}")
                     lineas.append(f"**Inicio técnico:** {_fmt(ot.get('fecha_inicio'))}")
                     lineas.append(f"**Finalización:** {_fmt(ot.get('fecha_finalizacion'))}")
+                    # Tiempo de ejecución: prioriza tiempo_ejecucion (string HH:MM),
+                    # fallback a duracion_real_neta_seg (más precisa, sin paros),
+                    # y por último duracion_real_seg. Formato: "1h 30min" o "45 min".
+                    def _fmt_dur(seg):
+                        try:
+                            s = int(seg or 0)
+                        except (TypeError, ValueError):
+                            return None
+                        if s <= 0: return None
+                        h, m = divmod(s // 60, 60)
+                        return f"{h}h {m:02d}min" if h else f"{m} min"
+                    dur_txt = None
                     if ot.get("tiempo_ejecucion"):
-                        lineas.append(f"**Tiempo ejecución:** {ot['tiempo_ejecucion']}")
+                        # tiempo_ejecucion suele ser "HH:MM" — convertir a formato bonito
+                        try:
+                            hh, mm = str(ot["tiempo_ejecucion"]).split(":")[:2]
+                            hh_i, mm_i = int(hh), int(mm)
+                            dur_txt = f"{hh_i}h {mm_i:02d}min" if hh_i else f"{mm_i} min"
+                        except Exception:
+                            dur_txt = str(ot["tiempo_ejecucion"])
+                    if not dur_txt:
+                        dur_txt = _fmt_dur(ot.get("duracion_real_neta_seg")) or _fmt_dur(ot.get("duracion_real_seg"))
+                    if dur_txt:
+                        lineas.append(f"**Tiempo ejecución:** {dur_txt}")
                     if ot.get("comentario_tecnico"):
                         lineas.append(f"**Comentario técnico:** {ot['comentario_tecnico']}")
                     st.markdown("  \n".join(lineas))
