@@ -763,7 +763,7 @@ def _render_panorama():
 st.markdown('<div class="section-hdr">Vista</div>', unsafe_allow_html=True)
 
 vista = st.radio("vista", ["📰 Feed cronológico", "📋 Tabla enriquecida",
-                           "📝 Registro (Excel)", "🔍 Validación En Revisión",
+                           "📝 Registro (Excel)", "🔍 Cierre Fracttal",
                            "🔗 Enlace Copec", "🔧 Repuestos", "📊 Estadísticas"],
                  horizontal=True, label_visibility="collapsed")
 
@@ -2529,7 +2529,7 @@ if vista == "🔗 Enlace Copec":
 # ══════════════════════════════════════════════════════════════════════
 # Vista: Validación En Revisión
 # ══════════════════════════════════════════════════════════════════════
-if vista == "🔍 Validación En Revisión":
+if vista == "🔍 Cierre Fracttal":
 
     @st.cache_data(ttl=300, show_spinner="Cargando OTs en revisión...")
     def cargar_ots_revision() -> pd.DataFrame:
