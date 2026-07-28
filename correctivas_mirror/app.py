@@ -70,6 +70,23 @@ FUENTE_META = {
 #   - Estados basura                          → 🚫 DESCARTADA
 _BASURA_EST = {"ERROR DE INGRESO", "DUPLICADO", "Duplicidad", "PRUEBA ROBOT"}
 
+
+def _title_smart(s):
+    """Title-case que preserva siglas cortas (LVX, LT, EDS, N°, F.N.A.O., etc.)
+    Usado para limpiar textos de Copec/Fracttal que vienen en MAYUSCULAS."""
+    if not s or not isinstance(s, str):
+        return s or ""
+    out = []
+    for w in s.split():
+        if len(w) <= 3 and w.isupper() and w.isalpha():
+            out.append(w)
+        elif "°" in w:
+            out.append(w[0].upper() + w[1:].lower())
+        else:
+            out.append(w.capitalize())
+    return " ".join(out)
+
+
 def estado_ot(row):
     # 1) Excepción SLA gana sobre todo
     if pd.notna(row.get("excepcion_motivo")) and str(row.get("excepcion_motivo") or "").strip():
@@ -1057,6 +1074,11 @@ elif vista == "📋 Tabla enriquecida":
     # Renombrada: 'Excepción' -> 'Observación' (misma data)
     _dft["Observación"] = _dft["excepcion_motivo"].fillna("")
 
+    # Title-case a los campos que vienen en MAYUSCULAS desde Fracttal/Copec
+    for _c in ("eds_nombre", "comuna", "equipo", "tecnico_disp", "cliente"):
+        if _c in _dft.columns:
+            _dft[_c] = _dft[_c].fillna("").astype(str).map(_title_smart)
+
     _cols = ["os_fracttal","n_llamado","cliente","eds_occim","eds_nombre",
              "comuna","zona","prioridad","Fuente","Estado","Estado Fracttal",
              "F. Llamado","F. Inicio","F. Cierre","Horas resp.","SLA (h)",
@@ -1952,19 +1974,7 @@ if vista == "🔗 Enlace Copec":
     _ots_ids = tuple(sorted({x for x in df["os_fracttal"].dropna().unique() if x}))
     _ots_detalle = cargar_ots_detalle(_ots_ids)
 
-    def _title_smart(s):
-        """Title-case que preserva siglas cortas (LVX, LT, EDS, N°)."""
-        if not s or not isinstance(s, str):
-            return s or ""
-        out = []
-        for w in s.split():
-            if len(w) <= 3 and w.isupper() and w.isalpha():
-                out.append(w)
-            elif "°" in w:
-                out.append(w[0].upper() + w[1:].lower())
-            else:
-                out.append(w.capitalize())
-        return " ".join(out)
+    # _title_smart definido a nivel de módulo (arriba, línea ~74)
 
     # ── Detectar pareos Plan/Repuestos (solo preventivos) ───────────
     # Copec divide cada mantención preventiva en 2 avisos separados:
@@ -2798,18 +2808,17 @@ if vista == "🔍 Cierre Fracttal":
             _dff["activo"] = _dff.apply(
                 lambda r: _limpiar_activo(r.get("activo"), r.get("parent_desc")), axis=1)
 
-        # Normalizar Tipo, Activo y Estación a formato título
-        if "tipo" in _dff.columns:
-            _dff["tipo"] = _dff["tipo"].astype(str).apply(
-                lambda x: x.title() if x and x.lower() not in ("nan", "none") else "—"
-            )
-        if "activo" in _dff.columns:
-            _dff["activo"] = _dff["activo"].astype(str).apply(
-                lambda x: x.title() if x and x.lower() not in ("nan", "none") else "—"
-            )
-        _dff["_estacion"] = _dff["_estacion"].astype(str).apply(
-            lambda x: x.title() if x and x.lower() not in ("nan", "none") else "—"
-        )
+        # Normalizar campos que vienen en MAYUSCULAS a title-case,
+        # preservando siglas cortas (LVX, LT, EDS, N°, etc).
+        def _clean(x):
+            if not x or str(x).lower() in ("nan", "none"):
+                return "—"
+            return _title_smart(str(x))
+        for _c in ("tipo", "activo", "_estacion", "personnel", "cliente",
+                   "motivo_semaforo", "trabajo_realizado", "descripcion_falla",
+                   "repuestos_detalle"):
+            if _c in _dff.columns:
+                _dff[_c] = _dff[_c].astype(str).apply(_clean)
 
         st.caption(f"Mostrando **{len(_dff)}** de {_n_total} OTs.")
 
