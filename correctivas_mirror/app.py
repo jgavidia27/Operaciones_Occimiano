@@ -1759,28 +1759,32 @@ if vista == "🔗 Enlace Copec":
         return by_aviso
 
     @st.cache_data(ttl=300, show_spinner="Cruzando preventivos con Fracttal...")
-    def cargar_ots_preventivas_por_eds_mes() -> dict:
+    def cargar_ots_preventivas_por_eds() -> dict:
         """Preventivos: no hay match 1:1 por nº aviso porque Enlace genera
         2 avisos (Plan+Repuestos) por 1 OT preventiva en Fracttal.
-        Cruce por (codigo_eds + año-mes de fecha_programada). Ambos avisos
-        del mismo mes apuntan a la misma OT Fracttal."""
-        rows = _sb_get("ordenes_trabajo", {
-            "select": "id_ot,codigo_eds,fecha_programada,tipo_tarea,estado",
-            "tipo_tarea": "like.PREVENTIVA*",
-            "fecha_programada": "gte.2026-01-01",
-            "order": "fecha_programada.desc",
-            "limit": "5000",
-        })
-        by_key = {}   # {(eds, YYYY-MM): id_ot}  (más reciente si hay duplicados)
-        for r in rows:
+        Devuelve {eds: [(fecha_iso, id_ot), ...]} para hacer match por
+        cercanía temporal (ventana ±45 días). Cubre 92% de casos."""
+        all_rows = []
+        for off in range(0, 10000, 1000):
+            rows = _sb_get("ordenes_trabajo", {
+                "select": "id_ot,codigo_eds,fecha_programada,tipo_tarea",
+                "tipo_tarea": "like.PREVENTIVA*",
+                "fecha_programada": "gte.2026-01-01",
+                "order": "fecha_programada.desc",
+                "limit": "1000", "offset": str(off),
+            })
+            if not rows:
+                break
+            all_rows.extend(rows)
+            if len(rows) < 1000:
+                break
+        by_eds: dict[str, list] = {}
+        for r in all_rows:
             eds = r.get("codigo_eds"); prog = r.get("fecha_programada")
             if not eds or not prog:
                 continue
-            ym = prog[:7]  # YYYY-MM
-            key = (str(eds), ym)
-            if key not in by_key:
-                by_key[key] = r["id_ot"]
-        return by_key
+            by_eds.setdefault(str(eds), []).append((prog[:10], r["id_ot"]))
+        return by_eds
 
     @st.cache_data(ttl=60)
     def cargar_enlace_auth_status() -> dict:
@@ -1820,21 +1824,36 @@ if vista == "🔗 Enlace Copec":
 
     # ── Cruce con Fracttal (2 estrategias según tipo_aviso) ─────────
     # Correctivos: id_sap -> llamados_correctivos.n_aviso -> os_fracttal (1:1)
-    # Preventivos: (EDS + año-mes) -> ordenes_trabajo con tipo_tarea PREVENTIVA
+    # Preventivos: mismo EDS + ventana ±45 días vs fecha_programada Fracttal
     _corr_map = cargar_match_fracttal_correctivo(
         df[df["tipo_aviso"] == "CORRECTIVO"]["id_sap"].dropna().astype(str).tolist()
     )
-    _prev_by_eds_mes = cargar_ots_preventivas_por_eds_mes()
+    _prev_by_eds = cargar_ots_preventivas_por_eds()
 
+    from datetime import datetime as _dt
     def _resolve_os(row):
         if row["tipo_aviso"] == "CORRECTIVO":
             return _corr_map.get(str(row["id_sap"]))
-        # Preventivo: eds + YYYY-MM de fecha_creacion
         eds = str(row.get("eds_codigo") or "")
-        fc  = row.get("fecha_creacion") or ""
+        fc  = (row.get("fecha_creacion") or "")[:10]
         if not eds or not fc:
             return None
-        return _prev_by_eds_mes.get((eds, fc[:7]))
+        cands = _prev_by_eds.get(eds) or []
+        if not cands:
+            return None
+        try:
+            d0 = _dt.strptime(fc, "%Y-%m-%d")
+        except ValueError:
+            return None
+        best, best_d = None, 999
+        for fp, id_ot in cands:
+            try:
+                delta = abs((_dt.strptime(fp, "%Y-%m-%d") - d0).days)
+            except ValueError:
+                continue
+            if delta <= 45 and delta < best_d:
+                best, best_d = id_ot, delta
+        return best
 
     df["os_fracttal"] = df.apply(_resolve_os, axis=1)
 
@@ -1992,18 +2011,44 @@ if vista == "🔗 Enlace Copec":
     else:
         _comuna_by_eds = cargar_estaciones_comuna()
 
-        def _label_estado(est: str) -> str:
+        def _title_smart(s):
+            """Title-case que preserva siglas cortas (LVX, LT, EDS, N°)."""
+            if not s or not isinstance(s, str):
+                return s or ""
+            out = []
+            for w in s.split():
+                # palabras <=3 chars todo-mayus quedan igual (LVX, LT, EDS, RM, GNC)
+                if len(w) <= 3 and w.isupper() and w.isalpha():
+                    out.append(w)
+                # palabras con "°" (N°1, N°5903) preservan formato
+                elif "°" in w:
+                    out.append(w[0].upper() + w[1:].lower())
+                else:
+                    out.append(w.capitalize())
+            return " ".join(out)
+
+        def _label_estado_uno(est):
             emo, lbl = ESTADO_META.get(est, ("⚪", est or ""))
             return f"{emo} {lbl}"
 
-        # Armamos filas colapsadas: preventivos pareados en 1 fila,
-        # correctivos como están.
+        def _estado_par(est_plan, est_rep):
+            """Estado combinado para preventivos pareados:
+              - Ambos CERRADO         → ✅ Cerrado
+              - Uno CERRADO, otro no  → 🟠 Cierre pendiente (1)
+              - Ninguno CERRADO       → 🔴 Cierre pendiente (2)
+            """
+            no_cerrados = sum(1 for e in (est_plan, est_rep) if e != "CERRADO")
+            if no_cerrados == 0:
+                return "✅ Cerrado"
+            if no_cerrados == 1:
+                return "🟠 Cierre pendiente (1)"
+            return "🔴 Cierre pendiente (2)"
+
         rows_view = []
-        # Preventivos con par (Plan + Repuestos, mismo par_key)
         _prev = d[d["tipo_aviso"] == "PREVENTIVO"].copy()
         _corr = d[d["tipo_aviso"] != "PREVENTIVO"].copy()
 
-        _consumed = set()  # id_sap ya integrados en un par
+        _consumed = set()
         for pk, g in _prev.groupby("_par_key"):
             if pk.endswith("|"):
                 continue
@@ -2014,31 +2059,26 @@ if vista == "🔗 Enlace Copec":
                 _consumed.update([plan["id_sap"], rep["id_sap"]])
                 comuna = _comuna_by_eds.get(str(plan["eds_codigo"] or ""), "")
                 desc = f"Plan Mtto {comuna}" if comuna else "Plan Mtto Preventivo"
-                # Estado combinado
-                if plan["estado"] == rep["estado"]:
-                    estado_ui = _label_estado(plan["estado"])
-                else:
-                    estado_ui = (f"{ESTADO_META.get(plan['estado'], ('⚪',''))[0]} Plan · "
-                                 f"{ESTADO_META.get(rep['estado'],  ('⚪',''))[0]} Rep")
                 rows_view.append({
                     "_key":         f"PREV|{pk}",
                     "_tipo":        "PREVENTIVO",
                     "_ids":         [plan["id_sap"], rep["id_sap"]],
                     "Creado":       pd.to_datetime(plan["fecha_creacion"], errors="coerce", utc=True),
-                    "N° aviso":     f"{plan['id_sap']} + {rep['id_sap']}",
+                    "N° Plan":      str(plan["id_sap"]),
+                    "N° Rep":       str(rep["id_sap"]),
                     "OS Fracttal":  plan.get("os_fracttal") or rep.get("os_fracttal") or "",
-                    "Tipo":         "PREVENTIVO",
-                    "Prioridad":    "",   # preventivos no llevan prioridad
-                    "Estado":       estado_ui,
+                    "Tipo":         "Preventivo",
+                    "Prioridad":    "",
+                    "Estado":       _estado_par(plan["estado"], rep["estado"]),
                     "Descripción":  desc,
-                    "Equipo":       plan.get("descripcion_equipo") or "",
+                    "Equipo":       _title_smart(plan.get("descripcion_equipo") or ""),
                     "EDS":          plan.get("eds_codigo") or "",
-                    "Dirección":    plan.get("descripcion_instalacion") or "",
-                    "Contacto":     plan.get("nombre_contacto") or "",
+                    "Dirección":    _title_smart(plan.get("descripcion_instalacion") or ""),
+                    "Contacto":     _title_smart(plan.get("nombre_contacto") or ""),
                     "Últ. cambio":  pd.to_datetime(plan["fecha_ultimo_cambio"], errors="coerce", utc=True),
                 })
 
-        # Preventivos huérfanos (Plan sin Repuestos o al revés) → como filas sueltas
+        # Preventivos huérfanos
         for _, r in _prev.iterrows():
             if r["id_sap"] in _consumed:
                 continue
@@ -2046,41 +2086,45 @@ if vista == "🔗 Enlace Copec":
             clase = r["_clase"] or ""
             prefijo = "Plan Mtto" if clase == "PLAN" else ("Repuestos Mtto" if clase == "REPUESTOS" else "Mtto")
             desc = f"{prefijo} {comuna} · (sin par)" if comuna else f"{prefijo} · (sin par)"
+            no_cerr = 0 if r["estado"] == "CERRADO" else 1
+            estado_ui = "✅ Cerrado" if no_cerr == 0 else "🟠 Cierre pendiente (1)"
             rows_view.append({
                 "_key":         f"SOLO|{r['id_sap']}",
                 "_tipo":        "PREVENTIVO_HUERFANO",
                 "_ids":         [r["id_sap"]],
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
-                "N° aviso":     str(r["id_sap"]),
+                "N° Plan":      str(r["id_sap"]) if clase == "PLAN" else "",
+                "N° Rep":       str(r["id_sap"]) if clase == "REPUESTOS" else "",
                 "OS Fracttal":  r.get("os_fracttal") or "",
-                "Tipo":         "PREVENTIVO",
+                "Tipo":         "Preventivo",
                 "Prioridad":    "",
-                "Estado":       _label_estado(r["estado"]),
+                "Estado":       estado_ui,
                 "Descripción":  desc,
-                "Equipo":       r.get("descripcion_equipo") or "",
+                "Equipo":       _title_smart(r.get("descripcion_equipo") or ""),
                 "EDS":          r.get("eds_codigo") or "",
-                "Dirección":    r.get("descripcion_instalacion") or "",
-                "Contacto":     r.get("nombre_contacto") or "",
+                "Dirección":    _title_smart(r.get("descripcion_instalacion") or ""),
+                "Contacto":     _title_smart(r.get("nombre_contacto") or ""),
                 "Últ. cambio":  pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True),
             })
 
-        # Correctivos (1 fila cada uno; sí llevan prioridad)
+        # Correctivos (1 fila cada uno; sí llevan prioridad; nº en col N° Plan)
         for _, r in _corr.iterrows():
             rows_view.append({
                 "_key":         f"CORR|{r['id_sap']}",
                 "_tipo":        "CORRECTIVO",
                 "_ids":         [r["id_sap"]],
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
-                "N° aviso":     str(r["id_sap"]),
+                "N° Plan":      str(r["id_sap"]),
+                "N° Rep":       "",
                 "OS Fracttal":  r.get("os_fracttal") or "",
-                "Tipo":         "CORRECTIVO",
+                "Tipo":         "Correctivo",
                 "Prioridad":    r.get("prioridad") or "",
-                "Estado":       _label_estado(r["estado"]),
-                "Descripción":  r.get("descripcion_falla") or "",
-                "Equipo":       r.get("descripcion_equipo") or "",
+                "Estado":       _label_estado_uno(r["estado"]),
+                "Descripción":  _title_smart(r.get("descripcion_falla") or ""),
+                "Equipo":       _title_smart(r.get("descripcion_equipo") or ""),
                 "EDS":          r.get("eds_codigo") or "",
-                "Dirección":    r.get("descripcion_instalacion") or "",
-                "Contacto":     r.get("nombre_contacto") or "",
+                "Dirección":    _title_smart(r.get("descripcion_instalacion") or ""),
+                "Contacto":     _title_smart(r.get("nombre_contacto") or ""),
                 "Últ. cambio":  pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True),
             })
 
@@ -2091,9 +2135,9 @@ if vista == "🔗 Enlace Copec":
         tab["Creado"]      = tab["Creado"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
         tab["Últ. cambio"] = tab["Últ. cambio"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
 
-        cols_show = ["Creado", "N° aviso", "OS Fracttal", "Tipo", "Prioridad",
-                     "Estado", "Descripción", "Equipo", "EDS", "Dirección",
-                     "Contacto", "Últ. cambio"]
+        cols_show = ["Creado", "N° Plan", "N° Rep", "OS Fracttal", "Tipo",
+                     "Prioridad", "Estado", "Descripción", "Equipo", "EDS",
+                     "Dirección", "Contacto", "Últ. cambio"]
 
         st.markdown(
             f"**{len(tab)} registros** "
@@ -2109,12 +2153,13 @@ if vista == "🔗 Enlace Copec":
             key="enlace_table",
             column_config={
                 "Creado":      st.column_config.TextColumn(width=100),
-                "N° aviso":    st.column_config.TextColumn(width=155),
+                "N° Plan":     st.column_config.TextColumn(width=90),
+                "N° Rep":      st.column_config.TextColumn(width=90),
                 "OS Fracttal": st.column_config.TextColumn(width=100),
-                "Tipo":        st.column_config.TextColumn(width=105),
+                "Tipo":        st.column_config.TextColumn(width=100),
                 "Prioridad":   st.column_config.TextColumn(width=80),
-                "Estado":      st.column_config.TextColumn(width=175),
-                "Descripción": st.column_config.TextColumn(width=260),
+                "Estado":      st.column_config.TextColumn(width=200),
+                "Descripción": st.column_config.TextColumn(width=240),
                 "Equipo":      st.column_config.TextColumn(width=150),
                 "EDS":         st.column_config.TextColumn(width=70),
                 "Dirección":   st.column_config.TextColumn(width=240),
@@ -2142,12 +2187,12 @@ if vista == "🔗 Enlace Copec":
                     st.markdown(
                         f"**{clase} · N° aviso {av['id_sap']}**  \n"
                         f"{_emo} {_lbl}  \n"
-                        f"**Falla:** {av.get('descripcion_falla') or '—'}  \n"
+                        f"**Falla:** {_title_smart(av.get('descripcion_falla') or '') or '—'}  \n"
                         f"**Descripción:** {av.get('descripcion') or '—'}  \n"
-                        f"**Equipo:** {av.get('descripcion_equipo') or '—'}  \n"
+                        f"**Equipo:** {_title_smart(av.get('descripcion_equipo') or '') or '—'}  \n"
                         f"**EDS:** {av.get('eds_codigo') or '—'} · "
-                        f"{av.get('descripcion_instalacion') or ''}  \n"
-                        f"**Contacto:** {av.get('nombre_contacto') or '—'} "
+                        f"{_title_smart(av.get('descripcion_instalacion') or '')}  \n"
+                        f"**Contacto:** {_title_smart(av.get('nombre_contacto') or '') or '—'} "
                         f"{('· ' + av.get('telefono_contacto')) if av.get('telefono_contacto') else ''}  \n"
                         f"**N° orden Enlace:** `{av.get('numero_orden') or '—'}`  \n"
                         f"**OS Fracttal:** `{av.get('os_fracttal') or '—'}`  \n"
