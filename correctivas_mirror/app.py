@@ -1760,6 +1760,28 @@ if vista == "🔗 Enlace Copec":
                     by_aviso[str(r["n_aviso"])] = r["os_fracttal"]
         return by_aviso
 
+    @st.cache_data(ttl=300)
+    def cargar_ots_detalle(ids: tuple[str, ...]) -> dict:
+        """Trae detalle de OTs Fracttal (responsable, fechas, estado, etc.)
+        indexado por id_ot para el panel de detalle expandido."""
+        if not ids:
+            return {}
+        out = {}
+        ids_list = [i for i in ids if i]
+        for i in range(0, len(ids_list), 200):
+            chunk = ids_list[i:i+200]
+            rows = _sb_get("ordenes_trabajo", {
+                "select": ("id_ot,responsable,estado,estado_tarea,prioridad_calc,"
+                           "modalidad_atencion,tipo_falla,causa_raiz,"
+                           "fecha_inicio,fecha_finalizacion,tiempo_ejecucion,"
+                           "comentario_tecnico,tipo_tarea"),
+                "id_ot": f"in.({','.join(chunk)})",
+                "limit": "500",
+            })
+            for r in rows:
+                out[r["id_ot"]] = r
+        return out
+
     @st.cache_data(ttl=300, show_spinner="Cargando OTs correctivas Fracttal...")
     def cargar_ots_correctivas_por_eds() -> dict:
         """OTs correctivas de Fracttal indexadas por EDS para match por
@@ -1921,6 +1943,10 @@ if vista == "🔗 Enlace Copec":
         return _best_match(_prev_by_eds.get(eds, []), fc, ventana_dias=45)
 
     df["os_fracttal"] = df.apply(_resolve_os, axis=1)
+
+    # Detalles Fracttal (responsable, fechas, etc.) para el panel expandido
+    _ots_ids = tuple(sorted({x for x in df["os_fracttal"].dropna().unique() if x}))
+    _ots_detalle = cargar_ots_detalle(_ots_ids)
 
     # ── Detectar pareos Plan/Repuestos (solo preventivos) ───────────
     # Copec divide cada mantención preventiva en 2 avisos separados:
@@ -2291,9 +2317,22 @@ if vista == "🔗 Enlace Copec":
                 with col:
                     clase = av.get("_clase") or av.get("tipo_aviso")
                     _emo, _lbl = ESTADO_META.get(av["estado"], ("⚪", av["estado"]))
-                    st.markdown(
+                    # Datos base del aviso Enlace
+                    def _fmt(ts):
+                        if not ts or pd.isna(ts):
+                            return "—"
+                        try:
+                            return pd.to_datetime(ts, errors='coerce', utc=True).tz_convert(_CL_TZ).strftime('%d/%m/%Y %H:%M')
+                        except Exception:
+                            return "—"
+
+                    os_id = av.get("os_fracttal")
+                    ot = _ots_detalle.get(os_id) if os_id else None
+                    prio_ui = av.get("prioridad") if av["tipo_aviso"] == "CORRECTIVO" else "—"
+
+                    bloque_enlace = (
                         f"**{clase} · N° aviso {av['id_sap']}**  \n"
-                        f"{_emo} {_lbl}  \n"
+                        f"{_emo} {_lbl}  ·  **Prioridad:** {prio_ui or '—'}  \n"
                         f"**Falla:** {_title_smart(av.get('descripcion_falla') or '') or '—'}  \n"
                         f"**Descripción:** {av.get('descripcion') or '—'}  \n"
                         f"**Equipo:** {_title_smart(av.get('descripcion_equipo') or '') or '—'}  \n"
@@ -2302,12 +2341,31 @@ if vista == "🔗 Enlace Copec":
                         f"**Contacto:** {_title_smart(av.get('nombre_contacto') or '') or '—'} "
                         f"{('· ' + av.get('telefono_contacto')) if av.get('telefono_contacto') else ''}  \n"
                         f"**N° orden Enlace:** `{av.get('numero_orden') or '—'}`  \n"
-                        f"**N° OT Fracttal:** `{av.get('os_fracttal') or '—'}`  \n"
-                        f"**Creado:** "
-                        f"{pd.to_datetime(av['fecha_creacion'], errors='coerce', utc=True).tz_convert(_CL_TZ).strftime('%d/%m/%Y %H:%M') if pd.notna(av.get('fecha_creacion')) else '—'}  \n"
-                        f"**Últ. cambio:** "
-                        f"{pd.to_datetime(av['fecha_ultimo_cambio'], errors='coerce', utc=True).tz_convert(_CL_TZ).strftime('%d/%m/%Y %H:%M') if pd.notna(av.get('fecha_ultimo_cambio')) else '—'}"
+                        f"**Creado:** {_fmt(av.get('fecha_creacion'))}  \n"
+                        f"**Últ. cambio:** {_fmt(av.get('fecha_ultimo_cambio'))}"
                     )
+                    st.markdown(bloque_enlace)
+
+                    # Bloque Fracttal (si hay OT matcheada)
+                    if ot:
+                        st.markdown(
+                            f"\n---\n"
+                            f"**🔧 OT Fracttal · `{os_id}`**  \n"
+                            f"**Estado OT:** {ot.get('estado') or '—'}  ·  "
+                            f"**Estado tarea:** {ot.get('estado_tarea') or '—'}  \n"
+                            f"**Técnico:** {ot.get('responsable') or '—'}  \n"
+                            f"**Modalidad:** {ot.get('modalidad_atencion') or '—'}  \n"
+                            f"**Tipo falla:** {ot.get('tipo_falla') or '—'}  \n"
+                            f"**Causa raíz:** {ot.get('causa_raiz') or '—'}  \n"
+                            f"**Inicio técnico:** {_fmt(ot.get('fecha_inicio'))}  \n"
+                            f"**Finalización:** {_fmt(ot.get('fecha_finalizacion'))}  \n"
+                            f"**Tiempo ejecución:** {ot.get('tiempo_ejecucion') or '—'}  \n"
+                            f"**Comentario técnico:** {ot.get('comentario_tecnico') or '—'}"
+                        )
+                    elif os_id:
+                        st.markdown(f"\n---\n**🔧 OT Fracttal:** `{os_id}` _(sin detalle disponible)_")
+                    else:
+                        st.markdown(f"\n---\n**🔧 OT Fracttal:** _no matcheada_")
 
 
 # ══════════════════════════════════════════════════════════════════════
