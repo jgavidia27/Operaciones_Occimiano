@@ -2478,28 +2478,39 @@ if vista == "🔗 Enlace Copec":
                         lineas.append(f"**Causa raíz:** {_title_smart(ot.get('causa_raiz') or '') or '—'}")
                     lineas.append(f"**Inicio técnico:** {_fmt(ot.get('fecha_inicio'))}")
                     lineas.append(f"**Finalización:** {_fmt(ot.get('fecha_finalizacion'))}")
-                    # Tiempo de ejecución: prioriza tiempo_ejecucion (string HH:MM),
-                    # fallback a duracion_real_neta_seg (más precisa, sin paros),
-                    # y por último duracion_real_seg. Formato: "1h 30min" o "45 min".
-                    def _fmt_dur(seg):
-                        try:
-                            s = int(seg or 0)
-                        except (TypeError, ValueError):
-                            return None
-                        if s <= 0: return None
-                        h, m = divmod(s // 60, 60)
+                    # Tiempo de ejecución — Fracttal a veces registra "00:00" mal
+                    # (técnico no puso tiempo). Estrategia:
+                    #   1) delta real entre fecha_inicio y fecha_finalizacion (autoritativo)
+                    #   2) tiempo_ejecucion si != 0
+                    #   3) duracion_real_neta_seg / duracion_real_seg
+                    def _fmt_min(mins):
+                        if not mins or mins <= 0: return None
+                        h, m = divmod(int(mins), 60)
                         return f"{h}h {m:02d}min" if h else f"{m} min"
                     dur_txt = None
-                    if ot.get("tiempo_ejecucion"):
-                        # tiempo_ejecucion suele ser "HH:MM" — convertir a formato bonito
+                    fi, ff = ot.get("fecha_inicio"), ot.get("fecha_finalizacion")
+                    if fi and ff:
                         try:
-                            hh, mm = str(ot["tiempo_ejecucion"]).split(":")[:2]
-                            hh_i, mm_i = int(hh), int(mm)
-                            dur_txt = f"{hh_i}h {mm_i:02d}min" if hh_i else f"{mm_i} min"
+                            delta_m = int((pd.to_datetime(ff, utc=True) - pd.to_datetime(fi, utc=True)).total_seconds() / 60)
+                            dur_txt = _fmt_min(delta_m)
                         except Exception:
-                            dur_txt = str(ot["tiempo_ejecucion"])
+                            dur_txt = None
                     if not dur_txt:
-                        dur_txt = _fmt_dur(ot.get("duracion_real_neta_seg")) or _fmt_dur(ot.get("duracion_real_seg"))
+                        te = str(ot.get("tiempo_ejecucion") or "").strip()
+                        if te and te != "00:00":
+                            try:
+                                hh, mm = te.split(":")[:2]
+                                dur_txt = _fmt_min(int(hh) * 60 + int(mm))
+                            except Exception:
+                                dur_txt = te
+                    if not dur_txt:
+                        for k in ("duracion_real_neta_seg", "duracion_real_seg"):
+                            try:
+                                s = int(ot.get(k) or 0)
+                                if s > 0:
+                                    dur_txt = _fmt_min(s // 60); break
+                            except (TypeError, ValueError):
+                                continue
                     if dur_txt:
                         lineas.append(f"**Tiempo ejecución:** {dur_txt}")
                     if ot.get("comentario_tecnico"):
