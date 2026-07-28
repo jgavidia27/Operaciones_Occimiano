@@ -1882,10 +1882,13 @@ if vista == "🔗 Enlace Copec":
                 ts = pd.to_datetime(auth["updated_at"]).tz_convert(_CL_TZ)
                 _mins = (pd.Timestamp.now(tz=_CL_TZ) - ts).total_seconds() / 60
                 _label = ts.strftime("%d/%m %H:%M")
-                if _mins > 45:
+                # GitHub Actions cron no garantiza precisión al minuto: puede
+                # variar 15-45 min. Sólo alertamos con delay > 90 min (6x el
+                # intervalo esperado de 15 min).
+                if _mins > 90:
                     st.metric("Última sync", _label, delta=f"⚠️ hace {int(_mins)} min",
                               delta_color="inverse")
-                    st.caption("Cron esperado cada 15 min. Revisa GitHub Actions.")
+                    st.caption("Cron muy demorado. Revisa GitHub Actions.")
                 else:
                     st.metric("Última sync", _label, delta=f"hace {int(_mins)} min",
                               delta_color="off")
