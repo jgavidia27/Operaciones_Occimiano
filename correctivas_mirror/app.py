@@ -2141,11 +2141,12 @@ if vista == "🔗 Enlace Copec":
 
         def _estado_fracttal_ui(ot):
             """Traduce estado + estado_tarea + fecha_finalizacion de Fracttal
-            a las 3 categorías del negocio Occimiano:
-              • En Progreso: técnico aún no cierra la OT
-              • En Revisión: técnico cerró (DONE) pero admin no ha validado
-              • Finalizada: segunda validación OK (fecha_finalizacion poblada)
-              • Excepción: ERROR DE INGRESO / DUPLICADO / etc.
+            a las 3 categorías operativas Occimiano:
+              🔵 En Progreso: OT creada pero aún no atendida por el técnico
+                              (Fracttal la marca 'Por Iniciar' o 'En Proceso')
+              🟡 En Revisión: técnico cerró (DONE) pero admin no ha validado
+              ✅ Finalizada:  segunda validación OK (fecha_finalizacion poblada)
+              🚫 Excepción:   ERROR DE INGRESO / DUPLICADO / CANCEL / RECHAZ
             """
             if not ot:
                 return ""
@@ -2153,15 +2154,13 @@ if vista == "🔗 Enlace Copec":
             et     = (ot.get("estado_tarea") or "").strip().upper()
             ff     = ot.get("fecha_finalizacion")
             e_up   = estado.upper()
-            if "ERROR" in e_up or "DUPLIC" in e_up or "CANCEL" in e_up or "RECHAZ" in e_up:
+            if any(x in e_up for x in ("ERROR", "DUPLIC", "CANCEL", "RECHAZ")):
                 return f"🚫 {estado}"
             if estado == "Finalizadas" and ff:
                 return "✅ Finalizada"
             if et == "DONE":
                 return "🟡 En Revisión"
-            if estado == "Por Iniciar":
-                return "🔵 Por Iniciar"
-            return f"🟠 {estado or 'En Progreso'}"
+            return "🔵 En Progreso"
 
         def _estado_grupo(estados):
             """Estado combinado para N avisos (típicamente 1 Plan + 1..N Repuestos).
