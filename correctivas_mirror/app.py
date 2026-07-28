@@ -1989,12 +1989,12 @@ if vista == "🔗 Enlace Copec":
             "EDS": plan["eds_codigo"],
             "Dirección": plan["descripcion_instalacion"],
             "Fecha": pk.split("|")[-1],
-            "N° Plan": " + ".join(str(x) for x in plans["id_sap"]),
+            "N° MP Fija": " + ".join(str(x) for x in plans["id_sap"]),
             "Estado Plan": " / ".join(sorted({
                 ESTADO_META.get(e, ("⚪", e))[0] + " " + ESTADO_META.get(e, ("", e))[1]
                 for e in plans["estado"]
             })),
-            "N° Rep": " + ".join(str(x) for x in reps["id_sap"]),
+            "N° MP Variable": " + ".join(str(x) for x in reps["id_sap"]),
             "Estado Rep": " / ".join(sorted({
                 ESTADO_META.get(e, ("⚪", e))[0] + " " + ESTADO_META.get(e, ("", e))[1]
                 for e in reps["estado"]
@@ -2188,8 +2188,8 @@ if vista == "🔗 Enlace Copec":
                     "_tipo":        "PREVENTIVO",
                     "_ids":         todos_ids,
                     "Creado":       pd.to_datetime(plan["fecha_creacion"], errors="coerce", utc=True),
-                    "N° Plan":      n_plan,
-                    "N° Rep":       n_rep,
+                    "N° MP Fija":      n_plan,
+                    "N° MP Variable":       n_rep,
                     "N° OT Fracttal":  os_fr,
                     "Tipo":         "Preventivo",
                     "Prioridad":    "",
@@ -2226,8 +2226,8 @@ if vista == "🔗 Enlace Copec":
                 "_tipo":        "PREVENTIVO_HUERFANO",
                 "_ids":         [r["id_sap"]],
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
-                "N° Plan":      n_plan,
-                "N° Rep":       n_rep,
+                "N° MP Fija":      n_plan,
+                "N° MP Variable":       n_rep,
                 "N° OT Fracttal":  r.get("os_fracttal") or "",
                 "Tipo":         "Preventivo",
                 "Prioridad":    "",
@@ -2247,8 +2247,8 @@ if vista == "🔗 Enlace Copec":
                 "_tipo":        "CORRECTIVO",
                 "_ids":         [r["id_sap"]],
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
-                "N° Plan":      str(r["id_sap"]),
-                "N° Rep":       "",
+                "N° MP Fija":      str(r["id_sap"]),
+                "N° MP Variable":       "",
                 "N° OT Fracttal":  r.get("os_fracttal") or "",
                 "Tipo":         "Correctivo",
                 "Prioridad":    r.get("prioridad") or "",
@@ -2268,7 +2268,7 @@ if vista == "🔗 Enlace Copec":
         tab["Creado"]      = tab["Creado"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
         tab["Últ. cambio"] = tab["Últ. cambio"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
 
-        cols_show = ["Creado", "N° Plan", "N° Rep", "N° OT Fracttal", "Tipo",
+        cols_show = ["Creado", "N° MP Fija", "N° MP Variable", "N° OT Fracttal", "Tipo",
                      "Prioridad", "Estado", "Descripción", "EDS", "Dirección",
                      "Últ. cambio", "Equipo", "Contacto"]
 
@@ -2286,8 +2286,8 @@ if vista == "🔗 Enlace Copec":
             key="enlace_table",
             column_config={
                 "Creado":      st.column_config.TextColumn(width=100),
-                "N° Plan":     st.column_config.TextColumn(width=90),
-                "N° Rep":      st.column_config.TextColumn(width=90),
+                "N° MP Fija":     st.column_config.TextColumn(width=90),
+                "N° MP Variable":      st.column_config.TextColumn(width=90),
                 "N° OT Fracttal": st.column_config.TextColumn(width=100),
                 "Tipo":        st.column_config.TextColumn(width=100),
                 "Prioridad":   st.column_config.TextColumn(width=80),
@@ -2330,8 +2330,12 @@ if vista == "🔗 Enlace Copec":
                     ot = _ots_detalle.get(os_id) if os_id else None
                     prio_ui = av.get("prioridad") if av["tipo_aviso"] == "CORRECTIVO" else "—"
 
+                    # Renombrar clase con nomenclatura Occimiano
+                    clase_label = {"PLAN": "MP Fija",
+                                   "REPUESTOS": "MP Variable"}.get(clase, clase)
+
                     bloque_enlace = (
-                        f"**{clase} · N° aviso {av['id_sap']}**  \n"
+                        f"**{clase_label} · N° aviso {av['id_sap']}**  \n"
                         f"{_emo} {_lbl}  ·  **Prioridad:** {prio_ui or '—'}  \n"
                         f"**Falla:** {_title_smart(av.get('descripcion_falla') or '') or '—'}  \n"
                         f"**Descripción:** {av.get('descripcion') or '—'}  \n"
