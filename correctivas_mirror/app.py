@@ -2440,29 +2440,44 @@ if vista == "🔗 Enlace Copec":
                     st.markdown(bloque_enlace)
 
             # OT Fracttal: una sola por par (mismo os_fracttal para MP Fija + MP Variable)
+            _ESTADO_TAREA_ES = {
+                "DONE":        "Finalizada",
+                "NO_STARTED":  "No iniciada",
+                "IN_PROGRESS": "En progreso",
+                "PAUSED":      "Pausada",
+            }
             os_ids_unicos = sorted({av.get("os_fracttal") for _, av in _detalle.iterrows() if av.get("os_fracttal")})
-            st.markdown("")  # separador
+            st.markdown("")
             if not os_ids_unicos:
-                st.markdown("**🔧 OT Fracttal:** _no matcheada_")
+                st.markdown("**🔧 OT Fracttal:** ⏳ _no creada aún en Fracttal_")
             else:
                 for os_id in os_ids_unicos:
                     ot = _ots_detalle.get(os_id)
-                    if ot:
-                        st.markdown(
-                            f"**🔧 OT Fracttal · `{os_id}`**  \n"
-                            f"**Estado OT:** {ot.get('estado') or '—'}  ·  "
-                            f"**Estado tarea:** {ot.get('estado_tarea') or '—'}  \n"
-                            f"**Técnico:** {ot.get('responsable') or '—'}  \n"
-                            f"**Modalidad:** {ot.get('modalidad_atencion') or '—'}  \n"
-                            f"**Tipo falla:** {ot.get('tipo_falla') or '—'}  \n"
-                            f"**Causa raíz:** {ot.get('causa_raiz') or '—'}  \n"
-                            f"**Inicio técnico:** {_fmt(ot.get('fecha_inicio'))}  \n"
-                            f"**Finalización:** {_fmt(ot.get('fecha_finalizacion'))}  \n"
-                            f"**Tiempo ejecución:** {ot.get('tiempo_ejecucion') or '—'}  \n"
-                            f"**Comentario técnico:** {ot.get('comentario_tecnico') or '—'}"
-                        )
-                    else:
+                    if not ot:
                         st.markdown(f"**🔧 OT Fracttal:** `{os_id}` _(sin detalle disponible)_")
+                        continue
+                    # Solo mostramos campos con valor (evita filas '—' innecesarias
+                    # en preventivas donde modalidad/tipo_falla/causa_raiz son null).
+                    lineas = [f"**🔧 OT Fracttal · `{os_id}`**"]
+                    et_raw = ot.get("estado_tarea") or ""
+                    et_es = _ESTADO_TAREA_ES.get(et_raw, et_raw) if et_raw else "—"
+                    lineas.append(f"**Estado OT:** {ot.get('estado') or '—'}  ·  "
+                                  f"**Estado tarea:** {et_es}")
+                    if ot.get("responsable"):
+                        lineas.append(f"**Técnico:** {ot['responsable']}")
+                    if ot.get("modalidad_atencion"):
+                        lineas.append(f"**Modalidad:** {ot['modalidad_atencion']}")
+                    if ot.get("tipo_falla"):
+                        lineas.append(f"**Tipo falla:** {ot['tipo_falla']}")
+                    if ot.get("causa_raiz"):
+                        lineas.append(f"**Causa raíz:** {ot['causa_raiz']}")
+                    lineas.append(f"**Inicio técnico:** {_fmt(ot.get('fecha_inicio'))}")
+                    lineas.append(f"**Finalización:** {_fmt(ot.get('fecha_finalizacion'))}")
+                    if ot.get("tiempo_ejecucion"):
+                        lineas.append(f"**Tiempo ejecución:** {ot['tiempo_ejecucion']}")
+                    if ot.get("comentario_tecnico"):
+                        lineas.append(f"**Comentario técnico:** {ot['comentario_tecnico']}")
+                    st.markdown("  \n".join(lineas))
 
 
 # ══════════════════════════════════════════════════════════════════════
