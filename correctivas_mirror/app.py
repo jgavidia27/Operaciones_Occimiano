@@ -2208,8 +2208,8 @@ if vista == "🔗 Enlace Copec":
         tab["Últ. cambio"] = tab["Últ. cambio"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
 
         cols_show = ["Creado", "N° Plan", "N° Rep", "OS Fracttal", "Tipo",
-                     "Prioridad", "Estado", "Descripción", "Equipo", "EDS",
-                     "Dirección", "Contacto", "Últ. cambio"]
+                     "Prioridad", "Estado", "Descripción", "EDS", "Dirección",
+                     "Últ. cambio", "Equipo", "Contacto"]
 
         st.markdown(
             f"**{len(tab)} registros** "
