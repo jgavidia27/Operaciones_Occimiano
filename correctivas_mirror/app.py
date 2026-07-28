@@ -1810,7 +1810,15 @@ if vista == "🔗 Enlace Copec":
         elif auth.get("updated_at"):
             try:
                 ts = pd.to_datetime(auth["updated_at"]).tz_convert(_CL_TZ)
-                st.metric("Última sync", ts.strftime("%d/%m %H:%M"))
+                _mins = (pd.Timestamp.now(tz=_CL_TZ) - ts).total_seconds() / 60
+                _label = ts.strftime("%d/%m %H:%M")
+                if _mins > 45:
+                    st.metric("Última sync", _label, delta=f"⚠️ hace {int(_mins)} min",
+                              delta_color="inverse")
+                    st.caption("Cron esperado cada 15 min. Revisa GitHub Actions.")
+                else:
+                    st.metric("Última sync", _label, delta=f"hace {int(_mins)} min",
+                              delta_color="off")
             except Exception:
                 st.caption(f"Última sync: {auth.get('updated_at')}")
 
