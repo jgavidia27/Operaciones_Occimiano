@@ -2233,7 +2233,7 @@ if vista == "🔗 Enlace Copec":
                     "Creado":       pd.to_datetime(plan["fecha_creacion"], errors="coerce", utc=True),
                     "N° MP Fija":      n_plan,
                     "N° MP Variable":       n_rep,
-                    "N° OT Fracttal":  os_fr,
+                    "N° OT Fracttal":  os_fr or "⏳ pendiente",
                     "Tipo":         "Preventivo",
                     "Prioridad":    "",
                     "Estado Enlace":   _estado_grupo(todos_estados),
@@ -2284,7 +2284,7 @@ if vista == "🔗 Enlace Copec":
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
                 "N° MP Fija":      n_plan,
                 "N° MP Variable":       n_rep,
-                "N° OT Fracttal":  os_fr,
+                "N° OT Fracttal":  os_fr or "⏳ pendiente",
                 "Tipo":         "Preventivo",
                 "Prioridad":    "",
                 "Estado Enlace":   estado_ui,
@@ -2318,7 +2318,7 @@ if vista == "🔗 Enlace Copec":
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
                 "N° MP Fija":      str(r["id_sap"]),
                 "N° MP Variable":       "",
-                "N° OT Fracttal":  os_fr,
+                "N° OT Fracttal":  os_fr or "⏳ pendiente",
                 "Tipo":         "Correctivo",
                 "Prioridad":    r.get("prioridad") or "",
                 "Estado Enlace":   _label_estado_uno(r["estado"]),
@@ -2394,21 +2394,22 @@ if vista == "🔗 Enlace Copec":
 
             st.markdown("---")
             st.markdown(f"### Detalle · {row['Descripción']}")
+
+            def _fmt(ts):
+                if not ts or pd.isna(ts):
+                    return "—"
+                try:
+                    return pd.to_datetime(ts, errors='coerce', utc=True).tz_convert(_CL_TZ).strftime('%d/%m/%Y %H:%M')
+                except Exception:
+                    return "—"
+
+            # Renderizamos primero los avisos Enlace (uno o más) lado a lado
             _cols = st.columns(len(_detalle) if len(_detalle) > 1 else 1)
             for i, (_, av) in enumerate(_detalle.iterrows()):
                 col = _cols[i] if len(_detalle) > 1 else _cols[0]
                 with col:
                     clase = av.get("_clase") or av.get("tipo_aviso")
                     _emo, _lbl = ESTADO_META.get(av["estado"], ("⚪", av["estado"]))
-                    # Datos base del aviso Enlace
-                    def _fmt(ts):
-                        if not ts or pd.isna(ts):
-                            return "—"
-                        try:
-                            return pd.to_datetime(ts, errors='coerce', utc=True).tz_convert(_CL_TZ).strftime('%d/%m/%Y %H:%M')
-                        except Exception:
-                            return "—"
-
                     os_id = av.get("os_fracttal")
                     ot = _ots_detalle.get(os_id) if os_id else None
                     prio_ui = av.get("prioridad") if av["tipo_aviso"] == "CORRECTIVO" else "—"
@@ -2435,10 +2436,16 @@ if vista == "🔗 Enlace Copec":
                     )
                     st.markdown(bloque_enlace)
 
-                    # Bloque Fracttal (si hay OT matcheada)
+            # OT Fracttal: una sola por par (mismo os_fracttal para MP Fija + MP Variable)
+            os_ids_unicos = sorted({av.get("os_fracttal") for _, av in _detalle.iterrows() if av.get("os_fracttal")})
+            st.markdown("")  # separador
+            if not os_ids_unicos:
+                st.markdown("**🔧 OT Fracttal:** _no matcheada_")
+            else:
+                for os_id in os_ids_unicos:
+                    ot = _ots_detalle.get(os_id)
                     if ot:
                         st.markdown(
-                            f"\n---\n"
                             f"**🔧 OT Fracttal · `{os_id}`**  \n"
                             f"**Estado OT:** {ot.get('estado') or '—'}  ·  "
                             f"**Estado tarea:** {ot.get('estado_tarea') or '—'}  \n"
@@ -2451,10 +2458,8 @@ if vista == "🔗 Enlace Copec":
                             f"**Tiempo ejecución:** {ot.get('tiempo_ejecucion') or '—'}  \n"
                             f"**Comentario técnico:** {ot.get('comentario_tecnico') or '—'}"
                         )
-                    elif os_id:
-                        st.markdown(f"\n---\n**🔧 OT Fracttal:** `{os_id}` _(sin detalle disponible)_")
                     else:
-                        st.markdown(f"\n---\n**🔧 OT Fracttal:** _no matcheada_")
+                        st.markdown(f"**🔧 OT Fracttal:** `{os_id}` _(sin detalle disponible)_")
 
 
 # ══════════════════════════════════════════════════════════════════════
