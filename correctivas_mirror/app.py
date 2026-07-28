@@ -1062,7 +1062,7 @@ elif vista == "📋 Tabla enriquecida":
              "F. Llamado","F. Inicio","F. Cierre","Horas resp.","SLA (h)",
              "equipo","tecnico_disp","Observación","facturacion"]
     _ren = {
-        "os_fracttal":"OS Fracttal", "n_llamado":"N° Aviso",
+        "os_fracttal":"N° OT Fracttal", "n_llamado":"N° Aviso",
         "cliente":"Cliente", "eds_occim":"Cód. EDS", "eds_nombre":"EDS",
         "comuna":"Comuna", "zona":"Zona", "prioridad":"Prioridad",
         "equipo":"Equipo", "tecnico_disp":"Técnico", "facturacion":"Facturación",
@@ -1074,7 +1074,7 @@ elif vista == "📋 Tabla enriquecida":
     st.dataframe(
         _show, hide_index=True, use_container_width=True, height=680,
         column_config={
-            "OS Fracttal": st.column_config.TextColumn(width=105),
+            "N° OT Fracttal": st.column_config.TextColumn(width=105),
             "N° Aviso":    st.column_config.TextColumn(width=85),
             "Cliente":     st.column_config.TextColumn(width=140),
             "Cód. EDS":    st.column_config.TextColumn(width=85),
@@ -1742,7 +1742,9 @@ if vista == "🔗 Enlace Copec":
 
     @st.cache_data(ttl=120, show_spinner="Cruzando correctivos con Fracttal...")
     def cargar_match_fracttal_correctivo(n_avisos: list[str]) -> dict:
-        """Correctivos: match directo id_sap -> llamados_correctivos.n_aviso -> os_fracttal."""
+        """Correctivos: intenta primero llamados_correctivos.os_fracttal
+        (funciona solo para avisos activos que aún no cerraron). Devuelve
+        {n_aviso: os_fracttal} solo para los que sí tienen match ahí."""
         if not n_avisos:
             return {}
         by_aviso = {}
@@ -1757,6 +1759,30 @@ if vista == "🔗 Enlace Copec":
                 if r.get("n_aviso") and r.get("os_fracttal"):
                     by_aviso[str(r["n_aviso"])] = r["os_fracttal"]
         return by_aviso
+
+    @st.cache_data(ttl=300, show_spinner="Cargando OTs correctivas Fracttal...")
+    def cargar_ots_correctivas_por_eds() -> dict:
+        """OTs correctivas de Fracttal indexadas por EDS para match por
+        (EDS + fecha_creacion ± 3 días) cuando llamados_correctivos.os_fracttal
+        está NULL (ocurre en TODOS los correctivos ya cerrados)."""
+        all_rows = []
+        for off in range(0, 10000, 1000):
+            rows = _sb_get("ordenes_trabajo", {
+                "select": "id_ot,codigo_eds,fecha_creacion",
+                "tipo_tarea": "eq.CORRECTIVA",
+                "fecha_creacion": "gte.2026-01-01",
+                "order": "fecha_creacion.desc",
+                "limit": "1000", "offset": str(off),
+            })
+            if not rows: break
+            all_rows.extend(rows)
+            if len(rows) < 1000: break
+        by_eds: dict[str, list] = {}
+        for r in all_rows:
+            eds = r.get("codigo_eds"); fc = r.get("fecha_creacion")
+            if not eds or not fc: continue
+            by_eds.setdefault(str(eds), []).append((fc[:10], r["id_ot"]))
+        return by_eds
 
     @st.cache_data(ttl=300, show_spinner="Cruzando preventivos con Fracttal...")
     def cargar_ots_preventivas_por_eds() -> dict:
@@ -1853,26 +1879,22 @@ if vista == "🔗 Enlace Copec":
         st.stop()
 
     # ── Cruce con Fracttal (2 estrategias según tipo_aviso) ─────────
-    # Correctivos: id_sap -> llamados_correctivos.n_aviso -> os_fracttal (1:1)
-    # Preventivos: mismo EDS + ventana ±45 días vs fecha_programada Fracttal
+    # Correctivos:
+    #   1) Primero llamados_correctivos.n_aviso -> os_fracttal (para activos)
+    #   2) Fallback: ordenes_trabajo por (EDS + fecha ±3 días + CORRECTIVA)
+    # Preventivos: (EDS + fecha_creacion ±45 días) vs fecha_programada Fracttal
     _corr_map = cargar_match_fracttal_correctivo(
         df[df["tipo_aviso"] == "CORRECTIVO"]["id_sap"].dropna().astype(str).tolist()
     )
+    _corr_by_eds = cargar_ots_correctivas_por_eds()
     _prev_by_eds = cargar_ots_preventivas_por_eds()
 
     from datetime import datetime as _dt
-    def _resolve_os(row):
-        if row["tipo_aviso"] == "CORRECTIVO":
-            return _corr_map.get(str(row["id_sap"]))
-        eds = str(row.get("eds_codigo") or "")
-        fc  = (row.get("fecha_creacion") or "")[:10]
-        if not eds or not fc:
-            return None
-        cands = _prev_by_eds.get(eds) or []
-        if not cands:
+    def _best_match(cands, fecha_iso, ventana_dias):
+        if not cands or not fecha_iso:
             return None
         try:
-            d0 = _dt.strptime(fc, "%Y-%m-%d")
+            d0 = _dt.strptime(fecha_iso[:10], "%Y-%m-%d")
         except ValueError:
             return None
         best, best_d = None, 999
@@ -1881,9 +1903,22 @@ if vista == "🔗 Enlace Copec":
                 delta = abs((_dt.strptime(fp, "%Y-%m-%d") - d0).days)
             except ValueError:
                 continue
-            if delta <= 45 and delta < best_d:
+            if delta <= ventana_dias and delta < best_d:
                 best, best_d = id_ot, delta
         return best
+
+    def _resolve_os(row):
+        eds = str(row.get("eds_codigo") or "")
+        fc  = row.get("fecha_creacion") or ""
+        if row["tipo_aviso"] == "CORRECTIVO":
+            # 1) via llamados_correctivos
+            match = _corr_map.get(str(row["id_sap"]))
+            if match:
+                return match
+            # 2) fallback via ordenes_trabajo CORRECTIVA por EDS+fecha
+            return _best_match(_corr_by_eds.get(eds, []), fc, ventana_dias=3)
+        # Preventivos
+        return _best_match(_prev_by_eds.get(eds, []), fc, ventana_dias=45)
 
     df["os_fracttal"] = df.apply(_resolve_os, axis=1)
 
@@ -1990,7 +2025,7 @@ if vista == "🔗 Enlace Copec":
                 "id_sap": "N° aviso Copec", "eds_codigo": "EDS",
                 "descripcion_falla": "Falla", "descripcion_equipo": "Equipo",
                 "estado": "Estado", "_horas_sin_cerrar": "Sin cerrar",
-                "os_fracttal": "OS Fracttal",
+                "os_fracttal": "N° OT Fracttal",
             })
             st.dataframe(_alr_tab, hide_index=True, use_container_width=True, height=min(280, 55 + 35 * len(_alr_tab)))
 
@@ -2129,7 +2164,7 @@ if vista == "🔗 Enlace Copec":
                     "Creado":       pd.to_datetime(plan["fecha_creacion"], errors="coerce", utc=True),
                     "N° Plan":      n_plan,
                     "N° Rep":       n_rep,
-                    "OS Fracttal":  os_fr,
+                    "N° OT Fracttal":  os_fr,
                     "Tipo":         "Preventivo",
                     "Prioridad":    "",
                     "Estado":       _estado_grupo(todos_estados),
@@ -2167,7 +2202,7 @@ if vista == "🔗 Enlace Copec":
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
                 "N° Plan":      n_plan,
                 "N° Rep":       n_rep,
-                "OS Fracttal":  r.get("os_fracttal") or "",
+                "N° OT Fracttal":  r.get("os_fracttal") or "",
                 "Tipo":         "Preventivo",
                 "Prioridad":    "",
                 "Estado":       estado_ui,
@@ -2188,7 +2223,7 @@ if vista == "🔗 Enlace Copec":
                 "Creado":       pd.to_datetime(r["fecha_creacion"], errors="coerce", utc=True),
                 "N° Plan":      str(r["id_sap"]),
                 "N° Rep":       "",
-                "OS Fracttal":  r.get("os_fracttal") or "",
+                "N° OT Fracttal":  r.get("os_fracttal") or "",
                 "Tipo":         "Correctivo",
                 "Prioridad":    r.get("prioridad") or "",
                 "Estado":       _label_estado_uno(r["estado"]),
@@ -2207,7 +2242,7 @@ if vista == "🔗 Enlace Copec":
         tab["Creado"]      = tab["Creado"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
         tab["Últ. cambio"] = tab["Últ. cambio"].dt.tz_convert(_CL_TZ).dt.strftime("%d/%m %H:%M")
 
-        cols_show = ["Creado", "N° Plan", "N° Rep", "OS Fracttal", "Tipo",
+        cols_show = ["Creado", "N° Plan", "N° Rep", "N° OT Fracttal", "Tipo",
                      "Prioridad", "Estado", "Descripción", "EDS", "Dirección",
                      "Últ. cambio", "Equipo", "Contacto"]
 
@@ -2227,7 +2262,7 @@ if vista == "🔗 Enlace Copec":
                 "Creado":      st.column_config.TextColumn(width=100),
                 "N° Plan":     st.column_config.TextColumn(width=90),
                 "N° Rep":      st.column_config.TextColumn(width=90),
-                "OS Fracttal": st.column_config.TextColumn(width=100),
+                "N° OT Fracttal": st.column_config.TextColumn(width=100),
                 "Tipo":        st.column_config.TextColumn(width=100),
                 "Prioridad":   st.column_config.TextColumn(width=80),
                 "Estado":      st.column_config.TextColumn(width=200),
@@ -2267,7 +2302,7 @@ if vista == "🔗 Enlace Copec":
                         f"**Contacto:** {_title_smart(av.get('nombre_contacto') or '') or '—'} "
                         f"{('· ' + av.get('telefono_contacto')) if av.get('telefono_contacto') else ''}  \n"
                         f"**N° orden Enlace:** `{av.get('numero_orden') or '—'}`  \n"
-                        f"**OS Fracttal:** `{av.get('os_fracttal') or '—'}`  \n"
+                        f"**N° OT Fracttal:** `{av.get('os_fracttal') or '—'}`  \n"
                         f"**Creado:** "
                         f"{pd.to_datetime(av['fecha_creacion'], errors='coerce', utc=True).tz_convert(_CL_TZ).strftime('%d/%m/%Y %H:%M') if pd.notna(av.get('fecha_creacion')) else '—'}  \n"
                         f"**Últ. cambio:** "
