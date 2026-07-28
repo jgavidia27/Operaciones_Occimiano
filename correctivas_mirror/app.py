@@ -1882,20 +1882,27 @@ if vista == "🔗 Enlace Copec":
         clases = set(g["_clase"])
         if clases != {"PLAN", "REPUESTOS"}:
             continue
-        plan = g[g["_clase"] == "PLAN"].iloc[0]
-        rep  = g[g["_clase"] == "REPUESTOS"].iloc[0]
-        if plan["estado"] != rep["estado"]:
-            _desbal.append({
-                "EDS": plan["eds_codigo"],
-                "Dirección": plan["descripcion_instalacion"],
-                "Fecha": pk.split("|")[-1],
-                "Plan (nº aviso)": plan["id_sap"],
-                "Estado Plan": ESTADO_META.get(plan["estado"], ("⚪", plan["estado"]))[0] + " " +
-                               ESTADO_META.get(plan["estado"], ("", plan["estado"]))[1],
-                "Repuestos (nº aviso)": rep["id_sap"],
-                "Estado Repuestos": ESTADO_META.get(rep["estado"], ("⚪", rep["estado"]))[0] + " " +
-                                    ESTADO_META.get(rep["estado"], ("", rep["estado"]))[1],
-            })
+        estados_grupo = set(g["estado"])
+        if len(estados_grupo) <= 1:
+            continue   # todos iguales → no desbalanceado
+        plans = g[g["_clase"] == "PLAN"]
+        reps  = g[g["_clase"] == "REPUESTOS"]
+        plan = plans.iloc[0]
+        _desbal.append({
+            "EDS": plan["eds_codigo"],
+            "Dirección": plan["descripcion_instalacion"],
+            "Fecha": pk.split("|")[-1],
+            "N° Plan": " + ".join(str(x) for x in plans["id_sap"]),
+            "Estado Plan": " / ".join(sorted({
+                ESTADO_META.get(e, ("⚪", e))[0] + " " + ESTADO_META.get(e, ("", e))[1]
+                for e in plans["estado"]
+            })),
+            "N° Rep": " + ".join(str(x) for x in reps["id_sap"]),
+            "Estado Rep": " / ".join(sorted({
+                ESTADO_META.get(e, ("⚪", e))[0] + " " + ESTADO_META.get(e, ("", e))[1]
+                for e in reps["estado"]
+            })),
+        })
 
     if _desbal:
         st.markdown(
@@ -1986,7 +1993,11 @@ if vista == "🔗 Enlace Copec":
         estados_api = [e for e, m in ESTADO_META.items() if m[1] in estado_sel]
         d = d[d["estado"].isin(estados_api)]
     if prio_sel:
-        d = d[d["prioridad"].isin(prio_sel)]
+        # Los preventivos no llevan prioridad en la API (Copec la deja null),
+        # así que el filtro solo aplica a correctivos. De lo contrario el
+        # filtro descartaría todos los Repuestos preventivos y romperia el
+        # pareo Plan+Repuestos.
+        d = d[(d["tipo_aviso"] == "PREVENTIVO") | d["prioridad"].isin(prio_sel)]
     if q:
         ql = q.strip().lower()
         mask = pd.Series(False, index=d.index)
@@ -2031,45 +2042,61 @@ if vista == "🔗 Enlace Copec":
             emo, lbl = ESTADO_META.get(est, ("⚪", est or ""))
             return f"{emo} {lbl}"
 
-        def _estado_par(est_plan, est_rep):
-            """Estado combinado para preventivos pareados:
-              - Ambos CERRADO         → ✅ Cerrado
-              - Uno CERRADO, otro no  → 🟠 Cierre pendiente (1)
-              - Ninguno CERRADO       → 🔴 Cierre pendiente (2)
+        def _estado_grupo(estados):
+            """Estado combinado para N avisos (típicamente 1 Plan + 1..N Repuestos).
+              - Todos CERRADO   → ✅ Cerrado
+              - K sin cerrar    → 🟠/🔴 Cierre pendiente (K)   (rojo si K == total)
             """
-            no_cerrados = sum(1 for e in (est_plan, est_rep) if e != "CERRADO")
+            total = len(estados)
+            no_cerrados = sum(1 for e in estados if e != "CERRADO")
             if no_cerrados == 0:
                 return "✅ Cerrado"
-            if no_cerrados == 1:
-                return "🟠 Cierre pendiente (1)"
-            return "🔴 Cierre pendiente (2)"
+            emoji = "🔴" if no_cerrados == total else "🟠"
+            return f"{emoji} Cierre pendiente ({no_cerrados})"
 
         rows_view = []
         _prev = d[d["tipo_aviso"] == "PREVENTIVO"].copy()
         _corr = d[d["tipo_aviso"] != "PREVENTIVO"].copy()
 
         _consumed = set()
+        # Pareo: N Plans + M Repuestos con misma EDS+día se agrupan en 1 fila.
+        # Casos habituales: 1P+1R (normal), 1P+2R (EDS con 2 equipos, ej 10238).
         for pk, g in _prev.groupby("_par_key"):
             if pk.endswith("|"):
                 continue
             plans = g[g["_clase"] == "PLAN"]
             reps  = g[g["_clase"] == "REPUESTOS"]
-            if len(plans) == 1 and len(reps) == 1:
-                plan = plans.iloc[0]; rep = reps.iloc[0]
-                _consumed.update([plan["id_sap"], rep["id_sap"]])
+            if len(plans) >= 1 and len(reps) >= 1:
+                # Tomamos el Plan más "temprano" como cabecera; guardamos todos
+                # los ids en _ids para el detalle expandido.
+                plan = plans.iloc[0]
+                todos_ids = list(plans["id_sap"]) + list(reps["id_sap"])
+                todos_estados = list(plans["estado"]) + list(reps["estado"])
+                _consumed.update(todos_ids)
                 comuna = _comuna_by_eds.get(str(plan["eds_codigo"] or ""), "")
                 desc = f"Plan Mtto {comuna}" if comuna else "Plan Mtto Preventivo"
+                if len(reps) > 1:
+                    desc += f" · ({len(reps)} equipos)"
+                # N° Plan / Rep: si hay múltiples, los concatenamos con "+"
+                n_plan = " + ".join(str(x) for x in plans["id_sap"])
+                n_rep  = " + ".join(str(x) for x in reps["id_sap"])
+                # OS Fracttal: el primero no vacío entre todos
+                os_fr = ""
+                for _id in todos_ids:
+                    row = g[g["id_sap"] == _id].iloc[0]
+                    if row.get("os_fracttal"):
+                        os_fr = row["os_fracttal"]; break
                 rows_view.append({
                     "_key":         f"PREV|{pk}",
                     "_tipo":        "PREVENTIVO",
-                    "_ids":         [plan["id_sap"], rep["id_sap"]],
+                    "_ids":         todos_ids,
                     "Creado":       pd.to_datetime(plan["fecha_creacion"], errors="coerce", utc=True),
-                    "N° Plan":      str(plan["id_sap"]),
-                    "N° Rep":       str(rep["id_sap"]),
-                    "OS Fracttal":  plan.get("os_fracttal") or rep.get("os_fracttal") or "",
+                    "N° Plan":      n_plan,
+                    "N° Rep":       n_rep,
+                    "OS Fracttal":  os_fr,
                     "Tipo":         "Preventivo",
                     "Prioridad":    "",
-                    "Estado":       _estado_par(plan["estado"], rep["estado"]),
+                    "Estado":       _estado_grupo(todos_estados),
                     "Descripción":  desc,
                     "Equipo":       _title_smart(plan.get("descripcion_equipo") or ""),
                     "EDS":          plan.get("eds_codigo") or "",
