@@ -2009,6 +2009,7 @@ if vista == "🔗 Enlace Copec":
             if _v:
                 os_fr = _v; break
         _desbal.append({
+            "N° OT Fracttal": os_fr or "⏳ pendiente",
             "EDS": plan["eds_codigo"],
             "Dirección": _title_smart(plan["descripcion_instalacion"] or ""),
             "Fecha": pk.split("|")[-1],
@@ -2022,7 +2023,6 @@ if vista == "🔗 Enlace Copec":
                 ESTADO_META.get(e, ("⚪", e))[0] + " " + ESTADO_META.get(e, ("", e))[1]
                 for e in reps["estado"]
             })),
-            "N° OT Fracttal": os_fr or "⏳ pendiente",
         })
 
     if _desbal:
@@ -2062,20 +2062,24 @@ if vista == "🔗 Enlace Copec":
                 f'</div></div>',
                 unsafe_allow_html=True,
             )
-            _alr_tab = _alertas[["id_sap", "eds_codigo", "descripcion_falla",
-                                 "descripcion_equipo", "estado", "_horas_sin_cerrar",
-                                 "os_fracttal"]].copy()
+            _alr_tab = _alertas[["os_fracttal", "id_sap", "eds_codigo", "descripcion_falla",
+                                 "descripcion_equipo", "estado", "_horas_sin_cerrar"]].copy()
+            _alr_tab["os_fracttal"] = _alr_tab["os_fracttal"].fillna("").map(
+                lambda x: x if x else "⏳ pendiente"
+            )
             _alr_tab["_horas_sin_cerrar"] = _alr_tab["_horas_sin_cerrar"].map(
                 lambda h: f"🔴 {h:.0f}h" if h > 72 else f"🟠 {h:.0f}h"
             )
             _alr_tab["estado"] = _alr_tab["estado"].map(
                 lambda x: ESTADO_META.get(x, ("", x))[1]
             )
+            _alr_tab["descripcion_falla"]  = _alr_tab["descripcion_falla"].fillna("").map(_title_smart)
+            _alr_tab["descripcion_equipo"] = _alr_tab["descripcion_equipo"].fillna("").map(_title_smart)
             _alr_tab = _alr_tab.rename(columns={
+                "os_fracttal": "N° OT Fracttal",
                 "id_sap": "N° aviso Copec", "eds_codigo": "EDS",
                 "descripcion_falla": "Falla", "descripcion_equipo": "Equipo",
                 "estado": "Estado", "_horas_sin_cerrar": "Sin cerrar",
-                "os_fracttal": "N° OT Fracttal",
             })
             st.dataframe(_alr_tab, hide_index=True, use_container_width=True, height=min(280, 55 + 35 * len(_alr_tab)))
 
