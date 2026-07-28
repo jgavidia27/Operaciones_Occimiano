@@ -1937,8 +1937,8 @@ if vista == "🔗 Enlace Copec":
             match = _corr_map.get(str(row["id_sap"]))
             if match:
                 return match
-            # 2) fallback via ordenes_trabajo CORRECTIVA por EDS+fecha
-            return _best_match(_corr_by_eds.get(eds, []), fc, ventana_dias=3)
+            # 2) fallback via ordenes_trabajo CORRECTIVA por EDS+fecha (±5 días)
+            return _best_match(_corr_by_eds.get(eds, []), fc, ventana_dias=5)
         # Preventivos
         return _best_match(_prev_by_eds.get(eds, []), fc, ventana_dias=45)
 
