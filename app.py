@@ -113,6 +113,31 @@ def _strip_comentario_headers(txt) -> str:
     return _COMENT_HEADER_RE.sub("", s).strip(" |") or "—"
 
 
+# Helper de módulo: semanas domingo→sábado dentro de un mes 'YYYY-MM'.
+# Definido acá (no dentro de un bloque de tab) para que la vista de
+# Evolución SLA lo pueda usar antes que las pestañas MP.
+import calendar as _cal_mod
+from datetime import date as _date_mod, timedelta as _td_mod
+
+def _semanas_del_mes(ym: str) -> list[tuple]:
+    """Retorna lista de (label, start_date, end_date) para el mes 'YYYY-MM'."""
+    y, m = int(ym[:4]), int(ym[5:7])
+    first = _date_mod(y, m, 1)
+    last  = _date_mod(y, m, _cal_mod.monthrange(y, m)[1])
+    semanas, num, cur = [], 1, first
+    while cur <= last:
+        wd = cur.weekday()           # Mon=0 … Sat=5, Sun=6
+        days_to_sat = 0 if wd == 5 else (6 if wd == 6 else 5 - wd)
+        end = min(cur + _td_mod(days=days_to_sat), last)
+        semanas.append((
+            f"Semana {num}  ({cur.strftime('%d/%m')} – {end.strftime('%d/%m')})",
+            cur, end,
+        ))
+        num += 1
+        cur = end + _td_mod(days=1)
+    return semanas
+
+
 # ── Resolución EDS: código Fracttal → nombre humano ──────────────────────────
 # Las OTs vienen con código Fracttal (EE_S016, LOC-182, PBR-41, 60513, etc.).
 # El catálogo estaciones_servicio los indexa por:
