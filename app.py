@@ -2695,7 +2695,7 @@ if _page == _NAV_PAGES[1]:
                 # (Se quitó 'Cierre completo OT' por pedido explícito.)
                 _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
                                             "eds_occim","eds_nombre","cliente","tecnico",
-                                            "prioridad","ciudad","zona_ot"] if c in _df_sla_ot.columns]
+                                            "prioridad","ciudad"] if c in _df_sla_ot.columns]
                 _extra = ["tiempo_res","umbral_lbl","_uso_pct","_exc_pct","estado_sla"]
                 # Reporte de falla ANTES de Motivo excepción (orden pedido)
                 if "reporte" in _df_sla_ot.columns:
@@ -2720,7 +2720,7 @@ if _page == _NAV_PAGES[1]:
                              "fecha_atencion":"Fecha atención",
                              "eds_occim":"Cód. EDS",
                              "eds_nombre":"EDS","cliente":"Cliente","tecnico":"Técnico",
-                             "prioridad":"Prioridad","ciudad":"Ciudad","zona_ot":"Zona",
+                             "prioridad":"Prioridad","ciudad":"Ciudad",
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
                              "_uso_pct":"Uso SLA","_exc_pct":"Exceso",
                              "estado_sla":"Estado SLA",
@@ -2750,7 +2750,6 @@ if _page == _NAV_PAGES[1]:
                         "Técnico":           st.column_config.TextColumn(width=155),
                         "Prioridad":         st.column_config.TextColumn(width=80),
                         "Ciudad":            st.column_config.TextColumn(width=110),
-                        "Zona":              st.column_config.TextColumn(width=85),
                         "Tiempo resolución": st.column_config.TextColumn(width=120),
                         "Umbral SLA":        st.column_config.TextColumn(width=85),
                         "Uso SLA":           st.column_config.ProgressColumn(
