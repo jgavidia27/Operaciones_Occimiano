@@ -123,6 +123,12 @@ def estado_ot(row):
 
     # 5) Técnico inició pero aún no termina (fecha_inicio sin fecha_final)
     if tiene_inicio:
+        # Si Fracttal reporta la tarea como PAUSED, el técnico detuvo la
+        # atención (no está trabajando ahora). Mostrarlo aparte.
+        _et = str(row.get("_ot_estado_tarea") or "").strip().upper()
+        if _et == "PAUSED":
+            return ("Técnico pausó", "⏸️", "#94a3b8",
+                    "Técnico pausó la atención en Fracttal")
         return ("Técnico atendiendo", "🟡", "#f59e0b",
                 "Técnico inició la atención · trabajo en curso")
 
