@@ -1852,6 +1852,15 @@ if _page == _NAV_PAGES[1]:
                 if any(c in s for c in _SUR_CIUDADES):   return "Sur"
                 return "Centro (Santiago)"
 
+            # Zonas específicas COPEC — basadas en el prefijo del código EDS:
+            #   20xxx → Sur   ·   40xxx → Centro   ·   60xxx → Santiago
+            def _zona_copec(eds_occim):
+                s = str(eds_occim or "").strip()
+                if s.startswith("20"): return "Sur"
+                if s.startswith("40"): return "Centro"
+                if s.startswith("60"): return "Santiago"
+                return None   # sin prefijo reconocible
+
             # ── Filtros ───────────────────────────────────────────────────────
             cf1, cf2, cf3, cf4, cf5, cf6 = st.columns([1.4, 1.2, 1.4, 1.2, 1.4, 1.4])
             with cf1:
@@ -1874,11 +1883,16 @@ if _page == _NAV_PAGES[1]:
             with cf5:
                 sel_cu_c = st.selectbox("Cumplimiento SLA", ["Todos","CUMPLE","NO CUMPLE"], key="cl_cu")
             with cf6:
-                # Multiselect (permite combinar Centro + Norte + Sur).
-                # Vacío = todas (equivalente a "Todas").
+                # COPEC usa su propia distribución por prefijo del código EDS
+                # (20→Sur, 40→Centro, 60→Santiago). Otros clientes usan la
+                # segmentación geográfica genérica Norte/Centro (Santiago)/Sur.
+                _es_copec = (sel_cl_c or "").strip().upper() == "COPEC"
+                _zona_opts = ["Santiago", "Centro", "Sur"] if _es_copec \
+                             else ["Centro (Santiago)", "Norte", "Sur"]
                 sel_zona_c = st.multiselect(
-                    "Zona", ["Centro (Santiago)", "Norte", "Sur"],
-                    key="cl_zona", placeholder="Todas las zonas",
+                    "Zona", _zona_opts,
+                    key=f"cl_zona_{'copec' if _es_copec else 'gen'}",
+                    placeholder="Todas las zonas",
                 )
 
             # ── Aplicar filtros ───────────────────────────────────────────────
@@ -1888,12 +1902,22 @@ if _page == _NAV_PAGES[1]:
                 _fl2 = _fl2.dt.tz_convert(None)
             df_ll["_mes"]   = _fl2.dt.to_period("M").astype(str)
             df_ll["_month"] = _fl2.dt.month.astype("Int64")
+            _eds_occim_col = df_ll.get("eds_occim", pd.Series("", index=df_ll.index)).fillna("")
+            _cliente_col   = df_ll.get("cliente",   pd.Series("", index=df_ll.index)).fillna("")
+            _eds_nombre_col = df_ll.get("eds_nombre", pd.Series("", index=df_ll.index)).fillna("")
+            _comuna_col    = df_ll.get("comuna",    pd.Series("", index=df_ll.index)).fillna("")
+
+            def _zona_row(cli, edsocc, edsnom, com):
+                if str(cli or "").strip().upper() == "COPEC":
+                    z = _zona_copec(edsocc)
+                    if z is not None:
+                        return z
+                    # fallback si no hay eds_occim: usar la lógica geográfica
+                return _macrozona_ll(edsnom, com)
+
             df_ll["_macrozona"] = [
-                _macrozona_ll(e, c)
-                for e, c in zip(
-                    df_ll.get("eds_nombre", pd.Series("", index=df_ll.index)).fillna(""),
-                    df_ll.get("comuna", pd.Series("", index=df_ll.index)).fillna(""),
-                )
+                _zona_row(cl, eo, en, co)
+                for cl, eo, en, co in zip(_cliente_col, _eds_occim_col, _eds_nombre_col, _comuna_col)
             ]
             if sel_trim_c != "Todos":
                 df_ll = df_ll[df_ll["_month"].isin(_TRIMESTRES_DEF[sel_trim_c])]
