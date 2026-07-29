@@ -1843,41 +1843,33 @@ if vista == "🔗 Enlace Copec":
 
     @st.cache_data(ttl=300, show_spinner="Cruzando preventivos con Fracttal...")
     def cargar_ots_preventivas_por_eds() -> dict:
-        """Preventivos: no hay match 1:1 por nº aviso porque Enlace genera
-        2 avisos (Plan+Repuestos) por 1 OT preventiva en Fracttal.
-        Devuelve {eds: [(fecha_iso, id_ot), ...]} para match por cercanía
-        temporal (ventana ±45 días).
+        """Preventivos: (EDS + fecha_creacion OT >= fecha_creacion aviso).
+        Devuelve {eds: [(fecha_creacion_ot, id_ot), ...]}. La OT SIEMPRE
+        se crea después del aviso Enlace — nunca antes.
 
-        Incluye tipos: PREVENTIVA* (típico), ENTREGA DE INSUMOS Y/O
-        REPUESTOS (EDS del norte que no tienen preventiva mensual),
-        INSPECCIÓN y GARANTIA. Excluye CORRECTIVA (esas se cruzan por
-        nº aviso directo)."""
-        # PostgREST no soporta OR nativo en un solo campo con múltiples
-        # patrones like — usamos "in" para valores exactos + "like" para
-        # preventivas. Traemos ambos y unimos.
+        Incluye tipos: PREVENTIVA*, ENTREGA DE INSUMOS Y/O REPUESTOS,
+        INSPECCIÓN, GARANTIA. Excluye CORRECTIVA."""
         tipos_exactos = ("ENTREGA DE INSUMOS Y/O REPUESTOS", "INSPECCIÓN",
                          "GARANTIA (sin cobro)", "PREVENTIVA CUATRIMESTRAL")
         all_rows = []
-        # Preventivas
         for off in range(0, 10000, 1000):
             rows = _sb_get("ordenes_trabajo", {
-                "select": "id_ot,codigo_eds,fecha_programada,tipo_tarea",
+                "select": "id_ot,codigo_eds,fecha_creacion,tipo_tarea",
                 "tipo_tarea": "like.PREVENTIVA*",
-                "fecha_programada": "gte.2026-01-01",
-                "order": "fecha_programada.desc",
+                "fecha_creacion": "gte.2026-01-01",
+                "order": "fecha_creacion.desc",
                 "limit": "1000", "offset": str(off),
             })
             if not rows: break
             all_rows.extend(rows)
             if len(rows) < 1000: break
-        # Otros tipos
         for tt in tipos_exactos:
             for off in range(0, 5000, 1000):
                 rows = _sb_get("ordenes_trabajo", {
-                    "select": "id_ot,codigo_eds,fecha_programada,tipo_tarea",
+                    "select": "id_ot,codigo_eds,fecha_creacion,tipo_tarea",
                     "tipo_tarea": f"eq.{tt}",
-                    "fecha_programada": "gte.2026-01-01",
-                    "order": "fecha_programada.desc",
+                    "fecha_creacion": "gte.2026-01-01",
+                    "order": "fecha_creacion.desc",
                     "limit": "1000", "offset": str(off),
                 })
                 if not rows: break
@@ -1885,10 +1877,10 @@ if vista == "🔗 Enlace Copec":
                 if len(rows) < 1000: break
         by_eds: dict[str, list] = {}
         for r in all_rows:
-            eds = r.get("codigo_eds"); prog = r.get("fecha_programada")
-            if not eds or not prog:
+            eds = r.get("codigo_eds"); fc = r.get("fecha_creacion")
+            if not eds or not fc:
                 continue
-            by_eds.setdefault(str(eds), []).append((prog[:10], r["id_ot"]))
+            by_eds.setdefault(str(eds), []).append((fc[:10], r["id_ot"]))
         return by_eds
 
     @st.cache_data(ttl=60)
@@ -1951,19 +1943,24 @@ if vista == "🔗 Enlace Copec":
 
     from datetime import datetime as _dt
     def _best_match(cands, fecha_iso, ventana_dias):
+        """Busca la OT más cercana cuya fecha_creacion sea POSTERIOR o
+        IGUAL al aviso Enlace (delta >= 0). Nunca acepta OTs anteriores:
+        la OT en Fracttal siempre se genera DESPUÉS del aviso Enlace.
+        """
         if not cands or not fecha_iso:
             return None
         try:
             d0 = _dt.strptime(fecha_iso[:10], "%Y-%m-%d")
         except ValueError:
             return None
-        best, best_d = None, 999
+        best, best_d = None, 10**9
         for fp, id_ot in cands:
             try:
-                delta = abs((_dt.strptime(fp, "%Y-%m-%d") - d0).days)
+                delta = (_dt.strptime(fp, "%Y-%m-%d") - d0).days
             except ValueError:
                 continue
-            if delta <= ventana_dias and delta < best_d:
+            # OT debe ser POSTERIOR o igual al aviso Enlace (0 = mismo día).
+            if 0 <= delta <= ventana_dias and delta < best_d:
                 best, best_d = id_ot, delta
         return best
 
@@ -1971,13 +1968,12 @@ if vista == "🔗 Enlace Copec":
         eds = str(row.get("eds_codigo") or "")
         fc  = row.get("fecha_creacion") or ""
         if row["tipo_aviso"] == "CORRECTIVO":
-            # 1) via llamados_correctivos
             match = _corr_map.get(str(row["id_sap"]))
             if match:
                 return match
-            # 2) fallback via ordenes_trabajo CORRECTIVA por EDS+fecha (±5 días)
+            # OT correctiva se crea el mismo día o hasta 5 días después
             return _best_match(_corr_by_eds.get(eds, []), fc, ventana_dias=5)
-        # Preventivos
+        # Preventivos: OT hasta 45 días después del aviso Enlace
         return _best_match(_prev_by_eds.get(eds, []), fc, ventana_dias=45)
 
     df["os_fracttal"] = df.apply(_resolve_os, axis=1)
