@@ -67,7 +67,7 @@ PATENTES_STO: dict[str, str] = {
     "MARTIN FLORES":            "LWLF91",   # antes VCXZ49; ahora usa LWLF91 (ex Operaciones)
     "VICTOR BAHAMONDE":         "RRRW20",
     "JORGE RODRIGUEZ":          "VDBZ48",
-    "JUAN FRANCISCO TORO":      "SYGK68",
+    "JUAN FRANCISCO TORO":      "SRRX18",   # antes SYGK68 (y antes el SRRX18 era de Eduardo Toro)
     "JUAN GALLARDO":            "PKKH65",
     "LUIS LOPEZ":               "TFCR44",
     "LUIS PINTO":               "RRRW16",
@@ -75,7 +75,6 @@ PATENTES_STO: dict[str, str] = {
 
 # Vehículos que no corresponden a ningún técnico activo
 VEHICULOS_AUXILIARES: dict[str, str] = {
-    "SRRX18": "Vehículo Auxiliar (ex Eduardo Toro)",
     "STKX93": "Camión Occimiano",
     "VCXZ49": "Vehículo Auxiliar - Eléctrico",  # ex Martín Flores, ahora auxiliar
 }
