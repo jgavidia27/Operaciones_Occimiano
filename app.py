@@ -2605,6 +2605,21 @@ if _page == _NAV_PAGES[1]:
                 _df_sla_ot["zona_ot"] = [
                     _zona_por_comuna(c, z) for c, z in zip(_df_sla_ot["ciudad"], _df_sla_ot["zona_ot"])
                 ]
+                # Zona para MOSTRAR en la tabla (segmentación por cliente):
+                #   COPEC → Santiago / Centro / Sur según prefijo eds_occim (60/40/20)
+                #   Aramco / Shell / otros → Norte / Centro (Santiago) / Sur (geográfico)
+                _eds_occ_disp = (_df_sla_ot.get("eds_occim", pd.Series("", index=_df_sla_ot.index))
+                                          .fillna(""))
+                _cli_disp = (_df_sla_ot.get("cliente", pd.Series("", index=_df_sla_ot.index))
+                                       .fillna(""))
+                _nom_disp = (_df_sla_ot.get("eds_nombre", pd.Series("", index=_df_sla_ot.index))
+                                       .fillna(""))
+                _com_disp = _df_sla_ot["ciudad"].fillna("")
+                _df_sla_ot["zona_display"] = [
+                    (_zona_copec(eo) if str(cl or "").strip().upper() == "COPEC" and _zona_copec(eo) is not None
+                     else _macrozona_ll(en, co))
+                    for cl, eo, en, co in zip(_cli_disp, _eds_occ_disp, _nom_disp, _com_disp)
+                ]
                 _df_sla_ot["ciudad"] = _df_sla_ot["ciudad"].replace("", "—")
 
                 # Recalcular umbral SLA usando la zona corregida
@@ -2695,7 +2710,7 @@ if _page == _NAV_PAGES[1]:
                 # (Se quitó 'Cierre completo OT' por pedido explícito.)
                 _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
                                             "eds_occim","eds_nombre","cliente","tecnico",
-                                            "prioridad","ciudad"] if c in _df_sla_ot.columns]
+                                            "prioridad","ciudad","zona_display"] if c in _df_sla_ot.columns]
                 _extra = ["tiempo_res","umbral_lbl","_uso_pct","_exc_pct","estado_sla"]
                 # Reporte de falla ANTES de Motivo excepción (orden pedido)
                 if "reporte" in _df_sla_ot.columns:
@@ -2720,7 +2735,7 @@ if _page == _NAV_PAGES[1]:
                              "fecha_atencion":"Fecha atención",
                              "eds_occim":"Cód. EDS",
                              "eds_nombre":"EDS","cliente":"Cliente","tecnico":"Técnico",
-                             "prioridad":"Prioridad","ciudad":"Ciudad",
+                             "prioridad":"Prioridad","ciudad":"Ciudad","zona_display":"Zona",
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
                              "_uso_pct":"Uso SLA","_exc_pct":"Exceso",
                              "estado_sla":"Estado SLA",
@@ -2750,6 +2765,9 @@ if _page == _NAV_PAGES[1]:
                         "Técnico":           st.column_config.TextColumn(width=155),
                         "Prioridad":         st.column_config.TextColumn(width=80),
                         "Ciudad":            st.column_config.TextColumn(width=110),
+                        "Zona":              st.column_config.TextColumn(width=95,
+                            help="COPEC: Santiago / Centro / Sur (por prefijo de código EDS 60/40/20). "
+                                 "Aramco y Shell: Norte / Centro (Santiago) / Sur (geográfico)."),
                         "Tiempo resolución": st.column_config.TextColumn(width=120),
                         "Umbral SLA":        st.column_config.TextColumn(width=85),
                         "Uso SLA":           st.column_config.ProgressColumn(
