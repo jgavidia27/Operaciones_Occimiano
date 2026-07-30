@@ -20,16 +20,20 @@ Salida: un Google Sheet con 2 pestañas
 Idempotente: reescribe siempre el Sheet completo con la foto actual. Si en
 Fracttal se agrega/cambia/elimina una subtarea, al siguiente sync se refleja.
 
-Persistencia del ID del Sheet:
-    • env var PLANES_SHEET_ID → usa ese Sheet (lo actualiza in-place).
-    • Si NO está seteada → crea un Sheet nuevo, lo comparte con SHARE_WITH
-      (operaciones@occimiano.cl) como editor, imprime el ID + URL y termina.
-      Copiar ese ID a un GitHub Secret llamado PLANES_SHEET_ID para que las
-      corridas siguientes actualicen el mismo documento.
+Setup (una sola vez):
+    1. Crear un Google Sheet en blanco (desde operaciones@occimiano.cl).
+    2. Compartirlo como EDITOR con el correo del service account (client_email
+       del GOOGLE_SERVICE_ACCOUNT_JSON). Si no lo tienes, corré el script sin
+       PLANES_SHEET_ID: imprime el correo exacto a compartir.
+    3. Copiar el ID del Sheet (lo que va entre /d/ y /edit en la URL) al
+       GitHub Secret PLANES_SHEET_ID.
+    (Este es el mismo patrón que GDRIVE_HHEE_FOLDER_ID: el usuario comparte, el
+     service account solo escribe. Los service accounts no pueden crear/poseer
+     archivos propios en Drive — por eso NO creamos el Sheet nosotros.)
 
 Requiere env vars:
     GOOGLE_SERVICE_ACCOUNT_JSON   (JSON completo del service account)
-    PLANES_SHEET_ID               (opcional; ID del Sheet a actualizar)
+    PLANES_SHEET_ID               (ID del Sheet ya creado y compartido con el SA)
 
 Uso:
     python sync_planes_fracttal.py                 (sync normal)
@@ -52,10 +56,6 @@ FRACTTAL_TOKEN_URL = f"{FRACTTAL_BASE}/oauth/token"
 CLIENT_ID          = os.getenv("FRACTTAL_CLIENT_ID", "KtHFO5pMskBbJ3lhPr")
 CLIENT_SECRET      = os.getenv("FRACTTAL_CLIENT_SECRET", "bnpkpimGY4O0N9TxLUeKPXlKYRPV517m")
 ID_COMPANY         = 1507
-
-# Con quién se comparte el Sheet la primera vez que se crea.
-SHARE_WITH = os.getenv("PLANES_SHEET_SHARE_WITH", "operaciones@occimiano.cl")
-SHEET_TITLE = "Configuración Planes de Mantenimiento — Fracttal (auto)"
 
 # Tipos de registro (id_task_form_item_type → etiqueta legible).
 # Confirmado contra la pantalla de Fracttal y el Excel de Operaciones.
@@ -221,24 +221,15 @@ def _google_services():
     return sheets, drive
 
 
-def _crear_sheet(sheets, drive) -> str:
-    """Crea un Sheet nuevo, lo comparte con SHARE_WITH y devuelve su ID."""
-    ss = sheets.spreadsheets().create(
-        body={"properties": {"title": SHEET_TITLE},
-              "sheets": [{"properties": {"title": "Planes"}},
-                         {"properties": {"title": "Desglose"}}]},
-        fields="spreadsheetId").execute()
-    sid = ss["spreadsheetId"]
+def _sa_email() -> str:
+    """Devuelve el client_email del service account (para compartir el Sheet)."""
+    sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    if not sa_json:
+        return ""
     try:
-        drive.permissions().create(
-            fileId=sid,
-            body={"type": "user", "role": "writer", "emailAddress": SHARE_WITH},
-            sendNotificationEmail=True,
-            fields="id").execute()
-        log(f"Sheet compartido con {SHARE_WITH} (editor).", "OK")
-    except Exception as e:
-        log(f"No pude compartir automáticamente: {e}", "WARN")
-    return sid
+        return json.loads(sa_json).get("client_email", "")
+    except Exception:
+        return ""
 
 
 def _rows_to_values(rows: list, cols: list) -> list:
@@ -310,25 +301,29 @@ def main():
         _dump_csv(planes_rows, desglose_rows)
         return
 
+    sid = os.getenv("PLANES_SHEET_ID", "").strip()
+    if not sid:
+        # Setup pendiente: el usuario debe crear el Sheet y compartirlo con el SA.
+        # (Los service accounts no pueden crear/poseer archivos propios en Drive.)
+        email = _sa_email()
+        print("\n" + "=" * 72)
+        log("Falta PLANES_SHEET_ID. Setup en 3 pasos:", "WARN")
+        log("  1) Crea un Google Sheet en blanco (desde operaciones@occimiano.cl).", "WARN")
+        log(f"  2) Compártelo como EDITOR con el service account:", "WARN")
+        log(f"       {email or '(no pude leer client_email del JSON)'}", "WARN")
+        log("  3) Copia el ID del Sheet (lo que va entre /d/ y /edit en la URL)", "WARN")
+        log("     al GitHub Secret 'PLANES_SHEET_ID' y vuelve a correr el workflow.", "WARN")
+        log("  (Requisito previo: habilitar la Google Sheets API en el proyecto GCP", "WARN")
+        log("   del service account — ver instrucciones del asistente.)", "WARN")
+        print("=" * 72)
+        _dump_csv(planes_rows, desglose_rows)
+        sys.exit(1)
+
     sheets, drive = _google_services()
     if not sheets:
         log("Sin credenciales Google — vuelco CSV como respaldo.", "WARN")
         _dump_csv(planes_rows, desglose_rows)
         sys.exit(1)
-
-    sid = os.getenv("PLANES_SHEET_ID", "").strip()
-    if not sid:
-        log("PLANES_SHEET_ID no seteado → creando Sheet nuevo...", "PROG")
-        sid = _crear_sheet(sheets, drive)
-        escribir_sheet(sheets, sid, planes_rows, desglose_rows)
-        url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
-        print("\n" + "=" * 70)
-        log(f"SHEET CREADO. ID = {sid}", "OK")
-        log(f"URL: {url}", "OK")
-        log("Agregá este ID como GitHub Secret 'PLANES_SHEET_ID' para que las", "WARN")
-        log("corridas siguientes actualicen ESTE mismo documento.", "WARN")
-        print("=" * 70)
-        return
 
     escribir_sheet(sheets, sid, planes_rows, desglose_rows)
     log(f"URL: https://docs.google.com/spreadsheets/d/{sid}/edit", "OK")
