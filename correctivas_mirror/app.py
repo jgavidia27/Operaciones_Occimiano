@@ -2671,16 +2671,25 @@ if vista == "🔍 Cierre Fracttal":
         except Exception:
             pass
 
-    _uc1, _uc2 = st.columns([3, 1])
+    _uc1, _uc2, _uc3 = st.columns([3, 1, 1])
     with _uc1:
         st.caption(
             f"🕒 Última sincronización con Fracttal: **{_upd_lbl}**  ·  "
-            f"El sync automático corre en segundo plano; usá el botón para "
-            f"traer los datos más recientes al instante."
+            f"El sync automático corre cada 5 min. Usá los botones para "
+            f"actualizar la vista o traer datos frescos desde Fracttal."
         )
     with _uc2:
-        _do_sync = st.button("🔄 Actualizar ahora", use_container_width=True,
-            help="Trae en vivo las OTs En Revisión desde Fracttal (~2 min).")
+        _do_refresh = st.button("🔃 Refrescar", use_container_width=True,
+            help="Lee lo último desde Supabase — instantáneo (~1s). "
+                 "Muestra los datos del sync automático más reciente.")
+    with _uc3:
+        _do_sync = st.button("🔄 Sync Fracttal", use_container_width=True,
+            help="Trae en vivo las OTs desde Fracttal (~2 min). Sólo úsalo si "
+                 "necesitas datos ULTRA frescos que aún no capturó el cron.")
+
+    if _do_refresh:
+        st.cache_data.clear()
+        st.rerun()
 
     if _do_sync:
         import sys as _sys
