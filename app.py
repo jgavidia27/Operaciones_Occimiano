@@ -5722,11 +5722,12 @@ elif _page == _NAV_PAGES[3]:
         _df_tbl["Ratio (P/C x10)"] = [_fmt_ratio(c, p)
             for c, p in zip(_df_tbl["correctivas"], _df_tbl["preventivas"])]
 
-        # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío)
+        # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío;
+        # y 'Dirección' porque en Shell/Aramco/Copec 'nombre' == 'direccion',
+        # generaba una columna duplicada visualmente idéntica).
         _col_map = {
             "eds_occim":         "Cód. Occim",
             "nombre":            "Nombre / Dirección",
-            "direccion":         "Dirección",
             "comuna":            "Comuna",
             "zona_occim":        "Zona",
             "region":            "Región",
@@ -5756,7 +5757,7 @@ elif _page == _NAV_PAGES[3]:
         # Aplicar filtro tipeado sobre TODAS las columnas de texto relevantes
         if _lst_buscar:
             _cols_search = [c for c in ("Cód. Occim",
-                                        "Nombre / Dirección","Dirección","Comuna",
+                                        "Nombre / Dirección","Comuna",
                                         "Zona","Región","Último Técnico")
                             if c in _df_display.columns]
             _mask_lst = pd.Series(False, index=_df_display.index)
@@ -5769,8 +5770,7 @@ elif _page == _NAV_PAGES[3]:
         _show_df(_df_display, use_container_width=True, hide_index=True,
             column_config={
                 "Cód. Occim":        st.column_config.TextColumn(width=90),
-                "Nombre / Dirección":st.column_config.TextColumn(width=220),
-                "Dirección":         st.column_config.TextColumn(width=200),
+                "Nombre / Dirección":st.column_config.TextColumn(width=280),
                 "Comuna":            st.column_config.TextColumn(width=110),
                 "Zona":              st.column_config.TextColumn(width=70),
                 "Región":            st.column_config.TextColumn(width=70),
