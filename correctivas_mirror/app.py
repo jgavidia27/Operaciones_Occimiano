@@ -1893,7 +1893,7 @@ if vista == "🔗 Enlace Copec":
 
     # ── Header con estado del sync ──────────────────────────────────
     auth = cargar_enlace_auth_status()
-    c1, c2 = st.columns([3, 1])
+    c1, c2, c3 = st.columns([3, 1, 1])
     with c1:
         st.markdown("### Portal Enlace Copec — Pool de avisos")
         st.caption(
@@ -1921,6 +1921,42 @@ if vista == "🔗 Enlace Copec":
                               delta_color="off")
             except Exception:
                 st.caption(f"Última sync: {auth.get('updated_at')}")
+    with c3:
+        _do_sync_enlace = st.button("🔄 Actualizar ahora",
+                                    use_container_width=True, key="btn_sync_enlace",
+                                    help="Fuerza sync manual con la API Copec (~15s).")
+
+    if _do_sync_enlace:
+        import sys as _sys
+        _need = ("SUPABASE_URL", "SUPABASE_KEY")
+        _missing = []
+        for _k in _need:
+            _v = None
+            try:
+                _v = st.secrets[_k]
+            except Exception:
+                _v = os.getenv(_k)
+            if _v:
+                os.environ[_k] = str(_v)
+            else:
+                _missing.append(_k)
+        if _missing:
+            st.error(f"Faltan credenciales: {', '.join(_missing)}")
+        else:
+            _root = str(Path(__file__).parent.parent)
+            if _root not in _sys.path:
+                _sys.path.insert(0, _root)
+            try:
+                with st.spinner("Sincronizando con API Copec Enlace…"):
+                    import importlib
+                    import sync_enlace as _sync_e
+                    importlib.reload(_sync_e)
+                    _sync_e.main()
+                st.cache_data.clear()
+                st.success("✅ Datos actualizados desde Enlace Copec.")
+                st.rerun()
+            except (Exception, SystemExit) as _e:
+                st.error(f"No se pudo sincronizar: {_e}")
 
     df = cargar_enlace_avisos()
     if df.empty:
