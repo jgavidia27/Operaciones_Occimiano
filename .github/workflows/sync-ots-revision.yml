@@ -1,12 +1,12 @@
 name: Sync OTs En Revisión
 
-# Corre cada 15 minutos.
+# Corre cada 5 minutos.
 # Refresca la tabla `ots_en_revision` en Supabase con las OTs de
 # Fracttal que estan esperando validacion administrativa.
 # El panel de correctivas_mirror lee de esta tabla.
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:

@@ -2650,7 +2650,7 @@ if vista == "🔗 Enlace Copec":
 # ══════════════════════════════════════════════════════════════════════
 if vista == "🔍 Cierre Fracttal":
 
-    @st.cache_data(ttl=300, show_spinner="Cargando OTs en revisión...")
+    @st.cache_data(ttl=60, show_spinner="Cargando OTs en revisión...")
     def cargar_ots_revision() -> pd.DataFrame:
         rows = _sb_get("ots_en_revision", {
             "select": "*",
