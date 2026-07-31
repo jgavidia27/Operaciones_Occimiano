@@ -2112,7 +2112,7 @@ if vista == "🔗 Enlace Copec":
                 "estado": "Estado", "_horas_sin_cerrar": "Sin cerrar",
             })
             st.dataframe(_alr_tab, hide_index=True, use_container_width=True,
-                         height=min(700, 55 + 35 * len(_alr_tab)))
+                         height=min(400, 55 + 35 * len(_alr_tab)))
 
     # ── Filtros ─────────────────────────────────────────────────────
     st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
