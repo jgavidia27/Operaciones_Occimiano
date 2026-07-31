@@ -2112,7 +2112,7 @@ if vista == "🔗 Enlace Copec":
                 "estado": "Estado", "_horas_sin_cerrar": "Sin cerrar",
             })
             st.dataframe(_alr_tab, hide_index=True, use_container_width=True,
-                         height=min(400, 55 + 35 * len(_alr_tab)))
+                         height=min(700, 55 + 35 * len(_alr_tab)))
 
     # ── Filtros ─────────────────────────────────────────────────────
     st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
@@ -2578,22 +2578,35 @@ if vista == "🔗 Enlace Copec":
             "El técnico se obtiene desde la OT Fracttal matcheada; los avisos "
             "sin OT (aún no creada) se agrupan aparte."
         )
-        _rk_grp = _rk_grp.rename(columns={
-            "_tecnico":         "Técnico",
-            "avisos_abiertos":  "Avisos abiertos",
-            "horas_max":        "Máx sin cerrar (h)",
-            "horas_prom":       "Prom. sin cerrar (h)",
-        })
-        st.dataframe(
-            _rk_grp, hide_index=True, use_container_width=True,
-            height=min(500, 55 + 35 * len(_rk_grp)),
-            column_config={
-                "Técnico":              st.column_config.TextColumn(width=260),
-                "Avisos abiertos":      st.column_config.NumberColumn(width=140),
-                "Máx sin cerrar (h)":   st.column_config.NumberColumn(width=150),
-                "Prom. sin cerrar (h)": st.column_config.NumberColumn(width=160),
-            },
-        )
+        # Renderizamos con tabla HTML para poder centrar los números.
+        # (st.dataframe alinea NumberColumn siempre a la derecha.)
+        _html = [
+            "<style>",
+            ".enlace-ranking { width: 100%; border-collapse: collapse; font-size: 0.92em; }",
+            ".enlace-ranking th, .enlace-ranking td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; }",
+            ".enlace-ranking th { background: #f8fafc; font-weight: 600; color: #1e3a8a; text-align: left; }",
+            ".enlace-ranking th.num, .enlace-ranking td.num { text-align: center; }",
+            ".enlace-ranking tr:hover { background: #f1f5f9; }",
+            "</style>",
+            "<table class='enlace-ranking'>",
+            "<thead><tr>",
+            "<th>Técnico</th>",
+            "<th class='num'>Avisos abiertos</th>",
+            "<th class='num'>Máx sin cerrar (h)</th>",
+            "<th class='num'>Prom. sin cerrar (h)</th>",
+            "</tr></thead><tbody>",
+        ]
+        for _, r in _rk_grp.iterrows():
+            _html.append(
+                f"<tr>"
+                f"<td>{r['_tecnico']}</td>"
+                f"<td class='num'>{r['avisos_abiertos']}</td>"
+                f"<td class='num'>{r['horas_max']}</td>"
+                f"<td class='num'>{r['horas_prom']}</td>"
+                f"</tr>"
+            )
+        _html.append("</tbody></table>")
+        st.markdown("\n".join(_html), unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════
