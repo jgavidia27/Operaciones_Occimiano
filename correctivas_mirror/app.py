@@ -2059,20 +2059,26 @@ if vista == "🔗 Enlace Copec":
                      height=min(280, 55 + 35 * len(_desbal)))
 
     # ── ALERTA: "En Progreso" sin cierre ────────────────────────────
-    # EN_PROGRESO_EN_CURSO / EN_PROGRESO_EN_CIERRE que llevan >0 días abiertas
+    # EN_PROGRESO_EN_CURSO / EN_PROGRESO_EN_CIERRE que llevan >1 hora abiertas
     # son avisos donde el técnico terminó pero olvidó cerrar en Enlace.
     _ahora = pd.Timestamp.now(tz=_CL_TZ)
     _df_prog = df[df["estado"].str.startswith("EN_PROGRESO", na=False)].copy()
+    _alertas_ranking = pd.DataFrame()   # para el ranking al final
     if not _df_prog.empty:
         _df_prog["_fecha_cambio"] = pd.to_datetime(_df_prog["fecha_ultimo_cambio"], errors="coerce", utc=True).dt.tz_convert(_CL_TZ)
         _df_prog["_horas_sin_cerrar"] = ((_ahora - _df_prog["_fecha_cambio"]).dt.total_seconds() / 3600).round(1)
-        _alertas = _df_prog[_df_prog["_horas_sin_cerrar"] > 24].sort_values("_horas_sin_cerrar", ascending=False)
+        # Enriquecer con técnico responsable de la OT Fracttal
+        _df_prog["_tecnico"] = _df_prog["os_fracttal"].map(
+            lambda x: (_ots_detalle.get(x, {}) or {}).get("responsable") if x else None
+        )
+        _alertas = _df_prog[_df_prog["_horas_sin_cerrar"] > 1].sort_values("_horas_sin_cerrar", ascending=False)
+        _alertas_ranking = _alertas   # se usa para el ranking abajo
 
         if not _alertas.empty:
             st.markdown(
                 f'<div style="background:#fef2f2;border-left:4px solid #dc2626;'
                 f'padding:12px 16px;border-radius:6px;margin:12px 0">'
-                f'<b style="color:#991b1b">🚨 {len(_alertas)} avisos "En Progreso" sin cerrar hace más de 24h</b>'
+                f'<b style="color:#991b1b">🚨 {len(_alertas)} avisos "En Progreso" sin cerrar hace más de 1h</b>'
                 f'<div style="color:#7f1d1d;font-size:0.85em;margin-top:4px">'
                 f'El técnico terminó la mantención pero no cerró la orden en Enlace. '
                 f'Suele quedar abierta la orden de repuestos (Repuestos Mtto Prev) '
@@ -2081,25 +2087,32 @@ if vista == "🔗 Enlace Copec":
                 unsafe_allow_html=True,
             )
             _alr_tab = _alertas[["os_fracttal", "id_sap", "eds_codigo", "descripcion_falla",
-                                 "descripcion_equipo", "estado", "_horas_sin_cerrar"]].copy()
+                                 "_tecnico", "descripcion_equipo", "estado",
+                                 "_horas_sin_cerrar"]].copy()
             _alr_tab["os_fracttal"] = _alr_tab["os_fracttal"].fillna("").map(
                 lambda x: x if x else "⏳ pendiente"
             )
             _alr_tab["_horas_sin_cerrar"] = _alr_tab["_horas_sin_cerrar"].map(
-                lambda h: f"🔴 {h:.0f}h" if h > 72 else f"🟠 {h:.0f}h"
+                lambda h: (f"🔴 {h:.0f}h" if h > 72 else
+                           f"🟠 {h:.0f}h" if h > 24 else
+                           f"🟡 {h:.0f}h")
             )
             _alr_tab["estado"] = _alr_tab["estado"].map(
                 lambda x: ESTADO_META.get(x, ("", x))[1]
             )
+            _alr_tab["_tecnico"] = _alr_tab["_tecnico"].fillna("⏳ sin OT")
             _alr_tab["descripcion_falla"]  = _alr_tab["descripcion_falla"].fillna("").map(_title_smart)
             _alr_tab["descripcion_equipo"] = _alr_tab["descripcion_equipo"].fillna("").map(_title_smart)
             _alr_tab = _alr_tab.rename(columns={
                 "os_fracttal": "N° OT Fracttal",
                 "id_sap": "N° aviso Copec", "eds_codigo": "EDS",
-                "descripcion_falla": "Falla", "descripcion_equipo": "Equipo",
+                "descripcion_falla": "Falla",
+                "_tecnico": "Técnico",
+                "descripcion_equipo": "Equipo",
                 "estado": "Estado", "_horas_sin_cerrar": "Sin cerrar",
             })
-            st.dataframe(_alr_tab, hide_index=True, use_container_width=True, height=min(280, 55 + 35 * len(_alr_tab)))
+            st.dataframe(_alr_tab, hide_index=True, use_container_width=True,
+                         height=min(400, 55 + 35 * len(_alr_tab)))
 
     # ── Filtros ─────────────────────────────────────────────────────
     st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
@@ -2542,6 +2555,45 @@ if vista == "🔗 Enlace Copec":
                     if ot.get("comentario_tecnico"):
                         lineas.append(f"**Comentario técnico:** {ot['comentario_tecnico']}")
                     st.markdown("  \n".join(lineas))
+
+    # ── Ranking técnicos que dejan órdenes abiertas ─────────────────
+    if not _alertas_ranking.empty:
+        _rk = _alertas_ranking.copy()
+        _rk["_tecnico"] = _rk["_tecnico"].fillna("⏳ sin OT en Fracttal")
+        _rk_grp = _rk.groupby("_tecnico").agg(
+            avisos_abiertos=("id_sap", "count"),
+            horas_max=("_horas_sin_cerrar", "max"),
+            horas_prom=("_horas_sin_cerrar", "mean"),
+        ).reset_index().sort_values("avisos_abiertos", ascending=False)
+        _rk_grp["horas_max"]  = _rk_grp["horas_max"].round(0).astype(int)
+        _rk_grp["horas_prom"] = _rk_grp["horas_prom"].round(0).astype(int)
+
+        st.markdown("---")
+        st.markdown(
+            '<div class="section-hdr">🏁 Ranking técnicos con órdenes sin cerrar</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Cuenta cuántos avisos 'En Progreso' >1h tiene abiertos cada técnico. "
+            "El técnico se obtiene desde la OT Fracttal matcheada; los avisos "
+            "sin OT (aún no creada) se agrupan aparte."
+        )
+        _rk_grp = _rk_grp.rename(columns={
+            "_tecnico":         "Técnico",
+            "avisos_abiertos":  "Avisos abiertos",
+            "horas_max":        "Máx sin cerrar (h)",
+            "horas_prom":       "Prom. sin cerrar (h)",
+        })
+        st.dataframe(
+            _rk_grp, hide_index=True, use_container_width=True,
+            height=min(500, 55 + 35 * len(_rk_grp)),
+            column_config={
+                "Técnico":              st.column_config.TextColumn(width=260),
+                "Avisos abiertos":      st.column_config.NumberColumn(width=140),
+                "Máx sin cerrar (h)":   st.column_config.NumberColumn(width=150),
+                "Prom. sin cerrar (h)": st.column_config.NumberColumn(width=160),
+            },
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════
