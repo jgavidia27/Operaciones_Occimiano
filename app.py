@@ -4762,6 +4762,68 @@ elif _page == _NAV_PAGES[3]:
         import re as _re2
         return _re2.sub(r"^\d+\.\-?\s*", "", str(t)).strip()
 
+    def _limpiar_causa(c: str) -> str:
+        """Normaliza causa_raiz: '01.5.- ERROR 01 ELECTRICO' → 'ERROR 01 ELECTRICO'.
+        Devuelve '' si el valor es un código puramente numérico (150, 154, 155…)
+        o alguna forma de 'sin clasificar' — esos no aportan a la lectura."""
+        import re as _re3
+        s = _re3.sub(r"^\d+(?:\.\d+)?\.-?\s*", "", str(c)).strip()
+        if not s or s.upper() in ("SIN CLASIFICAR", "SIN INFORMACION", "NAN", "NONE"):
+            return ""
+        # Códigos puros ("150", "155.3") sin descripción → no aporta
+        if _re3.match(r"^\d+(?:[.,]\d+)?$", s):
+            return ""
+        return s
+
+    def _render_causas_panel(df_src: "pd.DataFrame", key_sfx: str, top_n: int = 8):
+        """Barras horizontales con las causas específicas más frecuentes
+        (failure_cause). Reemplaza al gráfico genérico de tipo de falla —
+        muestra la causa técnica (ERROR ELÉCTRICO, REPUESTOS/DESGASTE, DAÑO
+        POR CLIENTE, FICHERO MOJADO, etc.) que sirve para priorizar acción."""
+        if df_src.empty or "failure_cause" not in df_src.columns:
+            st.caption("Sin datos de causa de falla disponibles.")
+            return
+        _df_cc = df_src.copy()
+        _df_cc["_causa"] = _df_cc["failure_cause"].apply(_limpiar_causa)
+        _df_cc = _df_cc[_df_cc["_causa"] != ""]
+        if _df_cc.empty:
+            st.caption("Sin causas específicas registradas en el período.")
+            return
+
+        _causas_cnt = _df_cc["_causa"].value_counts().head(top_n)
+        _total_ot   = int(_causas_cnt.sum())
+        _total_all  = int(_df_cc.shape[0])
+
+        # Barras horizontales — mejor que dona para labels largos.
+        _fig = go.Figure(go.Bar(
+            x=_causas_cnt.values,
+            y=_causas_cnt.index,
+            orientation="h",
+            marker=dict(color=_FALLA_PAL[0], line=dict(color="rgba(0,0,0,0.08)", width=1)),
+            text=[f"{v} · {v/_total_all*100:.0f}%" for v in _causas_cnt.values],
+            textposition="outside",
+            hovertemplate="<b>%{y}</b><br>%{x} OTs<extra></extra>",
+        ))
+        _fig.update_layout(
+            height=max(220, 32 * len(_causas_cnt) + 60),
+            margin=dict(l=0, r=40, t=10, b=10),
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(color=_t["text"], size=12),
+            xaxis=dict(showgrid=True, gridcolor=_t["border"], zeroline=False,
+                       title=None),
+            yaxis=dict(autorange="reversed", title=None,
+                       tickfont=dict(size=11)),
+            showlegend=False,
+        )
+        st.plotly_chart(_fig, use_container_width=True, key=f"causas_bar_{key_sfx}")
+
+        _cobertura = _total_ot / _total_all * 100 if _total_all else 0
+        st.caption(
+            f"Top {len(_causas_cnt)} causas · {_total_ot} de {_total_all} OTs "
+            f"con causa registrada ({_cobertura:.0f}% de cobertura del top). "
+            f"Fuente: campo <i>Causa Raíz</i> de Fracttal."
+        )
+
     def _render_fallas_panel(df_src: "pd.DataFrame", key_sfx: str):
         """Dona con tipos de falla + panel de causas por tipo."""
         if df_src.empty or "failure_type" not in df_src.columns:
@@ -5085,19 +5147,25 @@ elif _page == _NAV_PAGES[3]:
                             unsafe_allow_html=True,
                         )
 
-                # ── Análisis de tipo de falla (company-level) — Dona ────────
-                if not df_wo_c.empty and "failure_type" in df_wo_c.columns:
-                    _df_fallas_c = df_wo_c[
+                # ── Causas más frecuentes de falla (company-level) ──────────
+                # Antes mostrábamos failure_type (F.N.A.O / F.A.O / SIN INFO /
+                # TRABAJOS ESP), que es una clasificación administrativa de
+                # imputación (¿quién tiene la culpa?) y no aporta al diagnóstico
+                # técnico. Ahora mostramos failure_cause (ej. ERROR ELÉCTRICO,
+                # REPUESTOS/DESGASTE, DAÑO POR CLIENTE) para detectar patrones
+                # accionables.
+                if not df_wo_c.empty and "failure_cause" in df_wo_c.columns:
+                    _df_causas_c = df_wo_c[
                         (df_wo_c["maint_type"] == "Correctiva") &
-                        (df_wo_c["failure_type"].str.strip() != "") &
+                        (df_wo_c["failure_cause"].str.strip() != "") &
                         (df_wo_c["mes_str"].isin(_meses_activos))
                     ]
                     st.markdown(
                         f'<div style="font-weight:700;font-size:0.95rem;margin:14px 0 8px 0;'
-                        f'color:{_t["text"]};">🔩 Tipos de falla — correctivos</div>',
+                        f'color:{_t["text"]};">⚡ Causas más frecuentes de falla — correctivos</div>',
                         unsafe_allow_html=True,
                     )
-                    _render_fallas_panel(_df_fallas_c, f"co_{_ck}")
+                    _render_causas_panel(_df_causas_c, f"co_{_ck}")
             else:
                 st.info("No hay datos de llamados para el período seleccionado.")
 
@@ -5293,14 +5361,25 @@ elif _page == _NAV_PAGES[3]:
             # datos que aún no existen. El sync ya excluye task_status
             # NO_STARTED, así que basta con filtrar por folios presentes.
             _shell_min_date = pd.Timestamp("2026-06-08", tz="UTC")
-            _folios_trabajados = set()
-            if not df_num_sub_eds.empty and "id_ot" in df_num_sub_eds.columns:
-                _folios_trabajados = set(df_num_sub_eds["id_ot"].astype(str).unique())
+            # Solo OTs que tengan al menos una subtarea en lavadora o aspiradora.
+            # Excluye planes lavatapiz / lavabike / lavainterior / termos / etc.
+            # cuyo formulario no incluye los parámetros que muestra esta tabla
+            # (bomba, consumos, tiempo fichas, numerales), y por eso salían con
+            # todas las columnas en "—".
+            _folios_lav_asp = set()
+            if (not df_num_sub_eds.empty
+                    and "id_ot" in df_num_sub_eds.columns
+                    and "tipo_activo" in df_num_sub_eds.columns):
+                _folios_lav_asp = set(
+                    df_num_sub_eds[
+                        df_num_sub_eds["tipo_activo"].isin(["lavadora", "aspiradora"])
+                    ]["id_ot"].astype(str).unique()
+                )
             _df_prev_all = (
                 df_wo_c[
                     (df_wo_c["maint_type"] == "Preventiva")
                     & (df_wo_c["creation_date"] >= _shell_min_date)
-                    & (df_wo_c["folio"].astype(str).isin(_folios_trabajados))
+                    & (df_wo_c["folio"].astype(str).isin(_folios_lav_asp))
                 ]
                 .sort_values("creation_date", ascending=False)
                 .drop_duplicates(subset=["folio"], keep="first")
