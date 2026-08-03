@@ -17,7 +17,7 @@ on:
       dry_run:
         description: "Modo prueba (no envía)"
         type: boolean
-        default: true
+        default: false
       test_email:
         description: "Redirigir a este email"
         type: string

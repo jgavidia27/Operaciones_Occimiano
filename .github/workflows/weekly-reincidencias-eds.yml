@@ -19,7 +19,7 @@ on:
       dry_run:
         description: "Modo prueba (NO envía correo, solo genera el Excel)"
         type: boolean
-        default: true            # DEFAULT TRUE → protege contra envíos accidentales
+        default: false           # gate por lunes en el script ya protege de envíos fuera de horario
       test_email:
         description: "Redirigir el correo a este email (para pruebas)"
         type: string
