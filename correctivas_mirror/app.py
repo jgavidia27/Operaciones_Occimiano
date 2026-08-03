@@ -2592,57 +2592,105 @@ if vista == "🔗 Enlace Copec":
                         lineas.append(f"**Comentario técnico:** {ot['comentario_tecnico']}")
                     st.markdown("  \n".join(lineas))
 
-    # ── Ranking técnicos que dejan órdenes abiertas ─────────────────
-    if not _alertas_ranking.empty:
-        _rk = _alertas_ranking.copy()
-        _rk["_tecnico"] = _rk["_tecnico"].fillna("⏳ sin OT en Fracttal")
-        _rk_grp = _rk.groupby("_tecnico").agg(
+    # ── Ranking técnicos con órdenes ABIERTAS (incluye todos los no cerrados) ──
+    # Toma todos los avisos != CERRADO, enriquece con técnico (de la OT Fracttal),
+    # agrupa y muestra. La tabla es clickeable → detalle de las OTs del técnico.
+    _rk_base = df[df["estado"] != "CERRADO"].copy()
+    if not _rk_base.empty:
+        _rk_base["_tecnico"] = _rk_base["os_fracttal"].map(
+            lambda x: (_ots_detalle.get(x, {}) or {}).get("responsable") if x else None
+        )
+        _rk_base["_tecnico"] = _rk_base["_tecnico"].fillna("⏳ sin OT en Fracttal")
+        _rk_base["_fecha_cambio"] = pd.to_datetime(
+            _rk_base["fecha_ultimo_cambio"], errors="coerce", utc=True).dt.tz_convert(_CL_TZ)
+        _now = pd.Timestamp.now(tz=_CL_TZ)
+        _rk_base["_horas"] = ((_now - _rk_base["_fecha_cambio"]).dt.total_seconds() / 3600).round(0)
+
+        _rk_grp = _rk_base.groupby("_tecnico").agg(
             avisos_abiertos=("id_sap", "count"),
-            horas_max=("_horas_sin_cerrar", "max"),
-            horas_prom=("_horas_sin_cerrar", "mean"),
+            correctivos=("tipo_aviso", lambda s: (s == "CORRECTIVO").sum()),
+            preventivos=("tipo_aviso", lambda s: (s == "PREVENTIVO").sum()),
+            horas_max=("_horas", "max"),
         ).reset_index().sort_values("avisos_abiertos", ascending=False)
-        _rk_grp["horas_max"]  = _rk_grp["horas_max"].round(0).astype(int)
-        _rk_grp["horas_prom"] = _rk_grp["horas_prom"].round(0).astype(int)
+        _rk_grp["horas_max"] = _rk_grp["horas_max"].fillna(0).astype(int)
+        _rk_grp = _rk_grp.rename(columns={
+            "_tecnico":         "Técnico",
+            "avisos_abiertos":  "Avisos abiertos",
+            "correctivos":      "Correctivos",
+            "preventivos":      "Preventivos",
+            "horas_max":        "Máx sin cerrar (h)",
+        })
 
         st.markdown("---")
         st.markdown(
-            '<div class="section-hdr">🏁 Ranking técnicos con órdenes sin cerrar</div>',
+            '<div class="section-hdr">🏁 Ranking técnicos con órdenes abiertas</div>',
             unsafe_allow_html=True,
         )
         st.caption(
-            "Cuenta cuántos avisos 'En Progreso' >1h tiene abiertos cada técnico. "
-            "El técnico se obtiene desde la OT Fracttal matcheada; los avisos "
-            "sin OT (aún no creada) se agrupan aparte."
+            "Todos los avisos que aún no están cerrados en Enlace, agrupados "
+            "por técnico responsable. Cliquea una fila para ver el detalle "
+            "de las OTs abiertas de ese técnico."
         )
-        # Renderizamos con tabla HTML para poder centrar los números.
-        # (st.dataframe alinea NumberColumn siempre a la derecha.)
-        _html = [
-            "<style>",
-            ".enlace-ranking { width: 100%; border-collapse: collapse; font-size: 0.92em; }",
-            ".enlace-ranking th, .enlace-ranking td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; }",
-            ".enlace-ranking th { background: #f8fafc; font-weight: 600; color: #1e3a8a; text-align: left; }",
-            ".enlace-ranking th.num, .enlace-ranking td.num { text-align: center; }",
-            ".enlace-ranking tr:hover { background: #f1f5f9; }",
-            "</style>",
-            "<table class='enlace-ranking'>",
-            "<thead><tr>",
-            "<th>Técnico</th>",
-            "<th class='num'>Avisos abiertos</th>",
-            "<th class='num'>Máx sin cerrar (h)</th>",
-            "<th class='num'>Prom. sin cerrar (h)</th>",
-            "</tr></thead><tbody>",
-        ]
-        for _, r in _rk_grp.iterrows():
-            _html.append(
-                f"<tr>"
-                f"<td>{r['_tecnico']}</td>"
-                f"<td class='num'>{r['avisos_abiertos']}</td>"
-                f"<td class='num'>{r['horas_max']}</td>"
-                f"<td class='num'>{r['horas_prom']}</td>"
-                f"</tr>"
+
+        _rk_event = st.dataframe(
+            _rk_grp, hide_index=True, use_container_width=True,
+            height=min(500, 55 + 35 * len(_rk_grp)),
+            on_select="rerun", selection_mode="single-row",
+            key="enlace_ranking_tab",
+            column_config={
+                "Técnico":            st.column_config.TextColumn(width=260),
+                "Avisos abiertos":    st.column_config.NumberColumn(width=140),
+                "Correctivos":        st.column_config.NumberColumn(width=110),
+                "Preventivos":        st.column_config.NumberColumn(width=110),
+                "Máx sin cerrar (h)": st.column_config.NumberColumn(width=150),
+            },
+        )
+
+        # ── Detalle del técnico seleccionado ────────────────────────
+        _rk_sel = getattr(_rk_event, "selection", None)
+        _rk_sel_rows = _rk_sel.get("rows", []) if isinstance(_rk_sel, dict) else (getattr(_rk_sel, "rows", []) or [])
+        if _rk_sel_rows:
+            _tec_sel = _rk_grp.iloc[_rk_sel_rows[0]]["Técnico"]
+            _det = _rk_base[_rk_base["_tecnico"] == _tec_sel].copy()
+            _det = _det.sort_values("_horas", ascending=False)
+            st.markdown(f"#### 📋 Órdenes abiertas de **{_tec_sel}** ({len(_det)})")
+
+            _det_tab = pd.DataFrame({
+                "N° OT Fracttal": _det["os_fracttal"].fillna("").map(lambda x: x if x else "⏳ pendiente"),
+                "N° aviso": _det["id_sap"].astype(str),
+                "Tipo": _det["tipo_aviso"].str.title(),
+                "EDS": _det["eds_codigo"].fillna(""),
+                "Dirección": _det["descripcion_instalacion"].fillna("").map(_title_smart),
+                "Descripción": _det["descripcion_falla"].fillna("").map(_title_smart),
+                "Estado Enlace": _det["estado"].map(
+                    lambda x: f"{ESTADO_META.get(x, ('⚪', x))[0]} {ESTADO_META.get(x, ('', x))[1]}"
+                ),
+                "Creado": pd.to_datetime(_det["fecha_creacion"], errors="coerce", utc=True) \
+                    .dt.tz_convert(_CL_TZ).dt.strftime("%d/%m/%Y %H:%M"),
+                "Últ. cambio": _det["_fecha_cambio"].dt.strftime("%d/%m/%Y %H:%M"),
+                "Sin cerrar": _det["_horas"].map(
+                    lambda h: (f"🔴 {int(h)}h" if h > 72 else
+                               f"🟠 {int(h)}h" if h > 24 else
+                               f"🟡 {int(h)}h" if h > 1 else
+                               f"🟢 <1h")
+                ),
+            })
+            st.dataframe(
+                _det_tab, hide_index=True, use_container_width=True,
+                height=min(500, 55 + 35 * len(_det_tab)),
+                column_config={
+                    "N° OT Fracttal": st.column_config.TextColumn(width=110),
+                    "N° aviso":       st.column_config.TextColumn(width=100),
+                    "Tipo":           st.column_config.TextColumn(width=100),
+                    "EDS":            st.column_config.TextColumn(width=70),
+                    "Dirección":      st.column_config.TextColumn(width=240),
+                    "Descripción":    st.column_config.TextColumn(width=260),
+                    "Estado Enlace":  st.column_config.TextColumn(width=170),
+                    "Creado":         st.column_config.TextColumn(width=125),
+                    "Últ. cambio":    st.column_config.TextColumn(width=125),
+                    "Sin cerrar":     st.column_config.TextColumn(width=95),
+                },
             )
-        _html.append("</tbody></table>")
-        st.markdown("\n".join(_html), unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════
