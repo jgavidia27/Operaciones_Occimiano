@@ -2593,33 +2593,22 @@ if vista == "🔗 Enlace Copec":
                     st.markdown("  \n".join(lineas))
 
     # ── Ranking técnicos con órdenes ABIERTAS (incluye todos los no cerrados) ──
-    # Toma todos los avisos != CERRADO, enriquece con técnico (de la OT Fracttal),
-    # agrupa y muestra. La tabla es clickeable → detalle de las OTs del técnico.
+    # Toma avisos != CERRADO, enriquece con técnico (de la OT Fracttal matcheada),
+    # y agrupa. La tabla es clickeable → detalle de las OTs del técnico.
+    # Los avisos sin OT Fracttal aún matcheada se muestran como métrica aparte.
     _rk_base = df[df["estado"] != "CERRADO"].copy()
     if not _rk_base.empty:
         _rk_base["_tecnico"] = _rk_base["os_fracttal"].map(
             lambda x: (_ots_detalle.get(x, {}) or {}).get("responsable") if x else None
         )
-        _rk_base["_tecnico"] = _rk_base["_tecnico"].fillna("⏳ sin OT en Fracttal")
         _rk_base["_fecha_cambio"] = pd.to_datetime(
             _rk_base["fecha_ultimo_cambio"], errors="coerce", utc=True).dt.tz_convert(_CL_TZ)
         _now = pd.Timestamp.now(tz=_CL_TZ)
         _rk_base["_horas"] = ((_now - _rk_base["_fecha_cambio"]).dt.total_seconds() / 3600).round(0)
 
-        _rk_grp = _rk_base.groupby("_tecnico").agg(
-            avisos_abiertos=("id_sap", "count"),
-            correctivos=("tipo_aviso", lambda s: (s == "CORRECTIVO").sum()),
-            preventivos=("tipo_aviso", lambda s: (s == "PREVENTIVO").sum()),
-            horas_max=("_horas", "max"),
-        ).reset_index().sort_values("avisos_abiertos", ascending=False)
-        _rk_grp["horas_max"] = _rk_grp["horas_max"].fillna(0).astype(int)
-        _rk_grp = _rk_grp.rename(columns={
-            "_tecnico":         "Técnico",
-            "avisos_abiertos":  "Avisos abiertos",
-            "correctivos":      "Correctivos",
-            "preventivos":      "Preventivos",
-            "horas_max":        "Máx sin cerrar (h)",
-        })
+        # Separar avisos con técnico identificado vs sin OT en Fracttal
+        _sin_ot = _rk_base[_rk_base["_tecnico"].isna()]
+        _con_tec = _rk_base[_rk_base["_tecnico"].notna()]
 
         st.markdown("---")
         st.markdown(
@@ -2627,27 +2616,57 @@ if vista == "🔗 Enlace Copec":
             unsafe_allow_html=True,
         )
         st.caption(
-            "Todos los avisos que aún no están cerrados en Enlace, agrupados "
-            "por técnico responsable. Cliquea una fila para ver el detalle "
-            "de las OTs abiertas de ese técnico."
+            "Avisos que aún no están cerrados en Enlace y tienen OT en Fracttal, "
+            "agrupados por técnico responsable. Cliquea una fila para ver el detalle."
         )
 
-        _rk_event = st.dataframe(
-            _rk_grp, hide_index=True, use_container_width=True,
-            height=min(500, 55 + 35 * len(_rk_grp)),
-            on_select="rerun", selection_mode="single-row",
-            key="enlace_ranking_tab",
-            column_config={
-                "Técnico":            st.column_config.TextColumn(width=260),
-                "Avisos abiertos":    st.column_config.NumberColumn(width=140),
-                "Correctivos":        st.column_config.NumberColumn(width=110),
-                "Preventivos":        st.column_config.NumberColumn(width=110),
-                "Máx sin cerrar (h)": st.column_config.NumberColumn(width=150),
-            },
-        )
+        # Métrica avisos sin OT (no forman parte del ranking)
+        if not _sin_ot.empty:
+            st.info(
+                f"ℹ️ Además hay **{len(_sin_ot)} avisos abiertos sin OT en Fracttal aún** "
+                f"({int((_sin_ot['tipo_aviso']=='CORRECTIVO').sum())} correctivos · "
+                f"{int((_sin_ot['tipo_aviso']=='PREVENTIVO').sum())} preventivos). "
+                f"Aún no se les puede asignar un técnico responsable en este ranking."
+            )
+
+        if _con_tec.empty:
+            st.info("Ningún técnico tiene órdenes abiertas con OT Fracttal identificada.")
+            _rk_grp = pd.DataFrame()
+        else:
+            _rk_grp = _con_tec.groupby("_tecnico").agg(
+                avisos_abiertos=("id_sap", "count"),
+                correctivos=("tipo_aviso", lambda s: (s == "CORRECTIVO").sum()),
+                preventivos=("tipo_aviso", lambda s: (s == "PREVENTIVO").sum()),
+                horas_max=("_horas", "max"),
+            ).reset_index().sort_values("avisos_abiertos", ascending=False)
+            _rk_grp["horas_max"] = _rk_grp["horas_max"].fillna(0).astype(int)
+            _rk_grp = _rk_grp.rename(columns={
+                "_tecnico":         "Técnico",
+                "avisos_abiertos":  "Avisos abiertos",
+                "correctivos":      "Correctivos",
+                "preventivos":      "Preventivos",
+                "horas_max":        "Máx sin cerrar (h)",
+            })
+
+        if _rk_grp.empty:
+            _rk_event = None
+        else:
+            _rk_event = st.dataframe(
+                _rk_grp, hide_index=True, use_container_width=True,
+                height=min(500, 55 + 35 * len(_rk_grp)),
+                on_select="rerun", selection_mode="single-row",
+                key="enlace_ranking_tab",
+                column_config={
+                    "Técnico":            st.column_config.TextColumn(width=260),
+                    "Avisos abiertos":    st.column_config.NumberColumn(width=140),
+                    "Correctivos":        st.column_config.NumberColumn(width=110),
+                    "Preventivos":        st.column_config.NumberColumn(width=110),
+                    "Máx sin cerrar (h)": st.column_config.NumberColumn(width=150),
+                },
+            )
 
         # ── Detalle del técnico seleccionado ────────────────────────
-        _rk_sel = getattr(_rk_event, "selection", None)
+        _rk_sel = getattr(_rk_event, "selection", None) if _rk_event else None
         _rk_sel_rows = _rk_sel.get("rows", []) if isinstance(_rk_sel, dict) else (getattr(_rk_sel, "rows", []) or [])
         if _rk_sel_rows:
             _tec_sel = _rk_grp.iloc[_rk_sel_rows[0]]["Técnico"]
