@@ -150,6 +150,11 @@ def fetch_subtareas_numeral(folio: str) -> list:
             # ¿El equipo posee cubre fichero? (Shell, plantilla nueva 2026).
             # None = la plantilla no traía el campo; "SI"/"NO" = respuesta real.
             "cubre_fichero":          None,
+            # Preguntas FLOWEY (Aramco, plantilla actualizada 2026-08-03):
+            #   • ¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?      → SI/NO
+            #   • ¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS…?    → lista (SI/NO/parcial…)
+            "flowey_utiliza":         None,
+            "flowey_diluido_agua":    None,
             "fecha_inicio_subtarea":  s.get("initial_date"),
             "fecha_fin_subtarea":     s.get("final_date"),
         }
@@ -240,6 +245,21 @@ def fetch_subtareas_numeral(folio: str) -> list:
                         idx[kid]["cubre_fichero"] = "NO"
                     else:
                         idx[kid]["cubre_fichero"] = val[:10]
+            elif "FLOWEY" in desc:
+                # Preguntas Aramco (subtareas #44 y #45 del PLAN MTTO GENERAL MSELF).
+                # #44: "¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?"     → SI/NO
+                # #45: "¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS…?"   → lista libre
+                if not val_empty:
+                    _v = val.lower()
+                    if "UTILIZA" in desc:
+                        if _v in ("true", "si", "sí", "yes", "1"):
+                            idx[kid]["flowey_utiliza"] = "SI"
+                        elif _v in ("false", "no", "0"):
+                            idx[kid]["flowey_utiliza"] = "NO"
+                        else:
+                            idx[kid]["flowey_utiliza"] = val[:20]
+                    elif "DILUID" in desc or "AGUA" in desc:
+                        idx[kid]["flowey_diluido_agua"] = val[:40]
 
     # 3) Filtrar: solo subtareas cuyo formulario tiene campos NUMERAL.
     #    Subtareas duplicadas del mismo equipo con plantilla sin numeral
@@ -294,6 +314,8 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "form_tiene_tiempo":     r.get("form_tiene_tiempo", False),
             "form_tiene_produccion": r.get("form_tiene_produccion", False),
             "cubre_fichero":         r.get("cubre_fichero"),
+            "flowey_utiliza":        r.get("flowey_utiliza"),
+            "flowey_diluido_agua":   r.get("flowey_diluido_agua"),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
             "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
             "updated_at":         datetime.now(timezone.utc).isoformat(),
@@ -314,7 +336,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             # compat). Detectamos por el mensaje PGRST204 "column ... does
             # not exist".
             if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text
-                                         or "cubre_fichero" in r.text):
+                                         or "cubre_fichero" in r.text or "flowey_" in r.text):
                 for rec in payload:
                     rec.pop("form_tiene_bomba", None)
                     rec.pop("form_tiene_consumo", None)
@@ -322,6 +344,8 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     rec.pop("form_tiene_produccion", None)
                     rec.pop("lts_hr_produccion_final", None)
                     rec.pop("cubre_fichero", None)
+                    rec.pop("flowey_utiliza", None)
+                    rec.pop("flowey_diluido_agua", None)
                 r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
                 if r2.status_code in (200, 201, 204):
                     return len(payload), 0

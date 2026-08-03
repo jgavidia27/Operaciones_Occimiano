@@ -15147,8 +15147,8 @@ elif _page == _NAV_PAGES[2]:
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
-    _ptab_plan, _ptab_prog, _ptab_norea, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
-        "📅  Planificación", "📋  Programación MP", "🚫  No Realizadas",
+    _ptab_plan, _ptab_prog, _ptab_rea, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
+        "📅  Planificación", "📋  Programación MP", "✅  Realizadas",
         "🏢  Por Cliente", "👷  Por Técnico",
         "🏭  Por Activo/EDS", "⏱️  Uptime"
     ])
@@ -15944,163 +15944,213 @@ elif _page == _NAV_PAGES[2]:
             )
 
     # ══════════════════════════════════════════════════════════════════════
-    # SUB-TAB: 🚫 No Realizadas — lee la seccion T-Z (filas 3-22 aprox)
-    # del Excel de Utilizacion, donde operaciones registra las EDS que
-    # no se pudieron atender (motivo: CLAUSURADA, SIN MSELF, RECAMBIO,
-    # NO ACEPTA MTTO, etc.). Fuente unica: el Excel del mes actual.
+    # SUB-TAB: ✅ Realizadas — MPs finalizadas agrupadas por Cliente.
+    # Combina dfp (OTs preventivas) + df_num_sub (subtareas por activo)
+    # para mostrar por cada OT: fecha, técnico, duración, cumplimiento
+    # del plazo, N equipos incluidos, N equipos OK y % de completitud.
+    # Para Aramco (ESMAX): 2 columnas extra con las respuestas FLOWEY
+    # (¿utiliza productos FLOWEY? / ¿están diluidos con agua?).
     # ══════════════════════════════════════════════════════════════════════
-    with _ptab_norea:
-        from openpyxl import load_workbook as _lwb_nr
-        from datetime import date as _date_nr
-
+    with _ptab_rea:
         st.markdown(
             '<div class="section-header">'
-            '🚫  Estaciones No Realizadas — Respaldo del mes'
+            '✅  Mantenciones Realizadas — desglose por OT'
             '</div>',
             unsafe_allow_html=True,
         )
         st.caption(
-            "EDS registradas en el Excel de Utilización de Tiempo como **no atendidas** "
-            "por razones ajenas al equipo (estación clausurada, sin MSELF, en recambio, "
-            "planta en marcha, etc.). Es el respaldo documental para justificar por qué "
-            "no se ejecutó el mantenimiento en la fecha programada."
+            "MPs finalizadas en el período filtrado. Se muestra por OT los equipos "
+            "incluidos en el plan, cuántos quedaron **OK** (formulario completo y "
+            "numeral válido) y el **% de completitud**. Una MP con 3 de 4 equipos "
+            "OK aparece como 75%. Para Aramco se incluyen 2 columnas extra con las "
+            "respuestas del checklist FLOWEY (a partir del 03-08-2026)."
         )
 
-        _PATH_NR = ("G:/.shortcut-targets-by-id/15zHnoU5VZlkOwYc6EBziNcnS-sAAtwtk/"
-                    "OPERACIONES/OPERACIONES/2026 UTILIZACIÓN DE TIEMPO.xlsx")
+        _dfr = dfp[
+            (dfp["estado_tarea"].isin(["Finalizada"]) | dfp["estado"].isin(["Finalizadas"]))
+            & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
+        ].copy()
 
-        @st.cache_data(ttl=300, show_spinner=False)
-        def _load_no_realizadas(mes_hoja: str) -> pd.DataFrame:
-            """Lee la seccion T-Z de la hoja hasta encontrar 'POR REALIZAR'
-            en col X (encabezado que separa 'no realizadas' de 'pendientes')."""
-            try:
-                _wb = _lwb_nr(_PATH_NR, data_only=True)
-            except Exception:
-                return pd.DataFrame()
-            if mes_hoja not in _wb.sheetnames:
-                return pd.DataFrame()
-            _ws = _wb[mes_hoja]
-            rows = []
-            for r in range(3, 30):
-                # Detectar fin de seccion
-                _x = _ws.cell(r, 24).value or ""   # col X
-                if _x and "POR REALIZAR" in str(_x).upper():
-                    break
-                _motivo   = _ws.cell(r, 20).value   # T
-                _fprog    = _ws.cell(r, 21).value   # U
-                _cod_eds  = _ws.cell(r, 22).value   # V
-                _n        = _ws.cell(r, 23).value   # W
-                _direccion= _ws.cell(r, 24).value   # X
-                _semana   = _ws.cell(r, 25).value   # Y
-                _fult     = _ws.cell(r, 26).value   # Z
-                _dia_sem  = _ws.cell(r, 27).value   # AA
-                _prov     = _ws.cell(r, 28).value   # AB
-                _comuna   = _ws.cell(r, 29).value   # AC
-                _tipo_mp  = _ws.cell(r, 30).value   # AD
-                # Solo agregar si tiene motivo o codigo EDS
-                if not _motivo and not _cod_eds:
-                    continue
-                # Excluir encabezados repetidos
-                if str(_motivo or "").upper() == "FECHA REAL":
-                    continue
-                rows.append({
-                    "Motivo":       str(_motivo or "").strip(),
-                    "F. Programada": _fprog,
-                    "Cód. EDS":     str(_cod_eds or "").strip(),
-                    "N°":           str(_n or "").strip(),
-                    "Dirección":    str(_direccion or "").strip(),
-                    "Semana":       str(_semana or "").strip(),
-                    "Última mant.": _fult,
-                    "Día semana":   str(_dia_sem or "").strip(),
-                    "Provincia":    str(_prov or "").strip(),
-                    "Comuna":       str(_comuna or "").strip(),
-                    "Tipo MP":      str(_tipo_mp or "").strip(),
-                })
-            return pd.DataFrame(rows)
-
-        # ── Filtros ─────────────────────────────────────────────────────
-        _MESES_NR = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
-                     "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
-        _yr_nr = _date_nr.today().year
-        _mes_actual_nr = _date_nr.today().month
-        _hojas_disp_nr = [f"{_MESES_NR[m-1]} {_yr_nr}"
-                          for m in range(_mes_actual_nr, 0, -1)] + \
-                         [f"{_MESES_NR[m-1]} {_yr_nr-1}"
-                          for m in range(12, 0, -1)]
-
-        _fnr1, _fnr2, _fnr3 = st.columns([2, 2, 1])
-        with _fnr1:
-            _mes_nr = st.selectbox("Mes", _hojas_disp_nr, key="nr_mes_sel")
-        with _fnr3:
-            st.write("")
-            if st.button("🔄 Refrescar", key="nr_refresh", use_container_width=True):
-                _load_no_realizadas.clear()
-                st.rerun()
-
-        with st.spinner(f"Leyendo {_mes_nr}…"):
-            _df_nr = _load_no_realizadas(_mes_nr)
-
-        if _df_nr.empty:
-            st.info(
-                f"No hay estaciones registradas como 'no realizadas' en **{_mes_nr}**. "
-                "Operaciones aún no ha poblado la sección T-Z de esa hoja, "
-                "o el mes no tenía casos."
-            )
+        if _dfr.empty:
+            st.info("Sin MPs finalizadas para el filtro seleccionado.")
         else:
-            # Filtro por motivo
-            _motivos_disp = ["Todos"] + sorted(_df_nr["Motivo"].dropna().unique().tolist())
-            with _fnr2:
-                _mot_sel = st.selectbox("Motivo", _motivos_disp, key="nr_mot_sel")
-            _df_nr_disp = _df_nr.copy()
-            if _mot_sel != "Todos":
-                _df_nr_disp = _df_nr_disp[_df_nr_disp["Motivo"] == _mot_sel]
+            # Cliente del selector (si "Todos" mostramos separador por cliente)
+            _clientes_disp = ["Todos"] + sorted(_dfr["cliente"].dropna().unique().tolist())
+            _rc1, _rc2 = st.columns([2, 2])
+            with _rc1:
+                _sel_cli_r = st.selectbox("Cliente", _clientes_disp, key="rea_cli")
+            with _rc2:
+                _buscar_r = st.text_input(
+                    "🔍 Buscar por OT, EDS o técnico",
+                    placeholder="Ej: OS-38123 · PBR-12 · Juan…",
+                    key="rea_buscar",
+                ).strip().upper()
 
-            # KPIs por motivo
-            _nk1, _nk2, _nk3, _nk4 = st.columns(4)
-            _nk1.metric("Total no realizadas", f"{len(_df_nr):,}")
-            _clausur = int((_df_nr["Motivo"].str.upper().str.contains("CLAUSUR|CIERRE", na=False)).sum())
-            _sinmself = int((_df_nr["Motivo"].str.upper().str.contains("SIN MSELF|SIN M", na=False)).sum())
-            _recambio = int((_df_nr["Motivo"].str.upper().str.contains("RECAMBIO", na=False)).sum())
-            _nk2.metric("🚧 Clausuradas/Cerradas", f"{_clausur:,}")
-            _nk3.metric("⚠️ Sin equipo", f"{_sinmself:,}")
-            _nk4.metric("🔄 Recambio", f"{_recambio:,}")
+            if _sel_cli_r != "Todos":
+                _dfr = _dfr[_dfr["cliente"] == _sel_cli_r]
 
-            # Formatear fechas
-            for _c in ("F. Programada", "Última mant."):
-                if _c in _df_nr_disp.columns:
-                    _df_nr_disp[_c] = pd.to_datetime(
-                        _df_nr_disp[_c], errors="coerce"
-                    ).dt.strftime("%d/%m/%Y").fillna("—")
+            # ── Precalcular cumplimiento de plazo y duración ────────────────
+            _fp = pd.to_datetime(_dfr["fecha_programada"], errors="coerce", utc=True)
+            _ff = pd.to_datetime(_dfr["fecha_finalizacion"], errors="coerce", utc=True)
+            _dfr["_fp_d"] = _fp.dt.tz_convert("America/Santiago").dt.strftime("%d/%m/%Y")
+            _dfr["_ff_d"] = _ff.dt.tz_convert("America/Santiago").dt.strftime("%d/%m/%Y")
 
-            _show_df(_df_nr_disp.reset_index(drop=True), hide_index=True,
-                width="stretch",
-                column_config={
-                    "Motivo":       st.column_config.TextColumn(width=180,
-                        help="Razón por la que no se realizó el mantenimiento."),
-                    "F. Programada":st.column_config.TextColumn(width=110),
-                    "Cód. EDS":     st.column_config.TextColumn(width=90),
-                    "N°":           st.column_config.TextColumn(width=55),
-                    "Dirección":    st.column_config.TextColumn(width=260),
-                    "Semana":       st.column_config.TextColumn(width=130),
-                    "Última mant.": st.column_config.TextColumn(width=110),
-                    "Día semana":   st.column_config.TextColumn(width=90),
-                    "Provincia":    st.column_config.TextColumn(width=130),
-                    "Comuna":       st.column_config.TextColumn(width=130),
-                    "Tipo MP":      st.column_config.TextColumn(width=70),
+            # Cumplimiento: fecha_finalizacion ≤ fecha_programada (mismo día
+            # o antes). Coincide con el criterio "Crudo MP" usado en Por Cliente.
+            _fp_n = _fp.dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
+            _ff_n = _ff.dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
+            _dfr["_dentro_plazo"] = (_ff_n <= _fp_n) & _fp_n.notna() & _ff_n.notna()
+
+            # Duración: preferir duracion_real_neta_seg si existe, si no cap
+            # con duracion_real_seg. Convertir a "Xh YYm".
+            def _fmt_dur_seg(s):
+                if s is None or pd.isna(s): return "—"
+                try:
+                    total = int(float(s))
+                except Exception:
+                    return "—"
+                if total <= 0: return "—"
+                h = total // 3600; m = (total % 3600) // 60
+                return f"{h}h {m:02d}m" if h else f"{m}m"
+            _dur_col = "duracion_real_neta_seg" if "duracion_real_neta_seg" in _dfr.columns else "duracion_real_seg"
+            if _dur_col in _dfr.columns:
+                _dfr["_dur_disp"] = _dfr[_dur_col].apply(_fmt_dur_seg)
+            else:
+                _dfr["_dur_disp"] = "—"
+
+            # ── Consolidar subtareas por OT ─────────────────────────────────
+            # df_num_sub: 1 fila por (id_ot, id_work_order_task/activo).
+            # Un equipo se cuenta como "OK" si el formulario tiene numeral y
+            # el numeral_ok es True. Los equipos sin numeral requerido (ej.
+            # ficheros, ablandadores) no penalizan → solo se cuentan si
+            # form_tiene_numeral es True (que es el filtro del propio sync).
+            _resumen_por_ot = {}
+            _flowey_por_ot  = {}
+            if df_num_sub is not None and not df_num_sub.empty:
+                _sub = df_num_sub[df_num_sub["id_ot"].isin(_dfr["id_ot"].astype(str))].copy()
+                if not _sub.empty:
+                    for _fol, _grp in _sub.groupby("id_ot"):
+                        _n_total = len(_grp)
+                        _n_ok    = int(_grp["numeral_ok"].fillna(False).astype(bool).sum())
+                        _equipos = _grp["nombre_activo"].dropna().astype(str).tolist()
+                        # Descripciones cortas de equipos: primer token si repetido
+                        _equipos_short = ", ".join(sorted(set(_equipos))[:4])
+                        if len(set(_equipos)) > 4:
+                            _equipos_short += f" +{len(set(_equipos))-4}"
+                        _pct = round(_n_ok / _n_total * 100) if _n_total else 0
+                        _resumen_por_ot[_fol] = {
+                            "equipos":       _equipos_short or "—",
+                            "n_total":       _n_total,
+                            "n_ok":          _n_ok,
+                            "pct":           _pct,
+                        }
+                        # Observación derivada
+                        if _n_total == _n_ok:
+                            _obs = f"✅ {_n_ok}/{_n_total} equipos completos"
+                        else:
+                            _obs = f"⚠️ {_n_ok}/{_n_total} equipos OK ({_pct}%)"
+                        _resumen_por_ot[_fol]["obs"] = _obs
+                        # FLOWEY (Aramco): primera respuesta no vacía entre los activos
+                        if "flowey_utiliza" in _grp.columns:
+                            _fu = _grp["flowey_utiliza"].dropna().astype(str)
+                            _fu = _fu[_fu != ""]
+                            _fd = _grp.get("flowey_diluido_agua", pd.Series(dtype=str)).dropna().astype(str)
+                            _fd = _fd[_fd != ""] if not _fd.empty else _fd
+                            _flowey_por_ot[_fol] = {
+                                "flowey_utiliza": _fu.iloc[0] if not _fu.empty else "—",
+                                "flowey_diluido": _fd.iloc[0] if not _fd.empty else "—",
+                            }
+
+            # ── Armar tabla ─────────────────────────────────────────────────
+            _rows_out = []
+            for _, _r in _dfr.sort_values("fecha_finalizacion", ascending=False).iterrows():
+                _fol = str(_r.get("id_ot", ""))
+                _res = _resumen_por_ot.get(_fol, {
+                    "equipos": "—", "n_total": 0, "n_ok": 0, "pct": 0,
+                    "obs": "Sin subtareas en Supabase (aún sin sync)"
                 })
+                _fl  = _flowey_por_ot.get(_fol, {"flowey_utiliza": "—", "flowey_diluido": "—"})
+                _row = {
+                    "Cliente":       str(_r.get("cliente", "") or "—"),
+                    "Fecha finaliz.": _r["_ff_d"] if pd.notna(_r["_ff_d"]) else "—",
+                    "N° OT":         _fol,
+                    "EDS":           str(_r.get("codigo_eds", "") or _r.get("estacion", "") or "—"),
+                    "Técnico":       str(_r.get("responsable", "") or "—"),
+                    "Duración":      _r["_dur_disp"],
+                    "Dentro plazo":  "✅ Sí" if _r["_dentro_plazo"] else "❌ No",
+                    "Equipos":       _res["equipos"],
+                    "OK / Total":    f'{_res["n_ok"]} / {_res["n_total"]}',
+                    "% Completitud": _res["pct"],
+                    "Observación":   _res["obs"],
+                    "Plan":          str(_r.get("plan_tareas", "") or "—")[:40],
+                }
+                # Columnas FLOWEY solo para Aramco (ESMAX / Aramco)
+                _cli_up = str(_r.get("cliente", "")).upper()
+                if "ARAMCO" in _cli_up or "ESMAX" in _cli_up:
+                    _row["FLOWEY utiliza"]      = _fl["flowey_utiliza"]
+                    _row["FLOWEY diluido agua"] = _fl["flowey_diluido"]
+                _rows_out.append(_row)
 
-            # Desglose por motivo
-            with st.expander("📊 Desglose por motivo", expanded=False):
-                _mot_ct = (_df_nr.groupby("Motivo").size()
-                           .reset_index(name="Cantidad")
-                           .sort_values("Cantidad", ascending=False))
-                _show_df(_mot_ct, hide_index=True, width="stretch")
+            if _buscar_r:
+                _rows_out = [
+                    r for r in _rows_out
+                    if _buscar_r in (r["N° OT"].upper() + " " + r["EDS"].upper()
+                                     + " " + r["Técnico"].upper())
+                ]
 
-            st.caption(
-                f"📖 Fuente: `2026 UTILIZACIÓN DE TIEMPO.xlsx` hoja **{_mes_nr}** · "
-                "sección T-Z (columnas Motivo, Fecha Programada, EDS, Dirección, etc.) · "
-                "cache 5 min."
-            )
+            if not _rows_out:
+                st.info("Sin resultados para el filtro/buscador.")
+            else:
+                _df_out = pd.DataFrame(_rows_out)
+                # Reordenar: si hay col FLOWEY, dejarlas al final
+                _cols_base = ["Cliente","Fecha finaliz.","N° OT","EDS","Técnico",
+                              "Duración","Dentro plazo","Equipos","OK / Total",
+                              "% Completitud","Observación","Plan"]
+                _cols_flow = [c for c in ("FLOWEY utiliza","FLOWEY diluido agua")
+                              if c in _df_out.columns]
+                _df_out = _df_out[[c for c in _cols_base if c in _df_out.columns] + _cols_flow]
+
+                _cfg = {
+                    "Cliente":        st.column_config.TextColumn(width=110),
+                    "Fecha finaliz.": st.column_config.TextColumn(width=100),
+                    "N° OT":          st.column_config.TextColumn(width=95),
+                    "EDS":            st.column_config.TextColumn(width=95),
+                    "Técnico":        st.column_config.TextColumn(width=180),
+                    "Duración":       st.column_config.TextColumn(width=85),
+                    "Dentro plazo":   st.column_config.TextColumn(width=100,
+                        help="✅ Sí = fecha_finalización ≤ fecha_programada"),
+                    "Equipos":        st.column_config.TextColumn(width=220,
+                        help="Equipos incluidos en el plan de esta OT"),
+                    "OK / Total":     st.column_config.TextColumn(width=85,
+                        help="Equipos con numeral válido / equipos totales del plan"),
+                    "% Completitud":  st.column_config.ProgressColumn(
+                        label="% Completitud",
+                        min_value=0, max_value=100, format="%d%%",
+                        help="% de equipos del plan que quedaron OK. Ej: 3/4 = 75%"),
+                    "Observación":    st.column_config.TextColumn(width=210),
+                    "Plan":           st.column_config.TextColumn(width=220),
+                    "FLOWEY utiliza": st.column_config.TextColumn(width=110,
+                        help="Solo Aramco. Respuesta a '¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?'"),
+                    "FLOWEY diluido agua": st.column_config.TextColumn(width=130,
+                        help="Solo Aramco. Respuesta a '¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS CON AGUA?'"),
+                }
+                _show_df(_df_out.reset_index(drop=True), hide_index=True,
+                         width="stretch", column_config=_cfg)
+
+                # KPIs rápidos
+                _tot_ots = len(_df_out)
+                _dentro  = int((_df_out["Dentro plazo"] == "✅ Sí").sum())
+                _pct_dentro = round(_dentro / _tot_ots * 100, 1) if _tot_ots else 0
+                _avg_compl  = round(_df_out["% Completitud"].mean(), 1) if _tot_ots else 0
+                _mk1, _mk2, _mk3 = st.columns(3)
+                _mk1.metric("OTs realizadas", f"{_tot_ots:,}")
+                _mk2.metric("Dentro de plazo", f"{_pct_dentro}%", help=f"{_dentro} de {_tot_ots}")
+                _mk3.metric("Completitud promedio", f"{_avg_compl}%",
+                            help="Promedio del % de equipos OK por OT")
+
+    # Bloque legacy 'No Realizadas' eliminado (pedido de operaciones 2026-08-03).
+    # El respaldo documental de EDS no atendidas se lleva en el Excel externo
+    # 'UTILIZACIÓN DE TIEMPO'; el dashboard ya no lo replica.
 
     # ── Tab 1: Por Cliente ────────────────────────────────────────────────
     with _ptab_cli:

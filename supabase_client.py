@@ -282,12 +282,13 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
             "consumo_shampoo_pct,consumo_cera_pct,consumo_cepillo_pct,"
             "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
             "form_tiene_produccion,cubre_fichero,"
+            "flowey_utiliza,flowey_diluido_agua,"
             "fecha_inicio_subtarea,fecha_fin_subtarea"
             "&order=id_ot.desc",
             limit=20_000,
         )
-        # Fallback si la migración lts_hr o form_tiene_produccion aún no
-        # está aplicada: reintentar sin esas columnas.
+        # Fallback si las nuevas columnas (flowey_*, lts_hr_...) aún no
+        # están aplicadas en Supabase: reintentar sin ellas.
         if not rows:
             rows = _query(
                 "numerales_subtarea",
