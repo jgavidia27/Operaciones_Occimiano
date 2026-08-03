@@ -5722,23 +5722,64 @@ elif _page == _NAV_PAGES[3]:
         _df_tbl["Ratio (P/C x10)"] = [_fmt_ratio(c, p)
             for c, p in zip(_df_tbl["correctivas"], _df_tbl["preventivas"])]
 
+        # Para clientes Aramco/Esmax, mostramos DOS columnas de código:
+        #   1. Cód. Aramco (EE_S###) — nomenclatura oficial de Aramco
+        #   2. Cód. Occim (PBR-XX)   — código interno Occimiano (puede faltar)
+        # eds_occim contiene PBR-XX o EE_S###; eds_occim_raw (alias de
+        # cod_occim_fracttal) contiene EE_S### cuando el eds_occim es PBR.
+        # Los EDS que ya son EE_S no tienen PBR interno.
+        _is_aramco = str(_col.get("label", "")).strip().upper().startswith("ARAMCO") or \
+                     str(_col.get("label", "")).strip().upper().startswith("ESMAX")
+        if _is_aramco:
+            def _cod_aramco(row):
+                e = str(row.get("eds_occim") or "").strip()
+                if e.startswith("EE_S"):
+                    return e
+                # cod_occim_fracttal se cargó como eds_occim_raw
+                cf = row.get("eds_occim_raw") or row.get("_cod_occim_frac")
+                s = str(cf).strip() if cf else ""
+                return s if s and s.lower() not in ("nan", "none") else "—"
+            def _cod_occim_pbr(row):
+                e = str(row.get("eds_occim") or "").strip()
+                # Si eds_occim YA es el código Aramco (EE_S), no hay PBR interno
+                if e.startswith("EE_S"):
+                    return "—"
+                return e or "—"
+            _df_tbl["cod_aramco"] = _df_tbl.apply(_cod_aramco, axis=1)
+            _df_tbl["cod_occim_pbr"] = _df_tbl.apply(_cod_occim_pbr, axis=1)
+
         # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío;
         # y 'Dirección' porque en Shell/Aramco/Copec 'nombre' == 'direccion',
         # generaba una columna duplicada visualmente idéntica).
-        _col_map = {
-            "eds_occim":         "Cód. Occim",
-            "nombre":            "Nombre / Dirección",
-            "comuna":            "Comuna",
-            "zona_occim":        "Zona",
-            "region":            "Región",
-            "ordenes_atendidas": "Órdenes atendidas",
-            "correctivas":       "Correctivas",
-            "preventivas":       "Preventivas",
-            "p1":                "P1",
-            "Última atención":   "Última atención",
-            "Ratio (P/C x10)":   "Ratio (P/C x10)",
-            "ultimo_tecnico":    "Último Técnico",
-        }
+        if _is_aramco:
+            _col_map = {
+                "cod_aramco":        "Cód. Aramco",
+                "cod_occim_pbr":     "Cód. Occim",
+                "nombre":            "Nombre / Dirección",
+                "comuna":            "Comuna",
+                "region":            "Región",
+                "ordenes_atendidas": "Órdenes atendidas",
+                "correctivas":       "Correctivas",
+                "preventivas":       "Preventivas",
+                "p1":                "P1",
+                "Última atención":   "Última atención",
+                "Ratio (P/C x10)":   "Ratio (P/C x10)",
+                "ultimo_tecnico":    "Último Técnico",
+            }
+        else:
+            _col_map = {
+                "eds_occim":         "Cód. Occim",
+                "nombre":            "Nombre / Dirección",
+                "comuna":            "Comuna",
+                "region":            "Región",
+                "ordenes_atendidas": "Órdenes atendidas",
+                "correctivas":       "Correctivas",
+                "preventivas":       "Preventivas",
+                "p1":                "P1",
+                "Última atención":   "Última atención",
+                "Ratio (P/C x10)":   "Ratio (P/C x10)",
+                "ultimo_tecnico":    "Último Técnico",
+            }
         _cols_show = [c for c in _col_map if c in _df_tbl.columns]
         _df_display = _df_tbl[_cols_show].rename(columns=_col_map).copy()
 
@@ -5756,9 +5797,9 @@ elif _page == _NAV_PAGES[3]:
 
         # Aplicar filtro tipeado sobre TODAS las columnas de texto relevantes
         if _lst_buscar:
-            _cols_search = [c for c in ("Cód. Occim",
+            _cols_search = [c for c in ("Cód. Aramco","Cód. Occim",
                                         "Nombre / Dirección","Comuna",
-                                        "Zona","Región","Último Técnico")
+                                        "Región","Último Técnico")
                             if c in _df_display.columns]
             _mask_lst = pd.Series(False, index=_df_display.index)
             for _c in _cols_search:
@@ -5769,10 +5810,12 @@ elif _page == _NAV_PAGES[3]:
 
         _show_df(_df_display, use_container_width=True, hide_index=True,
             column_config={
-                "Cód. Occim":        st.column_config.TextColumn(width=90),
+                "Cód. Aramco":       st.column_config.TextColumn(width=95,
+                    help="Código oficial de Aramco/Esmax (EE_S###)"),
+                "Cód. Occim":        st.column_config.TextColumn(width=90,
+                    help="Código interno Occimiano"),
                 "Nombre / Dirección":st.column_config.TextColumn(width=280),
                 "Comuna":            st.column_config.TextColumn(width=110),
-                "Zona":              st.column_config.TextColumn(width=70),
                 "Región":            st.column_config.TextColumn(width=70),
                 "Órdenes atendidas": st.column_config.NumberColumn(format="%d", width=90,
                     help="Correctivas + Preventivas realizadas en el período seleccionado"),
