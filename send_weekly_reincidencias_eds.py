@@ -277,7 +277,17 @@ def main():
     if args.mes:
         mes_yyyy_mm = args.mes
     else:
-        mes_yyyy_mm = _now_chile.strftime("%Y-%m")
+        # Regla de mes objetivo (definida por Operaciones):
+        #   • Primer lunes del mes (día ≤ 7) → CIERRA el mes anterior
+        #   • Lunes siguientes                → ACTUALIZA el mes en curso
+        # Ej: lunes 03/08 envía reporte de julio cerrado; lunes 10/08
+        # envía primera actualización de agosto en curso.
+        _hoy_d = _now_chile.date()
+        if _hoy_d.day <= 7:
+            _fin_mes_ant = _hoy_d.replace(day=1) - timedelta(days=1)
+            mes_yyyy_mm = _fin_mes_ant.strftime("%Y-%m")
+        else:
+            mes_yyyy_mm = _now_chile.strftime("%Y-%m")
     _year, _mes_num = int(mes_yyyy_mm.split("-")[0]), int(mes_yyyy_mm.split("-")[1])
     mes_label = f"{MESES_ES_LARGO[_mes_num].capitalize()} {_year}"
     sem_iso = _now_chile.isocalendar().week

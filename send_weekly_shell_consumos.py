@@ -1002,9 +1002,18 @@ def main() -> int:
     semana_ini = semana_fin - timedelta(days=6)     # lunes pasado
     sem_iso = semana_ini.isocalendar().week
 
-    # Mes del HILO = mes del lunes de envío
-    mes_yyyy_mm = hoy.strftime("%Y-%m")
-    mes_lbl = f"{MESES_ES[hoy.month]} {hoy.year}"
+    # Mes del HILO — regla definida por Operaciones:
+    #   • Primer lunes del mes (día ≤ 7) → CIERRA el mes anterior
+    #   • Lunes siguientes                → ACTUALIZA el mes en curso
+    # Ej: lunes 03/08 envía reporte de julio cerrado; lunes 10/08 envía
+    # primera actualización de agosto en curso.
+    if hoy.day <= 7:
+        _fin_mes_ant = hoy.replace(day=1) - timedelta(days=1)
+        mes_yyyy_mm = _fin_mes_ant.strftime("%Y-%m")
+        mes_lbl = f"{MESES_ES[_fin_mes_ant.month]} {_fin_mes_ant.year}"
+    else:
+        mes_yyyy_mm = hoy.strftime("%Y-%m")
+        mes_lbl = f"{MESES_ES[hoy.month]} {hoy.year}"
 
     log(f"═══ REPORTE SHELL CONSUMOS ═══")
     log(f"Lunes envío: {hoy}  ·  Semana anterior: {semana_ini} → {semana_fin} (ISO {sem_iso})")

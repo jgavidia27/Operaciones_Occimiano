@@ -24,6 +24,10 @@ on:
         description: "Redirigir el correo a este email (para pruebas)"
         type: string
         default: ""
+      mes:
+        description: "Forzar mes objetivo YYYY-MM (vacío = auto: primer lunes cierra mes anterior)"
+        type: string
+        default: ""
 
 jobs:
   send-reincidencias:
@@ -64,6 +68,9 @@ jobs:
             fi
             if [[ -n "${{ inputs.test_email }}" ]]; then
               ARGS="$ARGS --test-email ${{ inputs.test_email }}"
+            fi
+            if [[ -n "${{ inputs.mes }}" ]]; then
+              ARGS="$ARGS --mes ${{ inputs.mes }}"
             fi
           fi
           echo "Ejecutando: python send_weekly_reincidencias_eds.py $ARGS"
