@@ -5676,12 +5676,23 @@ elif _page == _NAV_PAGES[3]:
             f'· período: {_rango_lbl}</span></div>',
             unsafe_allow_html=True,
         )
-        # Buscador tipeable para el listado (código, nombre, dirección, comuna, LOC)
-        _lst_buscar = st.text_input(
-            "🔍 Buscar estación",
-            placeholder="Código, nombre, dirección, comuna…",
-            key=f"lst_buscar_{_ck}",
-        ).strip().upper()
+        # Buscador tipeable + toggle "solo con actividad en el período"
+        _lb_c1, _lb_c2 = st.columns([4, 1])
+        with _lb_c1:
+            _lst_buscar = st.text_input(
+                "🔍 Buscar estación",
+                placeholder="Código, nombre, dirección, comuna…",
+                key=f"lst_buscar_{_ck}",
+            ).strip().upper()
+        with _lb_c2:
+            _solo_activas = st.toggle(
+                "Solo con actividad",
+                value=True,
+                key=f"lst_solo_activas_{_ck}",
+                help="Muestra únicamente EDS con al menos 1 correctiva o "
+                     "preventiva en el período seleccionado. Apagalo para "
+                     "ver el catálogo completo.",
+            )
 
         # ── Construir tabla desde EDS master + df_ll_f (correctivas filtradas)
         #    + df_pm_f (preventivas filtradas). Ambos ya vienen filtrados por
@@ -5822,6 +5833,11 @@ elif _page == _NAV_PAGES[3]:
                 lambda x: "—" if x in ("—", "nan", "None", "") else x.title()
             )
 
+        # Filtro "solo con actividad": correctivas + preventivas > 0
+        _total_cat = len(_df_display)
+        if _solo_activas and "Órdenes atendidas" in _df_display.columns:
+            _df_display = _df_display[_df_display["Órdenes atendidas"] > 0]
+
         # Aplicar filtro tipeado sobre TODAS las columnas de texto relevantes
         if _lst_buscar:
             _cols_search = [c for c in ("Cód. Aramco","Cód. Occim",
@@ -5834,6 +5850,12 @@ elif _page == _NAV_PAGES[3]:
                     _lst_buscar, na=False, regex=False)
             _df_display = _df_display[_mask_lst]
             st.caption(f"Mostrando **{len(_df_display):,}** estaciones que coinciden con `{_lst_buscar}`.")
+        elif _solo_activas:
+            st.caption(f"Mostrando **{len(_df_display):,}** estaciones con actividad "
+                       f"en el período (de {_total_cat:,} en el catálogo). "
+                       f"Apagá 'Solo con actividad' para ver el catálogo completo.")
+        else:
+            st.caption(f"Mostrando **{_total_cat:,}** estaciones del catálogo completo.")
 
         _show_df(_df_display, use_container_width=True, hide_index=True,
             column_config={
