@@ -6005,7 +6005,17 @@ elif _page == _NAV_PAGES[3]:
         else:
             st.caption(f"Mostrando **{_total_cat:,}** estaciones del catálogo completo.")
 
-        _show_df(_df_display, use_container_width=True, hide_index=True,
+        # Tabla del listado con selección por clic en la fila. Al clickear
+        # una fila, la tabla queda con la fila resaltada y desplegamos abajo
+        # el detalle de correctivos + preventivos de esa estación.
+        st.caption("👉 Haz clic en cualquier fila para ver el detalle de esa estación abajo.")
+        _tabla_sel = st.dataframe(
+            _df_display.reset_index(drop=True),
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"lst_tabla_sel_{_ck}",
             column_config={
                 "Cód. Aramco":       st.column_config.TextColumn(width=95,
                     help="Código oficial de Aramco/Esmax (EE_S###)"),
@@ -6036,27 +6046,30 @@ elif _page == _NAV_PAGES[3]:
         # ══════════════════════════════════════════════════════════════════
         # Detalle de una EDS: correctivos + preventivos del período con
         # causa raíz, tipo de falla y comentario del técnico.
+        # Se activa cuando el usuario clickea una fila de la tabla arriba.
         # ══════════════════════════════════════════════════════════════════
-        st.markdown("---")
-        st.markdown(
-            f'<div style="font-weight:700;font-size:0.95rem;margin:12px 0 8px 0;'
-            f'color:{_t["text"]};">🔍  Detalle por estación</div>',
-            unsafe_allow_html=True,
-        )
-        _cod_opts = _df_display["Cód. Occim"].astype(str).tolist() if "Cód. Occim" in _df_display.columns else []
-        # Mapa código → nombre para etiqueta amigable en el selector
-        _cod_to_name = {}
-        if "Cód. Occim" in _df_display.columns and "Nombre / Dirección" in _df_display.columns:
-            _cod_to_name = dict(zip(
-                _df_display["Cód. Occim"].astype(str),
-                _df_display["Nombre / Dirección"].astype(str),
-            ))
-        _sel_eds_det = st.selectbox(
-            "Selecciona una estación para ver su detalle",
-            options=[""] + _cod_opts,
-            format_func=lambda c: "— Elige una estación —" if not c else f"{c} · {_cod_to_name.get(c,'')}",
-            key=f"lst_detalle_{_ck}",
-        )
+        _sel_rows = (_tabla_sel.selection.rows
+                     if _tabla_sel is not None and hasattr(_tabla_sel, "selection")
+                     else [])
+        _sel_eds_det = ""
+        if _sel_rows and "Cód. Occim" in _df_display.columns:
+            _row_idx = int(_sel_rows[0])
+            _df_ord = _df_display.reset_index(drop=True)
+            if 0 <= _row_idx < len(_df_ord):
+                _sel_eds_det = str(_df_ord.iloc[_row_idx]["Cód. Occim"])
+
+        if _sel_eds_det:
+            st.markdown("---")
+            _nom_sel = ""
+            if "Nombre / Dirección" in _df_display.columns:
+                _df_ord2 = _df_display.reset_index(drop=True)
+                _nom_sel = str(_df_ord2.iloc[int(_sel_rows[0])].get("Nombre / Dirección","") or "")
+            st.markdown(
+                f'<div style="font-weight:700;font-size:0.95rem;margin:12px 0 8px 0;'
+                f'color:{_t["text"]};">🔍  Detalle — {_sel_eds_det} · '
+                f'<span style="color:{_t["muted"]};font-weight:400;">{_nom_sel}</span></div>',
+                unsafe_allow_html=True,
+            )
         if _sel_eds_det:
             # ── Correctivos (df_ll_f = llamados filtrados por período) ────
             _det_corr = pd.DataFrame()
