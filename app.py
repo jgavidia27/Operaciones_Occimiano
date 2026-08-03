@@ -16019,15 +16019,21 @@ elif _page == _NAV_PAGES[2]:
                 _dfr["_dur_disp"] = "—"
 
             # ── Consolidar subtareas por OT ─────────────────────────────────
-            # df_num_sub: 1 fila por (id_ot, id_work_order_task/activo).
+            # numerales_subtarea: 1 fila por (id_ot, id_work_order_task/activo).
             # Un equipo se cuenta como "OK" si el formulario tiene numeral y
             # el numeral_ok es True. Los equipos sin numeral requerido (ej.
             # ficheros, ablandadores) no penalizan → solo se cuentan si
             # form_tiene_numeral es True (que es el filtro del propio sync).
+            @st.cache_data(ttl=300, show_spinner=False)
+            def _load_num_sub_mp():
+                from supabase_client import load_numerales_subtarea_supabase
+                return load_numerales_subtarea_supabase()
+            _df_num_sub_mp = _load_num_sub_mp()
+
             _resumen_por_ot = {}
             _flowey_por_ot  = {}
-            if df_num_sub is not None and not df_num_sub.empty:
-                _sub = df_num_sub[df_num_sub["id_ot"].isin(_dfr["id_ot"].astype(str))].copy()
+            if _df_num_sub_mp is not None and not _df_num_sub_mp.empty:
+                _sub = _df_num_sub_mp[_df_num_sub_mp["id_ot"].isin(_dfr["id_ot"].astype(str))].copy()
                 if not _sub.empty:
                     for _fol, _grp in _sub.groupby("id_ot"):
                         _n_total = len(_grp)
