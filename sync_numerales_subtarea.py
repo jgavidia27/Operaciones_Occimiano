@@ -159,6 +159,12 @@ def fetch_subtareas_numeral(folio: str) -> list:
             #   • ¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS…?    → lista (SI/NO/parcial…)
             "flowey_utiliza":         None,
             "flowey_diluido_agua":    None,
+            # Preguntas FICHERO (todos los clientes, planes con equipo
+            # FICHERO — Aramco/Copec/Shell — a partir del 2026-07-31):
+            #   • ¿EL FICHERO ACEPTA MONEDAS?               → lista (SI/NO/parcial)
+            #   • SI EL FICHERO FALLÓ, ¿SE REALIZÓ CAMBIO?  → lista (SI/NO/N/A)
+            "fichero_acepta_monedas": None,
+            "fichero_cambio":         None,
             "fecha_inicio_subtarea":  s.get("initial_date"),
             "fecha_fin_subtarea":     s.get("final_date"),
         }
@@ -264,6 +270,28 @@ def fetch_subtareas_numeral(folio: str) -> list:
                             idx[kid]["flowey_utiliza"] = val[:20]
                     elif "DILUID" in desc or "AGUA" in desc:
                         idx[kid]["flowey_diluido_agua"] = val[:40]
+            elif "FICHERO" in desc and ("ACEPTA" in desc and "MONEDA" in desc):
+                # "¿EL FICHERO ACEPTA MONEDAS?" — todos los clientes,
+                # planes con equipo FICHERO, plantilla actualizada 2026-07-31.
+                if not val_empty:
+                    _v = val.lower()
+                    if _v in ("true", "si", "sí", "yes", "1"):
+                        idx[kid]["fichero_acepta_monedas"] = "SI"
+                    elif _v in ("false", "no", "0"):
+                        idx[kid]["fichero_acepta_monedas"] = "NO"
+                    else:
+                        idx[kid]["fichero_acepta_monedas"] = val[:30]
+            elif "FICHERO" in desc and (("FALL" in desc and ("CAMBIO" in desc or "REALIZ" in desc))
+                                         or ("SE REALIZ" in desc and "CAMBIO" in desc)):
+                # "SI EL FICHERO FALLÓ, ¿SE REALIZÓ CAMBIO?" — todos los clientes.
+                if not val_empty:
+                    _v = val.lower()
+                    if _v in ("true", "si", "sí", "yes", "1"):
+                        idx[kid]["fichero_cambio"] = "SI"
+                    elif _v in ("false", "no", "0"):
+                        idx[kid]["fichero_cambio"] = "NO"
+                    else:
+                        idx[kid]["fichero_cambio"] = val[:30]
 
     # 3) Persistimos TODAS las subtareas ejecutadas (task_status != NO_STARTED,
     #    ya filtrado arriba). Antes solo guardábamos las que tenían campos
@@ -320,6 +348,8 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "cubre_fichero":         r.get("cubre_fichero"),
             "flowey_utiliza":        r.get("flowey_utiliza"),
             "flowey_diluido_agua":   r.get("flowey_diluido_agua"),
+            "fichero_acepta_monedas": r.get("fichero_acepta_monedas"),
+            "fichero_cambio":         r.get("fichero_cambio"),
             "task_status":           r.get("task_status"),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
             "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
@@ -342,7 +372,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             # not exist".
             if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text
                                          or "cubre_fichero" in r.text or "flowey_" in r.text
-                                         or "task_status" in r.text):
+                                         or "task_status" in r.text or "fichero_" in r.text):
                 for rec in payload:
                     rec.pop("form_tiene_bomba", None)
                     rec.pop("form_tiene_consumo", None)
@@ -352,6 +382,8 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     rec.pop("cubre_fichero", None)
                     rec.pop("flowey_utiliza", None)
                     rec.pop("flowey_diluido_agua", None)
+                    rec.pop("fichero_acepta_monedas", None)
+                    rec.pop("fichero_cambio", None)
                     rec.pop("task_status", None)
                 r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
                 if r2.status_code in (200, 201, 204):

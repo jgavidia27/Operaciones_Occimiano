@@ -16187,6 +16187,108 @@ elif _page == _NAV_PAGES[2]:
                 _mk3.metric("Completitud promedio", f"{_avg_compl}%",
                             help="Promedio del % de equipos OK por OT")
 
+            # ══════════════════════════════════════════════════════════════
+            # 📌 Registros relevantes — Ficheros
+            # Bloque debajo del detalle general. Aplica a todos los clientes
+            # (Aramco/Copec/Shell). Muestra respuestas a las 2 nuevas
+            # preguntas del checklist agregadas el 2026-07-31:
+            #   • ¿EL FICHERO ACEPTA MONEDAS?
+            #   • SI EL FICHERO FALLÓ, ¿SE REALIZÓ CAMBIO?
+            # Objetivo: detectar EDS con ficheros defectuosos y saber si el
+            # técnico ya realizó el cambio.
+            # ══════════════════════════════════════════════════════════════
+            _FICHERO_DESDE = pd.Timestamp("2026-07-31")
+            if (_df_num_sub_mp is not None and not _df_num_sub_mp.empty
+                    and "fichero_acepta_monedas" in _df_num_sub_mp.columns):
+                _sub_fich = _df_num_sub_mp[
+                    _df_num_sub_mp["id_ot"].isin(_dfr["id_ot"].astype(str))
+                    & (_df_num_sub_mp["fichero_acepta_monedas"].notna()
+                       | _df_num_sub_mp["fichero_cambio"].notna())
+                ].copy()
+                # Solo OTs finalizadas desde 2026-07-31
+                _map_ot = _dfr.set_index(_dfr["id_ot"].astype(str))[[
+                    "cliente","codigo_eds","estacion","responsable","fecha_finalizacion",
+                    "plan_tareas"
+                ]].to_dict("index")
+                _rows_fich = []
+                for _, _r in _sub_fich.iterrows():
+                    _fol = str(_r.get("id_ot",""))
+                    _meta = _map_ot.get(_fol)
+                    if not _meta:
+                        continue
+                    _ff = pd.to_datetime(_meta.get("fecha_finalizacion"),
+                                         errors="coerce", utc=True)
+                    if pd.isna(_ff) or _ff.tz_convert("America/Santiago").tz_localize(None) < _FICHERO_DESDE:
+                        continue
+                    _acepta = _r.get("fichero_acepta_monedas")
+                    _cambio = _r.get("fichero_cambio")
+                    if pd.isna(_acepta) and pd.isna(_cambio):
+                        continue
+                    # Icono según respuesta
+                    def _ico(v):
+                        if v is None or (isinstance(v, float) and pd.isna(v)):
+                            return "—"
+                        vs = str(v).strip().upper()
+                        if vs == "SI":  return "✅ Sí"
+                        if vs == "NO":  return "❌ No"
+                        return str(v)
+                    _rows_fich.append({
+                        "Cliente":    str(_meta.get("cliente","") or "—"),
+                        "Fecha":      _ff.tz_convert("America/Santiago").strftime("%d/%m/%Y") if pd.notna(_ff) else "—",
+                        "N° OT":      _fol,
+                        "EDS":        str(_meta.get("codigo_eds","") or _meta.get("estacion","") or "—"),
+                        "Técnico":    str(_meta.get("responsable","") or "—"),
+                        "Equipo (fichero)": str(_r.get("nombre_activo","") or "—"),
+                        "¿Acepta monedas?":   _ico(_acepta),
+                        "¿Se realizó cambio?": _ico(_cambio),
+                    })
+
+                st.markdown("---")
+                st.markdown(
+                    '<div class="section-header">'
+                    '📌  Registros relevantes — Ficheros'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "Respuestas al checklist de ficheros (nuevas preguntas "
+                    "agregadas el 31-07-2026): permite detectar EDS con "
+                    "ficheros que no aceptan monedas y saber si el técnico "
+                    "ya realizó el cambio. Aplica a todos los clientes "
+                    "(Aramco, Copec, Shell) para OTs finalizadas desde esa fecha."
+                )
+                if not _rows_fich:
+                    st.info(
+                        "Aún no hay registros con respuestas de fichero para las "
+                        "OTs del filtro actual. Aparecerán aquí conforme los "
+                        "técnicos completen las nuevas preguntas del checklist."
+                    )
+                else:
+                    _df_fich = pd.DataFrame(_rows_fich)
+                    # Alerta: cuenta cuántos ficheros no aceptan monedas
+                    _no_acep = int((_df_fich["¿Acepta monedas?"] == "❌ No").sum())
+                    _cambios = int((_df_fich["¿Se realizó cambio?"] == "✅ Sí").sum())
+                    _fk1, _fk2, _fk3 = st.columns(3)
+                    _fk1.metric("Registros", f"{len(_df_fich):,}")
+                    _fk2.metric("Ficheros no aceptan monedas", f"{_no_acep}",
+                                help="Cantidad de ficheros reportados como NO aceptan monedas")
+                    _fk3.metric("Cambios realizados", f"{_cambios}",
+                                help="Ficheros donde el técnico ya realizó el cambio tras la falla")
+                    _show_df(_df_fich.reset_index(drop=True), hide_index=True,
+                             width="stretch",
+                             column_config={
+                                 "Cliente":            st.column_config.TextColumn(width=100),
+                                 "Fecha":              st.column_config.TextColumn(width=95),
+                                 "N° OT":              st.column_config.TextColumn(width=95),
+                                 "EDS":                st.column_config.TextColumn(width=100),
+                                 "Técnico":            st.column_config.TextColumn(width=180),
+                                 "Equipo (fichero)":   st.column_config.TextColumn(width=200),
+                                 "¿Acepta monedas?":   st.column_config.TextColumn(width=130,
+                                     help="Respuesta a '¿EL FICHERO ACEPTA MONEDAS?'"),
+                                 "¿Se realizó cambio?": st.column_config.TextColumn(width=140,
+                                     help="Respuesta a 'SI EL FICHERO FALLÓ, ¿SE REALIZÓ CAMBIO?'"),
+                             })
+
     # Bloque legacy 'No Realizadas' eliminado (pedido de operaciones 2026-08-03).
     # El respaldo documental de EDS no atendidas se lleva en el Excel externo
     # 'UTILIZACIÓN DE TIEMPO'; el dashboard ya no lo replica.
