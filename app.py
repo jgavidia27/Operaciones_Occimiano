@@ -106,6 +106,40 @@ _COMENT_HEADER_RE = _re.compile(
     flags=_re.IGNORECASE,
 )
 
+# ══════════════════════════════════════════════════════════════════════
+# Mapeo oficial de zonas Aramco/Esmax (37 EDS con actividad en 2026).
+# Copec y Shell usan otra lógica (prefijo de código o comuna) — este mapa
+# aplica ÚNICAMENTE a Aramco, donde el negocio maneja 4 zonas separadas.
+# ══════════════════════════════════════════════════════════════════════
+_ARAMCO_ZONAS = {
+    # NORTE (15)
+    "EE_S003": "Norte", "EE_S032": "Norte", "EE_S043": "Norte",
+    "EE_S045": "Norte", "EE_S048": "Norte", "EE_S051": "Norte",
+    "EE_S109": "Norte", "EE_S189": "Norte", "EE_S195": "Norte",
+    "EE_S200": "Norte", "EE_S228": "Norte", "EE_S232": "Norte",
+    "EE_S250": "Norte", "EE_S268": "Norte", "EE_S300": "Norte",
+    # CENTRO (9) — se refiere a "Centro" geográfico (no Santiago)
+    "EE_S005": "Centro", "EE_S050": "Centro", "EE_S124": "Centro",
+    "EE_S186": "Centro", "EE_S203": "Centro", "EE_S251": "Centro",
+    "EE_S272": "Centro", "EE_S307": "Centro", "EE_S341": "Centro",
+    # SANTIAGO (10) — RM
+    "EE_S016": "Santiago", "EE_S018": "Santiago", "EE_S038": "Santiago",
+    "EE_S058": "Santiago", "EE_S163": "Santiago", "EE_S165": "Santiago",
+    "EE_S205": "Santiago", "EE_S229": "Santiago", "EE_S263": "Santiago",
+    "EE_S274": "Santiago",
+    # SUR (3)
+    "EE_S179": "Sur", "EE_S185": "Sur", "EE_S293": "Sur",
+}
+
+def _zona_aramco(codigo) -> str | None:
+    """Devuelve la zona Aramco (Norte/Centro/Santiago/Sur) o None si el
+    código no está en el mapa. Acepta EE_S### directo o busca en catálogo."""
+    if not codigo:
+        return None
+    c = str(codigo).strip().upper()
+    return _ARAMCO_ZONAS.get(c)
+
+
 def _strip_comentario_headers(txt) -> str:
     s = str(txt or "").strip()
     if not s or s == "—":
@@ -1883,15 +1917,25 @@ if _page == _NAV_PAGES[1]:
             with cf5:
                 sel_cu_c = st.selectbox("Cumplimiento SLA", ["Todos","CUMPLE","NO CUMPLE"], key="cl_cu")
             with cf6:
-                # COPEC usa su propia distribución por prefijo del código EDS
-                # (20→Sur, 40→Centro, 60→Santiago). Otros clientes usan la
-                # segmentación geográfica genérica Norte/Centro (Santiago)/Sur.
-                _es_copec = (sel_cl_c or "").strip().upper() == "COPEC"
-                _zona_opts = ["Santiago", "Centro", "Sur"] if _es_copec \
-                             else ["Centro (Santiago)", "Norte", "Sur"]
+                # Zonificación por cliente:
+                #   COPEC  → por prefijo eds_occim: 20→Sur, 40→Centro, 60→Santiago
+                #   ARAMCO → 4 zonas oficiales: Norte / Centro / Santiago / Sur
+                #   SHELL/otros → 3 zonas geográficas: Norte / Centro (Santiago) / Sur
+                _cli_up = (sel_cl_c or "").strip().upper()
+                _es_copec = _cli_up == "COPEC"
+                _es_aramco = "ARAMCO" in _cli_up or "ESMAX" in _cli_up
+                if _es_copec:
+                    _zona_opts = ["Santiago", "Centro", "Sur"]
+                    _zona_key = "copec"
+                elif _es_aramco:
+                    _zona_opts = ["Norte", "Centro", "Santiago", "Sur"]
+                    _zona_key = "aramco"
+                else:
+                    _zona_opts = ["Centro (Santiago)", "Norte", "Sur"]
+                    _zona_key = "gen"
                 sel_zona_c = st.multiselect(
                     "Zona", _zona_opts,
-                    key=f"cl_zona_{'copec' if _es_copec else 'gen'}",
+                    key=f"cl_zona_{_zona_key}",
                     placeholder="Todas las zonas",
                 )
 
@@ -1907,12 +1951,34 @@ if _page == _NAV_PAGES[1]:
             _eds_nombre_col = df_ll.get("eds_nombre", pd.Series("", index=df_ll.index)).fillna("")
             _comuna_col    = df_ll.get("comuna",    pd.Series("", index=df_ll.index)).fillna("")
 
+            # Mapa PBR→EE_S del catálogo Aramco (para traducir códigos Occim
+            # a códigos oficiales antes de mapear a las 4 zonas)
+            _pbr_to_ees_map = {}
+            try:
+                _cat_ar = df_eds[df_eds["cliente"].astype(str).str.upper().str.contains(
+                    "ARAMCO|ESMAX", na=False, regex=True)]
+                for _, _r in _cat_ar.iterrows():
+                    _eo = str(_r.get("eds_occim") or "").strip()
+                    _er = _r.get("eds_occim_raw") or _r.get("_cod_occim_frac")
+                    _er = str(_er).strip() if _er else ""
+                    if _eo.startswith("PBR") and _er.startswith("EE_S"):
+                        _pbr_to_ees_map[_eo] = _er
+            except Exception:
+                pass
+
             def _zona_row(cli, edsocc, edsnom, com):
-                if str(cli or "").strip().upper() == "COPEC":
+                cu = str(cli or "").strip().upper()
+                if cu == "COPEC":
                     z = _zona_copec(edsocc)
                     if z is not None:
                         return z
-                    # fallback si no hay eds_occim: usar la lógica geográfica
+                if "ARAMCO" in cu or "ESMAX" in cu:
+                    e = str(edsocc or "").strip()
+                    ees = e if e.startswith("EE_S") else _pbr_to_ees_map.get(e)
+                    z = _zona_aramco(ees)
+                    if z is not None:
+                        return z
+                # fallback: usar la lógica geográfica genérica
                 return _macrozona_ll(edsnom, com)
 
             df_ll["_macrozona"] = [
@@ -2615,9 +2681,39 @@ if _page == _NAV_PAGES[1]:
                 _nom_disp = (_df_sla_ot.get("eds_nombre", pd.Series("", index=_df_sla_ot.index))
                                        .fillna(""))
                 _com_disp = _df_sla_ot["ciudad"].fillna("")
+                # Para Aramco usamos el mapa oficial de 4 zonas
+                # (Norte/Centro/Santiago/Sur). Si el eds_occim es PBR, buscamos
+                # el EE_S### equivalente en el catálogo.
+                _pbr_to_ees_z = {}
+                try:
+                    _cat_ar = df_eds[df_eds["cliente"].astype(str).str.upper().str.contains(
+                        "ARAMCO|ESMAX", na=False, regex=True)]
+                    for _, _r in _cat_ar.iterrows():
+                        _eo = str(_r.get("eds_occim") or "").strip()
+                        _er = _r.get("eds_occim_raw") or _r.get("_cod_occim_frac")
+                        _er = str(_er).strip() if _er else ""
+                        if _eo.startswith("PBR") and _er.startswith("EE_S"):
+                            _pbr_to_ees_z[_eo] = _er
+                except Exception:
+                    pass
+
+                def _zona_final(cl, eo, en, co):
+                    cl_up = str(cl or "").strip().upper()
+                    if cl_up == "COPEC":
+                        z = _zona_copec(eo)
+                        if z is not None:
+                            return z
+                    if "ARAMCO" in cl_up or "ESMAX" in cl_up:
+                        # Resolver EE_S (directo o traducido de PBR)
+                        e = str(eo or "").strip()
+                        ees = e if e.startswith("EE_S") else _pbr_to_ees_z.get(e)
+                        z = _zona_aramco(ees)
+                        if z is not None:
+                            return z
+                    return _macrozona_ll(en, co)
+
                 _df_sla_ot["zona_display"] = [
-                    (_zona_copec(eo) if str(cl or "").strip().upper() == "COPEC" and _zona_copec(eo) is not None
-                     else _macrozona_ll(en, co))
+                    _zona_final(cl, eo, en, co)
                     for cl, eo, en, co in zip(_cli_disp, _eds_occ_disp, _nom_disp, _com_disp)
                 ]
                 _df_sla_ot["ciudad"] = _df_sla_ot["ciudad"].replace("", "—")
@@ -5785,6 +5881,10 @@ elif _page == _NAV_PAGES[3]:
                 return e or "—"
             _df_tbl["cod_aramco"] = _df_tbl.apply(_cod_aramco, axis=1)
             _df_tbl["cod_occim_pbr"] = _df_tbl.apply(_cod_occim_pbr, axis=1)
+            # Zona oficial Aramco (Norte/Centro/Santiago/Sur) del mapa fijo
+            _df_tbl["zona_aramco"] = _df_tbl["cod_aramco"].map(
+                lambda ees: _zona_aramco(ees) or "—"
+            )
 
         # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío;
         # y 'Dirección' porque en Shell/Aramco/Copec 'nombre' == 'direccion',
@@ -5796,6 +5896,7 @@ elif _page == _NAV_PAGES[3]:
                 "nombre":            "Nombre / Dirección",
                 "comuna":            "Comuna",
                 "region":            "Región",
+                "zona_aramco":       "Zona",
                 "ordenes_atendidas": "Órdenes atendidas",
                 "correctivas":       "Correctivas",
                 "preventivas":       "Preventivas",
@@ -5866,6 +5967,8 @@ elif _page == _NAV_PAGES[3]:
                 "Nombre / Dirección":st.column_config.TextColumn(width=280),
                 "Comuna":            st.column_config.TextColumn(width=110),
                 "Región":            st.column_config.TextColumn(width=70),
+                "Zona":              st.column_config.TextColumn(width=95,
+                    help="Zona oficial Aramco: Norte / Centro / Santiago / Sur"),
                 "Órdenes atendidas": st.column_config.NumberColumn(format="%d", width=90,
                     help="Correctivas + Preventivas realizadas en el período seleccionado"),
                 "Correctivas":       st.column_config.NumberColumn(format="%d", width=90,
