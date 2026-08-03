@@ -16028,12 +16028,18 @@ elif _page == _NAV_PAGES[2]:
             else:
                 _dfr["_dur_disp"] = "—"
 
-            # ── Consolidar subtareas por OT ─────────────────────────────────
+            # ── Consolidar subtareas (planes) por OT ────────────────────────
             # numerales_subtarea: 1 fila por (id_ot, id_work_order_task/activo).
-            # Un equipo se cuenta como "OK" si el formulario tiene numeral y
-            # el numeral_ok es True. Los equipos sin numeral requerido (ej.
-            # ficheros, ablandadores) no penalizan → solo se cuentan si
-            # form_tiene_numeral es True (que es el filtro del propio sync).
+            # Cada fila representa un PLAN DE TAREAS ejecutado dentro de la OT
+            # (lavadora, aspiradora, fichero, ablandador, termo, etc.).
+            #
+            # Total  = planes ejecutados (task_status != NO_STARTED, ya excluido).
+            # OK     = plan considerado completo:
+            #   • Si el plan tiene numeral (lavadora/aspiradora): numeral_ok=True.
+            #   • Si el plan NO tiene numeral (fichero, ablandador, termo):
+            #       task_status == 'DONE'  (subtarea finalizada).
+            #   Compat retro: si task_status aún no existe (sync viejo) →
+            #   consideramos OK a los con numeral_ok=True.
             @st.cache_data(ttl=300, show_spinner=False)
             def _load_num_sub_mp():
                 from supabase_client import load_numerales_subtarea_supabase
@@ -16045,11 +16051,26 @@ elif _page == _NAV_PAGES[2]:
             if _df_num_sub_mp is not None and not _df_num_sub_mp.empty:
                 _sub = _df_num_sub_mp[_df_num_sub_mp["id_ot"].isin(_dfr["id_ot"].astype(str))].copy()
                 if not _sub.empty:
+                    _has_task_status = "task_status" in _sub.columns
+                    _has_form_num    = "form_tiene_numeral" in _sub.columns
                     for _fol, _grp in _sub.groupby("id_ot"):
                         _n_total = len(_grp)
-                        _n_ok    = int(_grp["numeral_ok"].fillna(False).astype(bool).sum())
+                        # Marcar cada subtarea como OK
+                        def _es_ok(r):
+                            _con_num  = bool(r.get("form_tiene_numeral")) if _has_form_num else True
+                            _num_ok   = bool(r.get("numeral_ok")) if pd.notna(r.get("numeral_ok")) else False
+                            _t_status = str(r.get("task_status") or "").upper() if _has_task_status else ""
+                            if _con_num:
+                                return _num_ok
+                            # Sin numeral: DONE = OK. Compat retro: si no
+                            # tenemos task_status, asumimos OK (evitaba
+                            # penalizar planes sin numeral pre-migración).
+                            if _t_status:
+                                return _t_status == "DONE"
+                            return True
+                        _oks = _grp.apply(_es_ok, axis=1)
+                        _n_ok = int(_oks.sum())
                         _equipos = _grp["nombre_activo"].dropna().astype(str).tolist()
-                        # Descripciones cortas de equipos: primer token si repetido
                         _equipos_short = ", ".join(sorted(set(_equipos))[:4])
                         if len(set(_equipos)) > 4:
                             _equipos_short += f" +{len(set(_equipos))-4}"
@@ -16062,9 +16083,9 @@ elif _page == _NAV_PAGES[2]:
                         }
                         # Observación derivada
                         if _n_total == _n_ok:
-                            _obs = f"✅ {_n_ok}/{_n_total} equipos completos"
+                            _obs = f"✅ {_n_ok}/{_n_total} planes completos"
                         else:
-                            _obs = f"⚠️ {_n_ok}/{_n_total} equipos OK ({_pct}%)"
+                            _obs = f"⚠️ {_n_ok}/{_n_total} planes OK ({_pct}%)"
                         _resumen_por_ot[_fol]["obs"] = _obs
                         # FLOWEY (Aramco): primera respuesta no vacía entre los activos
                         if "flowey_utiliza" in _grp.columns:
@@ -16094,7 +16115,7 @@ elif _page == _NAV_PAGES[2]:
                     "Técnico":       str(_r.get("responsable", "") or "—"),
                     "Duración":      _r["_dur_disp"],
                     "Dentro plazo":  "✅ Sí" if _r["_dentro_plazo"] else "❌ No",
-                    "Equipos":       _res["equipos"],
+                    "Planes ejecutados": _res["equipos"],
                     "OK / Total":    f'{_res["n_ok"]} / {_res["n_total"]}',
                     "% Completitud": _res["pct"],
                     "Observación":   _res["obs"],
@@ -16120,8 +16141,8 @@ elif _page == _NAV_PAGES[2]:
                 _df_out = pd.DataFrame(_rows_out)
                 # Reordenar: si hay col FLOWEY, dejarlas al final
                 _cols_base = ["Cliente","Fecha finaliz.","N° OT","EDS","Técnico",
-                              "Duración","Dentro plazo","Equipos","OK / Total",
-                              "% Completitud","Observación","Plan"]
+                              "Duración","Dentro plazo","Planes ejecutados",
+                              "OK / Total","% Completitud","Observación","Plan"]
                 _cols_flow = [c for c in ("FLOWEY utiliza","FLOWEY diluido agua")
                               if c in _df_out.columns]
                 _df_out = _df_out[[c for c in _cols_base if c in _df_out.columns] + _cols_flow]
@@ -16135,14 +16156,16 @@ elif _page == _NAV_PAGES[2]:
                     "Duración":       st.column_config.TextColumn(width=85),
                     "Dentro plazo":   st.column_config.TextColumn(width=100,
                         help="✅ Sí = fecha_finalización ≤ fecha_programada"),
-                    "Equipos":        st.column_config.TextColumn(width=220,
-                        help="Equipos incluidos en el plan de esta OT"),
+                    "Planes ejecutados": st.column_config.TextColumn(width=240,
+                        help="Planes/subtareas ejecutadas en esta OT (lavadora, aspiradora, "
+                             "fichero, ablandador, termo, etc.)."),
                     "OK / Total":     st.column_config.TextColumn(width=85,
-                        help="Equipos con numeral válido / equipos totales del plan"),
+                        help="Planes completos / planes ejecutados. Un plan es OK si su "
+                             "subtarea quedó DONE (o si tiene numeral, cuando el numeral es válido)."),
                     "% Completitud":  st.column_config.ProgressColumn(
                         label="% Completitud",
                         min_value=0, max_value=100, format="%d%%",
-                        help="% de equipos del plan que quedaron OK. Ej: 3/4 = 75%"),
+                        help="% de planes ejecutados que quedaron OK. Ej: 3/4 = 75%"),
                     "Observación":    st.column_config.TextColumn(width=210),
                     "Plan":           st.column_config.TextColumn(width=220),
                     "FLOWEY utiliza": st.column_config.TextColumn(width=110,

@@ -128,6 +128,10 @@ def fetch_subtareas_numeral(folio: str) -> list:
             "codigo_activo":      s.get("code"),
             "nombre_activo":      (s.get("items_log_description") or "").strip(),
             "tipo_activo":        _tipo_activo(s.get("items_log_description") or ""),
+            # Estado de la subtarea (plan del checklist): DONE, IN_PROGRESS,
+            # PENDING, etc. Se usa para el conteo de planes ejecutados por
+            # OT en la pestaña 'Realizadas' (planes completos vs iniciados).
+            "task_status":        str(s.get("task_status", "")).upper() or None,
             "numeral_inicial":    None,
             "numeral_final":      None,
             "form_tiene_numeral": False,
@@ -261,14 +265,14 @@ def fetch_subtareas_numeral(folio: str) -> list:
                     elif "DILUID" in desc or "AGUA" in desc:
                         idx[kid]["flowey_diluido_agua"] = val[:40]
 
-    # 3) Filtrar: solo subtareas cuyo formulario tiene campos NUMERAL.
-    #    Subtareas duplicadas del mismo equipo con plantilla sin numeral
-    #    quedan excluidas (no penalizan al técnico).
-    out = []
-    for kid, row in idx.items():
-        if row["form_tiene_numeral"]:
-            out.append(row)
-    return out
+    # 3) Persistimos TODAS las subtareas ejecutadas (task_status != NO_STARTED,
+    #    ya filtrado arriba). Antes solo guardábamos las que tenían campos
+    #    NUMERAL — pero eso hacía que 'Realizadas' contara 2/4 planes cuando
+    #    la OT tenía 4 subtareas (lavadora+aspiradora+fichero+ablandador).
+    #    Las vistas de scoring de numeral (Precisión Fracttal, ranking Shell)
+    #    siguen intactas porque filtran internamente por tipo_activo /
+    #    form_tiene_numeral / numeral_ok.
+    return list(idx.values())
 
 
 def evaluar_calidad(row: dict) -> tuple:
@@ -316,6 +320,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "cubre_fichero":         r.get("cubre_fichero"),
             "flowey_utiliza":        r.get("flowey_utiliza"),
             "flowey_diluido_agua":   r.get("flowey_diluido_agua"),
+            "task_status":           r.get("task_status"),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
             "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
             "updated_at":         datetime.now(timezone.utc).isoformat(),
@@ -336,7 +341,8 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             # compat). Detectamos por el mensaje PGRST204 "column ... does
             # not exist".
             if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text
-                                         or "cubre_fichero" in r.text or "flowey_" in r.text):
+                                         or "cubre_fichero" in r.text or "flowey_" in r.text
+                                         or "task_status" in r.text):
                 for rec in payload:
                     rec.pop("form_tiene_bomba", None)
                     rec.pop("form_tiene_consumo", None)
@@ -346,6 +352,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     rec.pop("cubre_fichero", None)
                     rec.pop("flowey_utiliza", None)
                     rec.pop("flowey_diluido_agua", None)
+                    rec.pop("task_status", None)
                 r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
                 if r2.status_code in (200, 201, 204):
                     return len(payload), 0

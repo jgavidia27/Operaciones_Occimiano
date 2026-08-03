@@ -282,7 +282,7 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
             "consumo_shampoo_pct,consumo_cera_pct,consumo_cepillo_pct,"
             "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
             "form_tiene_produccion,cubre_fichero,"
-            "flowey_utiliza,flowey_diluido_agua,"
+            "flowey_utiliza,flowey_diluido_agua,task_status,"
             "fecha_inicio_subtarea,fecha_fin_subtarea"
             "&order=id_ot.desc",
             limit=20_000,
