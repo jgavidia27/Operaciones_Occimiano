@@ -5984,6 +5984,175 @@ elif _page == _NAV_PAGES[3]:
                 "Último Técnico":    st.column_config.TextColumn(width=160),
             })
 
+        # ══════════════════════════════════════════════════════════════════
+        # Detalle de una EDS: correctivos + preventivos del período con
+        # causa raíz, tipo de falla y comentario del técnico.
+        # ══════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.markdown(
+            f'<div style="font-weight:700;font-size:0.95rem;margin:12px 0 8px 0;'
+            f'color:{_t["text"]};">🔍  Detalle por estación</div>',
+            unsafe_allow_html=True,
+        )
+        _cod_opts = _df_display["Cód. Occim"].astype(str).tolist() if "Cód. Occim" in _df_display.columns else []
+        # Mapa código → nombre para etiqueta amigable en el selector
+        _cod_to_name = {}
+        if "Cód. Occim" in _df_display.columns and "Nombre / Dirección" in _df_display.columns:
+            _cod_to_name = dict(zip(
+                _df_display["Cód. Occim"].astype(str),
+                _df_display["Nombre / Dirección"].astype(str),
+            ))
+        _sel_eds_det = st.selectbox(
+            "Selecciona una estación para ver su detalle",
+            options=[""] + _cod_opts,
+            format_func=lambda c: "— Elige una estación —" if not c else f"{c} · {_cod_to_name.get(c,'')}",
+            key=f"lst_detalle_{_ck}",
+        )
+        if _sel_eds_det:
+            # ── Correctivos (df_ll_f = llamados filtrados por período) ────
+            _det_corr = pd.DataFrame()
+            if not df_ll_f.empty and "eds_occim" in df_ll_f.columns:
+                _det_corr = df_ll_f[df_ll_f["eds_occim"].astype(str) == _sel_eds_det].copy()
+
+            # ── Preventivas (df_pm_f = preventivas filtradas por período) ─
+            _det_prev = pd.DataFrame()
+            if not df_pm_f.empty and "eds_occim" in df_pm_f.columns:
+                _det_prev = df_pm_f[df_pm_f["eds_occim"].astype(str) == _sel_eds_det].copy()
+
+            # ── Enriquecer correctivos con causa raíz / tipo falla / comentario
+            # desde df_wo_c (ordenes_trabajo). Match por folio OS-XXXX.
+            _wo_lookup = pd.DataFrame()
+            if not df_wo_c.empty and "folio" in df_wo_c.columns:
+                _cols_wo = [c for c in ("folio","failure_type","failure_cause",
+                                        "comentario_tecnico") if c in df_wo_c.columns]
+                if len(_cols_wo) >= 2:
+                    _wo_lookup = df_wo_c[_cols_wo].drop_duplicates(subset="folio")
+
+            _det_corr_disp = pd.DataFrame()
+            if not _det_corr.empty:
+                # Detectar columna de folio en llamados
+                _fol_col = None
+                for _c in ("os_fracttal","folio","id_ot","n_ot"):
+                    if _c in _det_corr.columns:
+                        _fol_col = _c
+                        break
+                if _fol_col and not _wo_lookup.empty:
+                    _det_corr = _det_corr.merge(
+                        _wo_lookup, left_on=_fol_col, right_on="folio", how="left"
+                    )
+                _det_corr_disp = _det_corr.copy()
+                _det_corr_disp["Fecha"] = pd.to_datetime(
+                    _det_corr_disp.get("fecha_llamado"), errors="coerce"
+                ).dt.strftime("%d/%m/%Y").fillna("—")
+                # Limpiar prefijos "01.5.- ERROR ..." en tipo y causa
+                import re as _re_c
+                def _limp(v):
+                    if v is None or (isinstance(v, float) and pd.isna(v)): return "—"
+                    s = _re_c.sub(r"^\d+(?:\.\d+)?\.-?\s*", "", str(v)).strip()
+                    return s or "—"
+                _det_corr_disp["Tipo falla"] = _det_corr_disp.get(
+                    "failure_type", pd.Series("—", index=_det_corr_disp.index)).apply(_limp)
+                _det_corr_disp["Causa raíz"] = _det_corr_disp.get(
+                    "failure_cause", pd.Series("—", index=_det_corr_disp.index)).apply(_limp)
+                _det_corr_disp["Comentario técnico"] = _det_corr_disp.get(
+                    "comentario_tecnico", pd.Series("—", index=_det_corr_disp.index)
+                ).fillna("").astype(str).replace({"": "—", "None": "—", "nan": "—"})
+                _det_corr_disp = _det_corr_disp.rename(columns={
+                    _fol_col: "N° OT" if _fol_col else "N° OT",
+                    "prioridad":       "Prioridad",
+                    "tecnico":         "Técnico",
+                    "cumplimiento":    "SLA",
+                }) if _fol_col else _det_corr_disp
+                _cols_show_corr = [c for c in ["Fecha","N° OT","Prioridad","Técnico","SLA",
+                                                "Tipo falla","Causa raíz","Comentario técnico"]
+                                    if c in _det_corr_disp.columns]
+                _det_corr_disp = _det_corr_disp[_cols_show_corr].sort_values(
+                    "Fecha", ascending=False) if "Fecha" in _det_corr_disp.columns else _det_corr_disp[_cols_show_corr]
+
+            _det_prev_disp = pd.DataFrame()
+            if not _det_prev.empty:
+                _det_prev_disp = _det_prev.copy()
+                _det_prev_disp["Fecha"] = pd.to_datetime(
+                    _det_prev_disp.get("creation_date"), errors="coerce"
+                ).dt.tz_convert(None).dt.strftime("%d/%m/%Y").fillna("—") \
+                    if "creation_date" in _det_prev_disp.columns else "—"
+                # Enriquecer con comentario del técnico si viene en df_wo_c
+                if "folio" in _det_prev_disp.columns and not _wo_lookup.empty:
+                    _det_prev_disp = _det_prev_disp.merge(
+                        _wo_lookup[["folio","comentario_tecnico"]] if "comentario_tecnico" in _wo_lookup.columns else _wo_lookup[["folio"]],
+                        on="folio", how="left"
+                    )
+                _det_prev_disp["Comentario técnico"] = _det_prev_disp.get(
+                    "comentario_tecnico", pd.Series("—", index=_det_prev_disp.index)
+                ).fillna("").astype(str).replace({"": "—", "None": "—", "nan": "—"})
+                _det_prev_disp = _det_prev_disp.rename(columns={
+                    "folio":       "N° OT",
+                    "technician":  "Técnico",
+                    "plan_tareas": "Plan",
+                    "estado":      "Estado",
+                })
+                _cols_show_prev = [c for c in ["Fecha","N° OT","Plan","Técnico","Estado",
+                                                "Comentario técnico"]
+                                    if c in _det_prev_disp.columns]
+                _det_prev_disp = _det_prev_disp[_cols_show_prev].sort_values(
+                    "Fecha", ascending=False) if "Fecha" in _det_prev_disp.columns else _det_prev_disp[_cols_show_prev]
+
+            _n_corr = len(_det_corr_disp)
+            _n_prev = len(_det_prev_disp)
+            _mk_a, _mk_b = st.columns(2)
+            _mk_a.metric("Correctivos en período", f"{_n_corr}")
+            _mk_b.metric("Preventivas en período", f"{_n_prev}")
+
+            if _n_corr == 0 and _n_prev == 0:
+                st.info(f"La estación **{_sel_eds_det}** no tiene atenciones registradas "
+                        f"en el período seleccionado.")
+            else:
+                # Correctivos
+                st.markdown(
+                    f'<div style="font-weight:700;font-size:0.9rem;margin:14px 0 6px 0;'
+                    f'color:{_t["text"]};">🚨 Correctivos ({_n_corr})</div>',
+                    unsafe_allow_html=True,
+                )
+                if _n_corr == 0:
+                    st.caption("Sin correctivos en el período.")
+                else:
+                    _show_df(_det_corr_disp.reset_index(drop=True), hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "Fecha":              st.column_config.TextColumn(width=95),
+                            "N° OT":              st.column_config.TextColumn(width=95),
+                            "Prioridad":          st.column_config.TextColumn(width=80),
+                            "Técnico":            st.column_config.TextColumn(width=170),
+                            "SLA":                st.column_config.TextColumn(width=105),
+                            "Tipo falla":         st.column_config.TextColumn(width=170,
+                                help="Clasificación administrativa (F.N.A.O./F.A.O./etc)"),
+                            "Causa raíz":         st.column_config.TextColumn(width=220,
+                                help="Causa específica registrada por el técnico"),
+                            "Comentario técnico": st.column_config.TextColumn(width=320,
+                                help="Qué hizo el técnico en terreno (nota de la OT en Fracttal)"),
+                        })
+
+                # Preventivas
+                st.markdown(
+                    f'<div style="font-weight:700;font-size:0.9rem;margin:16px 0 6px 0;'
+                    f'color:{_t["text"]};">🛠️ Preventivas ({_n_prev})</div>',
+                    unsafe_allow_html=True,
+                )
+                if _n_prev == 0:
+                    st.caption("Sin preventivas en el período.")
+                else:
+                    _show_df(_det_prev_disp.reset_index(drop=True), hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "Fecha":              st.column_config.TextColumn(width=95),
+                            "N° OT":              st.column_config.TextColumn(width=95),
+                            "Plan":               st.column_config.TextColumn(width=230),
+                            "Técnico":            st.column_config.TextColumn(width=170),
+                            "Estado":             st.column_config.TextColumn(width=110),
+                            "Comentario técnico": st.column_config.TextColumn(width=320,
+                                help="Qué hizo el técnico en terreno (nota de la OT en Fracttal)"),
+                        })
+
 
     # ════════════════════════════════════════════════════════════════════════
     # PESTAÑA: HISTORIAL DE NUMERALES (global, agrupado por EDS, con buscador)
