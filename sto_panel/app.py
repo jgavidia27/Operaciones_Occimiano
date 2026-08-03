@@ -636,6 +636,56 @@ def render_detalle(codigo_eds: str, periodo: date):
                     placeholder="Acción de fondo para este grupo.",
                     key=f"gs_{codigo_eds}_{g['id']}",
                 )
+
+            # ── Preguntas de seguimiento ─────────────────────────────────
+            _OPC_SOL = ["Sí", "Aún no"]
+            _OPC_CTC = ["Sí", "No"]
+            _OPC_MED = ["Llamada", "Presencial"]
+            _MAP_SOL = {"Sí": "si", "Aún no": "aun_no"}
+            _MAP_CTC = {"Sí": "si", "No": "no"}
+            _MAP_MED = {"Llamada": "llamada", "Presencial": "presencial"}
+            _INV_SOL = {v: k for k, v in _MAP_SOL.items()}
+            _INV_CTC = {v: k for k, v in _MAP_CTC.items()}
+            _INV_MED = {v: k for k, v in _MAP_MED.items()}
+
+            q1, q2 = st.columns(2)
+            with q1:
+                _sol_ini = _INV_SOL.get(g.get("soluciono"))
+                _sol_idx = _OPC_SOL.index(_sol_ini) if _sol_ini in _OPC_SOL else None
+                sol_sel = st.radio(
+                    "¿Se solucionó el problema?",
+                    options=_OPC_SOL, index=_sol_idx, horizontal=True,
+                    disabled=ya_validado,
+                    key=f"gsol_{codigo_eds}_{g['id']}",
+                )
+                g["soluciono"] = _MAP_SOL.get(sol_sel)
+
+            with q2:
+                _ctc_ini = _INV_CTC.get(g.get("contacto_estacion"))
+                _ctc_idx = _OPC_CTC.index(_ctc_ini) if _ctc_ini in _OPC_CTC else None
+                ctc_sel = st.radio(
+                    "¿Se contactó a la estación?",
+                    options=_OPC_CTC, index=_ctc_idx, horizontal=True,
+                    disabled=ya_validado,
+                    key=f"gctc_{codigo_eds}_{g['id']}",
+                )
+                g["contacto_estacion"] = _MAP_CTC.get(ctc_sel)
+
+                # Solo mostrar "¿Por qué medio?" si contacto_estacion == Sí
+                if g.get("contacto_estacion") == "si":
+                    _med_ini = _INV_MED.get(g.get("medio_contacto"))
+                    _med_idx = _OPC_MED.index(_med_ini) if _med_ini in _OPC_MED else None
+                    med_sel = st.radio(
+                        "¿Por qué medio?",
+                        options=_OPC_MED, index=_med_idx, horizontal=True,
+                        disabled=ya_validado,
+                        key=f"gmed_{codigo_eds}_{g['id']}",
+                    )
+                    g["medio_contacto"] = _MAP_MED.get(med_sel)
+                else:
+                    # Si cambió a "No", limpiar el medio
+                    g["medio_contacto"] = None
+
             st.divider()
 
     # ── Acciones ─────────────────────────────────────────────────────────
@@ -665,7 +715,7 @@ def render_detalle(codigo_eds: str, periodo: date):
             errores.append(f"Hay causas repetidas entre grupos: {', '.join(dup)}. "
                            "Cada causa puede usarse una sola vez por EDS.")
 
-        # Grupos: cada uno debe tener ≥1 OT y resumen+solución llenos
+        # Grupos: cada uno debe tener ≥1 OT, textos completos y seguimiento respondido
         for g in grupos:
             n_ots = sum(1 for _, v in asignaciones.items() if v == g["id"])
             _titulo = g.get("nombre") or "(sin motivo)"
@@ -673,6 +723,12 @@ def render_detalle(codigo_eds: str, periodo: date):
                 errores.append(f"**{_titulo}** está vacío — quítalo o asígnale OTs.")
             if not (g.get("resumen") or "").strip() or not (g.get("solucion") or "").strip():
                 errores.append(f"**{_titulo}**: completa resumen y solución.")
+            if not g.get("soluciono"):
+                errores.append(f"**{_titulo}**: responde *¿Se solucionó el problema?*")
+            if not g.get("contacto_estacion"):
+                errores.append(f"**{_titulo}**: responde *¿Se contactó a la estación?*")
+            elif g.get("contacto_estacion") == "si" and not g.get("medio_contacto"):
+                errores.append(f"**{_titulo}**: indica el *medio de contacto* (llamada / presencial).")
 
         if errores:
             for e in errores:
