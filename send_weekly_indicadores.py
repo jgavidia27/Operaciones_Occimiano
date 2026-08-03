@@ -188,8 +188,20 @@ def main():
     mes_label = f"{MESES_ES_LARGO[_mes_num].capitalize()} {_year}"
     sem_iso = _now_chile.isocalendar().week  # nº de semana ISO de HOY en Chile
 
+    # ── Gate por día: este correo solo se envía los LUNES ──────────────
+    # El workflow corre a diario porque los crons semanales de GitHub
+    # Actions saltan disparos con frecuencia (best-effort, no garantía).
+    # Con cron diario tenemos ~20 oportunidades/semana en vez de 3, y
+    # este guard + el dedupe idempotente aseguran envío único los lunes.
+    # weekday(): 0=Lun, 1=Mar, ..., 6=Dom
+    if not args.dry_run and not args.test_email and _now_chile.weekday() != 0:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] "
+              f"═══ SKIP: hoy es {_now_chile.strftime('%A')}, "
+              "el correo se envía solo los lunes ═══", flush=True)
+        return 0
+
     # ── Dedupe idempotente: si ya se envió hoy, salir sin re-enviar ────
-    # Necesario porque el workflow tiene 3 crons escalonados como backup.
+    # Necesario porque el workflow corre a diario y varias veces al día.
     from email_dedupe import ya_enviado_hoy, marcar_enviado_hoy
     if not args.dry_run and not args.test_email and ya_enviado_hoy("weekly_indicadores"):
         print(f"[{datetime.now().strftime('%H:%M:%S')}] "

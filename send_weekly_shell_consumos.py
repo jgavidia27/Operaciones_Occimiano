@@ -1010,7 +1010,17 @@ def main() -> int:
     log(f"Lunes envío: {hoy}  ·  Semana anterior: {semana_ini} → {semana_fin} (ISO {sem_iso})")
     log(f"Mes hilo: {mes_yyyy_mm} ({mes_lbl})")
 
-    # ── Dedupe idempotente (3 crons backup) ──
+    # ── Gate por día: este correo solo se envía los LUNES ──────────────
+    # El workflow corre a diario (los crons semanales de GitHub Actions
+    # saltan disparos con frecuencia — best-effort, no garantía).
+    # dias_desde_lunes 0 = lunes.
+    if (not args.dry_run and not args.test_email and not args.fecha
+            and dias_desde_lunes != 0):
+        log(f"═══ SKIP: hoy es {hoy.strftime('%A')}, "
+            "el correo se envía solo los lunes ═══")
+        return 0
+
+    # ── Dedupe idempotente (cron diario + múltiples horas) ──
     from email_dedupe import ya_enviado_hoy, marcar_enviado_hoy
     if not args.dry_run and not args.test_email and ya_enviado_hoy(
             "shell_consumos", fecha=hoy.strftime("%Y-%m-%d")):

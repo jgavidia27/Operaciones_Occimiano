@@ -284,7 +284,16 @@ def main():
 
     _log(f"═══ REINCIDENCIAS EDS — {mes_label} (Sem. {sem_iso}) ═══")
 
-    # ── Dedupe idempotente (3 crons backup) ──
+    # ── Gate por día: este correo solo se envía los LUNES ──────────────
+    # El workflow corre a diario (los crons semanales de GitHub Actions
+    # saltan disparos con frecuencia — best-effort, no garantía).
+    # weekday(): 0=Lun, ..., 6=Dom
+    if not args.dry_run and not args.test_email and _now_chile.weekday() != 0:
+        _log(f"═══ SKIP: hoy es {_now_chile.strftime('%A')}, "
+             "el correo se envía solo los lunes ═══")
+        return 0
+
+    # ── Dedupe idempotente (cron diario + múltiples horas) ──
     from email_dedupe import ya_enviado_hoy, marcar_enviado_hoy
     if not args.dry_run and not args.test_email and ya_enviado_hoy("weekly_reincidencias"):
         _log("═══ SKIP: ya se envió el resumen de hoy (dedupe) ═══")

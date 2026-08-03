@@ -6,12 +6,14 @@ name: Weekly Reincidencias EDS (email grupal)
 # Usamos 14:30 UTC como principal (~10:30-11:30 CLT según DST).
 on:
   schedule:
-    # 3 crons escalonados como redundancia — GitHub Actions a veces se
-    # salta el primer disparo. Dedupe idempotente en el script evita
-    # re-envíos si el primero ya funcionó.
-    - cron: "30 14 * * 1"      # Lunes 14:30 UTC (~10:30 CLT)
-    - cron: "0 15 * * 1"       # Backup +30 min
-    - cron: "30 15 * * 1"      # Backup +1 h
+    # Cron DIARIO en la ventana horaria del envío. El script sale sin
+    # hacer nada los días que no son lunes (gate por weekday) y con
+    # dedupe idempotente si el correo del lunes ya salió. Estrategia:
+    # 21 oportunidades semanales en vez de 3 — los crons semanales de
+    # GitHub Actions saltan disparos con alta frecuencia (best-effort).
+    - cron: "30 14 * * *"      # 14:30 UTC diario (~10:30 CLT)
+    - cron: "0 15 * * *"       # 15:00 UTC diario
+    - cron: "30 15 * * *"      # 15:30 UTC diario
   workflow_dispatch:            # permite ejecutar manualmente
     inputs:
       dry_run:
