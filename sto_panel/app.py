@@ -141,29 +141,22 @@ init_cookie_manager()
 
 ASSETS_DIR = _HERE / "assets"
 LOGO_LOGIN = str(ASSETS_DIR / "logo_login.png")
-LOGO_OCCIM = str(ASSETS_DIR / "logo_occim.jpg")
+LOGO_OCCIM = str(ASSETS_DIR / "logo_occim.png")
 
 
 def _login_view():
-    # Header: título a la izquierda, logo pequeño a la derecha
-    _t, _lg = st.columns([4, 1])
-    with _t:
-        st.markdown(
-            "<h1 style='margin-bottom:0;border:none;'>Análisis STO Occim</h1>"
-            "<p style='color:#556;margin-top:4px;'>Panel de validación de reincidencias "
-            "— acceso restringido a técnicos senior</p>",
-            unsafe_allow_html=True,
-        )
-    with _lg:
-        try:
-            st.image(LOGO_LOGIN, width=110)
-        except Exception:
-            pass
-
+    st.markdown(
+        "<h1 style='margin-bottom:0;border:none;'>Análisis STO Occim</h1>"
+        "<p style='color:#556;margin-top:4px;'>Panel de validación de reincidencias "
+        "— acceso restringido a técnicos senior</p>",
+        unsafe_allow_html=True,
+    )
     st.markdown("<hr style='margin-top:4px;'>", unsafe_allow_html=True)
 
-    _lf, _cf, _rf = st.columns([1, 2, 1])
-    with _cf:
+    # Formulario a la izquierda + logo 25 años a la derecha
+    _form_col, _logo_col = st.columns([2, 1])
+
+    with _form_col:
         with st.form("login_form"):
             email = st.text_input("Correo", placeholder="tuemail@occimiano.cl")
             pwd   = st.text_input("Contraseña", type="password")
@@ -173,6 +166,12 @@ def _login_view():
                     st.rerun()
                 else:
                     st.error("Correo o contraseña incorrectos.")
+
+    with _logo_col:
+        try:
+            st.image(LOGO_LOGIN, width=170)
+        except Exception:
+            pass
 
 
 def _senior_info() -> dict | None:
