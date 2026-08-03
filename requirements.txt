@@ -5,6 +5,8 @@ requests>=2.31.0
 openpyxl>=3.1.0
 flask>=3.0.0
 gunicorn>=21.2.0
+# Kanban drag & drop del panel Análisis STO Occim (sto_panel/)
+streamlit-sortables>=0.3.0
 
 # Módulo HHEE — scrapers + Google Drive API (solo GitHub Actions cron)
 playwright>=1.40.0
