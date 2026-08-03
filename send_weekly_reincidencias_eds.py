@@ -53,6 +53,7 @@ DESTINATARIOS = [
     "lpinto@occimiano.cl",       # Luis Pinto
     "jcaceres@occimiano.cl",     # Jesus Caceres
     "wsoto@occimiano.cl",        # Wilson Soto
+    "dhevia@occimiano.cl",       # D. Hevia
 ]
 
 MESES_ES_LARGO = ["", "enero", "febrero", "marzo", "abril", "mayo", "junio",
