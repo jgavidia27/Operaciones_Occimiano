@@ -5886,17 +5886,64 @@ elif _page == _NAV_PAGES[3]:
                 lambda ees: _zona_aramco(ees) or "—"
             )
 
+        # ── Zona por cliente ─────────────────────────────────────────────
+        # Cada cliente tiene su propia nomenclatura (misma lógica que usa
+        # 'Cumplimiento SLA' en la pantalla de EDS):
+        #   • ARAMCO/ESMAX: Norte / Centro / Santiago / Sur — desde mapa
+        #                    oficial en cod_aramco (EE_S###).
+        #   • COPEC:        Santiago (prefijo 60) / Centro (40) / Sur (20)
+        #                    del eds_occim numérico.
+        #   • SHELL y otros: macrozona geográfica por comuna/dirección
+        #                    (Norte / Centro (Santiago) / Sur), usando la
+        #                    misma clasificación que la pestaña SLA.
+        _is_copec = str(_col.get("label","")).strip().upper() == "COPEC"
+
+        def _zona_norte_sur(nombre, comuna):
+            # Copia local del criterio geográfico usado en SLA (evita
+            # dependencia de vars definidas dentro de otra sub-pestaña).
+            _NORTE = {"IQUIQUE","ARICA","ANTOFAGASTA","CALAMA","COPIAPO","COPIAPÓ",
+                      "OVALLE","LA SERENA","COQUIMBO","VALLENAR","ILLAPEL","HUASCO",
+                      "ALTO HOSPICIO","TOCOPILLA","MEJILLONES"}
+            _SUR   = {"CONCEPCION","CONCEPCIÓN","OSORNO","TEMUCO","VALDIVIA",
+                      "PUERTO MONTT","CHILLAN","CHILLÁN","LOS ANGELES","LOS ÁNGELES",
+                      "LINARES","TALCA","CURICO","CURICÓ","RANCAGUA","FRUTILLAR",
+                      "VICTORIA","RENGO","SAN FERNANDO","PUERTO VARAS","ANCUD",
+                      "CASTRO","COIHAIQUE","LA UNION","LA UNIÓN"}
+            s = (str(nombre or "") + " " + str(comuna or "")).upper()
+            if any(c in s for c in _NORTE): return "Norte"
+            if any(c in s for c in _SUR):   return "Sur"
+            return "Centro (Santiago)"
+
+        def _zona_copec_pref(eds_occim):
+            s = str(eds_occim or "").strip()
+            if s.startswith("60"): return "Santiago"
+            if s.startswith("40"): return "Centro"
+            if s.startswith("20"): return "Sur"
+            return None
+
+        def _zona_cliente_row(row):
+            if _is_aramco:
+                return row.get("zona_aramco") or "—"
+            if _is_copec:
+                z = _zona_copec_pref(row.get("eds_occim"))
+                if z: return z
+                # fallback geográfico si prefijo no reconocido
+                return _zona_norte_sur(row.get("nombre"), row.get("comuna"))
+            # Shell y otros
+            return _zona_norte_sur(row.get("nombre"), row.get("comuna"))
+
+        _df_tbl["zona_cliente"] = _df_tbl.apply(_zona_cliente_row, axis=1)
+
         # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío;
-        # y 'Dirección' porque en Shell/Aramco/Copec 'nombre' == 'direccion',
-        # generaba una columna duplicada visualmente idéntica).
+        # 'Dirección' — duplicaba 'Nombre / Dirección'; 'region' — se
+        # reemplaza por 'Zona' propia del cliente).
         if _is_aramco:
             _col_map = {
                 "cod_aramco":        "Cód. Aramco",
                 "cod_occim_pbr":     "Cód. Occim",
                 "nombre":            "Nombre / Dirección",
                 "comuna":            "Comuna",
-                "region":            "Región",
-                "zona_aramco":       "Zona",
+                "zona_cliente":      "Zona",
                 "ordenes_atendidas": "Órdenes atendidas",
                 "correctivas":       "Correctivas",
                 "preventivas":       "Preventivas",
@@ -5910,7 +5957,7 @@ elif _page == _NAV_PAGES[3]:
                 "eds_occim":         "Cód. Occim",
                 "nombre":            "Nombre / Dirección",
                 "comuna":            "Comuna",
-                "region":            "Región",
+                "zona_cliente":      "Zona",
                 "ordenes_atendidas": "Órdenes atendidas",
                 "correctivas":       "Correctivas",
                 "preventivas":       "Preventivas",
@@ -5943,7 +5990,7 @@ elif _page == _NAV_PAGES[3]:
         if _lst_buscar:
             _cols_search = [c for c in ("Cód. Aramco","Cód. Occim",
                                         "Nombre / Dirección","Comuna",
-                                        "Región","Último Técnico")
+                                        "Zona","Último Técnico")
                             if c in _df_display.columns]
             _mask_lst = pd.Series(False, index=_df_display.index)
             for _c in _cols_search:
@@ -5966,9 +6013,11 @@ elif _page == _NAV_PAGES[3]:
                     help="Código interno Occimiano"),
                 "Nombre / Dirección":st.column_config.TextColumn(width=280),
                 "Comuna":            st.column_config.TextColumn(width=110),
-                "Región":            st.column_config.TextColumn(width=70),
-                "Zona":              st.column_config.TextColumn(width=95,
-                    help="Zona oficial Aramco: Norte / Centro / Santiago / Sur"),
+                "Zona":              st.column_config.TextColumn(width=110,
+                    help=("Zona según la denominación de cada cliente: "
+                          "COPEC → Santiago/Centro/Sur por prefijo EDS (60/40/20) · "
+                          "Aramco → Norte/Centro/Santiago/Sur del mapa oficial · "
+                          "Shell y otros → macrozona geográfica.")),
                 "Órdenes atendidas": st.column_config.NumberColumn(format="%d", width=90,
                     help="Correctivas + Preventivas realizadas en el período seleccionado"),
                 "Correctivas":       st.column_config.NumberColumn(format="%d", width=90,
