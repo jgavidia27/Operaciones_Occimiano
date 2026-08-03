@@ -15971,6 +15971,16 @@ elif _page == _NAV_PAGES[2]:
             & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
         ].copy()
 
+        # Normalización del cliente para el filtro:
+        #   • Cualquier variante "PARTICULAR ..." se agrupa como "Particulares".
+        #   • Se excluye "OCCIMIANO" (OTs internas — no aportan al análisis
+        #     de mantenciones prestadas a clientes).
+        if not _dfr.empty:
+            _dfr = _dfr[~_dfr["cliente"].astype(str).str.strip().str.upper().eq("OCCIMIANO")].copy()
+            _dfr["cliente"] = _dfr["cliente"].astype(str).str.strip().apply(
+                lambda c: "Particulares" if c.upper().startswith("PARTICULAR") else c
+            )
+
         if _dfr.empty:
             st.info("Sin MPs finalizadas para el filtro seleccionado.")
         else:
