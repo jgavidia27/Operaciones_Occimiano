@@ -2702,14 +2702,38 @@ if _page == _NAV_PAGES[1]:
                 _df_sla_ot["_exc_pct"] = _df_sla_ot["pct_sla_ot"].apply(
                     lambda v: round(max(float(v) - 100.0, 0.0), 1) if pd.notna(v) else None)
 
+                # Enriquecer con Cód. Esmax (EE_S###) para todas las OTs Aramco.
+                # Mapa PBR→EE_S desde el catálogo de EDS.
+                _cli_up = _df_sla_ot.get("cliente", pd.Series(dtype=str)).astype(str).str.upper()
+                _is_aramco_row = _cli_up.str.contains("ARAMCO|ESMAX", na=False, regex=True)
+                _pbr_to_ees = {}
+                if "df_eds" in dir() or True:
+                    try:
+                        _catalog = df_eds[df_eds["cliente"].astype(str).str.upper().str.contains(
+                            "ARAMCO|ESMAX", na=False, regex=True)].copy()
+                        # eds_occim_raw contiene el EE_S### para las PBR
+                        for _, _r in _catalog.iterrows():
+                            _eo = str(_r.get("eds_occim") or "").strip()
+                            _er = _r.get("eds_occim_raw") or _r.get("_cod_occim_frac")
+                            _er = str(_er).strip() if _er else ""
+                            if _eo.startswith("PBR") and _er and _er.lower() not in ("nan", "none"):
+                                _pbr_to_ees[_eo] = _er
+                    except Exception:
+                        pass
+                def _cod_esmax(row):
+                    if not _is_aramco_row.get(row.name, False):
+                        return ""
+                    eo = str(row.get("eds_occim") or "").strip()
+                    if eo.startswith("EE_S"):
+                        return eo
+                    return _pbr_to_ees.get(eo, "—")
+                _df_sla_ot["cod_esmax"] = _df_sla_ot.apply(_cod_esmax, axis=1)
+
                 # Orden solicitado por operaciones:
-                # OS Fracttal | N° Aviso | Fecha llamado | Fecha atención | Cód. EDS |
-                # EDS | Cliente | Técnico | Prioridad | Ciudad | Zona |
-                # Tiempo resolución | Umbral SLA | Uso SLA | Exceso | Estado SLA |
-                # Reporte de falla | Motivo excepción
-                # (Se quitó 'Cierre completo OT' por pedido explícito.)
+                # OS Fracttal | N° Aviso | Fecha llamado | Fecha atención |
+                # Cód. Esmax (solo Aramco) | Cód. EDS | EDS | Cliente | ...
                 _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
-                                            "eds_occim","eds_nombre","cliente","tecnico",
+                                            "cod_esmax","eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_display"] if c in _df_sla_ot.columns]
                 _extra = ["tiempo_res","umbral_lbl","_uso_pct","_exc_pct","estado_sla"]
                 # Reporte de falla ANTES de Motivo excepción (orden pedido)
@@ -2733,6 +2757,7 @@ if _page == _NAV_PAGES[1]:
                     columns={"os_fracttal":"OS Fracttal",
                              "fecha_llamado":"Fecha llamado",
                              "fecha_atencion":"Fecha atención",
+                             "cod_esmax":"Cód. Esmax",
                              "eds_occim":"Cód. EDS",
                              "eds_nombre":"EDS","cliente":"Cliente","tecnico":"Técnico",
                              "prioridad":"Prioridad","ciudad":"Ciudad","zona_display":"Zona",
@@ -2759,6 +2784,8 @@ if _page == _NAV_PAGES[1]:
                             help="N° de referencia del cliente: 'No. Aviso' para COPEC / N° Cotalker para ESMAX-Aramco. Vacío = sin referencia registrada."),
                         "Fecha llamado":        st.column_config.TextColumn(width=110),
                         "Fecha atención":       st.column_config.TextColumn(width=110),
+                        "Cód. Esmax":        st.column_config.TextColumn(width=95,
+                            help="Código oficial de Aramco/Esmax (EE_S###). Solo aplica a OTs de Aramco."),
                         "Cód. EDS":          st.column_config.TextColumn(width=100),
                         "EDS":               st.column_config.TextColumn(width=210),
                         "Cliente":           st.column_config.TextColumn(width=90),
