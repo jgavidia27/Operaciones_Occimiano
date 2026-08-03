@@ -74,16 +74,24 @@ st.markdown(f"""
     .badge-ok   {{ background: {OCCIM_BLUE}; color: #fff; padding: 2px 8px;
                   border-radius: 12px; font-size: 0.78em; font-weight: 600; }}
 
-    /* Botones primarios (Ingresar, Validar y firmar…) */
-    .stButton > button[kind="primary"],
-    .stFormSubmitButton > button[kind="primary"] {{
+    /* Botones primarios (Ingresar, Validar y firmar…) — cubre todos los kinds */
+    button[kind="primary"],
+    button[kind="primaryFormSubmit"],
+    button[data-testid="stBaseButton-primary"],
+    button[data-testid="stBaseButton-primaryFormSubmit"],
+    button[data-testid="stFormSubmitButton-primary"] {{
         background-color: {OCCIM_BLUE} !important;
         border-color: {OCCIM_BLUE} !important;
+        color: #ffffff !important;
     }}
-    .stButton > button[kind="primary"]:hover,
-    .stFormSubmitButton > button[kind="primary"]:hover {{
+    button[kind="primary"]:hover,
+    button[kind="primaryFormSubmit"]:hover,
+    button[data-testid="stBaseButton-primary"]:hover,
+    button[data-testid="stBaseButton-primaryFormSubmit"]:hover,
+    button[data-testid="stFormSubmitButton-primary"]:hover {{
         background-color: {OCCIM_BLUE_DARK} !important;
         border-color: {OCCIM_BLUE_DARK} !important;
+        color: #ffffff !important;
     }}
 
     /* Chips de motivos (burbujas clickeables) */
@@ -137,21 +145,23 @@ LOGO_OCCIM = str(ASSETS_DIR / "logo_occim.jpg")
 
 
 def _login_view():
-    _l, _c, _r = st.columns([1, 1, 1])
-    with _c:
+    # Header: título a la izquierda, logo pequeño a la derecha
+    _t, _lg = st.columns([4, 1])
+    with _t:
+        st.markdown(
+            "<h1 style='margin-bottom:0;border:none;'>Análisis STO Occim</h1>"
+            "<p style='color:#556;margin-top:4px;'>Panel de validación de reincidencias "
+            "— acceso restringido a técnicos senior</p>",
+            unsafe_allow_html=True,
+        )
+    with _lg:
         try:
-            st.image(LOGO_LOGIN, use_container_width=True)
+            st.image(LOGO_LOGIN, width=110)
         except Exception:
             pass
-    st.markdown(
-        f"<h1 style='text-align:center;border:none;'>Análisis STO Occim</h1>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<p style='text-align:center;color:#556;'>Panel de validación de reincidencias — "
-        "acceso restringido a técnicos senior</p>",
-        unsafe_allow_html=True,
-    )
+
+    st.markdown("<hr style='margin-top:4px;'>", unsafe_allow_html=True)
+
     _lf, _cf, _rf = st.columns([1, 2, 1])
     with _cf:
         with st.form("login_form"):
