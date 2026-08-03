@@ -47,18 +47,47 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.markdown("""
+OCCIM_BLUE       = "#1a4a8f"   # azul principal del logo OCCIM
+OCCIM_BLUE_DARK  = "#123566"
+OCCIM_BLUE_SOFT  = "#e6edf7"
+
+st.markdown(f"""
 <style>
-    .stMetric { background: rgba(255,255,255,0.03); padding: 8px; border-radius: 8px; }
-    .eds-card { padding: 10px 12px; border: 1px solid rgba(200,200,200,0.2);
-                border-radius: 8px; margin-bottom: 6px; }
-    .badge-pend { background: #ffb020; color: #000; padding: 2px 8px;
-                  border-radius: 12px; font-size: 0.78em; font-weight: 600; }
-    .badge-ok   { background: #22c55e; color: #fff; padding: 2px 8px;
-                  border-radius: 12px; font-size: 0.78em; font-weight: 600; }
+    /* Títulos con toque azul OCCIM */
+    h1, h2, h3 {{ color: {OCCIM_BLUE_DARK} !important; }}
+    h1 {{ border-bottom: 3px solid {OCCIM_BLUE}; padding-bottom: 6px; }}
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {{
+        background: linear-gradient(180deg, {OCCIM_BLUE_SOFT} 0%, #ffffff 220px);
+    }}
+    [data-testid="stSidebar"] .stMarkdown h3 {{
+        color: {OCCIM_BLUE_DARK} !important;
+    }}
+
+    .stMetric {{ background: {OCCIM_BLUE_SOFT}; padding: 10px; border-radius: 8px;
+                 border-left: 4px solid {OCCIM_BLUE}; }}
+    .eds-card {{ padding: 10px 12px; border: 1px solid rgba(200,200,200,0.2);
+                border-radius: 8px; margin-bottom: 6px; }}
+    .badge-pend {{ background: #ffb020; color: #000; padding: 2px 8px;
+                  border-radius: 12px; font-size: 0.78em; font-weight: 600; }}
+    .badge-ok   {{ background: {OCCIM_BLUE}; color: #fff; padding: 2px 8px;
+                  border-radius: 12px; font-size: 0.78em; font-weight: 600; }}
+
+    /* Botones primarios (Ingresar, Validar y firmar…) */
+    .stButton > button[kind="primary"],
+    .stFormSubmitButton > button[kind="primary"] {{
+        background-color: {OCCIM_BLUE} !important;
+        border-color: {OCCIM_BLUE} !important;
+    }}
+    .stButton > button[kind="primary"]:hover,
+    .stFormSubmitButton > button[kind="primary"]:hover {{
+        background-color: {OCCIM_BLUE_DARK} !important;
+        border-color: {OCCIM_BLUE_DARK} !important;
+    }}
 
     /* Chips de motivos (burbujas clickeables) */
-    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button {
+    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button {{
         border-radius: 999px;
         padding: 6px 14px;
         font-size: 0.82em;
@@ -67,28 +96,31 @@ st.markdown("""
         white-space: normal;
         min-height: 34px;
         transition: all 0.15s ease-out;
-    }
-    /* Chip inactivo — azul oscuro con relleno claro */
-    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button[kind="secondary"] {
+    }}
+    /* Chip inactivo — contorno azul OCCIM */
+    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button[kind="secondary"] {{
         background-color: #ffffff;
-        color: #1a2b4a;
-        border: 1.5px solid #1a2b4a;
-    }
-    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
-        background-color: #eef1f6;
-        border-color: #0f1c33;
-        color: #0f1c33;
-    }
-    /* Chip activo — relleno azul oscuro sólido */
-    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button[kind="primary"] {
-        background-color: #1a2b4a;
+        color: {OCCIM_BLUE};
+        border: 1.5px solid {OCCIM_BLUE};
+    }}
+    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button[kind="secondary"]:hover {{
+        background-color: {OCCIM_BLUE_SOFT};
+        border-color: {OCCIM_BLUE_DARK};
+        color: {OCCIM_BLUE_DARK};
+    }}
+    /* Chip activo — relleno azul OCCIM */
+    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button[kind="primary"] {{
+        background-color: {OCCIM_BLUE};
         color: #ffffff;
-        border: 1.5px solid #1a2b4a;
-    }
-    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button[kind="primary"]:hover {
-        background-color: #0f1c33;
-        border-color: #0f1c33;
-    }
+        border: 1.5px solid {OCCIM_BLUE};
+    }}
+    div[data-testid="stHorizontalBlock"] div[data-testid="column"] .stButton > button[kind="primary"]:hover {{
+        background-color: {OCCIM_BLUE_DARK};
+        border-color: {OCCIM_BLUE_DARK};
+    }}
+
+    /* Divisor sutil */
+    hr {{ border-top: 1px solid {OCCIM_BLUE_SOFT}; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,19 +131,38 @@ st.markdown("""
 
 init_cookie_manager()
 
+ASSETS_DIR = _HERE / "assets"
+LOGO_LOGIN = str(ASSETS_DIR / "logo_login.png")
+LOGO_OCCIM = str(ASSETS_DIR / "logo_occim.jpg")
+
 
 def _login_view():
-    st.title("🔧 Análisis STO Occim")
-    st.caption("Panel de validación de reincidencias — acceso restringido a técnicos senior")
-    with st.form("login_form"):
-        email = st.text_input("Correo", placeholder="tuemail@occimiano.cl")
-        pwd   = st.text_input("Contraseña", type="password")
-        ok = st.form_submit_button("Ingresar", type="primary", use_container_width=True)
-        if ok:
-            if try_login(email, pwd):
-                st.rerun()
-            else:
-                st.error("Correo o contraseña incorrectos.")
+    _l, _c, _r = st.columns([1, 1, 1])
+    with _c:
+        try:
+            st.image(LOGO_LOGIN, use_container_width=True)
+        except Exception:
+            pass
+    st.markdown(
+        f"<h1 style='text-align:center;border:none;'>Análisis STO Occim</h1>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<p style='text-align:center;color:#556;'>Panel de validación de reincidencias — "
+        "acceso restringido a técnicos senior</p>",
+        unsafe_allow_html=True,
+    )
+    _lf, _cf, _rf = st.columns([1, 2, 1])
+    with _cf:
+        with st.form("login_form"):
+            email = st.text_input("Correo", placeholder="tuemail@occimiano.cl")
+            pwd   = st.text_input("Contraseña", type="password")
+            ok = st.form_submit_button("Ingresar", type="primary", use_container_width=True)
+            if ok:
+                if try_login(email, pwd):
+                    st.rerun()
+                else:
+                    st.error("Correo o contraseña incorrectos.")
 
 
 def _senior_info() -> dict | None:
@@ -150,6 +201,10 @@ if _me is None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
+    try:
+        st.image(LOGO_OCCIM, use_container_width=True)
+    except Exception:
+        pass
     st.markdown(f"### 👋 {_me['nombre']}")
     st.caption(_me["email"])
     st.divider()
