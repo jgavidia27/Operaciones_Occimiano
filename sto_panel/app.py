@@ -546,12 +546,10 @@ def render_detalle(codigo_eds: str, periodo: date):
 
     # ── Resumen + solución por grupo ────────────────────────────────────
     if grupos:
-        st.markdown("### Resumen y solución por grupo")
+        st.markdown("### Resumen y solución por motivo")
         for i, g in enumerate(grupos):
             g["letra"] = _letra(i)
-            titulo = f"Grupo {g['letra']}"
-            if g.get("nombre"):
-                titulo += f": {g['nombre']}"
+            titulo = g.get("nombre") or "(sin motivo)"
             n_ots = sum(1 for _, v in asignaciones.items() if v == g["id"])
             st.markdown(f"**{titulo}** — {n_ots} OT(s)")
 
@@ -606,11 +604,11 @@ def render_detalle(codigo_eds: str, periodo: date):
         # Grupos: cada uno debe tener ≥1 OT y resumen+solución llenos
         for g in grupos:
             n_ots = sum(1 for _, v in asignaciones.items() if v == g["id"])
-            _titulo = f"Grupo {g['letra']}" + (f" ({g['nombre']})" if g.get("nombre") else "")
+            _titulo = g.get("nombre") or "(sin motivo)"
             if n_ots == 0:
-                errores.append(f"{_titulo} está vacío — elimínalo o asígnale OTs.")
+                errores.append(f"**{_titulo}** está vacío — quítalo o asígnale OTs.")
             if not (g.get("resumen") or "").strip() or not (g.get("solucion") or "").strip():
-                errores.append(f"{_titulo}: completa resumen y solución.")
+                errores.append(f"**{_titulo}**: completa resumen y solución.")
 
         if errores:
             for e in errores:

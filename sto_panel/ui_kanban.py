@@ -117,10 +117,7 @@ def _label_to_id(items: list[dict]) -> dict[str, str]:
 
 def _header_grupo(g: dict) -> str:
     nombre = (g.get("nombre") or "").strip()
-    letra = g.get("letra") or g["id"]
-    if nombre:
-        return f"🗂 Grupo {letra}: {nombre}"
-    return f"🗂 Grupo {letra}"
+    return f"🗂 {nombre}" if nombre else "🗂 (sin motivo)"
 
 
 def render_kanban(items: list[dict],
