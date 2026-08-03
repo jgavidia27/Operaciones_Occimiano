@@ -6103,9 +6103,15 @@ elif _page == _NAV_PAGES[3]:
                         _wo_lookup, left_on=_fol_col, right_on="folio", how="left"
                     )
                 _det_corr_disp = _det_corr.copy()
-                _det_corr_disp["Fecha"] = pd.to_datetime(
-                    _det_corr_disp.get("fecha_llamado"), errors="coerce"
-                ).dt.strftime("%d/%m/%Y").fillna("—")
+                # Ordenamos ANTES de convertir la fecha a string, para que
+                # 'más reciente primero' quede correcto (evita ordenar por
+                # texto '30/05/2026' vs '01/12/2025').
+                _fdt = pd.to_datetime(_det_corr_disp.get("fecha_llamado"),
+                                      errors="coerce")
+                _det_corr_disp["_fdt"] = _fdt
+                _det_corr_disp["Fecha"] = _fdt.dt.strftime("%d/%m/%Y").fillna("—")
+                _det_corr_disp = _det_corr_disp.sort_values(
+                    "_fdt", ascending=False, na_position="last").drop(columns=["_fdt"])
                 # Limpiar prefijos "01.5.- ERROR ..." en tipo y causa
                 import re as _re_c
                 def _limp(v):
@@ -6125,39 +6131,51 @@ elif _page == _NAV_PAGES[3]:
                     "tecnico":         "Técnico",
                     "cumplimiento":    "SLA",
                 }) if _fol_col else _det_corr_disp
+                # SLA con íconos: ✅ Cumple / ❌ No cumple
+                if "SLA" in _det_corr_disp.columns:
+                    def _sla_icon(v):
+                        s = str(v or "").strip().upper()
+                        if s == "CUMPLE":    return "✅ Cumple"
+                        if s == "NO CUMPLE": return "❌ No cumple"
+                        if "EXCEP" in s:     return "ℹ️ Excepción"
+                        return s.title() if s else "—"
+                    _det_corr_disp["SLA"] = _det_corr_disp["SLA"].apply(_sla_icon)
                 _cols_show_corr = [c for c in ["Fecha","N° OT","Prioridad","Técnico","SLA",
                                                 "Tipo falla","Causa raíz","Comentario técnico"]
                                     if c in _det_corr_disp.columns]
-                _det_corr_disp = _det_corr_disp[_cols_show_corr].sort_values(
-                    "Fecha", ascending=False) if "Fecha" in _det_corr_disp.columns else _det_corr_disp[_cols_show_corr]
+                _det_corr_disp = _det_corr_disp[_cols_show_corr]
 
             _det_prev_disp = pd.DataFrame()
             if not _det_prev.empty:
-                _det_prev_disp = _det_prev.copy()
-                _det_prev_disp["Fecha"] = pd.to_datetime(
-                    _det_prev_disp.get("creation_date"), errors="coerce"
-                ).dt.tz_convert(None).dt.strftime("%d/%m/%Y").fillna("—") \
-                    if "creation_date" in _det_prev_disp.columns else "—"
-                # Enriquecer con comentario del técnico si viene en df_wo_c
-                if "folio" in _det_prev_disp.columns and not _wo_lookup.empty:
-                    _det_prev_disp = _det_prev_disp.merge(
-                        _wo_lookup[["folio","comentario_tecnico"]] if "comentario_tecnico" in _wo_lookup.columns else _wo_lookup[["folio"]],
-                        on="folio", how="left"
-                    )
-                _det_prev_disp["Comentario técnico"] = _det_prev_disp.get(
-                    "comentario_tecnico", pd.Series("—", index=_det_prev_disp.index)
-                ).fillna("").astype(str).replace({"": "—", "None": "—", "nan": "—"})
+                # df_pm_f puede tener 1 fila por subtarea (varios activos por OT),
+                # así que dedup por folio ANTES de mostrar — 1 OT = 1 fila.
+                _det_prev_dedup = _det_prev.drop_duplicates(subset=["folio"], keep="first") \
+                    if "folio" in _det_prev.columns else _det_prev.copy()
+                # Fecha de ATENCIÓN: fecha_finalizacion primero, fallback fecha_inicio;
+                # si tampoco hay, uso creation_date (mismo comportamiento previo).
+                _fdt_prev = None
+                for _c in ("fecha_finalizacion","fecha_inicio","creation_date"):
+                    if _c in _det_prev_dedup.columns:
+                        _fdt_prev = pd.to_datetime(_det_prev_dedup[_c],
+                                                    errors="coerce", utc=True)
+                        _fdt_prev = _fdt_prev.dt.tz_convert("America/Santiago") \
+                            .dt.tz_localize(None)
+                        break
+                _det_prev_disp = _det_prev_dedup.copy()
+                if _fdt_prev is not None:
+                    _det_prev_disp["_fdt"] = _fdt_prev
+                    _det_prev_disp["Fecha"] = _fdt_prev.dt.strftime("%d/%m/%Y").fillna("—")
+                    _det_prev_disp = _det_prev_disp.sort_values(
+                        "_fdt", ascending=False, na_position="last").drop(columns=["_fdt"])
+                else:
+                    _det_prev_disp["Fecha"] = "—"
                 _det_prev_disp = _det_prev_disp.rename(columns={
                     "folio":       "N° OT",
                     "technician":  "Técnico",
-                    "plan_tareas": "Plan",
-                    "estado":      "Estado",
                 })
-                _cols_show_prev = [c for c in ["Fecha","N° OT","Plan","Técnico","Estado",
-                                                "Comentario técnico"]
+                _cols_show_prev = [c for c in ["Fecha","N° OT","Técnico"]
                                     if c in _det_prev_disp.columns]
-                _det_prev_disp = _det_prev_disp[_cols_show_prev].sort_values(
-                    "Fecha", ascending=False) if "Fecha" in _det_prev_disp.columns else _det_prev_disp[_cols_show_prev]
+                _det_prev_disp = _det_prev_disp[_cols_show_prev]
 
             _n_corr = len(_det_corr_disp)
             _n_prev = len(_det_prev_disp)
@@ -6206,13 +6224,10 @@ elif _page == _NAV_PAGES[3]:
                     _show_df(_det_prev_disp.reset_index(drop=True), hide_index=True,
                         width="stretch",
                         column_config={
-                            "Fecha":              st.column_config.TextColumn(width=95),
-                            "N° OT":              st.column_config.TextColumn(width=95),
-                            "Plan":               st.column_config.TextColumn(width=230),
-                            "Técnico":            st.column_config.TextColumn(width=170),
-                            "Estado":             st.column_config.TextColumn(width=110),
-                            "Comentario técnico": st.column_config.TextColumn(width=320,
-                                help="Qué hizo el técnico en terreno (nota de la OT en Fracttal)"),
+                            "Fecha":              st.column_config.TextColumn(width=110,
+                                help="Fecha de atención (fecha_finalizacion — fallback fecha_inicio)"),
+                            "N° OT":              st.column_config.TextColumn(width=110),
+                            "Técnico":            st.column_config.TextColumn(width=220),
                         })
 
 
