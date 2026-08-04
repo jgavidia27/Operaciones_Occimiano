@@ -14997,28 +14997,34 @@ elif _page == _NAV_PAGES[2]:
     _ppct   = round(_pfin / _ptot * 100, 1) if _ptot > 0 else 0.0
 
     # ══════════════════════════════════════════════════════════════════════
-    # % Cumplimiento en tiempo y forma — Criterio Occimiano v3 (2026-08-04)
+    # % Cumplimiento en tiempo y forma — Criterio Occimiano v3.1 (2026-08-04)
     # ══════════════════════════════════════════════════════════════════════
-    # Reglas simplificadas, sin depender del "intervalo del plan":
+    # Reglas simplificadas, definidas por operaciones. Ejemplo base:
+    # programación 04/08.
     #
     #   Sea  dias_atraso     = fecha_ejecución − fecha_programada  (positivo = tarde)
     #        dias_antelacion = fecha_programada − fecha_ejecución  (positivo = antes)
     #
     #   1. Intervalo NETO (crudo):
     #        CUMPLE  ⇔  ejecutada  AND  dias_atraso ≤ 0  AND  dias_antelacion ≤ 15
-    #        Rango permitido: 15 días antes → mismo día de fecha_programada.
+    #        Ejemplos: prog 04/08. Ejec 05/08 (1d tarde) → NO cumple.
+    #                  Ejec 19/07 (16d antes) → NO cumple.
+    #                  Ejec 20/07 (15d antes) → CUMPLE.
+    #                  Rango: 15 días antes → mismo día programado.
     #
     #   2. Intervalo FLEXIBLE:
-    #        CUMPLE  ⇔  ejecutada  AND  dias_atraso ≤ 5  AND  dias_antelacion ≤ 15
-    #        Rango: 15 días antes → 5 días después.
+    #        CUMPLE  ⇔  ejecutada  AND  dias_atraso < 5  AND  dias_antelacion ≤ 15
+    #        Ejemplo: prog 04/08. Ejec 09/08 (5d tarde) → NO cumple (excede).
+    #                 Ejec 08/08 (4d tarde) → CUMPLE.
+    #                 Rango: 15 días antes → 4 días después (día 5 ya es exceso).
     #
     #   3. Anticipación INDEBIDA:
     #        SE MARCA  ⇔  ejecutada  AND  dias_antelacion > 15
-    #        Es una anti-métrica (adelantamientos excesivos que salen del Neto).
+    #        Adelanto que sale del rango del Neto. Ejemplo: prog 04/08 ejec 19/07.
     #
-    #   4. EXCESO (nuevo, con 2 niveles):
-    #        Exceso normal  ⇔  ejecutada  AND  5 < dias_atraso < 15
-    #        Exceso CRÍTICO ⇔  ejecutada  AND  dias_atraso ≥ 15
+    #   4. EXCESO (2 niveles dentro del mismo gauge):
+    #        Exceso normal  ⇔  ejecutada  AND  5 ≤ dias_atraso < 15   (5 a 14 días tarde)
+    #        Exceso CRÍTICO ⇔  ejecutada  AND  dias_atraso ≥ 15       (15 o más)
     #        Gauge muestra el % total (normal + crítico) y separa el crítico.
     #
     # Universo:
@@ -15061,9 +15067,9 @@ elif _page == _NAV_PAGES[2]:
         _dn = _df_cumpl["dias_antelacion"]
 
         _df_cumpl["cumple"]         = _ej & (_da <= 0)  & (_dn <= 15)
-        _df_cumpl["cumple_flex"]    = _ej & (_da <= 5)  & (_dn <= 15)
+        _df_cumpl["cumple_flex"]    = _ej & (_da <  5)  & (_dn <= 15)
         _df_cumpl["_antic_indebida"] = _ej & (_dn > 15)
-        _df_cumpl["_exceso"]        = _ej & (_da > 5) & (_da < 15)
+        _df_cumpl["_exceso"]        = _ej & (_da >= 5) & (_da < 15)
         _df_cumpl["_exceso_critico"]= _ej & (_da >= 15)
 
         # Motivo textual para el desglose
@@ -15076,7 +15082,7 @@ elif _page == _NAV_PAGES[2]:
             n = int(r["dias_antelacion"]) if pd.notna(r["dias_antelacion"]) else 0
             if d >= 15:
                 return f"🔴 Exceso crítico: {d} días tarde"
-            if d > 5:
+            if d >= 5:
                 return f"🟠 Exceso: {d} días tarde"
             if d > 0:
                 return f"🟡 Fuera del Neto: {d} días tarde (rescatada por Flexible)"
@@ -15240,7 +15246,7 @@ elif _page == _NAV_PAGES[2]:
     with _gc2:
         st.plotly_chart(
             _build_gauge(_cump_sem_pct, "% Cumplimiento — Intervalo Flexible",
-                         "ventana: 15 días antes → 5 días después de la programada"),
+                         "ventana: 15 días antes → 4 días después (día 5 ya es exceso)"),
             use_container_width=True, key="prev_gauge_flexible",
         )
     with _gc3:
@@ -15277,7 +15283,7 @@ elif _page == _NAV_PAGES[2]:
             </tr>
             <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
               <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">
-                Intervalo Flexible (15 días antes → 5 días después)</td>
+                Intervalo Flexible (15 días antes → 4 días después; día 5 ya es exceso)</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color_s};font-size:1.05rem;">{_cump_sem_n:,} / {_cump_tot:,}</b>
                 <span style="color:var(--text-color, #475569);font-size:0.82rem;"> OTs en plazo · {_cump_sem_pct}%</span>
@@ -15293,7 +15299,7 @@ elif _page == _NAV_PAGES[2]:
             </tr>
             <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
               <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">
-                Exceso (5–14 d tarde) + Exceso crítico (≥15 d tarde)</td>
+                Exceso (5 a 14 d tarde) + Exceso crítico (≥15 d tarde)</td>
               <td style="padding:6px 0;text-align:right;">
                 <b style="color:{_gauge_color_e};font-size:1.05rem;">{_exc_n + _exc_crit_n:,} / {_cump_tot:,}</b>
                 <span style="color:var(--text-color, #475569);font-size:0.82rem;">
@@ -15397,8 +15403,8 @@ elif _page == _NAV_PAGES[2]:
                     "Días desvío":   st.column_config.NumberColumn(format="%d", width=90,
                         help="Días entre fecha_fin y fecha_programada. Positivo = tarde, negativo = adelantada."),
                     "Veredicto":     st.column_config.TextColumn(width=170,
-                        help="✅ Neto = 15d antes → mismo día · 🟡 Flexible = rescatada (≤5d tarde) · "
-                             "🟠 Exceso = 6-14d tarde · 🔴 Exceso crítico = ≥15d tarde · "
+                        help="✅ Neto = 15d antes → mismo día · 🟡 Flexible = rescatada (<5d tarde) · "
+                             "🟠 Exceso = 5-14d tarde · 🔴 Exceso crítico = ≥15d tarde · "
                              "🔵 Anticipación indebida = >15d antes · ⏳ No iniciada = sin ejecutar"),
                     "Motivo":        st.column_config.TextColumn(width=260),
                     "Responsable":   st.column_config.TextColumn(width=150),
