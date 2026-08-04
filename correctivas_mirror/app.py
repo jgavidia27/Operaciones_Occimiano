@@ -2116,44 +2116,86 @@ if vista == "🔗 Enlace Copec":
         _alertas_ranking = _alertas   # se usa para el ranking abajo
 
         if not _alertas.empty:
+            # Agrupar por OT Fracttal: cuando MP Fija + MP Variable comparten
+            # la misma OT, colapsamos a UNA sola fila con ambos N° avisos.
+            # Los avisos sin OT (⏳) se dejan como filas individuales.
+            _rows_alr = []
+            _con_ot = _alertas[_alertas["os_fracttal"].fillna("") != ""]
+            _sin_ot = _alertas[_alertas["os_fracttal"].fillna("") == ""]
+
+            for os_id, grp in _con_ot.groupby("os_fracttal"):
+                # tipo (Correctivo/Preventivo) — todos los avisos del grupo son iguales
+                tipo_up = str(grp.iloc[0].get("tipo_aviso") or "").upper()
+                tipo_lbl = "Preventivo (MP)" if tipo_up == "PREVENTIVO" else "Correctivo"
+                # armar lista "12345 (MP Fija)" separados por " + "
+                partes = []
+                for _, r in grp.iterrows():
+                    clase = r.get("_clase")
+                    suf = " (MP Fija)" if clase == "PLAN" else \
+                          " (MP Variable)" if clase == "REPUESTOS" else ""
+                    partes.append(f"{r['id_sap']}{suf}")
+                # falla + equipo del primer registro (o del Plan si existe)
+                _p = grp[grp["_clase"] == "PLAN"]
+                _r = (_p.iloc[0] if not _p.empty else grp.iloc[0])
+                hmax = grp["_horas_sin_cerrar"].max()
+                _rows_alr.append({
+                    "N° OT Fracttal": os_id,
+                    "Tipo": tipo_lbl,
+                    "Técnico": grp.iloc[0].get("_tecnico") or "⏳ sin OT",
+                    "N° avisos Copec": " + ".join(partes),
+                    "EDS": _r.get("eds_codigo") or "",
+                    "Falla": _title_smart(_r.get("descripcion_falla") or ""),
+                    "Equipo": _title_smart(_r.get("descripcion_equipo") or ""),
+                    "Estado": ESTADO_META.get(_r.get("estado"), ("", _r.get("estado") or ""))[1],
+                    "_hmax": hmax,
+                    "Sin cerrar": (f"🔴 {hmax:.0f}h" if hmax > 72 else
+                                   f"🟠 {hmax:.0f}h" if hmax > 24 else
+                                   f"🟡 {hmax:.0f}h"),
+                })
+            # Avisos sin OT: cada uno es su fila
+            for _, r in _sin_ot.iterrows():
+                tipo_up = str(r.get("tipo_aviso") or "").upper()
+                tipo_lbl = "Preventivo (MP)" if tipo_up == "PREVENTIVO" else "Correctivo"
+                h = r["_horas_sin_cerrar"]
+                _rows_alr.append({
+                    "N° OT Fracttal": "⏳ pendiente",
+                    "Tipo": tipo_lbl,
+                    "Técnico": "⏳ sin OT",
+                    "N° avisos Copec": str(r["id_sap"]),
+                    "EDS": r.get("eds_codigo") or "",
+                    "Falla": _title_smart(r.get("descripcion_falla") or ""),
+                    "Equipo": _title_smart(r.get("descripcion_equipo") or ""),
+                    "Estado": ESTADO_META.get(r.get("estado"), ("", r.get("estado") or ""))[1],
+                    "_hmax": h,
+                    "Sin cerrar": (f"🔴 {h:.0f}h" if h > 72 else
+                                   f"🟠 {h:.0f}h" if h > 24 else
+                                   f"🟡 {h:.0f}h"),
+                })
+            _alr_tab = pd.DataFrame(_rows_alr).sort_values("_hmax", ascending=False).drop(columns=["_hmax"])
+
             st.markdown(
                 f'<div style="background:#fef2f2;border-left:4px solid #dc2626;'
                 f'padding:12px 16px;border-radius:6px;margin:12px 0">'
-                f'<b style="color:#991b1b">🚨 {len(_alertas)} avisos "En Progreso" sin cerrar hace más de 1h</b>'
+                f'<b style="color:#991b1b">🚨 {len(_alr_tab)} servicios "En Progreso" sin cerrar hace más de 1h</b>'
                 f'<div style="color:#7f1d1d;font-size:0.85em;margin-top:4px">'
                 f'El técnico terminó la mantención pero no cerró la orden en Enlace. '
-                f'Suele quedar abierta la orden de repuestos (Repuestos Mtto Prev) '
-                f'aunque la del plan (Plan Mtto Preventivo) esté cerrada.'
+                f'Los preventivos se muestran agrupados por OT Fracttal (MP Fija + MP Variable en la misma fila).'
                 f'</div></div>',
                 unsafe_allow_html=True,
             )
-            _alr_tab = _alertas[["os_fracttal", "id_sap", "eds_codigo", "descripcion_falla",
-                                 "_tecnico", "descripcion_equipo", "estado",
-                                 "_horas_sin_cerrar"]].copy()
-            _alr_tab["os_fracttal"] = _alr_tab["os_fracttal"].fillna("").map(
-                lambda x: x if x else "⏳ pendiente"
-            )
-            _alr_tab["_horas_sin_cerrar"] = _alr_tab["_horas_sin_cerrar"].map(
-                lambda h: (f"🔴 {h:.0f}h" if h > 72 else
-                           f"🟠 {h:.0f}h" if h > 24 else
-                           f"🟡 {h:.0f}h")
-            )
-            _alr_tab["estado"] = _alr_tab["estado"].map(
-                lambda x: ESTADO_META.get(x, ("", x))[1]
-            )
-            _alr_tab["_tecnico"] = _alr_tab["_tecnico"].fillna("⏳ sin OT")
-            _alr_tab["descripcion_falla"]  = _alr_tab["descripcion_falla"].fillna("").map(_title_smart)
-            _alr_tab["descripcion_equipo"] = _alr_tab["descripcion_equipo"].fillna("").map(_title_smart)
-            _alr_tab = _alr_tab.rename(columns={
-                "os_fracttal": "N° OT Fracttal",
-                "id_sap": "N° aviso Copec", "eds_codigo": "EDS",
-                "descripcion_falla": "Falla",
-                "_tecnico": "Técnico",
-                "descripcion_equipo": "Equipo",
-                "estado": "Estado", "_horas_sin_cerrar": "Sin cerrar",
-            })
             st.dataframe(_alr_tab, hide_index=True, use_container_width=True,
-                         height=min(400, 55 + 35 * len(_alr_tab)))
+                         height=min(400, 55 + 35 * len(_alr_tab)),
+                         column_config={
+                             "N° OT Fracttal":  st.column_config.TextColumn(width=105),
+                             "Tipo":            st.column_config.TextColumn(width=130),
+                             "Técnico":         st.column_config.TextColumn(width=180),
+                             "N° avisos Copec": st.column_config.TextColumn(width=250),
+                             "EDS":             st.column_config.TextColumn(width=70),
+                             "Falla":           st.column_config.TextColumn(width=260),
+                             "Equipo":          st.column_config.TextColumn(width=140),
+                             "Estado":          st.column_config.TextColumn(width=140),
+                             "Sin cerrar":      st.column_config.TextColumn(width=90),
+                         })
 
     # ── Filtros ─────────────────────────────────────────────────────
     st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
