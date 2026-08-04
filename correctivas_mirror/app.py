@@ -2124,17 +2124,20 @@ if vista == "🔗 Enlace Copec":
             _sin_ot = _alertas[_alertas["os_fracttal"].fillna("") == ""]
 
             for os_id, grp in _con_ot.groupby("os_fracttal"):
-                # tipo (Correctivo/Preventivo) — todos los avisos del grupo son iguales
                 tipo_up = str(grp.iloc[0].get("tipo_aviso") or "").upper()
                 tipo_lbl = "Preventivo (MP)" if tipo_up == "PREVENTIVO" else "Correctivo"
-                # armar lista "12345 (MP Fija)" separados por " + "
-                partes = []
-                for _, r in grp.iterrows():
-                    clase = r.get("_clase")
-                    suf = " (MP Fija)" if clase == "PLAN" else \
-                          " (MP Variable)" if clase == "REPUESTOS" else ""
-                    partes.append(f"{r['id_sap']}{suf}")
-                # falla + equipo del primer registro (o del Plan si existe)
+                # Separar M. Fija y M. Variable:
+                #  - Correctivo → todo va a M. Fija (Variable vacío)
+                #  - Preventivo → Plan(es) en M. Fija, Repuestos(s) en M. Variable
+                if tipo_up == "PREVENTIVO":
+                    _plans = grp[grp["_clase"] == "PLAN"]
+                    _reps  = grp[grp["_clase"] == "REPUESTOS"]
+                    m_fija = " + ".join(str(x) for x in _plans["id_sap"]) if not _plans.empty else "—"
+                    m_var  = " + ".join(str(x) for x in _reps["id_sap"])  if not _reps.empty  else "—"
+                else:
+                    m_fija = " + ".join(str(x) for x in grp["id_sap"])
+                    m_var  = ""
+                # falla + equipo del Plan si existe, sino del primero
                 _p = grp[grp["_clase"] == "PLAN"]
                 _r = (_p.iloc[0] if not _p.empty else grp.iloc[0])
                 hmax = grp["_horas_sin_cerrar"].max()
@@ -2142,7 +2145,8 @@ if vista == "🔗 Enlace Copec":
                     "N° OT Fracttal": os_id,
                     "Tipo": tipo_lbl,
                     "Técnico": grp.iloc[0].get("_tecnico") or "⏳ sin OT",
-                    "N° avisos Copec": " + ".join(partes),
+                    "M. Fija":     m_fija,
+                    "M. Variable": m_var,
                     "EDS": _r.get("eds_codigo") or "",
                     "Falla": _title_smart(_r.get("descripcion_falla") or ""),
                     "Equipo": _title_smart(_r.get("descripcion_equipo") or ""),
@@ -2152,16 +2156,25 @@ if vista == "🔗 Enlace Copec":
                                    f"🟠 {hmax:.0f}h" if hmax > 24 else
                                    f"🟡 {hmax:.0f}h"),
                 })
-            # Avisos sin OT: cada uno es su fila
+            # Avisos sin OT: cada uno es su fila (van a M. Fija o Variable
+            # según su clase; correctivos siempre a M. Fija).
             for _, r in _sin_ot.iterrows():
                 tipo_up = str(r.get("tipo_aviso") or "").upper()
                 tipo_lbl = "Preventivo (MP)" if tipo_up == "PREVENTIVO" else "Correctivo"
+                _clase = r.get("_clase")
+                if tipo_up == "PREVENTIVO" and _clase == "REPUESTOS":
+                    m_fija, m_var = "—", str(r["id_sap"])
+                elif tipo_up == "PREVENTIVO":
+                    m_fija, m_var = str(r["id_sap"]), "—"
+                else:
+                    m_fija, m_var = str(r["id_sap"]), ""
                 h = r["_horas_sin_cerrar"]
                 _rows_alr.append({
                     "N° OT Fracttal": "⏳ pendiente",
                     "Tipo": tipo_lbl,
                     "Técnico": "⏳ sin OT",
-                    "N° avisos Copec": str(r["id_sap"]),
+                    "M. Fija":     m_fija,
+                    "M. Variable": m_var,
                     "EDS": r.get("eds_codigo") or "",
                     "Falla": _title_smart(r.get("descripcion_falla") or ""),
                     "Equipo": _title_smart(r.get("descripcion_equipo") or ""),
@@ -2189,7 +2202,10 @@ if vista == "🔗 Enlace Copec":
                              "N° OT Fracttal":  st.column_config.TextColumn(width=105),
                              "Tipo":            st.column_config.TextColumn(width=130),
                              "Técnico":         st.column_config.TextColumn(width=180),
-                             "N° avisos Copec": st.column_config.TextColumn(width=250),
+                             "M. Fija":         st.column_config.TextColumn(width=100,
+                                 help="N° aviso Copec de la MP Fija (preventivo) o del correctivo"),
+                             "M. Variable":     st.column_config.TextColumn(width=100,
+                                 help="N° aviso Copec de la MP Variable (repuestos). Solo aplica a preventivos"),
                              "EDS":             st.column_config.TextColumn(width=70),
                              "Falla":           st.column_config.TextColumn(width=260),
                              "Equipo":          st.column_config.TextColumn(width=140),
