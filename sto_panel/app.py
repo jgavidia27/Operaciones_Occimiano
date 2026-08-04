@@ -468,6 +468,7 @@ CAUSAS: list[dict] = [
     {"nombre": "Falla en Componentes (Externos)",    "atrib": "FAO"},
     {"nombre": "Falla eléctrica (001)",              "atrib": "FAO"},
     {"nombre": "Fuga de agua (003)",                 "atrib": "FAO"},
+    {"nombre": "MP anterior ineficiente",            "atrib": "FAO"},
 ]
 CAUSAS_NOMBRES = [c["nombre"] for c in CAUSAS]
 CAUSA_ATRIB: dict[str, str] = {c["nombre"]: c["atrib"] for c in CAUSAS}
