@@ -15577,20 +15577,26 @@ elif _page == _NAV_PAGES[2]:
                     _has_form_num    = "form_tiene_numeral" in _sub.columns
                     for _fol, _grp in _sub.groupby("id_ot"):
                         _n_total = len(_grp)
-                        # Marcar cada subtarea como OK
-                        def _es_ok(r):
-                            _con_num  = bool(r.get("form_tiene_numeral")) if _has_form_num else True
-                            _num_ok   = bool(r.get("numeral_ok")) if pd.notna(r.get("numeral_ok")) else False
-                            _t_status = str(r.get("task_status") or "").upper() if _has_task_status else ""
-                            if _con_num:
-                                return _num_ok
-                            # Sin numeral: DONE = OK. Compat retro: si no
-                            # tenemos task_status, asumimos OK (evitaba
-                            # penalizar planes sin numeral pre-migración).
-                            if _t_status:
-                                return _t_status == "DONE"
-                            return True
-                        _oks = _grp.apply(_es_ok, axis=1)
+                        # OK = plan completo. Regla:
+                        #   • Si el plan tiene numeral (form_tiene_numeral):
+                        #       numeral_ok == True.
+                        #   • Si NO tiene numeral (fichero, ablandador, etc.):
+                        #       task_status == 'DONE'. Compat retro: si el
+                        #       sync viejo no llenó task_status, contamos OK.
+                        # Vectorizado (evita .apply — más robusto ante tipos
+                        # Arrow/nullable de Supabase).
+                        _con_num = (_grp["form_tiene_numeral"].fillna(False).astype(bool)
+                                    if _has_form_num
+                                    else pd.Series(True, index=_grp.index))
+                        _num_ok  = _grp["numeral_ok"].fillna(False).astype(bool)
+                        if _has_task_status:
+                            _t_up   = _grp["task_status"].fillna("").astype(str).str.upper()
+                            _no_num_ok = _t_up.eq("") | _t_up.eq("DONE")
+                        else:
+                            _no_num_ok = pd.Series(True, index=_grp.index)
+                        _oks = _con_num.where(~_con_num, _num_ok).mask(~_con_num, _no_num_ok)
+                        # Simplificación: donde _con_num=True → _num_ok; donde False → _no_num_ok
+                        _oks = _num_ok.where(_con_num, _no_num_ok)
                         _n_ok = int(_oks.sum())
                         _equipos = _grp["nombre_activo"].dropna().astype(str).tolist()
                         _equipos_short = ", ".join(sorted(set(_equipos))[:4])
