@@ -1,5 +1,5 @@
 """
-Análisis STO Occim — Panel de validación de reincidencias EDS.
+Panel de validación STO - Occim — Panel de validación de reincidencias EDS.
 
 Entry point Streamlit. En Streamlit Cloud, apunta este archivo como
 Main file path del segundo deploy.
@@ -41,7 +41,7 @@ import db  # noqa: E402
 # ═══════════════════════════════════════════════════════════════════════════
 
 st.set_page_config(
-    page_title="Análisis STO Occim",
+    page_title="Panel de validación STO - Occim",
     page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -158,7 +158,7 @@ LOGO_OCCIM = str(ASSETS_DIR / "logo_occim.png")
 
 def _login_view():
     st.markdown(
-        "<h1 style='margin-bottom:0;border:none;'>Análisis STO Occim</h1>"
+        "<h1 style='margin-bottom:0;border:none;'>☑️ Panel de validación STO - Occim</h1>"
         "<p style='color:#556;margin-top:4px;'>Panel de validación de reincidencias "
         "— acceso restringido a técnicos senior</p>",
         unsafe_allow_html=True,
@@ -323,7 +323,7 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def render_home(periodo: date, cliente: str):
-    st.title("🔧 Análisis STO Occim")
+    st.title("☑️ Panel de validación STO - Occim")
     st.caption(f"Reincidencias · {periodo_label(periodo)}"
                + (f" · {cliente}" if cliente != "Todos" else ""))
 
