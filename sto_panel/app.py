@@ -363,23 +363,25 @@ def render_home(periodo: date, cliente: str):
     st.markdown("### EDS reincidentes")
     st.caption("Ordenadas: 🔴 reincidentes primero, luego por N° de llamados. Click para revisar y clasificar.")
 
-    hdr = st.columns([1, 3, 2, 1, 3, 1])
+    hdr = st.columns([1, 3, 2, 2, 1, 3, 1])
     hdr[0].markdown("**EDS**")
     hdr[1].markdown("**Estación**")
-    hdr[2].markdown("**Cliente**")
-    hdr[3].markdown("**N°**")
-    hdr[4].markdown("**Estado**")
-    hdr[5].markdown("")
+    hdr[2].markdown("**Ciudad**")
+    hdr[3].markdown("**Cliente**")
+    hdr[4].markdown("**N°**")
+    hdr[5].markdown("**Estado**")
+    hdr[6].markdown("")
 
     for _, row in df.iterrows():
         cod = row["codigo_eds"]
         est = estados.get(cod, {})
         prev = val_prev.get(cod, [])
-        cols = st.columns([1, 3, 2, 1, 3, 1])
+        cols = st.columns([1, 3, 2, 2, 1, 3, 1])
         cols[0].write(cod or "—")
-        cols[1].write(row.get("estacion") or "—")
-        cols[2].write(row.get("cliente") or "—")
-        cols[3].write(int(row["n_llamados"]))
+        cols[1].write((row.get("estacion") or "").title() or "—")
+        cols[2].write((row.get("comuna") or "").title() or "—")
+        cols[3].write(_cliente_bonito(row.get("cliente")))
+        cols[4].write(int(row["n_llamados"]))
 
         if est.get("validado"):
             firmante = est.get("validado_por_nombre") or "—"
@@ -390,7 +392,7 @@ def render_home(periodo: date, cliente: str):
                     fecha = pd.to_datetime(_at).strftime("%d/%m")
                 except Exception:
                     fecha = ""
-            cols[4].markdown(
+            cols[5].markdown(
                 f'<span class="badge-ok">✅ Validado por {firmante}'
                 + (f" · {fecha}" if fecha else "") + "</span>",
                 unsafe_allow_html=True,
@@ -399,18 +401,18 @@ def render_home(periodo: date, cliente: str):
             p = prev[0]
             _p_periodo = pd.to_datetime(p["periodo"]).strftime("%b %Y").lower()
             _p_firmante = p.get("validado_por_nombre") or "—"
-            cols[4].markdown(
+            cols[5].markdown(
                 f'<span class="badge-crit">🔴 Reincidente — validada por '
                 f'{_p_firmante} en {_p_periodo}</span>',
                 unsafe_allow_html=True,
             )
         else:
-            cols[4].markdown(
+            cols[5].markdown(
                 '<span class="badge-pend">🔔 Pendiente</span>',
                 unsafe_allow_html=True,
             )
 
-        if cols[5].button("Abrir", key=f"open_{cod}"):
+        if cols[6].button("Abrir", key=f"open_{cod}"):
             st.session_state["eds_detalle"] = cod
             st.rerun()
 
@@ -472,6 +474,13 @@ CAUSAS: list[dict] = [
 ]
 CAUSAS_NOMBRES = [c["nombre"] for c in CAUSAS]
 CAUSA_ATRIB: dict[str, str] = {c["nombre"]: c["atrib"] for c in CAUSAS}
+
+
+def _cliente_bonito(cli) -> str:
+    """Nombre del cliente en Title Case (Copec, Shell (Enex), Esmax (Aramco))."""
+    if not cli:
+        return "—"
+    return str(cli).title()
 
 
 def _letra(i: int) -> str:

@@ -50,18 +50,32 @@ def _correctivas_mes(periodo_iso: str) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _mapa_comunas() -> dict[str, str]:
+    """{codigo_eds: comuna} desde estaciones_servicio. Cache 1h."""
+    rows = _query(
+        "estaciones_servicio",
+        "select=eds_occim,comuna",
+        limit=5000,
+    )
+    return {r["eds_occim"]: (r.get("comuna") or "") for r in rows if r.get("eds_occim")}
+
+
 def eds_reincidentes(periodo: date, cliente: str | None = None) -> pd.DataFrame:
     """EDS con ≥3 correctivos en el mes. Ordena desc por N° de llamados."""
     df = _correctivas_mes(periodo.isoformat())
     if df.empty:
-        return pd.DataFrame(columns=["codigo_eds", "cliente", "estacion", "n_llamados"])
+        return pd.DataFrame(columns=["codigo_eds", "cliente", "estacion", "comuna", "n_llamados"])
     if cliente and cliente != "Todos":
         df = df[df["cliente"] == cliente]
     g = (df.groupby(["codigo_eds", "cliente", "estacion"], dropna=False)
            .size().reset_index(name="n_llamados"))
-    g = g[g["n_llamados"] >= 3].sort_values(
-        "n_llamados", ascending=False
-    ).reset_index(drop=True)
+    g = g[g["n_llamados"] >= 3]
+
+    comunas = _mapa_comunas()
+    g["comuna"] = g["codigo_eds"].map(comunas).fillna("")
+    g = g[["codigo_eds", "cliente", "estacion", "comuna", "n_llamados"]]
+    g = g.sort_values("n_llamados", ascending=False).reset_index(drop=True)
     return g
 
 
