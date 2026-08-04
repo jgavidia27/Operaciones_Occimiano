@@ -5996,7 +5996,7 @@ elif _page == _NAV_PAGES[3]:
                 "tipo_equipo_disp":  "Tipo",
                 "ordenes_atendidas": "Órdenes atendidas",
                 "correctivas":       "Correctivas",
-                "corr_x_eq":         "Corr / equipo",
+                "corr_x_eq":         "Llamados x Pista",
                 "preventivas":       "Preventivas",
                 "p1":                "P1",
                 "Última atención":   "Última atención",
@@ -6087,10 +6087,10 @@ elif _page == _NAV_PAGES[3]:
                     help="Correctivas + Preventivas realizadas en el período seleccionado"),
                 "Correctivas":       st.column_config.NumberColumn(format="%d", width=90,
                     help="Llamados correctivos (emergencia) atendidos en el período"),
-                "Corr / equipo":     st.column_config.NumberColumn(format="%.1f", width=100,
-                    help=("Correctivas ÷ N° equipos de la EDS. Sirve para comparar peras "
-                          "con peras: 6 correctivos en 1 Doble = 3.0/eq (esperable); "
-                          "6 correctivos en 1 Simple = 6.0/eq (grave).")),
+                "Llamados x Pista":  st.column_config.NumberColumn(format="%.1f", width=115,
+                    help=("Correctivas ÷ N° equipos (pistas) de la EDS. Sirve para comparar "
+                          "peras con peras: 6 llamados en 1 Doble = 3.0/pista (esperable); "
+                          "6 llamados en 1 Simple = 6.0/pista (grave).")),
                 "Preventivas":       st.column_config.NumberColumn(format="%d", width=90,
                     help="Mantenciones preventivas realizadas en el período"),
                 "P1":                st.column_config.NumberColumn(format="%d", width=60,
