@@ -157,6 +157,13 @@ LOGO_LOGIN = str(ASSETS_DIR / "logo_login.png")
 LOGO_OCCIM = str(ASSETS_DIR / "logo_occim.png")
 
 
+def _cliente_bonito(cli) -> str:
+    """Nombre del cliente en Title Case (Copec, Shell (Enex), Esmax (Aramco))."""
+    if not cli:
+        return "—"
+    return str(cli).title()
+
+
 def _login_view():
     st.markdown(
         "<h1 style='margin-bottom:0;border:none;'>☑️ Panel de validación STO - Occim</h1>"
@@ -523,13 +530,6 @@ CAUSAS: list[dict] = [
 ]
 CAUSAS_NOMBRES = [c["nombre"] for c in CAUSAS]
 CAUSA_ATRIB: dict[str, str] = {c["nombre"]: c["atrib"] for c in CAUSAS}
-
-
-def _cliente_bonito(cli) -> str:
-    """Nombre del cliente en Title Case (Copec, Shell (Enex), Esmax (Aramco))."""
-    if not cli:
-        return "—"
-    return str(cli).title()
 
 
 def _letra(i: int) -> str:
