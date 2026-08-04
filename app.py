@@ -15385,6 +15385,11 @@ elif _page == _NAV_PAGES[2]:
                 "Motivo":        _df_v["_motivo"].fillna("").values,
                 "Responsable":   _df_v.get("responsable", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
             })
+            # Normalizar a Title Case las columnas que vienen en MAYÚSCULAS
+            # desde Fracttal (Cliente / Estación / Tipo Tarea / Plan /
+            # Responsable). Respeta acrónimos vía _smart_title_series.
+            for _colt in ("Cliente", "Estación", "Tipo Tarea", "Plan", "Responsable"):
+                _det[_colt] = _smart_title_series(_det[_colt])
 
             _show_df(_det.reset_index(drop=True), hide_index=True,
                 width="stretch",
@@ -15555,6 +15560,9 @@ elif _page == _NAV_PAGES[2]:
                     "Responsable":     _df_v.get("responsable", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
                     "Prioridad":       _df_v.get("prioridad", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
                 })
+                # Title Case para las columnas que vienen en MAYÚSCULAS desde Fracttal
+                for _colt in ("Cliente", "Estación", "Tipo Tarea", "Plan", "Responsable"):
+                    _det[_colt] = _smart_title_series(_det[_colt])
 
                 _show_df(_det.reset_index(drop=True), hide_index=True,
                     width="stretch",
