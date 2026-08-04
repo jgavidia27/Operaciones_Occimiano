@@ -5251,21 +5251,28 @@ elif _page == _NAV_PAGES[3]:
                     for _, _r5 in _top5_data.iterrows():
                         _ult5 = pd.to_datetime(_r5["ultimo_llamado"], errors="coerce")
                         _ult5_str = _ult5.strftime("%d/%m/%Y") if pd.notna(_ult5) else "—"
-                        # Falla más frecuente para esa EDS desde df_wo
-                        _fallas5 = pd.Series(dtype=str)
-                        if not df_wo_c.empty and "failure_type" in df_wo_c.columns and "eds_occim" in df_wo_c.columns:
-                            _fallas5 = df_wo_c[
+                        # Causa más frecuente para esa EDS desde df_wo. Usa
+                        # failure_cause (causa técnica: ERROR ELÉCTRICO, DAÑO
+                        # POR CLIENTE, REPUESTOS/DESGASTE, etc.) — NO failure_type
+                        # (F.N.A.O. / F.A.O. es solo clasificación administrativa
+                        # de imputación, no aporta al diagnóstico técnico).
+                        _causas5 = pd.Series(dtype=str)
+                        if (not df_wo_c.empty and "failure_cause" in df_wo_c.columns
+                                and "eds_occim" in df_wo_c.columns):
+                            _tmp = df_wo_c[
                                 (df_wo_c["eds_occim"] == _r5["eds_occim"]) &
-                                (df_wo_c["failure_type"].str.strip() != "")
-                            ]["failure_type"].value_counts()
-                        _falla_top = _fallas5.index[0] if not _fallas5.empty else "—"
+                                (df_wo_c["failure_cause"].str.strip() != "")
+                            ]["failure_cause"].apply(_limpiar_causa)
+                            _tmp = _tmp[_tmp != ""]   # descarta códigos numéricos / SIN CLASIFICAR
+                            _causas5 = _tmp.value_counts()
+                        _falla_top = _causas5.index[0] if not _causas5.empty else "—"
                         st.markdown(
                             f'<div style="background:{_t["card"]};border:1px solid {_t["border"]};'
                             f'border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:0.80rem;">'
                             f'<b style="color:{_col["accent"]};">{_r5["eds_nombre"]}</b><br>'
                             f'<span style="color:{_t["muted"]};">Llamados: </span><b>{int(_r5["llamados"])}</b> · '
                             f'<span style="color:{_t["muted"]};">Último: </span>{_ult5_str}<br>'
-                            f'<span style="color:{_t["muted"]};">Falla frecuente: </span>{_falla_top}'
+                            f'<span style="color:{_t["muted"]};">Causa frecuente: </span>{_falla_top}'
                             f'</div>',
                             unsafe_allow_html=True,
                         )
