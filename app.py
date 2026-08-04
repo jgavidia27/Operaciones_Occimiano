@@ -14863,15 +14863,16 @@ elif _page == _NAV_PAGES[2]:
     }
     df_prev["estado_tarea"] = df_prev["estado_tarea"].replace(_ESTADO_TAREA_MAP)
 
-    # Consolidar clientes:
+    # Consolidar clientes (vectorizado — evita .apply con lambdas por
+    # incompatibilidad con Arrow arrays en pandas 3.14):
     #   • Toda variante 'PARTICULAR *' → 'Particulares'.
-    #   • 'OCCIMIANO' se marca como None para excluirse del filtro (interna).
+    #   • 'OCCIMIANO' → None (interna, se excluye del filtro).
     if "cliente" in df_prev.columns:
-        _cli_up = df_prev["cliente"].astype(str).str.strip()
-        df_prev["cliente"] = _cli_up.apply(
-            lambda c: "Particulares" if c.upper().startswith("PARTICULAR")
-                      else (None if c.upper() == "OCCIMIANO" else c)
-        )
+        _cli_str = df_prev["cliente"].astype(str).str.strip()
+        _cli_up  = _cli_str.str.upper()
+        df_prev["cliente"] = _cli_str.mask(_cli_up.str.startswith("PARTICULAR"),
+                                            "Particulares")
+        df_prev.loc[_cli_up == "OCCIMIANO", "cliente"] = None
 
     # ── Formatear duración (segundos → "HH:MM") ───────────────────────────────
     def _seg_a_hhmm(seg) -> str:
@@ -15493,15 +15494,20 @@ elif _page == _NAV_PAGES[2]:
             & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
         ].copy()
 
-        # Normalización del cliente para el filtro:
+        # Normalización del cliente para el filtro (vectorizada — evita
+        # .apply con lambdas por incompatibilidad con Arrow arrays en
+        # pandas 3.14):
         #   • Cualquier variante "PARTICULAR ..." se agrupa como "Particulares".
         #   • Se excluye "OCCIMIANO" (OTs internas — no aportan al análisis
         #     de mantenciones prestadas a clientes).
         if not _dfr.empty:
-            _dfr = _dfr[~_dfr["cliente"].astype(str).str.strip().str.upper().eq("OCCIMIANO")].copy()
-            _dfr["cliente"] = _dfr["cliente"].astype(str).str.strip().apply(
-                lambda c: "Particulares" if c.upper().startswith("PARTICULAR") else c
-            )
+            _cli_r = _dfr["cliente"].astype(str).str.strip()
+            _cli_r_up = _cli_r.str.upper()
+            _dfr = _dfr[~_cli_r_up.eq("OCCIMIANO")].copy()
+            _cli_r = _cli_r.loc[_dfr.index]
+            _cli_r_up = _cli_r_up.loc[_dfr.index]
+            _dfr["cliente"] = _cli_r.mask(_cli_r_up.str.startswith("PARTICULAR"),
+                                          "Particulares")
 
         if _dfr.empty:
             st.info("Sin MPs finalizadas para el filtro seleccionado.")
