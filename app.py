@@ -7992,6 +7992,15 @@ elif _page == _NAV_PAGES[4]:
                 _tec = _p.DataFrame(_rt.json())
                 if not _tec.empty:
                     _df = _df.merge(_tec, on="patente", how="left")
+            # Fallback: si un evento GPS no matchea ningún técnico, usa la
+            # patente como nombre. Sin esto el groupby con dropna=True los
+            # elimina y desaparecen del ranking de 'Uso vehículos'.
+            for _col_fill, _val_fb in (("nombre_completo", "(sin técnico)"),
+                                        ("equipo", "—"), ("rut", "")):
+                if _col_fill in _df.columns:
+                    _df[_col_fill] = _df[_col_fill].fillna(_val_fb)
+                else:
+                    _df[_col_fill] = _val_fb
             return _df
 
         # ── Loader: turnos desde turnos_data.json (fuente Planificación Turnos STO) ──
@@ -8157,9 +8166,11 @@ elif _page == _NAV_PAGES[4]:
                 # Pivot: filas = patente/tecnico, columnas = días L-D, celdas = km
                 _df["km"] = _df["km"].astype(float)
                 _df["fecha_d"] = pd.to_datetime(_df["fecha"]).dt.date
-                _pt = _df.groupby(["patente","nombre_completo","fecha_d"])["km"].sum().reset_index()
+                _pt = _df.groupby(["patente","nombre_completo","fecha_d"],
+                                    dropna=False)["km"].sum().reset_index()
                 _pivot = _pt.pivot_table(index=["patente","nombre_completo"], columns="fecha_d",
-                                           values="km", aggfunc="sum", fill_value=0).round(1)
+                                           values="km", aggfunc="sum", fill_value=0,
+                                           dropna=False).round(1)
                 # Asegurar 7 columnas (L-D)
                 _dias_sem = [_lun_sel + _td_veh(days=i) for i in range(7)]
                 for _d in _dias_sem:
@@ -8200,9 +8211,11 @@ elif _page == _NAV_PAGES[4]:
                 _df["fecha_d"] = pd.to_datetime(_df["fecha"]).dt.date
                 # Semana ISO (1..5) del mes: por día del mes → 1+(dia-1)//7
                 _df["sem_mes"] = _df["fecha_d"].apply(lambda d: 1 + (d.day - 1) // 7)
-                _pt = _df.groupby(["patente","nombre_completo","sem_mes"])["km"].sum().reset_index()
+                _pt = _df.groupby(["patente","nombre_completo","sem_mes"],
+                                    dropna=False)["km"].sum().reset_index()
                 _pivot = _pt.pivot_table(index=["patente","nombre_completo"], columns="sem_mes",
-                                           values="km", aggfunc="sum", fill_value=0).round(1)
+                                           values="km", aggfunc="sum", fill_value=0,
+                                           dropna=False).round(1)
                 # Renombrar
                 _pivot.columns = [f"Sem {c}" for c in _pivot.columns]
                 _pivot["Total mes"] = _pivot.sum(axis=1).round(1)
