@@ -131,7 +131,7 @@ def render_kanban(items: list[dict],
     """
     if not items:
         st.info("No hay correctivos para clasificar en este periodo.")
-        return {"asignaciones": {}}
+        return {"asignaciones": {}, "unchanged": True}
 
     try:
         from streamlit_sortables import sort_items
@@ -161,6 +161,11 @@ def render_kanban(items: list[dict],
         key=f"{key_prefix}_sortable_{firma}",
     )
 
+    # Defensa: si el componente aún no responde o devuelve algo raro,
+    # NO reconstruimos asignaciones — devolvemos las que ya había.
+    if not result or not isinstance(result, list):
+        return {"asignaciones": dict(asignaciones), "unchanged": True}
+
     label2id = _label_to_id(items)
     nuevas: dict = {}
     header_a_key = {LABEL_PENDIENTE: None, LABEL_SIN: "sin_coincidencia"}
@@ -177,7 +182,7 @@ def render_kanban(items: list[dict],
                 nuevas[ot] = dest
             # dest == None → columna pendiente → no persiste
 
-    return {"asignaciones": nuevas}
+    return {"asignaciones": nuevas, "unchanged": False}
 
 
 def _render_fallback(items: list[dict], asignaciones: dict, grupos: list[dict],
@@ -210,4 +215,4 @@ def _render_fallback(items: list[dict], asignaciones: dict, grupos: list[dict],
                 nuevas[ot] = k
         st.divider()
 
-    return {"asignaciones": nuevas}
+    return {"asignaciones": nuevas, "unchanged": False}

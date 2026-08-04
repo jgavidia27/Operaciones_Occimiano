@@ -603,10 +603,14 @@ def render_detalle(codigo_eds: str, periodo: date):
         read_only=ya_validado,
         key_prefix=f"k_{codigo_eds}_{periodo.isoformat()}",
     )
-    if not ya_validado:
-        # Actualizar asignaciones desde lo devuelto por el sortable
-        state["asignaciones"] = resultado["asignaciones"]
-        asignaciones = state["asignaciones"]
+    if not ya_validado and not resultado.get("unchanged"):
+        # Solo persistimos si el sortable devolvió algo distinto — evita
+        # loop de re-render con react error #185 cuando default cambia
+        # entre reruns con la misma key.
+        nuevas_asig = resultado["asignaciones"]
+        if nuevas_asig != state["asignaciones"]:
+            state["asignaciones"] = nuevas_asig
+            asignaciones = state["asignaciones"]
 
     # ── Resumen + solución por grupo ────────────────────────────────────
     if grupos:
