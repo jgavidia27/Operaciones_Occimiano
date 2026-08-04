@@ -434,9 +434,17 @@ def load_listado_eds_supabase() -> pd.DataFrame:
     rows = _query(
         "estaciones_servicio",
         "select=eds_occim,cliente,nombre,direccion,comuna,region,zona,activa,"
-        "loc_fracttal,barcode_cliente,cod_occim_fracttal",
+        "loc_fracttal,barcode_cliente,cod_occim_fracttal,tipo_equipo,n_equipos",
         limit=2000
     )
+    # Fallback si la migración tipo_equipo / n_equipos aún no está aplicada.
+    if not rows:
+        rows = _query(
+            "estaciones_servicio",
+            "select=eds_occim,cliente,nombre,direccion,comuna,region,zona,activa,"
+            "loc_fracttal,barcode_cliente,cod_occim_fracttal",
+            limit=2000
+        )
     if not rows:
         return pd.DataFrame()
 

@@ -5934,6 +5934,32 @@ elif _page == _NAV_PAGES[3]:
 
         _df_tbl["zona_cliente"] = _df_tbl.apply(_zona_cliente_row, axis=1)
 
+        # ── Tipo de equipo (Simple/Doble) + Correctivas por equipo ──────
+        # Solo COPEC tiene catálogo Simple/Doble (fuente: Excel operaciones).
+        # 'Corr/equipo' normaliza el ranking: 6 correctivos en 1 Doble = 3
+        # por equipo; 6 correctivos en 1 Simple = 6 por equipo (más grave).
+        if "tipo_equipo" in _df_tbl.columns:
+            def _tipo_badge(v):
+                s = str(v or "").strip().title()
+                if s == "Doble":  return "🔵 Doble"
+                if s == "Simple": return "⚪ Simple"
+                return "—"
+            _df_tbl["tipo_equipo_disp"] = _df_tbl["tipo_equipo"].apply(_tipo_badge)
+        else:
+            _df_tbl["tipo_equipo_disp"] = "—"
+        if "n_equipos" in _df_tbl.columns and "correctivas" in _df_tbl.columns:
+            def _corr_x_eq(row):
+                try:
+                    n = int(row.get("n_equipos") or 0)
+                    c = int(row.get("correctivas") or 0)
+                except Exception:
+                    return None
+                if n <= 0: return None
+                return round(c / n, 1)
+            _df_tbl["corr_x_eq"] = _df_tbl.apply(_corr_x_eq, axis=1)
+        else:
+            _df_tbl["corr_x_eq"] = None
+
         # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío;
         # 'Dirección' — duplicaba 'Nombre / Dirección'; 'region' — se
         # reemplaza por 'Zona' propia del cliente).
@@ -5946,6 +5972,24 @@ elif _page == _NAV_PAGES[3]:
                 "zona_cliente":      "Zona",
                 "ordenes_atendidas": "Órdenes atendidas",
                 "correctivas":       "Correctivas",
+                "preventivas":       "Preventivas",
+                "p1":                "P1",
+                "Última atención":   "Última atención",
+                "Ratio (P/C x10)":   "Ratio (P/C x10)",
+                "ultimo_tecnico":    "Último Técnico",
+            }
+        elif _is_copec:
+            # COPEC: incluye Tipo (Simple/Doble) y Correctivas/equipo, para
+            # comparar EDS de forma justa (6 correctivos en 1 Doble = 3/eq).
+            _col_map = {
+                "eds_occim":         "Cód. Occim",
+                "nombre":            "Nombre / Dirección",
+                "comuna":            "Comuna",
+                "zona_cliente":      "Zona",
+                "tipo_equipo_disp":  "Tipo",
+                "ordenes_atendidas": "Órdenes atendidas",
+                "correctivas":       "Correctivas",
+                "corr_x_eq":         "Corr / equipo",
                 "preventivas":       "Preventivas",
                 "p1":                "P1",
                 "Última atención":   "Última atención",
@@ -6028,10 +6072,18 @@ elif _page == _NAV_PAGES[3]:
                           "COPEC → Santiago/Centro/Sur por prefijo EDS (60/40/20) · "
                           "Aramco → Norte/Centro/Santiago/Sur del mapa oficial · "
                           "Shell y otros → macrozona geográfica.")),
+                "Tipo":              st.column_config.TextColumn(width=90,
+                    help=("Solo COPEC. ⚪ Simple = 1 lavadora · 🔵 Doble = 2 lavadoras. "
+                          "Una estación Doble maneja el doble de tráfico, por lo que un "
+                          "mismo número de correctivos es proporcionalmente menos grave.")),
                 "Órdenes atendidas": st.column_config.NumberColumn(format="%d", width=90,
                     help="Correctivas + Preventivas realizadas en el período seleccionado"),
                 "Correctivas":       st.column_config.NumberColumn(format="%d", width=90,
                     help="Llamados correctivos (emergencia) atendidos en el período"),
+                "Corr / equipo":     st.column_config.NumberColumn(format="%.1f", width=100,
+                    help=("Correctivas ÷ N° equipos de la EDS. Sirve para comparar peras "
+                          "con peras: 6 correctivos en 1 Doble = 3.0/eq (esperable); "
+                          "6 correctivos en 1 Simple = 6.0/eq (grave).")),
                 "Preventivas":       st.column_config.NumberColumn(format="%d", width=90,
                     help="Mantenciones preventivas realizadas en el período"),
                 "P1":                st.column_config.NumberColumn(format="%d", width=60,
