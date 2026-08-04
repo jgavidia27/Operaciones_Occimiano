@@ -2062,8 +2062,13 @@ if vista == "🔗 Enlace Copec":
         for _v in g["os_fracttal"]:
             if _v:
                 os_fr = _v; break
+        # Técnico responsable desde la OT Fracttal matcheada
+        _tec = ""
+        if os_fr and _ots_detalle.get(os_fr):
+            _tec = _ots_detalle[os_fr].get("responsable") or ""
         _desbal.append({
             "N° OT Fracttal": os_fr or "⏳ pendiente",
+            "Técnico": _tec or "⏳ sin OT",
             "EDS": plan["eds_codigo"],
             "Dirección": _title_smart(plan["descripcion_instalacion"] or ""),
             "Fecha": pk.split("|")[-1],
