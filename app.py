@@ -14855,11 +14855,17 @@ elif _page == _NAV_PAGES[2]:
     df_prev["_mes"]   = _fc_prev.dt.to_period("M").astype(str)
     df_prev["_month"] = _fc_prev.dt.month.astype("Int64")
 
-    # ── Normalizar estado_tarea (Fracttal devuelve valores en inglés) ─────────
+    # ── Normalizar estado_tarea (Fracttal devuelve valores mezclados EN/ES) ──
+    # Vienen: DONE / NO_STARTED / IN_PROGRESS (raw API) y también variantes ya
+    # traducidas ('Finalizadas' con S, 'En progreso' con minúscula, etc.).
     _ESTADO_TAREA_MAP = {
-        "DONE":        "Finalizada",
-        "NO_STARTED":  "No Iniciada",
-        "IN_PROGRESS": "En Progreso",
+        "DONE":         "Finalizada",
+        "NO_STARTED":   "No Iniciada",
+        "IN_PROGRESS":  "En Progreso",
+        "Finalizadas":  "Finalizada",   # Fracttal también devuelve plural
+        "Finalizado":   "Finalizada",
+        "En progreso":  "En Progreso",  # capitalizar 'p'
+        "No iniciada":  "No Iniciada",  # capitalizar 'i'
     }
     df_prev["estado_tarea"] = df_prev["estado_tarea"].replace(_ESTADO_TAREA_MAP)
 
@@ -16096,9 +16102,10 @@ elif _page == _NAV_PAGES[2]:
             "Se excluyen OTs anuladas (Cancelado / Error ingreso / Equipo con recambio)."
         )
 
-        # Universo: TODAS las MPs operativas (ya excluye anuladas por _dfp_op).
-        # Deduplicar por id_ot para evitar contar 2 veces las OTs compuestas.
-        _dfplan = _dfp_op.copy()
+        # Universo: TODAS las MPs (usamos _dfp_full — NO aplica filtros de
+        # trimestre/mes de la barra superior, porque la vista Kanban vive
+        # en su propia ventana de 3 semanas). Excluimos anuladas manualmente.
+        _dfplan = _dfp_full[~_dfp_full["estado"].isin(_ESTADOS_NO_CUENTAN)].copy()
         _dfplan["_fp"] = pd.to_datetime(
             _dfplan["fecha_programada"], errors="coerce", utc=True
         ).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
