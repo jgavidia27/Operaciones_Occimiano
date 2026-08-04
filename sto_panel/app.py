@@ -681,36 +681,32 @@ def render_detalle(codigo_eds: str, periodo: date):
             state["asignaciones"] = nuevas_asig
             asignaciones = state["asignaciones"]
 
-    # ── Resumen + solución por grupo ────────────────────────────────────
+    # ── Resumen + solución generales de la EDS (uno solo) ───────────────
     if grupos:
-        st.markdown("### Resumen y solución por motivo")
-        for i, g in enumerate(grupos):
-            g["letra"] = _letra(i)
-            titulo = g.get("nombre") or "(sin motivo)"
-            n_ots = sum(1 for _, v in asignaciones.items() if v == g["id"])
-            st.markdown(f"**{titulo}** — {n_ots} OT(s)")
+        st.markdown("### Resumen y solución")
+        st.caption("Un resumen general de lo que ves y una propuesta de solución para toda la EDS.")
 
-            c1, c2 = st.columns(2)
-            with c1:
-                g["resumen"] = st.text_area(
-                    "Resumen de la falla",
-                    value=g.get("resumen") or "",
-                    height=100,
-                    disabled=ya_validado,
-                    placeholder="¿Qué falla comparten estas OTs?",
-                    key=f"gr_{codigo_eds}_{g['id']}",
-                )
-            with c2:
-                g["solucion"] = st.text_area(
-                    "Solución propuesta",
-                    value=g.get("solucion") or "",
-                    height=100,
-                    disabled=ya_validado,
-                    placeholder="Acción de fondo para este grupo.",
-                    key=f"gs_{codigo_eds}_{g['id']}",
-                )
-
-            st.divider()
+        c1, c2 = st.columns(2)
+        with c1:
+            resumen_edd = st.text_area(
+                "Resumen de la falla",
+                value=fila.get("resumen_falla") or "",
+                height=110,
+                disabled=ya_validado,
+                placeholder="¿Qué patrón ves en los llamados de esta EDS?",
+                key=f"eds_resumen_{codigo_eds}",
+            )
+        with c2:
+            solucion_edd = st.text_area(
+                "Solución propuesta",
+                value=fila.get("solucion_propuesta") or "",
+                height=110,
+                disabled=ya_validado,
+                placeholder="Acción de fondo para reducir la reincidencia.",
+                key=f"eds_solucion_{codigo_eds}",
+            )
+        state["resumen"]  = resumen_edd
+        state["solucion"] = solucion_edd
 
     # ── Seguimiento general de la EDS (una sola vez, no por grupo) ────────
     if grupos:
@@ -768,8 +764,13 @@ def render_detalle(codigo_eds: str, periodo: date):
 
     a1, a2 = st.columns([1, 1])
     if a1.button("💾 Guardar avance", use_container_width=True):
-        ok = db.upsert_clasificaciones(codigo_eds, periodo, _serializar(state))
-        if ok:
+        ok1 = db.upsert_clasificaciones(codigo_eds, periodo, _serializar(state))
+        ok2 = db.upsert_textos(
+            codigo_eds, periodo,
+            resumen=state.get("resumen") or "",
+            solucion=state.get("solucion") or "",
+        )
+        if ok1 and ok2:
             st.success("Avance guardado.")
         else:
             st.error("No se pudo guardar. Reintenta.")
@@ -788,14 +789,18 @@ def render_detalle(codigo_eds: str, periodo: date):
             errores.append(f"Hay causas repetidas entre grupos: {', '.join(dup)}. "
                            "Cada causa puede usarse una sola vez por EDS.")
 
-        # Grupos: cada uno debe tener ≥1 OT y resumen+solución llenos
+        # Cada grupo debe tener al menos 1 OT
         for g in grupos:
             n_ots = sum(1 for _, v in asignaciones.items() if v == g["id"])
             _titulo = g.get("nombre") or "(sin motivo)"
             if n_ots == 0:
                 errores.append(f"**{_titulo}** está vacío — quítalo o asígnale OTs.")
-            if not (g.get("resumen") or "").strip() or not (g.get("solucion") or "").strip():
-                errores.append(f"**{_titulo}**: completa resumen y solución.")
+
+        # Resumen y solución generales de la EDS
+        if not (state.get("resumen") or "").strip():
+            errores.append("Completa el **Resumen de la falla** general.")
+        if not (state.get("solucion") or "").strip():
+            errores.append("Completa la **Solución propuesta** general.")
 
         # Seguimiento general
         _seg = state.get("seguimiento") or {}
@@ -814,8 +819,8 @@ def render_detalle(codigo_eds: str, periodo: date):
                 codigo_eds, periodo,
                 email=_me["email"], nombre=_me["nombre"],
                 clasificaciones=_serializar(state),
-                resumen="",   # ahora la info detallada vive por grupo
-                solucion="",
+                resumen=state.get("resumen") or "",
+                solucion=state.get("solucion") or "",
             )
             if ok:
                 st.success("✅ Validación firmada. Gracias.")
