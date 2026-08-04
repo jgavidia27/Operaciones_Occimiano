@@ -93,3 +93,37 @@ def clientes_del_periodo(periodo: date) -> list[str]:
     if df.empty:
         return []
     return sorted(df["cliente"].dropna().unique().tolist())
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def top_eds_mes_actual(top_n: int = 10) -> pd.DataFrame:
+    """Top N EDS del mes en curso por N° de correctivos.
+    Cache 5 min. No exige umbral de ≥3 (muestra todo lo que hay hasta la fecha)."""
+    from datetime import datetime
+    hoy = date.today()
+    ini = date(hoy.year, hoy.month, 1)
+    # Fin exclusivo = mañana (para incluir todo lo de hoy)
+    from datetime import timedelta
+    fin = hoy + timedelta(days=1)
+
+    rows = _query(
+        "ordenes_trabajo",
+        f"select=id_ot,codigo_eds,cliente,estacion,fecha_creacion"
+        f"&tipo_tarea=ilike.*CORRECTIV*"
+        f"&fecha_creacion=gte.{ini.isoformat()}"
+        f"&fecha_creacion=lt.{fin.isoformat()}"
+        f"&codigo_eds=not.is.null"
+        f"&order=fecha_creacion.desc",
+        limit=20_000,
+    )
+    if not rows:
+        return pd.DataFrame(columns=["codigo_eds", "cliente", "estacion", "comuna", "n_llamados"])
+
+    df = pd.DataFrame(rows).drop_duplicates(subset=["id_ot"])
+    g = (df.groupby(["codigo_eds", "cliente", "estacion"], dropna=False)
+           .size().reset_index(name="n_llamados"))
+    comunas = _mapa_comunas()
+    g["comuna"] = g["codigo_eds"].map(comunas).fillna("")
+    g = g[["codigo_eds", "cliente", "estacion", "comuna", "n_llamados"]]
+    g = g.sort_values("n_llamados", ascending=False).head(top_n).reset_index(drop=True)
+    return g

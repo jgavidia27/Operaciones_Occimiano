@@ -31,6 +31,7 @@ from periodo import (  # noqa: E402
 )
 from reincidencias import (  # noqa: E402
     eds_reincidentes, correctivos_de_eds, clientes_del_periodo,
+    top_eds_mes_actual,
 )
 from ui_kanban import render_kanban  # noqa: E402
 import db  # noqa: E402
@@ -248,7 +249,7 @@ with st.sidebar:
     st.divider()
     _nav = st.radio(
         "Vista",
-        options=["Reincidencias", "Historial"],
+        options=["Reincidencias", "Historial", "Mes en curso"],
         index=0,
         label_visibility="collapsed",
     )
@@ -305,9 +306,57 @@ def render_historial():
     )
 
 
+def render_mes_en_curso():
+    from datetime import date as _date
+    hoy = _date.today()
+    st.title("📈 Mes en curso")
+    st.caption(f"Top 10 EDS con más correctivos en **{periodo_label(_date(hoy.year, hoy.month, 1))}** (actualizado en tiempo real).")
+
+    df = top_eds_mes_actual(top_n=10)
+    if df.empty:
+        st.info("Aún no hay correctivos registrados este mes.")
+        return
+
+    total_llamados = int(df["n_llamados"].sum())
+    umbral_3 = int((df["n_llamados"] >= 3).sum())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Top 10 EDS", len(df))
+    c2.metric("Total correctivos (Top 10)", total_llamados)
+    c3.metric("Ya con ≥3 llamados", umbral_3)
+
+    st.markdown("### Ranking")
+
+    _view = df.copy()
+    _view["Estación"] = _view["estacion"].fillna("").astype(str).str.title()
+    _view["Ciudad"]   = _view["comuna"].fillna("").astype(str).str.title()
+    _view["Cliente"]  = _view["cliente"].apply(_cliente_bonito)
+    _view = _view.rename(columns={"codigo_eds": "EDS", "n_llamados": "N° llamados"})
+    st.dataframe(
+        _view[["EDS", "Estación", "Ciudad", "Cliente", "N° llamados"]],
+        use_container_width=True, hide_index=True,
+    )
+
+    st.markdown("### Gráfico")
+    _chart = df.copy()
+    _chart["label"] = (
+        _chart["codigo_eds"].astype(str)
+        + " — "
+        + _chart["estacion"].fillna("").astype(str).str.title()
+    )
+    _chart = _chart.set_index("label")[["n_llamados"]].rename(
+        columns={"n_llamados": "N° llamados"}
+    )
+    st.bar_chart(_chart, horizontal=True, height=380, color=OCCIM_BLUE)
+
+
 if _nav == "Historial":
     _volver_a_home()
     render_historial()
+    st.stop()
+
+if _nav == "Mes en curso":
+    _volver_a_home()
+    render_mes_en_curso()
     st.stop()
 
 
