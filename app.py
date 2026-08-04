@@ -16109,21 +16109,60 @@ elif _page == _NAV_PAGES[2]:
     with _ptab_plan:
         st.caption(
             "Vista **Kanban** de MPs programadas: semana en curso + 2 siguientes. "
-            "Agrupadas por cliente. Cada OT muestra su estado — "
-            "✅ Realizada · 🟡 En Progreso · ⚪ Pendiente. "
-            "Al top de cada columna: cuántas de las programadas ya se ejecutaron. "
-            "Se excluyen OTs anuladas (Cancelado / Error ingreso / Equipo con recambio)."
+            "Agrupadas por cliente. **Cada card = 1 visita** (una subtarea con "
+            "fecha propia). Estado — ✅ Realizada · 🟡 En Progreso · ⚪ Pendiente. "
+            "Al top de cada columna: cuántas de las visitas ya se ejecutaron. "
+            "Fuente: `mp_subtareas_prog` (sincroniza `cal_date_maintenance` "
+            "de cada subtarea Fracttal, equivalente a 'Fecha Programada' del export)."
         )
 
-        # Universo: TODAS las MPs (usamos _dfp_full — NO aplica filtros de
-        # trimestre/mes de la barra superior, porque la vista Kanban vive
-        # en su propia ventana de 3 semanas). Excluimos anuladas manualmente.
-        _dfplan = _dfp_full[~_dfp_full["estado"].isin(_ESTADOS_NO_CUENTAN)].copy()
+        # Universo: mp_subtareas_prog — 1 fila por subtarea con su
+        # cal_date_maintenance individual (equivalente a col P del export
+        # Excel de Fracttal). Refleja el detalle real de visitas por EDS.
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _load_mp_subtareas_prog():
+            import os as _o, requests as _r
+            try:
+                _u = str(st.secrets["SUPABASE_URL"]); _k = str(st.secrets["SUPABASE_KEY"])
+            except Exception:
+                _u = _o.getenv("SUPABASE_URL",""); _k = _o.getenv("SUPABASE_KEY","")
+            if not _u or not _k: return pd.DataFrame()
+            _h = {"apikey": _k, "Authorization": f"Bearer {_k}"}
+            _rows, _off, _pg = [], 0, 1000
+            while _off < 10000:
+                _resp = _r.get(f"{_u}/rest/v1/mp_subtareas_prog",
+                    params={"select":"id_ot,id_work_order_task,codigo_activo,nombre_activo,"
+                                     "cliente,codigo_eds,estacion,tipo_tarea,plan_tareas,"
+                                     "responsable,cal_date_maintenance,task_status",
+                            "limit": _pg, "offset": _off,
+                            "order": "cal_date_maintenance.desc"},
+                    headers=_h, timeout=30)
+                if _resp.status_code != 200: break
+                _b = _resp.json()
+                if not _b: break
+                _rows.extend(_b)
+                if len(_b) < _pg: break
+                _off += _pg
+            return pd.DataFrame(_rows)
+
+        _dfplan = _load_mp_subtareas_prog()
+        if _dfplan.empty:
+            st.warning("Tabla mp_subtareas_prog vacía. Ejecuta `sync_mp_subtareas_prog.py`.")
+            st.stop()
         _dfplan["_fp"] = pd.to_datetime(
-            _dfplan["fecha_programada"], errors="coerce", utc=True
+            _dfplan["cal_date_maintenance"], errors="coerce", utc=True
         ).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
         _dfplan = _dfplan[_dfplan["_fp"].notna()].copy()
-        _dfplan = _dfplan.drop_duplicates(subset=["id_ot"], keep="first")
+        # Normalizar cliente para consolidar variantes 'PARTICULAR *' y quitar OCCIMIANO
+        _cli_s = _dfplan["cliente"].astype(str).str.strip()
+        _cli_up = _cli_s.str.upper()
+        _dfplan = _dfplan[~_cli_up.eq("OCCIMIANO")].copy()
+        _cli_s = _cli_s.loc[_dfplan.index]
+        _cli_up = _cli_up.loc[_dfplan.index]
+        _dfplan["cliente"] = _cli_s.mask(_cli_up.str.startswith("PARTICULAR"), "Particulares")
+        # Normalizar estado_tarea a etiquetas ES-ES
+        _ESTMAP = {"DONE":"Finalizada","NO_STARTED":"No Iniciada","IN_PROGRESS":"En Progreso"}
+        _dfplan["estado_tarea"] = _dfplan["task_status"].map(_ESTMAP).fillna(_dfplan["task_status"])
 
         _hoy_pl = pd.Timestamp.today().normalize()
         _lun_actual = _hoy_pl - pd.Timedelta(days=_hoy_pl.weekday())
@@ -16211,29 +16250,39 @@ elif _page == _NAV_PAGES[2]:
                                 _badge, _cbdg = "🟡 En Progreso", "#f59e0b"
                             else:
                                 _badge, _cbdg = "⚪ Pendiente", "#94a3b8"
-                            _est_nom = str(_mp.get("estacion", "") or
-                                           _mp.get("codigo_eds", "") or "—")
+                            # Limpiar 'estacion' que viene como '// COPEC/ COPEC BUIN/'
+                            # → tomar la penúltima parte (nombre de la EDS).
+                            _est_raw = str(_mp.get("estacion", "") or "").strip()
+                            _partes = [p.strip() for p in _est_raw.split("/") if p.strip()]
+                            _est_bonito = _partes[-1] if _partes else "—"
+                            _cod_eds = str(_mp.get("codigo_eds", "") or "").strip() or "—"
+                            _activo = str(_mp.get("nombre_activo", "") or "—")
+                            _activo_tit = _smart_title_series(pd.Series([_activo])).iloc[0]
                             _plan_raw = str(_mp.get("plan_tareas", "") or "—")
                             _plan_tit = _smart_title_series(pd.Series([_plan_raw])).iloc[0]
                             _resp_mp = str(_mp.get("responsable", "") or "—")
                             _resp_tit = _smart_title_series(pd.Series([_resp_mp])).iloc[0]
                             _fp_lbl = _mp["_fp"].strftime("%a %d/%m")
-                            _est_tit = _smart_title_series(pd.Series([_est_nom])).iloc[0]
+                            _est_tit = _smart_title_series(pd.Series([_est_bonito])).iloc[0]
                             st.markdown(
                                 f"""<div style='background:{_t["card"]};
                                     border:1px solid {_t["border"]};
                                     border-left:3px solid {_cbdg};
                                     border-radius:6px; padding:8px 10px;
                                     margin-bottom:6px; font-size:0.80rem;'>
-                                  <div style='color:{_t["text"]};'><b>{_est_tit[:52]}</b></div>
-                                  <div style='color:{_t["muted"]}; font-size:0.75rem;
-                                              margin-top:2px;'>{_plan_tit[:60]}</div>
+                                  <div style='color:{_t["text"]};'>
+                                    <b>{_cod_eds}</b> · {_est_tit[:42]}
+                                  </div>
+                                  <div style='color:{_t["muted"]}; font-size:0.72rem;
+                                              margin-top:2px;'>🔧 {_activo_tit[:55]}</div>
+                                  <div style='color:{_t["muted"]}; font-size:0.72rem;
+                                              margin-top:1px;'>📋 {_plan_tit[:55]}</div>
                                   <div style='display:flex; justify-content:space-between;
                                               margin-top:4px; font-size:0.72rem;'>
-                                    <span style='color:{_t["muted"]};'>{_resp_tit[:28]} · {_fp_lbl}</span>
+                                    <span style='color:{_t["muted"]};'>{_resp_tit[:26]} · {_fp_lbl}</span>
                                     <span style='color:{_cbdg}; font-weight:600;'>{_badge}</span>
                                   </div>
-                                  <div style='color:{_t["muted"]}; font-size:0.70rem;
+                                  <div style='color:{_t["muted"]}; font-size:0.68rem;
                                               margin-top:2px;'>{_mp["id_ot"]}</div>
                                 </div>""",
                                 unsafe_allow_html=True,
