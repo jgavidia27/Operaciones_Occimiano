@@ -42,7 +42,7 @@ import db  # noqa: E402
 
 st.set_page_config(
     page_title="Panel de validación STO - Occim",
-    page_icon="🔧",
+    page_icon="☑️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
