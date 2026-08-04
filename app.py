@@ -16484,7 +16484,8 @@ elif _page == _NAV_PAGES[2]:
                         "N° OT":      _fol,
                         "EDS":        str(_meta.get("codigo_eds","") or _meta.get("estacion","") or "—"),
                         "Técnico":    str(_meta.get("responsable","") or "—"),
-                        "Equipo (fichero)": str(_r.get("nombre_activo","") or "—"),
+                        "Cód. Equipo": str(_r.get("codigo_activo","") or "—"),
+                        "Equipo":      str(_r.get("nombre_activo","") or "—"),
                         "¿Acepta monedas?":   _ico(_acepta),
                         "¿Se realizó cambio?": _ico(_cambio),
                     })
@@ -16528,7 +16529,11 @@ elif _page == _NAV_PAGES[2]:
                                  "N° OT":              st.column_config.TextColumn(width=95),
                                  "EDS":                st.column_config.TextColumn(width=100),
                                  "Técnico":            st.column_config.TextColumn(width=180),
-                                 "Equipo (fichero)":   st.column_config.TextColumn(width=200),
+                                 "Cód. Equipo":        st.column_config.TextColumn(width=95,
+                                     help="Código del activo en Fracttal (ej. EQ-6766)"),
+                                 "Equipo":             st.column_config.TextColumn(width=220,
+                                     help="Nombre/tipo del equipo que tiene el fichero: "
+                                          "lavadora, aspiradora, lavatapette, etc."),
                                  "¿Acepta monedas?":   st.column_config.TextColumn(width=130,
                                      help="Respuesta a '¿EL FICHERO ACEPTA MONEDAS?'"),
                                  "¿Se realizó cambio?": st.column_config.TextColumn(width=140,
