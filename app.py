@@ -14856,8 +14856,22 @@ elif _page == _NAV_PAGES[2]:
     df_prev["_month"] = _fc_prev.dt.month.astype("Int64")
 
     # ── Normalizar estado_tarea (Fracttal devuelve valores en inglés) ─────────
-    _ESTADO_TAREA_MAP = {"DONE": "Finalizada", "NO_STARTED": "No Iniciada"}
+    _ESTADO_TAREA_MAP = {
+        "DONE":        "Finalizada",
+        "NO_STARTED":  "No Iniciada",
+        "IN_PROGRESS": "En Progreso",
+    }
     df_prev["estado_tarea"] = df_prev["estado_tarea"].replace(_ESTADO_TAREA_MAP)
+
+    # Consolidar clientes:
+    #   • Toda variante 'PARTICULAR *' → 'Particulares'.
+    #   • 'OCCIMIANO' se marca como None para excluirse del filtro (interna).
+    if "cliente" in df_prev.columns:
+        _cli_up = df_prev["cliente"].astype(str).str.strip()
+        df_prev["cliente"] = _cli_up.apply(
+            lambda c: "Particulares" if c.upper().startswith("PARTICULAR")
+                      else (None if c.upper() == "OCCIMIANO" else c)
+        )
 
     # ── Formatear duración (segundos → "HH:MM") ───────────────────────────────
     def _seg_a_hhmm(seg) -> str:
@@ -14890,7 +14904,7 @@ elif _page == _NAV_PAGES[2]:
     # ── Filtros fila 1 ────────────────────────────────────────────────────
     _pTRIM = {"T1 (Ene–Mar)":[1,2,3],"T2 (Abr–Jun)":[4,5,6],
               "T3 (Jul–Sep)":[7,8,9],"T4 (Oct–Dic)":[10,11,12]}
-    _pf1, _pf2, _pf3, _pf4, _pf5 = st.columns([1.1, 1.3, 1.5, 1.5, 1.5])
+    _pf1, _pf2, _pf3, _pf4 = st.columns([1.1, 1.3, 1.5, 1.6])
     with _pf1:
         sel_ptrim = st.selectbox("Trimestre", ["Todos"] + list(_pTRIM.keys()), key="prev_trim")
     with _pf2:
@@ -14906,31 +14920,37 @@ elif _page == _NAV_PAGES[2]:
         _ptipo_opts = ["Todos"] + sorted(df_prev["tipo_tarea"].dropna().unique().tolist())
         sel_ptipo = st.selectbox("Tipo de tarea", _ptipo_opts, key="prev_tipo")
     with _pf4:
-        _pactiv_opts = ["Todos"] + sorted(df_prev["activador"].dropna().unique().tolist())
-        sel_pactiv = st.selectbox("Activador", _pactiv_opts, key="prev_activ")
-    with _pf5:
         _presp_opts = ["Todos"] + sorted(df_prev["responsable"].dropna().unique().tolist())
         sel_presp = st.selectbox("Responsable", _presp_opts, key="prev_resp")
 
     # ── Filtros fila 2 ────────────────────────────────────────────────────
-    _pf6, _pf7, _pf8, _pf9, _pf10 = st.columns([1.1, 1.3, 1.5, 1.5, 1.5])
+    # Solo dejamos los 3 que aportan valor: estado tarea, plan y cliente.
+    _pf6, _pf9, _pf10 = st.columns([1.3, 1.8, 1.5])
     with _pf6:
-        sel_pestado = st.selectbox("Estado",
-            ["Todos"] + sorted(df_prev["estado"].dropna().unique().tolist()), key="prev_estado")
-    with _pf7:
-        sel_pestarea = st.selectbox("Estado tarea",
-            ["Todos"] + sorted(df_prev["estado_tarea"].dropna().unique().tolist()), key="prev_estarea")
-    with _pf8:
-        sel_pclasi = st.text_input("Clasificación 2", key="prev_clasi",
-                                   placeholder="60198  ó  SH_736…")
+        # Orden fijo con etiquetas ya normalizadas (En Progreso, no IN_PROGRESS)
+        _ESTAREA_OPTS = ["Todos", "Finalizada", "En Progreso", "No Iniciada"]
+        # Solo mostrar las que tienen datos
+        _est_disp = set(df_prev["estado_tarea"].dropna().unique().tolist())
+        _estarea_opts = [o for o in _ESTAREA_OPTS if o == "Todos" or o in _est_disp]
+        sel_pestarea = st.selectbox("Estado tarea", _estarea_opts, key="prev_estarea")
     with _pf9:
-        _ppl_opts = ["Todos"] + sorted(df_prev["plan_tareas"].dropna().unique().tolist()) \
-            if "plan_tareas" in df_prev.columns else ["Todos"]
-        sel_pplan = st.selectbox("Plan de tareas", _ppl_opts, key="prev_plan")
+        # Plan de tareas: Title Case (respeta acrónimos MSELF, PBR, etc.)
+        # Mapa {label_title: valor_original} para poder filtrar contra Supabase.
+        _plan_raw = sorted(df_prev["plan_tareas"].dropna().unique().tolist()) \
+            if "plan_tareas" in df_prev.columns else []
+        _plan_map = {}
+        if _plan_raw:
+            _titled = _smart_title_series(pd.Series(_plan_raw)).tolist()
+            for lbl, raw in zip(_titled, _plan_raw):
+                _plan_map[lbl] = raw
+        _ppl_opts = ["Todos"] + sorted(_plan_map.keys())
+        sel_pplan_lbl = st.selectbox("Plan de tareas", _ppl_opts, key="prev_plan")
+        sel_pplan = _plan_map.get(sel_pplan_lbl, sel_pplan_lbl)  # valor real Supabase
 
-    # Helper: orden de clientes — primero los 3 principales, luego alfabético
+    # Helper: orden de clientes — primero los 3 principales, luego Particulares,
+    # luego alfabético. Occimiano ya se excluyó al normalizar df_prev.
     def _orden_clientes(series_clientes) -> list:
-        _principales = ["COPEC", "Aramco (Esmax)", "SHELL (Enex)"]
+        _principales = ["COPEC", "Aramco (Esmax)", "SHELL (Enex)", "Particulares"]
         _unicos = set(series_clientes.dropna().unique().tolist())
         _ord = [c for c in _principales if c in _unicos]
         _resto = sorted(c for c in _unicos if c not in _principales)
@@ -14942,6 +14962,12 @@ elif _page == _NAV_PAGES[2]:
             _orden_clientes(df_prev["cliente"]) if "cliente" in df_prev.columns else ["Todos"],
             key="prev_cliente",
         )
+
+    # Placeholders para variables eliminadas (Activador, Estado, Clasif 2)
+    # — algunos KPIs downstream aún las referencian.
+    sel_pactiv  = "Todos"
+    sel_pestado = "Todos"
+    sel_pclasi  = ""
 
     # ── Aplicar filtros ───────────────────────────────────────────────────
     dfp = df_prev.copy()
