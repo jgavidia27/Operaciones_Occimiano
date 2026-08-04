@@ -15429,794 +15429,158 @@ elif _page == _NAV_PAGES[2]:
     ])
 
     # ══════════════════════════════════════════════════════════════════════
-    # SUB-TAB: 📋 Programación MP — cronograma de MPs POR REALIZAR del mes.
-    # Lee la seccion T24+ del Excel (despues del encabezado 'POR REALIZAR').
-    # Cada fila = una EDS programada. Si tiene FECHA REAL (col T) = ya se hizo;
-    # si no = pendiente. Sirve para desglosar lo que viene y detectar
-    # programadas vencidas (fecha_progr pasada y aun sin ejecutar).
+    # SUB-TAB: 📋 Programación MP — MPs pendientes desde Supabase/Fracttal.
+    # Reemplaza la lectura del Excel externo 'UTILIZACIÓN DE TIEMPO.xlsx'
+    # por consulta directa a ordenes_trabajo filtrando estado_tarea IN
+    # ('No Iniciada','En Progreso'). Universo siempre fresco (sync cada
+    # 30 min); no requiere que nadie mantenga el Excel a mano.
     # ══════════════════════════════════════════════════════════════════════
     with _ptab_prog:
-        from openpyxl import load_workbook as _lwb_pr
-        from datetime import date as _date_pr
-
         st.markdown(
             '<div class="section-header">'
-            '📋  Programación MP — Cronograma del mes'
+            '📋  Programación MP — Pendientes desde Fracttal'
             '</div>',
             unsafe_allow_html=True,
         )
         st.caption(
-            "MPs programadas del mes según el Excel de Utilización de Tiempo. "
-            "**Pendientes** = aún sin ejecutar · **Realizadas** = ya tienen fecha real · "
-            "**⚠️ Vencidas** = fecha programada ya pasó y siguen sin ejecutarse. "
-            "Cada EDS puede tener varios equipos, cada uno con su propia frecuencia de MP."
+            "MPs con estado **No Iniciada** o **En Progreso** ordenadas por urgencia. "
+            "Data en vivo desde Supabase (sync Fracttal cada 30 min). "
+            "🚨 Vencidas = fecha programada ya pasó · ⚠️ Hoy · 🟡 Esta semana · 📅 Próximas."
         )
 
-        _PATH_PR = ("G:/.shortcut-targets-by-id/15zHnoU5VZlkOwYc6EBziNcnS-sAAtwtk/"
-                    "OPERACIONES/OPERACIONES/2026 UTILIZACIÓN DE TIEMPO.xlsx")
+        # ── Universo: MPs pendientes (No Iniciada o En Progreso) ────────
+        # Reutilizamos _dfp_op (excluye anuladas). No filtramos por período
+        # ni cliente aquí — usamos filtros propios porque la vista es 100%
+        # operativa (qué toca hacer YA).
+        _hoy_pr = pd.Timestamp.today().normalize()
 
-        @st.cache_data(ttl=300, show_spinner=False)
-        def _load_programacion_mp(mes_hoja: str) -> pd.DataFrame:
-            """Lee la seccion POR REALIZAR (desde el encabezado en col X hasta
-            el fin de datos). Devuelve DataFrame con las MPs programadas."""
-            try:
-                _wb = _lwb_pr(_PATH_PR, data_only=True)
-            except Exception:
-                return pd.DataFrame()
-            if mes_hoja not in _wb.sheetnames:
-                return pd.DataFrame()
-            _ws = _wb[mes_hoja]
-            # Localizar la fila del encabezado 'POR REALIZAR' o el 2do 'FECHA REAL'
-            _start = None
-            for r in range(3, 60):
-                _x = str(_ws.cell(r, 24).value or "").upper()   # col X
-                _t = str(_ws.cell(r, 20).value or "").upper()   # col T
-                if "POR REALIZAR" in _x or (r > 5 and _t == "FECHA REAL"):
-                    _start = r + 1
-                    # Si es 'POR REALIZAR' el encabezado real esta 1 fila mas abajo
-                    if "POR REALIZAR" in _x:
-                        _start = r + 2
-                    break
-            if _start is None:
-                return pd.DataFrame()
-            rows = []
-            for r in range(_start, _ws.max_row + 1):
-                _cod = _ws.cell(r, 22).value   # V - N° EDS
-                _dir = _ws.cell(r, 24).value   # X - direccion
-                if not _cod and not _dir:
-                    continue
-                # Saltar encabezados repetidos
-                if str(_ws.cell(r, 20).value or "").upper() == "FECHA REAL":
-                    continue
-                rows.append({
-                    "F. Real":      _ws.cell(r, 20).value,   # T
-                    "F. Programada": _ws.cell(r, 21).value,  # U
-                    "Cód. EDS":     str(_ws.cell(r, 22).value or "").strip(),  # V
-                    "N°":           str(_ws.cell(r, 23).value or "").strip(),  # W
-                    "Dirección":    str(_ws.cell(r, 24).value or "").strip(),  # X
-                    "Semana":       str(_ws.cell(r, 25).value or "").strip(),  # Y
-                    "Última mant.": _ws.cell(r, 26).value,   # Z
-                    "Día":          str(_ws.cell(r, 27).value or "").strip(),  # AA
-                    "Provincia":    str(_ws.cell(r, 28).value or "").strip(),  # AB
-                    "Comuna":       str(_ws.cell(r, 29).value or "").strip(),  # AC
-                    "Tipo MP":      str(_ws.cell(r, 30).value or "").strip(),  # AD
-                })
-            return pd.DataFrame(rows)
+        _df_pend = _dfp_op[
+            _dfp_op["estado_tarea"].isin(["No Iniciada", "En Progreso"])
+            & _dfp_op["fecha_programada"].notna()
+        ].copy()
 
-        # ── Filtros ─────────────────────────────────────────────────────
-        _MESES_PR = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
-                     "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
-        _MESES_PR_TIT = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
-                         "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
-        _MIN_YR_PR = 2026   # solo interesa 2026 en adelante
-        _yr_pr = _date_pr.today().year
-        _mes_actual_pr = _date_pr.today().month
-        # Meses del año actual hasta el actual + todos los meses de años anteriores >= 2026
-        _hojas_disp_pr = []
-        if _yr_pr >= _MIN_YR_PR:
-            _hojas_disp_pr += [f"{_MESES_PR_TIT[m-1]} {_yr_pr % 100:02d}"
-                               for m in range(_mes_actual_pr, 0, -1)]
-        for _y in range(_yr_pr - 1, _MIN_YR_PR - 1, -1):
-            _hojas_disp_pr += [f"{_MESES_PR_TIT[m-1]} {_y % 100:02d}"
-                               for m in range(12, 0, -1)]
-
-        # Mapa etiqueta visible -> hoja original del Excel ('JULIO 2026')
-        _lbl2hoja_pr = {}
-        for _y in range(_MIN_YR_PR, _yr_pr + 1):
-            for _m in range(1, 13):
-                _lbl2hoja_pr[f"{_MESES_PR_TIT[_m-1]} {_y % 100:02d}"] = \
-                    f"{_MESES_PR[_m-1]} {_y}"
-
-        _fp1, _fp2, _fp3, _fp4 = st.columns([1.8, 1.5, 1.5, 1])
-        with _fp1:
-            _mes_pr = st.selectbox("Mes", _hojas_disp_pr, key="pr_mes_sel")
-        with _fp4:
-            st.write("")
-            if st.button("🔄 Refrescar", key="pr_refresh", use_container_width=True):
-                _load_programacion_mp.clear()
-                st.rerun()
-
-        # La hoja original del Excel sigue en formato 'JULIO 2026' (mayúsc, año completo)
-        _mes_pr_hoja = _lbl2hoja_pr.get(_mes_pr, _mes_pr)
-        with st.spinner(f"Leyendo programación de {_mes_pr}…"):
-            _df_pr = _load_programacion_mp(_mes_pr_hoja)
-
-        if _df_pr.empty:
-            st.info(
-                f"No hay MPs programadas registradas en **{_mes_pr}**. "
-                "Verifica que la hoja tenga la sección 'POR REALIZAR' poblada."
-            )
+        if _df_pend.empty:
+            st.success("✅ No hay MPs pendientes. Todas las OTs están finalizadas.")
         else:
-            # Normalizar fechas y calcular estado
-            _hoy_pr = pd.Timestamp.today().normalize()
-            _df_pr["_freal_dt"] = pd.to_datetime(_df_pr["F. Real"], errors="coerce")
-            _df_pr["_fprog_dt"] = pd.to_datetime(_df_pr["F. Programada"], errors="coerce")
-
-            # ── Cruce con Fracttal (Supabase) para validar ejecución real ──
-            # El Excel no siempre se actualiza; Fracttal es la fuente de verdad.
-            # Indexamos preventivas del mes por codigo_eds -> mejor OT.
-            _mes_num_pr0 = _MESES_PR.index(_mes_pr_hoja.split()[0]) + 1
-            _yr_pr0 = int(_mes_pr_hoja.split()[1])
-
-            @st.cache_data(ttl=900, show_spinner=False)
-            def _fracttal_mp_idx(mes_num, anio):
-                """{codigo_eds: {id_ot, responsable, fin, estado, estacion, fcrea}}
-                de las preventivas de Fracttal cuya creación cae en el mes."""
-                from supabase_client import _query as _sq
-                _d0 = f"{anio}-{mes_num:02d}-01"
-                _mn2, _yr2 = (mes_num + 1, anio) if mes_num < 12 else (1, anio + 1)
-                _d1 = f"{_yr2}-{_mn2:02d}-05"
-                try:
-                    _rows = _sq("ordenes_trabajo",
-                        "select=id_ot,codigo_eds,estado,fecha_finalizacion,fecha_creacion,"
-                        "fecha_programada,responsable,estacion,nombre_activo"
-                        "&tipo_tarea=ilike.*PREVENTIV*"
-                        f"&fecha_creacion=gte.{_d0}&fecha_creacion=lt.{_d1}",
-                        limit=5000)
-                except Exception:
-                    return {}
-                _idx = {}
-                _BASURA = ("ERROR DE INGRESO","DUPLICADO","DUPLICIDAD","DE PRUEBA",
-                           "PRUEBA ROBOT","CANCELAD")
-                for r in _rows:
-                    _ce = str(r.get("codigo_eds") or "").strip().upper()
-                    if not _ce:
-                        continue
-                    _est = str(r.get("estado") or "").upper()
-                    if any(b in _est for b in _BASURA):
-                        continue
-                    _fin = r.get("fecha_finalizacion")
-                    _prev = _idx.get(_ce)
-                    # Preferir: la que tiene fecha_finalizacion (realizada)
-                    if _prev is None or (_fin and not _prev.get("fin")):
-                        _idx[_ce] = {
-                            "id_ot": r.get("id_ot"),
-                            "responsable": r.get("responsable") or "",
-                            "fin": _fin,
-                            "fcrea": r.get("fecha_creacion"),
-                            "fprog": r.get("fecha_programada"),
-                            "estado": r.get("estado") or "",
-                            "estacion": r.get("estacion") or r.get("nombre_activo") or "",
-                        }
-                return _idx
-            _FR_IDX = _fracttal_mp_idx(_mes_num_pr0, _yr_pr0)
-
-            def _match_fr(cod_eds):
-                return _FR_IDX.get(str(cod_eds or "").strip().upper())
-
-            def _estado_pr(row):
-                _fr = _match_fr(row["Cód. EDS"])
-                # 1) Fracttal manda: si hay OT finalizada -> Realizada
-                if _fr and _fr.get("fin"):
-                    return "✅ Realizada"
-                # 2) Excel marca realizada
-                if pd.notna(row["_freal_dt"]):
-                    return "✅ Realizada"
-                # 3) Hay OT abierta en Fracttal (en progreso / por iniciar)
-                if _fr:
-                    return "🕓 Pendiente"
-                # 4) Sin rastro en Fracttal y fecha programada ya pasó
-                if pd.notna(row["_fprog_dt"]) and row["_fprog_dt"] < _hoy_pr:
-                    return "⚠️ Vencida"
-                return "🕓 Pendiente"
-            _df_pr["Estado"] = _df_pr.apply(_estado_pr, axis=1)
-            # Enriquecer con OT y responsable de Fracttal
-            _df_pr["_ot_fr"]   = _df_pr["Cód. EDS"].apply(
-                lambda c: (_match_fr(c) or {}).get("id_ot") or "")
-            _df_pr["_resp_fr"] = _df_pr["Cód. EDS"].apply(
-                lambda c: (_match_fr(c) or {}).get("responsable") or "")
-            _df_pr["_finfr_dt"] = pd.to_datetime(
-                _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fin")),
-                errors="coerce")
-            # Fecha programada Fracttal (usada como tentativa cuando Excel no tiene fecha)
-            # tz-naive: Fracttal viene con +00:00; el Excel es naive. Alineamos ambos.
-            def _to_naive(s):
-                s = pd.to_datetime(s, errors="coerce", utc=True)
-                return s.dt.tz_localize(None) if hasattr(s, "dt") else s
-            _df_pr["_fprogfr_dt"] = _to_naive(
-                _df_pr["Cód. EDS"].apply(lambda c: (_match_fr(c) or {}).get("fprog")))
-            _df_pr["_finfr_dt"]   = _to_naive(_df_pr["_finfr_dt"])
-            _df_pr["_freal_dt"]   = _to_naive(_df_pr["_freal_dt"])
-            _df_pr["_fprog_dt"]   = _to_naive(_df_pr["_fprog_dt"])
-            # Fecha efectiva para la agenda, en orden de preferencia:
-            #  1) F. Programada Excel (definitiva)
-            #  2) fecha_programada Fracttal (tentativa)
-            #  3) fecha_finalizacion Fracttal (ya ejecutada)
-            #  4) F. Real Excel (registrada como hecha)
-            # Marca 'tentativa' solo si la fecha viene de (2) y no hay ejecución.
-            _df_pr["_fprog_tent"] = (
-                _df_pr["_fprog_dt"].isna()
-                & _df_pr["_fprogfr_dt"].notna()
-                & _df_pr["_finfr_dt"].isna()
-                & _df_pr["_freal_dt"].isna())
-            _df_pr["_fprog_dt"] = (
-                _df_pr["_fprog_dt"]
-                .fillna(_df_pr["_fprogfr_dt"])
-                .fillna(_df_pr["_finfr_dt"])
-                .fillna(_df_pr["_freal_dt"]))
-
-            # ── Reconciliación bidireccional (Excel ↔ Fracttal) ──
-            # El Excel es una GUÍA; Fracttal (Supabase) refleja lo que
-            # realmente se programó/ejecutó. Cruzamos ambas fuentes:
-            #   • en ambas          -> ✔ Coincide
-            #   • solo en Excel     -> 📄 Solo Excel (no aparece en Fracttal)
-            #   • solo en Fracttal  -> 🆕 Solo Fracttal (MP no registrada en Excel)
-            _df_pr["Origen"] = _df_pr["Cód. EDS"].apply(
-                lambda c: "✔ Coincide" if _match_fr(c) else "📄 Solo Excel")
-
-            # EDS que Fracttal tiene con MP del mes pero NO están en el Excel
-            _eds_excel = set(_df_pr["Cód. EDS"].str.strip().str.upper())
-            _huerf = [(_ce, _v) for _ce, _v in _FR_IDX.items()
-                      if _ce not in _eds_excel]
-            if _huerf:
-                _rows_fr = []
-                for _ce, _v in _huerf:
-                    _fin = _v.get("fin")
-                    _fprogfr = _v.get("fprog")
-                    _fcr = _v.get("fcrea")
-                    _fprog = _fin or _fprogfr or _fcr    # mejor fecha disponible
-                    _rows_fr.append({
-                        "F. Real":      _fin,
-                        "F. Programada": _fprog,
-                        "Cód. EDS":     _ce,
-                        "N°":           "",
-                        "Dirección":    _v.get("estacion") or "(sin dirección)",
-                        "Semana":       "",
-                        "Última mant.": None,
-                        "Día":          "",
-                        "Provincia":    "",
-                        "Comuna":       "",
-                        "Tipo MP":      "",
-                        "_freal_dt":    pd.to_datetime(_fin, errors="coerce"),
-                        "_fprog_dt":    pd.to_datetime(_fprog, errors="coerce"),
-                        "_fprogfr_dt":  pd.to_datetime(_fprogfr, errors="coerce"),
-                        "_fprog_tent":  bool(_fprogfr and not _fin),
-                        "Estado":       "✅ Realizada" if _fin else "🕓 Pendiente",
-                        "_ot_fr":       _v.get("id_ot") or "",
-                        "_resp_fr":     _v.get("responsable") or "",
-                        "_finfr_dt":    pd.to_datetime(_fin, errors="coerce"),
-                        "Origen":       "🆕 Solo Fracttal",
-                    })
-                _df_fr_extra = pd.DataFrame(_rows_fr)
-                # Alinear columnas y concatenar
-                for _c in _df_pr.columns:
-                    if _c not in _df_fr_extra.columns:
-                        _df_fr_extra[_c] = None
-                _df_pr = pd.concat(
-                    [_df_pr, _df_fr_extra[_df_pr.columns]], ignore_index=True)
-
-            _n_huerf = len(_huerf)
-
-            # ── Normalizar 'Semana' (corrige typeos: 3ta/3era/3ra → 3ra, etc.) ──
-            import re as _re_pr
-            _SEM_LBL = {1:"1era semana", 2:"2da semana", 3:"3ra semana",
-                        4:"4ta semana", 5:"5ta semana"}
-            def _sem_num_canon(s):
-                s = str(s or "").upper().strip()
-                if not s or s in ("NAN","NONE","NO TIENE MP"):
-                    return None
-                _m = _re_pr.search(r"(\d)", s)
-                if not _m:
-                    return None
-                _n = int(_m.group(1))
-                return _n if 1 <= _n <= 5 else None
-            _df_pr["_sem_n"]     = _df_pr["Semana"].apply(_sem_num_canon)
-            _df_pr["_sem_canon"] = _df_pr["_sem_n"].apply(
-                lambda n: _SEM_LBL.get(int(n)) if pd.notna(n) else "Sin semana")
-
-            # Rango de días por semana del mes: la 1era semana termina el
-            # primer DOMINGO del mes (aunque tenga menos de 7 días); las
-            # siguientes van lunes-domingo, y la última se recorta al último
-            # día del mes.
-            import calendar as _cal_pr
-            from datetime import date as _date_sem, timedelta as _td_sem
-            _last_day   = _cal_pr.monthrange(_yr_pr0, _mes_num_pr0)[1]
-            _mes_titulo = _MESES_PR_TIT[_mes_num_pr0 - 1].lower()
-            _first_dow  = _date_sem(_yr_pr0, _mes_num_pr0, 1).weekday()   # 0=lun..6=dom
-            _first_sun  = 7 - _first_dow                                    # día del 1er dom
-            def _sem_rango(n):
-                if n is None or (isinstance(n, float) and pd.isna(n)):
-                    return "sin semana"
-                _n = int(n)
-                if _n == 1:
-                    _ini, _fin = 1, min(_first_sun, _last_day)
-                else:
-                    _ini = _first_sun + 7 * (_n - 2) + 1
-                    _fin = min(_first_sun + 7 * (_n - 1), _last_day)
-                if _ini > _last_day:
-                    return "—"
-                return f"{_ini:02d} al {_fin:02d} de {_mes_titulo}"
-
-            # Filtros estado + semana
-            with _fp2:
-                _est_opts = ["Todas","🕓 Pendiente","⚠️ Vencida","✅ Realizada"]
-                _est_sel = st.selectbox("Estado", _est_opts, key="pr_est_sel")
-            with _fp3:
-                _sems_pres = sorted([n for n in _df_pr["_sem_n"].dropna().unique()])
-                _sem_opts_lbl = ["Todas"] + [
-                    f"{_SEM_LBL[int(n)]} ({_sem_rango(n)})" for n in _sems_pres]
-                if _df_pr["_sem_n"].isna().any():
-                    _sem_opts_lbl.append("Sin semana")
-                _sem_sel = st.selectbox("Semana MP", _sem_opts_lbl, key="pr_sem_sel")
-
-            _df_pr_disp = _df_pr.copy()
-            if _est_sel != "Todas":
-                _df_pr_disp = _df_pr_disp[_df_pr_disp["Estado"] == _est_sel]
-            if _sem_sel != "Todas":
-                if _sem_sel == "Sin semana":
-                    _df_pr_disp = _df_pr_disp[_df_pr_disp["_sem_canon"] == "Sin semana"]
-                else:
-                    _lbl_only = _sem_sel.split(" (")[0]   # '1era semana'
-                    _df_pr_disp = _df_pr_disp[_df_pr_disp["_sem_canon"] == _lbl_only]
-
-            # Filtro por origen (validación cruzada de fuentes)
-            _org_col1, _org_col2 = st.columns([1.4, 2.6])
-            with _org_col1:
-                _org_sel = st.selectbox(
-                    "Fuente / Validación",
-                    ["Todas", "✔ Coincide", "📄 Solo Excel", "🆕 Solo Fracttal"],
-                    key="pr_origen_sel",
-                    help="Cruce Excel ↔ Fracttal. 'Solo Fracttal' = MP ejecutada/"
-                         "programada en Fracttal que no está registrada en el Excel.")
-            if _org_sel != "Todas":
-                _df_pr_disp = _df_pr_disp[_df_pr_disp["Origen"] == _org_sel]
-
-            # Buscar EDS
-            _buscar_pr = st.text_input("Buscar EDS o dirección",
-                placeholder="Ej: 60001 o Huechuraba", key="pr_buscar")
-            if _buscar_pr.strip():
-                _q = _buscar_pr.strip().upper()
-                _df_pr_disp = _df_pr_disp[
-                    _df_pr_disp["Cód. EDS"].str.upper().str.contains(_q, na=False) |
-                    _df_pr_disp["Dirección"].str.upper().str.contains(_q, na=False) |
-                    _df_pr_disp["Comuna"].str.upper().str.contains(_q, na=False)
-                ]
+            _fp_pr = pd.to_datetime(_df_pend["fecha_programada"], errors="coerce",
+                                    utc=True).dt.tz_convert("America/Santiago") \
+                    .dt.tz_localize(None).dt.normalize()
+            _df_pend["_fp_n"] = _fp_pr
+            _df_pend["_dias_para_vencer"] = (_fp_pr - _hoy_pr).dt.days
+            # Urgencia:
+            #   'Vencidas' : dias_para_vencer < 0
+            #   'Hoy'      : dias_para_vencer == 0
+            #   'Semana'   : 1..7
+            #   'Próximas' : 8..30
+            #   '>30d'     : más allá (no aparece por defecto pero filtrable)
+            def _urg_bucket(d):
+                if d < 0:   return "🚨 Vencidas"
+                if d == 0:  return "⚠️ Hoy"
+                if d <= 7:  return "🟡 Esta semana"
+                if d <= 30: return "📅 Próximas (30d)"
+                return "📆 Futuras (>30d)"
+            _df_pend["_urgencia"] = _df_pend["_dias_para_vencer"].apply(_urg_bucket)
 
             # KPIs
-            _n_tot  = len(_df_pr)
-            _n_pend = int((_df_pr["Estado"] == "🕓 Pendiente").sum())
-            _n_venc = int((_df_pr["Estado"] == "⚠️ Vencida").sum())
-            _n_real = int((_df_pr["Estado"] == "✅ Realizada").sum())
-            _pk1,_pk2,_pk3,_pk4,_pk5 = st.columns(5)
-            _pk1.metric("Total (Excel + Fracttal)", f"{_n_tot:,}")
-            _pk2.metric("✅ Realizadas", f"{_n_real:,}",
-                        delta=f"{round(_n_real/_n_tot*100,1) if _n_tot else 0}%")
-            _pk3.metric("🕓 Pendientes", f"{_n_pend:,}")
-            _pk4.metric("⚠️ Vencidas", f"{_n_venc:,}",
-                        delta="prog. pasó, sin ejecutar", delta_color="inverse")
-            _pk5.metric("🆕 Solo Fracttal", f"{_n_huerf:,}",
-                        delta="no está en el Excel", delta_color="inverse",
-                        help="MPs que Fracttal registró este mes pero que no "
-                             "figuran en la programación del Excel. Revisar para "
-                             "mantener el Excel al día.")
+            _n_vencidas = int((_df_pend["_dias_para_vencer"] < 0).sum())
+            _n_hoy      = int((_df_pend["_dias_para_vencer"] == 0).sum())
+            _n_sem      = int(((_df_pend["_dias_para_vencer"] >= 1)
+                                & (_df_pend["_dias_para_vencer"] <= 7)).sum())
+            _n_prox     = int(((_df_pend["_dias_para_vencer"] >= 8)
+                                & (_df_pend["_dias_para_vencer"] <= 30)).sum())
+            _k1, _k2, _k3, _k4 = st.columns(4)
+            _k1.metric("🚨 Vencidas", f"{_n_vencidas:,}",
+                       help="fecha programada ya pasó y no se han ejecutado")
+            _k2.metric("⚠️ Hoy",      f"{_n_hoy:,}")
+            _k3.metric("🟡 Esta semana", f"{_n_sem:,}",
+                       help="1 a 7 días para la fecha programada")
+            _k4.metric("📅 Próximas (30d)", f"{_n_prox:,}")
 
-            if _n_huerf:
-                st.info(
-                    f"🔎 **{_n_huerf} MP** están en Fracttal pero **no en el Excel** "
-                    "de programación (posible registro olvidado). Aparecen marcadas "
-                    "como **🆕 Solo Fracttal** — filtra por 'Fuente / Validación' "
-                    "para revisarlas.")
+            # ── Filtros ─────────────────────────────────────────────────
+            _fp1, _fp2, _fp3, _fp4 = st.columns([1.2, 1.5, 1.5, 1.4])
+            with _fp1:
+                _URG_OPTS = ["Todas", "🚨 Vencidas", "⚠️ Hoy", "🟡 Esta semana",
+                             "📅 Próximas (30d)", "📆 Futuras (>30d)"]
+                _sel_urg = st.selectbox("Urgencia", _URG_OPTS, key="prog_urg_sel")
+            with _fp2:
+                _cli_pr = ["Todos"] + sorted(_df_pend["cliente"].dropna().astype(str).unique().tolist())
+                _sel_cli_pr = st.selectbox("Cliente", _cli_pr, key="prog_cli_sel")
+            with _fp3:
+                _resp_pr = ["Todos"] + sorted(_df_pend["responsable"].dropna().astype(str).unique().tolist())
+                _sel_resp_pr = st.selectbox("Responsable", _resp_pr, key="prog_resp_sel")
+            with _fp4:
+                _pln_pr = ["Todos"] + sorted(_df_pend["plan_tareas"].dropna().astype(str).unique().tolist())
+                _sel_pln_pr = st.selectbox("Plan", _pln_pr, key="prog_plan_sel")
 
-            st.divider()
+            _df_v = _df_pend.copy()
+            if _sel_urg != "Todas":
+                _df_v = _df_v[_df_v["_urgencia"] == _sel_urg]
+            if _sel_cli_pr != "Todos":
+                _df_v = _df_v[_df_v["cliente"] == _sel_cli_pr]
+            if _sel_resp_pr != "Todos":
+                _df_v = _df_v[_df_v["responsable"] == _sel_resp_pr]
+            if _sel_pln_pr != "Todos":
+                _df_v = _df_v[_df_v["plan_tareas"] == _sel_pln_pr]
 
-            # ── Selector de vista (mismo enfoque que Programación STO) ──
-            _EST_PR = {   # estado -> (color, bg, orden)
-                "✅ Realizada": ("#16a34a", "#dcfce7", 2),
-                "🕓 Pendiente": ("#0284c7", "#e0f2fe", 1),
-                "⚠️ Vencida":   ("#dc2626", "#fee2e2", 0),
-            }
-            _DIA_ABR_PR = ["LUN","MAR","MIÉ","JUE","VIE","SÁB","DOM"]
-            _DIA_FULL_PR = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"]
-
-            _vista_pr = st.radio(
-                "Vista", ["📅 Agenda día", "📊 Semana", "🔥 Calendario mes", "📋 Tabla"],
-                horizontal=True, label_visibility="collapsed", key="pr_vista")
-
-            def _card_eds(row):
-                """Tarjeta HTML de una EDS programada, con validación Fracttal."""
-                _c, _bg, _ = _EST_PR.get(row["Estado"], ("#64748b","#f1f5f9",9))
-                # Línea de ejecución real (Fracttal / Excel)
-                _fr = ""
-                _fin_fr = row.get("_finfr_dt")
-                if pd.notna(_fin_fr):
-                    _fr = f' · hecha {_fin_fr.strftime("%d/%m")}'
-                elif pd.notna(row.get("_freal_dt")):
-                    _fr = f' · hecha {row["_freal_dt"].strftime("%d/%m")}'
-                # Línea OT + responsable de Fracttal
-                _ot = str(row.get("_ot_fr") or "")
-                _resp = str(row.get("_resp_fr") or "")
-                _ot_html = ""
-                if _ot:
-                    _resp_corto = _resp.split()[0] + " " + (_resp.split()[1] if len(_resp.split())>1 else "") if _resp else "—"
-                    _ot_html = (f'<div style="font-size:.68rem;color:#0369a1;margin-top:2px;'
-                                f'font-weight:600">🔧 {_ot}'
-                                + (f' · {_resp_corto}' if _resp else '') + '</div>')
-                # Badge cuando la MP no está en el Excel (solo Fracttal)
-                _org_badge = ""
-                if row.get("Origen") == "🆕 Solo Fracttal":
-                    _org_badge = ('<span style="background:#fef3c7;color:#92400e;'
-                                  'font-size:.6rem;font-weight:700;padding:1px 5px;'
-                                  'border-radius:4px;margin-left:4px">🆕 no en Excel</span>')
-                # Badge cuando la fecha viene de Fracttal (tentativa, no definitiva en Excel)
-                if row.get("_fprog_tent") and pd.isna(row.get("_freal_dt")) and pd.isna(row.get("_finfr_dt")):
-                    _fp_fr = row.get("_fprogfr_dt")
-                    _tent_txt = f' Fracttal: {_fp_fr.strftime("%d/%m")}' if pd.notna(_fp_fr) else ''
-                    _org_badge += ('<span style="background:#fef9c3;color:#854d0e;'
-                                   'font-size:.6rem;font-weight:700;padding:1px 5px;'
-                                   f'border-radius:4px;margin-left:4px" '
-                                   f'title="Fecha tentativa (Fracttal, pendiente de confirmar en Excel)">'
-                                   f'📌 tentativa{_tent_txt}</span>')
-                return (f'<div style="background:#fff;border:1px solid #e2e8f0;'
-                        f'border-left:3px solid {_c};border-radius:8px;padding:7px 10px;'
-                        f'margin-bottom:7px;">'
-                        f'<div style="font-weight:700;font-size:.82rem;color:#1e293b">'
-                        f'{row["Cód. EDS"]} <span style="color:#94a3b8;font-weight:500">'
-                        f'N°{row["N°"]}</span>{_org_badge}</div>'
-                        f'<div style="font-size:.74rem;color:#475569;margin-top:1px">'
-                        f'{str(row["Dirección"])[:42]}</div>'
-                        f'<div style="font-size:.68rem;color:#94a3b8;margin-top:2px">'
-                        f'{row["Comuna"]} · {row.get("_sem_canon") or row["Semana"]}{_fr}</div>'
-                        f'{_ot_html}</div>')
-
-            # Partición: con fecha exacta vs. sin fecha (solo semana)
-            # Forzar dtype datetime64 tz-naive: al concatenar filas Solo
-            # Fracttal con Excel puede quedar como object (mix tz-naive/aware).
-            def _to_naive_series(s):
-                s2 = pd.to_datetime(s, errors="coerce", utc=True)
-                try:
-                    return s2.dt.tz_localize(None)
-                except (AttributeError, TypeError):
-                    return s2
-            _df_pr_disp["_fprog_dt"] = _to_naive_series(_df_pr_disp["_fprog_dt"])
-
-            # Confinar al mes seleccionado: las filas 'Solo Fracttal' y las
-            # rellenadas con fechas de Fracttal pueden traer fechas de meses
-            # anteriores (ej. una MP de julio con fecha_finalizacion=abril).
-            # Filtramos por año-mes exacto para no mezclar meses en la
-            # Agenda día ni en el calendario mensual.
-            _mask_mes = (
-                (_df_pr_disp["_fprog_dt"].dt.year  == _yr_pr0) &
-                (_df_pr_disp["_fprog_dt"].dt.month == _mes_num_pr0)
-            )
-            # Las que caen fuera del mes → se tratan como "sin fecha exacta"
-            # (aparecerán en la sección 'Sin día ni en Excel ni en Fracttal').
-            _df_pr_disp.loc[
-                _df_pr_disp["_fprog_dt"].notna() & (~_mask_mes),
-                "_fprog_dt"
-            ] = pd.NaT
-
-            _df_v      = _df_pr_disp[_df_pr_disp["_fprog_dt"].notna()].copy()
-            _df_sinfec = _df_pr_disp[_df_pr_disp["_fprog_dt"].isna()].copy()
-
-            # Semana canónica ya calculada arriba en _df_pr; se propaga a _df_sinfec
-            # Alias por compatibilidad con la vista Semana (usa _sem_norm más abajo)
-            if not _df_sinfec.empty:
-                _df_sinfec["_sem_norm"] = _df_sinfec["_sem_n"].apply(
-                    lambda n: f"Semana {int(n)}" if pd.notna(n) else "Sin semana")
-
-            # ═══════════ AGENDA DÍA ═══════════
-            if _vista_pr == "📅 Agenda día":
-                _dias_pr = sorted(_df_v["_fprog_dt"].dt.date.unique().tolist())
-
-                if _dias_pr:
-                    _hoy_pr_d = _hoy_pr.date()
-                    _idx_pr = _dias_pr.index(_hoy_pr_d) if _hoy_pr_d in _dias_pr else 0
-                    _dia_pr = st.selectbox("Día programado", _dias_pr, index=_idx_pr,
-                        format_func=lambda d: f"{_DIA_FULL_PR[d.weekday()]} {d.strftime('%d/%m')}",
-                        key="pr_dia_pick")
-                    st.caption(
-                        "Muestra las MPs cuya fecha efectiva (planificada en Excel, "
-                        "tentativa Fracttal, o de ejecución real) cae en el día "
-                        "seleccionado. Cada tarjeta indica si la MP estaba "
-                        "**planificada este día** o **ejecutada este día** (aunque "
-                        "la planificación original fuese diferente)."
-                    )
-                    _dd = _df_v[_df_v["_fprog_dt"].dt.date == _dia_pr].copy()
-                    # Marcar si el día seleccionado coincide con la F. Programada
-                    # original del Excel (planificada para ese día) o si viene de
-                    # una ejecución real / fecha tentativa Fracttal.
-                    def _origen_dia(row, dia):
-                        _fp_excel = row.get("_fprog_dt_excel_orig")
-                        if pd.notna(_fp_excel) and _fp_excel.date() == dia:
-                            return "planif"
-                        return "ejec"
-                    # Recomputo la F. Programada original solo de Excel (para
-                    # distinguir de las que fueron rellenadas con Fracttal/real)
-                    _fpo = pd.to_datetime(_dd.get("F. Programada"), errors="coerce")
-                    if hasattr(_fpo, "dt") and _fpo.dt.tz is not None:
-                        _fpo = _fpo.dt.tz_convert(None)
-                    _dd["_fprog_dt_excel_orig"] = _fpo
-                    _dd["_origen_dia"] = _dd.apply(
-                        lambda r: _origen_dia(r, _dia_pr), axis=1)
-
-                    _cols_html = ""
-                    for _est in ["⚠️ Vencida","🕓 Pendiente","✅ Realizada"]:
-                        _sub = _dd[_dd["Estado"] == _est]
-                        if _sub.empty:
-                            continue
-                        _c, _bg, _ = _EST_PR[_est]
-                        _cards = ""
-                        for _, r in _sub.iterrows():
-                            _card_html = _card_eds(r)
-                            # Insertar badge planif/ejec justo después del código EDS
-                            if r["_origen_dia"] == "planif":
-                                _badge_dia = ('<span style="background:#dcfce7;color:#166534;'
-                                              'font-size:.6rem;font-weight:700;padding:1px 5px;'
-                                              'border-radius:4px;margin-left:4px">'
-                                              '📅 planificada este día</span>')
-                            else:
-                                _badge_dia = ('<span style="background:#fef3c7;color:#92400e;'
-                                              'font-size:.6rem;font-weight:700;padding:1px 5px;'
-                                              'border-radius:4px;margin-left:4px" '
-                                              'title="Ejecutada este día; la planificación original en Excel era otra semana o no se hizo aquí.">'
-                                              '⚡ ejecutada aquí</span>')
-                            # Insertar badge después del primer </div> del top
-                            _card_html = _card_html.replace(
-                                '</div><div class="eds"',
-                                _badge_dia + '</div><div class="eds"',
-                                1,
-                            )
-                            _cards += _card_html
-                        _cols_html += (
-                            f'<div style="background:#f1f5f9;border:1px solid #e2e8f0;'
-                            f'border-radius:12px;padding:12px;min-width:230px;flex:1">'
-                            f'<div style="font-size:.8rem;font-weight:700;margin-bottom:10px;'
-                            f'color:{_c};text-transform:uppercase;letter-spacing:.03em">'
-                            f'{_est} <span style="background:#fff;border:1px solid #e2e8f0;'
-                            f'border-radius:20px;padding:1px 8px;font-size:.72rem;color:#64748b;'
-                            f'float:right">{len(_sub)}</span></div>{_cards}</div>')
-                    st.markdown(f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
-                                f'align-items:flex-start">{_cols_html}</div>',
-                                unsafe_allow_html=True)
-                else:
-                    st.info("Sin MPs con fecha exacta en este filtro. Cambia a "
-                            "vista **📊 Semana** para ver las planificadas por semana "
-                            "sin día específico.")
-
-            # ═══════════ SEMANA ═══════════
-            elif _vista_pr == "📊 Semana":
-                # Leyenda de colores (borde izquierdo de cada tarjeta)
-                st.markdown(
-                    '<div style="display:flex;gap:16px;flex-wrap:wrap;'
-                    'background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;'
-                    'padding:8px 14px;margin-bottom:10px;font-size:.8rem">'
-                    '<div style="display:flex;align-items:center;gap:6px">'
-                    '<span style="display:inline-block;width:12px;height:12px;'
-                    'background:#16a34a;border-radius:2px"></span>'
-                    '<b style="color:#166534">Realizada</b> — cerrada con fecha real'
-                    '</div>'
-                    '<div style="display:flex;align-items:center;gap:6px">'
-                    '<span style="display:inline-block;width:12px;height:12px;'
-                    'background:#0284c7;border-radius:2px"></span>'
-                    '<b style="color:#075985">Pendiente</b> — planificada, aún sin ejecutar'
-                    '</div>'
-                    '<div style="display:flex;align-items:center;gap:6px">'
-                    '<span style="display:inline-block;width:12px;height:12px;'
-                    'background:#dc2626;border-radius:2px"></span>'
-                    '<b style="color:#991b1b">Vencida</b> — fecha pasó y no se hizo'
-                    '</div>'
-                    '<div style="display:flex;align-items:center;gap:6px;color:#78350f">'
-                    '<span style="background:#fefce8;border:1px solid #fde68a;'
-                    'padding:1px 6px;border-radius:4px;font-size:.7rem;font-weight:700">'
-                    '📅 Sin día exacto</span> planificadas por semana sin día fijo'
-                    '</div>'
-                    '</div>',
-                    unsafe_allow_html=True,
-                )
-                # Semana del MES (1..5) — más útil que la ISO week porque el Excel
-                # planifica en "1era/2da/3era/4ta/5ta semana" del mes.
-                def _wk_mes(d):
-                    # semana del mes basada en el día (1-7=W1, 8-14=W2, ...)
-                    return (d.day - 1) // 7 + 1
-                _df_v["_wkm"]  = _df_v["_fprog_dt"].dt.date.apply(_wk_mes) \
-                    if not _df_v.empty else []
-                _wks_con_fec = sorted(_df_v["_wkm"].unique().tolist()) if not _df_v.empty else []
-                _wks_sinfec  = sorted({int(s.split()[1]) for s in _df_sinfec["_sem_norm"].unique()
-                                       if s.startswith("Semana ") and s.split()[1].isdigit()}) \
-                                if not _df_sinfec.empty else []
-                _wks_all = sorted(set(_wks_con_fec) | set(_wks_sinfec))
-
-                if not _wks_all:
-                    st.info("Sin MPs programadas.")
-                else:
-                    _wpick = st.selectbox("Semana",
-                        [f"Semana {w} del mes" for w in _wks_all], key="pr_wk_pick")
-                    _wn = int(_wpick.split()[1])
-                    _dfw     = _df_v[_df_v["_wkm"] == _wn] if not _df_v.empty else _df_v.iloc[0:0]
-                    _dfw_sf  = _df_sinfec[_df_sinfec["_sem_norm"] == f"Semana {_wn}"] \
-                                if not _df_sinfec.empty else _df_sinfec.iloc[0:0]
-
-                    # Columnas por día de la semana presentes (fecha exacta)
-                    _dias_w = sorted(_dfw["_fprog_dt"].dt.date.unique().tolist()) \
-                                if not _dfw.empty else []
-                    _cols_html = ""
-                    for _d in _dias_w:
-                        _sub = _dfw[_dfw["_fprog_dt"].dt.date == _d]
-                        _we = _d.weekday() >= 5
-                        _cards = "".join(_card_eds(r) for _, r in _sub.iterrows())
-                        _cols_html += (
-                            f'<div style="background:{"#fffbeb" if _we else "#f8fafc"};'
-                            f'border:1px solid #e2e8f0;border-radius:12px;padding:10px;'
-                            f'min-width:210px;flex:1">'
-                            f'<div style="font-size:.78rem;font-weight:700;margin-bottom:8px;'
-                            f'color:#334155;text-align:center">'
-                            f'{_DIA_ABR_PR[_d.weekday()]} {_d.strftime("%d/%m")} '
-                            f'<span style="color:#94a3b8;font-weight:500">({len(_sub)})</span>'
-                            f'</div>{_cards}</div>')
-                    # Columna "Sin día" con las MPs de la semana sin fecha exacta
-                    if not _dfw_sf.empty:
-                        _cards_sf = "".join(_card_eds(r) for _, r in _dfw_sf.iterrows())
-                        _cols_html += (
-                            f'<div style="background:#fefce8;border:1px solid #fde68a;'
-                            f'border-radius:12px;padding:10px;min-width:230px;flex:1">'
-                            f'<div style="font-size:.78rem;font-weight:700;margin-bottom:8px;'
-                            f'color:#92400e;text-align:center">'
-                            f'📅 Sin día exacto '
-                            f'<span style="color:#78350f;font-weight:500">({len(_dfw_sf)})</span>'
-                            f'</div>{_cards_sf}</div>')
-                    st.markdown(f'<div style="display:flex;gap:12px;overflow-x:auto;'
-                                f'align-items:flex-start;padding-bottom:8px">{_cols_html}</div>',
-                                unsafe_allow_html=True)
-
-            # ═══════════ CALENDARIO MES ═══════════
-            elif _vista_pr == "🔥 Calendario mes":
-                import calendar as _cal_pr
-                _mes_num_pr = _MESES_PR.index(_mes_pr_hoja.split()[0]) + 1
-                _yr_pr_c = int(_mes_pr_hoja.split()[1])
-                _cal = _cal_pr.Calendar(firstweekday=0)  # lunes
-                _semanas_cal = _cal.monthdayscalendar(_yr_pr_c, _mes_num_pr)
-                # Índice: día -> {estados}
-                _por_dia = {}
-                for _, r in _df_v.iterrows():
-                    if r["_fprog_dt"].month == _mes_num_pr and r["_fprog_dt"].year == _yr_pr_c:
-                        _por_dia.setdefault(r["_fprog_dt"].day, []).append(r["Estado"])
-                # Header días
-                _cal_html = ('<div style="display:grid;grid-template-columns:repeat(7,1fr);'
-                             'gap:6px;margin-bottom:6px">')
-                for _dn in _DIA_ABR_PR:
-                    _cal_html += (f'<div style="text-align:center;font-size:.72rem;'
-                                  f'font-weight:700;color:#64748b">{_dn}</div>')
-                _cal_html += '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">'
-                for _sem in _semanas_cal:
-                    for _d in _sem:
-                        if _d == 0:
-                            _cal_html += '<div></div>'
-                            continue
-                        _ests = _por_dia.get(_d, [])
-                        _n = len(_ests)
-                        if _n == 0:
-                            _cal_html += (f'<div style="border:1px solid #f1f5f9;border-radius:8px;'
-                                          f'min-height:64px;padding:5px;background:#fcfcfd">'
-                                          f'<div style="font-size:.72rem;color:#cbd5e1">{_d}</div></div>')
-                            continue
-                        _nv = sum(1 for e in _ests if e == "⚠️ Vencida")
-                        _np = sum(1 for e in _ests if e == "🕓 Pendiente")
-                        _nr = sum(1 for e in _ests if e == "✅ Realizada")
-                        # Color dominante: vencida > pendiente > realizada
-                        if _nv: _bd = "#dc2626"; _bgc = "#fef2f2"
-                        elif _np: _bd = "#0284c7"; _bgc = "#f0f9ff"
-                        else: _bd = "#16a34a"; _bgc = "#f0fdf4"
-                        _mini = ""
-                        if _nr: _mini += f'<span style="color:#16a34a">●{_nr}</span> '
-                        if _np: _mini += f'<span style="color:#0284c7">●{_np}</span> '
-                        if _nv: _mini += f'<span style="color:#dc2626">●{_nv}</span>'
-                        _cal_html += (
-                            f'<div title="{_d}/{_mes_num_pr}: {_nr} hechas · {_np} pend · {_nv} venc" '
-                            f'style="border:1px solid {_bd}55;border-left:3px solid {_bd};'
-                            f'border-radius:8px;min-height:64px;padding:5px;background:{_bgc}">'
-                            f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                            f'<span style="font-size:.72rem;font-weight:700;color:#334155">{_d}</span>'
-                            f'<span style="font-size:.7rem;font-weight:800;color:{_bd};'
-                            f'background:#fff;border-radius:10px;padding:0 6px">{_n}</span></div>'
-                            f'<div style="font-size:.64rem;margin-top:6px;line-height:1.6">{_mini}</div>'
-                            f'</div>')
-                _cal_html += '</div>'
-                st.markdown(_cal_html, unsafe_allow_html=True)
-                st.caption("Cada día muestra el total de MP y el desglose ●verde=hechas "
-                           "●azul=pendientes ●rojo=vencidas. Borde = estado más urgente del día.")
-
-                # ── Detalle del día seleccionado (debajo del calendario) ──
-                _dias_con_mp = sorted(_por_dia.keys())
-                if _dias_con_mp:
-                    st.divider()
-                    _dsel = st.selectbox(
-                        "Ver detalle del día:",
-                        _dias_con_mp,
-                        format_func=lambda d: f"{d}/{_mes_num_pr:02d} — "
-                            f"{len(_por_dia.get(d, []))} MP",
-                        key="pr_cal_dia")
-                    _dd_cal = _df_v[
-                        (_df_v["_fprog_dt"].dt.day == _dsel) &
-                        (_df_v["_fprog_dt"].dt.month == _mes_num_pr) &
-                        (_df_v["_fprog_dt"].dt.year == _yr_pr_c)]
-                    _cols_det = ""
-                    for _est in ["⚠️ Vencida","🕓 Pendiente","✅ Realizada"]:
-                        _sub = _dd_cal[_dd_cal["Estado"] == _est]
-                        if _sub.empty:
-                            continue
-                        _c, _bg, _ = _EST_PR[_est]
-                        _cards = "".join(_card_eds(r) for _, r in _sub.iterrows())
-                        _cols_det += (
-                            f'<div style="background:#f1f5f9;border:1px solid #e2e8f0;'
-                            f'border-radius:12px;padding:12px;min-width:230px;flex:1">'
-                            f'<div style="font-size:.8rem;font-weight:700;margin-bottom:10px;'
-                            f'color:{_c};text-transform:uppercase;letter-spacing:.03em">'
-                            f'{_est} <span style="background:#fff;border:1px solid #e2e8f0;'
-                            f'border-radius:20px;padding:1px 8px;font-size:.72rem;color:#64748b;'
-                            f'float:right">{len(_sub)}</span></div>{_cards}</div>')
-                    st.markdown(f'<div style="display:flex;gap:14px;flex-wrap:wrap;'
-                                f'align-items:flex-start">{_cols_det}</div>',
-                                unsafe_allow_html=True)
-
-            # ═══════════ TABLA ═══════════
+            if _df_v.empty:
+                st.info("Sin MPs pendientes para el filtro seleccionado.")
             else:
-                _df_show_pr = _df_pr_disp.copy()
-                # Fecha de ejecución real: Fracttal manda, sino Excel
-                _df_show_pr["OT Fracttal"] = _df_show_pr["_ot_fr"].fillna("").replace("", "—")
-                _df_show_pr["Responsable"] = _df_show_pr["_resp_fr"].fillna("").replace("", "—")
-                _df_show_pr["F. Ejecución"] = _df_show_pr["_finfr_dt"].fillna(
-                    _df_show_pr["_freal_dt"])
-                for _c in ("F. Ejecución","F. Programada","Última mant."):
-                    # utc=True + tz_localize(None) para manejar mix
-                    # tz-aware/naive sin ValueError.
-                    _s = pd.to_datetime(_df_show_pr[_c], errors="coerce", utc=True)
-                    try:
-                        _s = _s.dt.tz_localize(None)
-                    except (AttributeError, TypeError):
-                        pass
-                    _df_show_pr[_c] = _s.dt.strftime("%d/%m/%Y").fillna("—")
-                _ord_est = {"⚠️ Vencida":0, "🕓 Pendiente":1, "✅ Realizada":2}
-                _df_show_pr = _df_show_pr.assign(
-                    _o=_df_show_pr["Estado"].map(_ord_est).fillna(9)
-                ).sort_values(["_o","_fprog_dt"], ascending=[True, True])
-                _cols_pr = ["Estado","Origen","F. Programada","F. Ejecución","OT Fracttal",
-                            "Responsable","Cód. EDS","N°","Dirección","Semana","Comuna","Tipo MP"]
-                _show_df(_df_show_pr[_cols_pr].reset_index(drop=True),
-                    hide_index=True, width="stretch",
+                # Orden: vencidas primero (mayor atraso arriba), luego por fecha asc
+                _df_v = _df_v.sort_values(
+                    ["_dias_para_vencer"], ascending=[True]
+                )
+
+                def _lbl_dias(d):
+                    if d < 0:  return f"⚠️ {abs(int(d))} d atraso"
+                    if d == 0: return "⚠️ HOY"
+                    if d == 1: return "1 día"
+                    return f"{int(d)} días"
+
+                _det = pd.DataFrame({
+                    "Urgencia":        _df_v["_urgencia"].values,
+                    "OT":              _df_v["id_ot"].astype(str).values,
+                    "Cliente":         _df_v.get("cliente", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
+                    "Cód. EDS":        _df_v.get("codigo_eds",
+                                          _df_v.get("clasificacion_2",
+                                             pd.Series("", index=_df_v.index))).fillna("—").astype(str).values,
+                    "Estación":        _df_v.get("estacion",
+                                          _df_v.get("ubicacion",
+                                             pd.Series("", index=_df_v.index))).fillna("—").astype(str).values,
+                    "Tipo Tarea":      _df_v.get("tipo_tarea", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
+                    "Plan":            _df_v.get("plan_tareas", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
+                    "Equipo":          _df_v.get("codigo_activo", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
+                    "F. Programada":   _df_v["_fp_n"].dt.strftime("%d/%m/%Y").values,
+                    "Días":            [_lbl_dias(d) for d in _df_v["_dias_para_vencer"].values],
+                    "Estado Tarea":    _df_v.get("estado_tarea", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
+                    "Responsable":     _df_v.get("responsable", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
+                    "Prioridad":       _df_v.get("prioridad", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
+                })
+
+                _show_df(_det.reset_index(drop=True), hide_index=True,
+                    width="stretch",
                     column_config={
-                        "Estado":        st.column_config.TextColumn(width=115),
-                        "Origen":        st.column_config.TextColumn(width=120,
-                            help="Cruce Excel ↔ Fracttal. '🆕 Solo Fracttal' = "
-                                 "no está registrada en el Excel."),
-                        "F. Programada": st.column_config.TextColumn(width=105),
-                        "F. Ejecución":  st.column_config.TextColumn(width=105,
-                            help="Fecha real de ejecución (Fracttal). — si aún no se ha hecho."),
-                        "OT Fracttal":   st.column_config.TextColumn(width=100,
-                            help="N° de orden de trabajo en Fracttal (validación de ejecución)."),
-                        "Responsable":   st.column_config.TextColumn(width=160,
-                            help="Técnico que ejecutó la MP según Fracttal."),
-                        "Cód. EDS":      st.column_config.TextColumn(width=90),
-                        "N°":            st.column_config.TextColumn(width=55),
-                        "Dirección":     st.column_config.TextColumn(width=210),
-                        "Semana":        st.column_config.TextColumn(width=100),
-                        "Comuna":        st.column_config.TextColumn(width=115),
-                        "Tipo MP":       st.column_config.TextColumn(width=70),
+                        "Urgencia":      st.column_config.TextColumn(width=140),
+                        "OT":            st.column_config.TextColumn(width=85),
+                        "Cliente":       st.column_config.TextColumn(width=110),
+                        "Cód. EDS":      st.column_config.TextColumn(width=85),
+                        "Estación":      st.column_config.TextColumn(width=180),
+                        "Tipo Tarea":    st.column_config.TextColumn(width=140),
+                        "Plan":          st.column_config.TextColumn(width=200),
+                        "Equipo":        st.column_config.TextColumn(width=85),
+                        "F. Programada": st.column_config.TextColumn(width=100),
+                        "Días":          st.column_config.TextColumn(width=110,
+                            help="Días restantes hasta la fecha programada. Negativo = atraso."),
+                        "Estado Tarea":  st.column_config.TextColumn(width=110,
+                            help="No Iniciada = el técnico aún no abrió la OT · "
+                                 "En Progreso = ya la abrió pero no la ha finalizado"),
+                        "Responsable":   st.column_config.TextColumn(width=160),
+                        "Prioridad":     st.column_config.TextColumn(width=80),
                     })
 
-            st.caption(
-                f"Mostrando **{len(_df_pr_disp):,}** de {_n_tot:,} EDS · "
-                f"Fuente: `2026 UTILIZACIÓN DE TIEMPO.xlsx` hoja **{_mes_pr_hoja}** sección POR REALIZAR · cache 5 min."
-            )
+                st.caption(
+                    f"Mostrando **{len(_det):,}** de {len(_df_pend):,} MPs pendientes · "
+                    f"Fuente: Supabase (sync Fracttal cada 30 min) — data siempre fresca."
+                )
 
     # ══════════════════════════════════════════════════════════════════════
     # SUB-TAB: ✅ Realizadas — MPs finalizadas agrupadas por Cliente.
