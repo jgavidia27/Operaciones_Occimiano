@@ -15460,8 +15460,8 @@ elif _page == _NAV_PAGES[2]:
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────
-    _ptab_plan, _ptab_prog, _ptab_rea, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
-        "📅  Planificación", "📋  Programación MP", "✅  Realizadas",
+    _ptab_plan, _ptab_rea, _ptab_cli, _ptab_tec, _ptab_eds, _ptab_uptime = st.tabs([
+        "📅  Planificación", "✅  Realizadas",
         "🏢  Por Cliente", "👷  Por Técnico",
         "🏭  Por Activo/EDS", "⏱️  Uptime"
     ])
@@ -15472,164 +15472,6 @@ elif _page == _NAV_PAGES[2]:
     # por consulta directa a ordenes_trabajo filtrando estado_tarea IN
     # ('No Iniciada','En Progreso'). Universo siempre fresco (sync cada
     # 30 min); no requiere que nadie mantenga el Excel a mano.
-    # ══════════════════════════════════════════════════════════════════════
-    with _ptab_prog:
-        st.markdown(
-            '<div class="section-header">'
-            '📋  Programación MP — Pendientes desde Fracttal'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "MPs con estado **No Iniciada** o **En Progreso** ordenadas por urgencia. "
-            "Data en vivo desde Supabase (sync Fracttal cada 30 min). "
-            "🚨 Vencidas = fecha programada ya pasó · ⚠️ Hoy · 🟡 Esta semana · 📅 Próximas."
-        )
-
-        # ── Universo: MPs pendientes (No Iniciada o En Progreso) ────────
-        # Reutilizamos _dfp_op (excluye anuladas). No filtramos por período
-        # ni cliente aquí — usamos filtros propios porque la vista es 100%
-        # operativa (qué toca hacer YA).
-        _hoy_pr = pd.Timestamp.today().normalize()
-
-        _df_pend = _dfp_op[
-            _dfp_op["estado_tarea"].isin(["No Iniciada", "En Progreso"])
-            & _dfp_op["fecha_programada"].notna()
-        ].copy()
-
-        if _df_pend.empty:
-            st.success("✅ No hay MPs pendientes. Todas las OTs están finalizadas.")
-        else:
-            _fp_pr = pd.to_datetime(_df_pend["fecha_programada"], errors="coerce",
-                                    utc=True).dt.tz_convert("America/Santiago") \
-                    .dt.tz_localize(None).dt.normalize()
-            _df_pend["_fp_n"] = _fp_pr
-            _df_pend["_dias_para_vencer"] = (_fp_pr - _hoy_pr).dt.days
-            # Urgencia:
-            #   'Vencidas' : dias_para_vencer < 0
-            #   'Hoy'      : dias_para_vencer == 0
-            #   'Semana'   : 1..7
-            #   'Próximas' : 8..30
-            #   '>30d'     : más allá (no aparece por defecto pero filtrable)
-            def _urg_bucket(d):
-                if d < 0:   return "🚨 Vencidas"
-                if d == 0:  return "⚠️ Hoy"
-                if d <= 7:  return "🟡 Esta semana"
-                if d <= 30: return "📅 Próximas (30d)"
-                return "📆 Futuras (>30d)"
-            _df_pend["_urgencia"] = _df_pend["_dias_para_vencer"].apply(_urg_bucket)
-
-            # KPIs
-            _n_vencidas = int((_df_pend["_dias_para_vencer"] < 0).sum())
-            _n_hoy      = int((_df_pend["_dias_para_vencer"] == 0).sum())
-            _n_sem      = int(((_df_pend["_dias_para_vencer"] >= 1)
-                                & (_df_pend["_dias_para_vencer"] <= 7)).sum())
-            _n_prox     = int(((_df_pend["_dias_para_vencer"] >= 8)
-                                & (_df_pend["_dias_para_vencer"] <= 30)).sum())
-            _k1, _k2, _k3, _k4 = st.columns(4)
-            _k1.metric("🚨 Vencidas", f"{_n_vencidas:,}",
-                       help="fecha programada ya pasó y no se han ejecutado")
-            _k2.metric("⚠️ Hoy",      f"{_n_hoy:,}")
-            _k3.metric("🟡 Esta semana", f"{_n_sem:,}",
-                       help="1 a 7 días para la fecha programada")
-            _k4.metric("📅 Próximas (30d)", f"{_n_prox:,}")
-
-            # ── Filtros ─────────────────────────────────────────────────
-            _fp1, _fp2, _fp3, _fp4 = st.columns([1.2, 1.5, 1.5, 1.4])
-            with _fp1:
-                _URG_OPTS = ["Todas", "🚨 Vencidas", "⚠️ Hoy", "🟡 Esta semana",
-                             "📅 Próximas (30d)", "📆 Futuras (>30d)"]
-                _sel_urg = st.selectbox("Urgencia", _URG_OPTS, key="prog_urg_sel")
-            with _fp2:
-                _cli_pr = ["Todos"] + sorted(_df_pend["cliente"].dropna().astype(str).unique().tolist())
-                _sel_cli_pr = st.selectbox("Cliente", _cli_pr, key="prog_cli_sel")
-            with _fp3:
-                _resp_pr = ["Todos"] + sorted(_df_pend["responsable"].dropna().astype(str).unique().tolist())
-                _sel_resp_pr = st.selectbox("Responsable", _resp_pr, key="prog_resp_sel")
-            with _fp4:
-                _pln_pr = ["Todos"] + sorted(_df_pend["plan_tareas"].dropna().astype(str).unique().tolist())
-                _sel_pln_pr = st.selectbox("Plan", _pln_pr, key="prog_plan_sel")
-
-            _df_v = _df_pend.copy()
-            if _sel_urg != "Todas":
-                _df_v = _df_v[_df_v["_urgencia"] == _sel_urg]
-            if _sel_cli_pr != "Todos":
-                _df_v = _df_v[_df_v["cliente"] == _sel_cli_pr]
-            if _sel_resp_pr != "Todos":
-                _df_v = _df_v[_df_v["responsable"] == _sel_resp_pr]
-            if _sel_pln_pr != "Todos":
-                _df_v = _df_v[_df_v["plan_tareas"] == _sel_pln_pr]
-
-            if _df_v.empty:
-                st.info("Sin MPs pendientes para el filtro seleccionado.")
-            else:
-                # Orden: vencidas primero (mayor atraso arriba), luego por fecha asc
-                _df_v = _df_v.sort_values(
-                    ["_dias_para_vencer"], ascending=[True]
-                )
-
-                def _lbl_dias(d):
-                    if d < 0:  return f"⚠️ {abs(int(d))} d atraso"
-                    if d == 0: return "⚠️ HOY"
-                    if d == 1: return "1 día"
-                    return f"{int(d)} días"
-
-                _det = pd.DataFrame({
-                    "Urgencia":        _df_v["_urgencia"].values,
-                    "OT":              _df_v["id_ot"].astype(str).values,
-                    "Cliente":         _df_v.get("cliente", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
-                    "Cód. EDS":        _df_v.get("codigo_eds",
-                                          _df_v.get("clasificacion_2",
-                                             pd.Series("", index=_df_v.index))).fillna("—").astype(str).values,
-                    "Estación":        _df_v.get("estacion",
-                                          _df_v.get("ubicacion",
-                                             pd.Series("", index=_df_v.index))).fillna("—").astype(str).values,
-                    "Tipo Tarea":      _df_v.get("tipo_tarea", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
-                    "Plan":            _df_v.get("plan_tareas", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
-                    "Equipo":          _df_v.get("codigo_activo", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
-                    "F. Programada":   _df_v["_fp_n"].dt.strftime("%d/%m/%Y").values,
-                    "Días":            [_lbl_dias(d) for d in _df_v["_dias_para_vencer"].values],
-                    "Estado Tarea":    _df_v.get("estado_tarea", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
-                    "Responsable":     _df_v.get("responsable", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
-                    "Prioridad":       _df_v.get("prioridad", pd.Series("", index=_df_v.index)).fillna("—").astype(str).values,
-                })
-                # Title Case para las columnas que vienen en MAYÚSCULAS desde Fracttal
-                for _colt in ("Cliente", "Estación", "Tipo Tarea", "Plan", "Responsable"):
-                    _det[_colt] = _smart_title_series(_det[_colt])
-
-                _show_df(_det.reset_index(drop=True), hide_index=True,
-                    width="stretch",
-                    column_config={
-                        "Urgencia":      st.column_config.TextColumn(width=140),
-                        "OT":            st.column_config.TextColumn(width=85),
-                        "Cliente":       st.column_config.TextColumn(width=110),
-                        "Cód. EDS":      st.column_config.TextColumn(width=85),
-                        "Estación":      st.column_config.TextColumn(width=180),
-                        "Tipo Tarea":    st.column_config.TextColumn(width=140),
-                        "Plan":          st.column_config.TextColumn(width=200),
-                        "Equipo":        st.column_config.TextColumn(width=85),
-                        "F. Programada": st.column_config.TextColumn(width=100),
-                        "Días":          st.column_config.TextColumn(width=110,
-                            help="Días restantes hasta la fecha programada. Negativo = atraso."),
-                        "Estado Tarea":  st.column_config.TextColumn(width=110,
-                            help="No Iniciada = el técnico aún no abrió la OT · "
-                                 "En Progreso = ya la abrió pero no la ha finalizado"),
-                        "Responsable":   st.column_config.TextColumn(width=160),
-                        "Prioridad":     st.column_config.TextColumn(width=80),
-                    })
-
-                st.caption(
-                    f"Mostrando **{len(_det):,}** de {len(_df_pend):,} MPs pendientes · "
-                    f"Fuente: Supabase (sync Fracttal cada 30 min) — data siempre fresca."
-                )
-
-    # ══════════════════════════════════════════════════════════════════════
-    # SUB-TAB: ✅ Realizadas — MPs finalizadas agrupadas por Cliente.
-    # Combina dfp (OTs preventivas) + df_num_sub (subtareas por activo)
-    # para mostrar por cada OT: fecha, técnico, duración, cumplimiento
-    # del plazo, N equipos incluidos, N equipos OK y % de completitud.
-    # Para Aramco (ESMAX): 2 columnas extra con las respuestas FLOWEY
-    # (¿utiliza productos FLOWEY? / ¿están diluidos con agua?).
     # ══════════════════════════════════════════════════════════════════════
     with _ptab_rea:
         st.markdown(
@@ -16226,429 +16068,145 @@ elif _page == _NAV_PAGES[2]:
                 st.caption(f"{len(_pt_activas_show):,} OTs activas")
 
     # ── Tab 4: Planificación ──────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # SUB-TAB: 📅 Planificación — Kanban de MPs por semana (3 semanas).
+    # Reemplaza la vista antigua (2 velocímetros + tabla + próximas OTs).
+    # Muestra en 3 columnas la semana actual + 2 siguientes, agrupadas por
+    # cliente, con badge Realizada / En Progreso / Pendiente por OT. Al top
+    # de cada columna: contador X/Y realizadas + barra de progreso.
+    # ══════════════════════════════════════════════════════════════════════
     with _ptab_plan:
-        # Parte de _dfp_full: respeta responsable/tipo/estado pero no trimestre/mes
-        # IMPORTANTE: Supabase guarda fechas en UTC. Hay que convertirlas a hora
-        # local de Chile (America/Santiago) ANTES de quitarles el tz, sino las
-        # OTs nocturnas aparecen un día corrido.
-        _dfplan = _dfp_full.copy()
-        _dfplan["_fp_dt"] = pd.to_datetime(
-            _dfplan["fecha_programada"], errors="coerce", utc=True
-        ).dt.tz_convert("America/Santiago").dt.tz_localize(None)
-        _dfplan["_ff_dt"] = pd.to_datetime(
-            _dfplan["fecha_finalizacion"], errors="coerce", utc=True
-        ).dt.tz_convert("America/Santiago").dt.tz_localize(None)
-        _dfplan = _dfplan[_dfplan["_fp_dt"].notna()].copy()
-
-        _hoy = pd.Timestamp.today().normalize()
-        _lun_actual = _hoy - pd.Timedelta(days=_hoy.weekday())
-        _dom_actual = _lun_actual + pd.Timedelta(days=6)
-        _lun_prox   = _lun_actual + pd.Timedelta(weeks=1)
-        _dom_prox   = _lun_prox   + pd.Timedelta(days=6)
-        _semana_iso = _hoy.isocalendar().week
-
-        # Encabezado con número de semana ISO
-        st.markdown(
-            f"""<div style="background:rgba(1,121,138,0.10);border-left:3px solid #01798A;
-                 padding:10px 16px;border-radius:6px;margin-bottom:14px;">
-              <span style="color:#01798A;font-weight:700;font-size:0.95rem;letter-spacing:0.04em;">
-                📆  Semana ISO {_semana_iso}</span>
-              <span style="color:#94a3b8;font-size:0.85rem;margin-left:12px;">
-                Hoy: <b>{_hoy.strftime('%d/%m/%Y')}</b> · Rango actual:
-                <b>{_lun_actual.strftime('%d/%m')} – {_dom_actual.strftime('%d/%m/%Y')}</b></span>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-
-        _plan_sem_opts = {
-            f"Semana actual (S{_semana_iso}): {_lun_actual.strftime('%d/%m')} – {_dom_actual.strftime('%d/%m/%Y')}":
-                (_lun_actual, _dom_actual + pd.Timedelta(hours=23, minutes=59, seconds=59)),
-            f"Próxima semana (S{_semana_iso+1}): {_lun_prox.strftime('%d/%m')} – {_dom_prox.strftime('%d/%m/%Y')}":
-                (_lun_prox, _dom_prox + pd.Timedelta(hours=23, minutes=59, seconds=59)),
-            "Últimas 2 semanas":
-                (_lun_actual - pd.Timedelta(weeks=2), _hoy + pd.Timedelta(hours=23, minutes=59, seconds=59)),
-            "Próximas 4 semanas":
-                (_hoy, _hoy + pd.Timedelta(weeks=4) + pd.Timedelta(hours=23, minutes=59, seconds=59)),
-        }
-        _plan_sel = st.radio("Período", list(_plan_sem_opts.keys()),
-                             horizontal=True, key="prev_plan_sem")
-        _plan_ini, _plan_fin = _plan_sem_opts[_plan_sel]
-
-        _df_semana = _dfplan[
-            (_dfplan["_fp_dt"] >= _plan_ini) & (_dfplan["_fp_dt"] <= _plan_fin)
-        ].copy()
-
-        # ── Relojes: Tiempo de atención MP — dos métricas distintas ───────
-        # 1) PROGRAMADA → EJECUCIÓN     (cumplimiento del plazo comprometido)
-        # 2) DURACIÓN REAL DEL TRABAJO  (fecha_inicio → fecha_finalización =
-        #    cuánto tarda el técnico ejecutando la OT desde que la abre)
-        # Ambos calculados sobre OTs FINALIZADAS del filtro global, en horas.
-        _dfp_for_avg = dfp[
-            dfp["fecha_finalizacion"].notna()
-            & dfp["fecha_programada"].notna()
-            & ~dfp["estado"].isin(_ESTADOS_NO_CUENTAN)
-        ].copy()
-
-        def _fmt_h_d(hrs: float) -> str:
-            """Formato 'X días Y horas' o 'Z horas' si < 24h."""
-            neg = hrs < 0
-            h_abs = abs(hrs)
-            if h_abs < 24:
-                txt = f"{h_abs:.1f} h"
-            else:
-                d = int(h_abs // 24)
-                h = round(h_abs - d * 24, 1)
-                txt = f"{d} día{'s' if d != 1 else ''} {h:.1f} h" if h > 0 else f"{d} día{'s' if d != 1 else ''}"
-            return f"-{txt}" if neg else txt
-
-        if not _dfp_for_avg.empty:
-            # Sin normalize → precisión sub-día
-            _fp_avg = pd.to_datetime(_dfp_for_avg["fecha_programada"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
-            _ff_avg = pd.to_datetime(_dfp_for_avg["fecha_finalizacion"], errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
-            _fi_avg = pd.to_datetime(_dfp_for_avg["fecha_inicio"],       errors="coerce", utc=True).dt.tz_convert("America/Santiago").dt.tz_localize(None)
-
-            # Métrica 1: programada → ejecución
-            _h_prog        = (_ff_avg - _fp_avg).dt.total_seconds() / 3600
-            _avg_h_prog    = round(_h_prog.mean(), 1)
-            _med_h_prog    = round(_h_prog.median(), 1)
-            _pct_a_tiempo  = round((_h_prog <= 0).mean() * 100, 1)
-
-            # Métrica 2: duración real del trabajo (inicio → finalización)
-            # Solo cuenta cuando hay fecha_inicio (técnico abrió la OT)
-            _h_dur        = (_ff_avg - _fi_avg).dt.total_seconds() / 3600
-            _h_dur_valid  = _h_dur.where((_h_dur >= 0) & _fi_avg.notna())
-            _avg_h_dur    = round(_h_dur_valid.mean(), 1)  if _h_dur_valid.notna().any() else 0.0
-            _med_h_dur    = round(_h_dur_valid.median(), 1) if _h_dur_valid.notna().any() else 0.0
-            _ot_dur_n     = int(_h_dur_valid.notna().sum())
-            _ot_eval      = len(_dfp_for_avg)
-        else:
-            _avg_h_prog = _med_h_prog = _avg_h_dur = _med_h_dur = 0.0
-            _pct_a_tiempo = 0
-            _ot_eval = _ot_dur_n = 0
-
-        _color_prog = "#10b981" if _avg_h_prog <= 0 else "#f59e0b" if _avg_h_prog <= 72 else "#ef4444"
-        # Duración real: <1h excelente, <4h bueno, >4h investigar (puede ser
-        # OT que el técnico dejó abierta sin cerrarla bien)
-        _color_dur = "#10b981" if _avg_h_dur <= 1 else "#f59e0b" if _avg_h_dur <= 4 else "#ef4444"
-
-        import plotly.graph_objects as _go2
-
-        def _build_clock(value, color, title, subtitle, axis_range, tickvals, steps):
-            fig = _go2.Figure(_go2.Indicator(
-                mode="gauge+number",
-                value=value,
-                number={"suffix": " h", "font": {"size": 28}, "valueformat": ".1f"},
-                title={"text": f"<b>{title}</b><br>"
-                               f"<span style='font-size:0.72rem;color:#94a3b8'>{subtitle}</span>",
-                       "font": {"size": 13}},
-                gauge={
-                    "axis":    {"range": axis_range, "tickwidth": 1, "tickfont": {"size": 9},
-                                "tickvals": tickvals},
-                    "bar":     {"color": color, "thickness": 0.32},
-                    "bgcolor": "rgba(0,0,0,0)",
-                    "borderwidth": 0,
-                    "steps": steps,
-                },
-            ))
-            fig.update_layout(height=250, margin=dict(l=10, r=10, t=60, b=10),
-                              paper_bgcolor="rgba(0,0,0,0)")
-            return fig
-
-        _rc1, _rc2 = st.columns(2)
-        with _rc1:
-            # Eje del gauge programada→ejecución: -120 a +360h (-5d a +15d)
-            _fig_prog = _build_clock(
-                _avg_h_prog, _color_prog,
-                "⏱ Programada → Ejecución",
-                "horas entre fecha programada y ejecución",
-                [-120, 360], [-120, -48, 0, 24, 72, 168, 360],
-                [
-                    {"range": [-120, 0], "color": "rgba(16,185,129,0.18)"},
-                    {"range": [0,    72], "color": "rgba(245,158,11,0.18)"},
-                    {"range": [72,  360], "color": "rgba(239,68,68,0.18)"},
-                ],
-            )
-            # Línea de "fecha programada" (objetivo = 0)
-            _fig_prog.update_traces(gauge_threshold={"line": {"color": "#0f172a", "width": 2},
-                                                     "thickness": 0.85, "value": 0})
-            st.plotly_chart(_fig_prog, use_container_width=True, key="prev_reloj_prog")
-        with _rc2:
-            # Duración real del trabajo: escala 0 a 8h (rango operativo razonable)
-            _fig_dur = _build_clock(
-                _avg_h_dur, _color_dur,
-                "⏱ Duración real del trabajo",
-                "horas entre inicio del técnico y cierre de la OT",
-                [0, 8], [0, 0.5, 1, 2, 4, 6, 8],
-                [
-                    {"range": [0, 1], "color": "rgba(16,185,129,0.18)"},
-                    {"range": [1, 4], "color": "rgba(245,158,11,0.18)"},
-                    {"range": [4, 8], "color": "rgba(239,68,68,0.18)"},
-                ],
-            )
-            st.plotly_chart(_fig_dur, use_container_width=True, key="prev_reloj_dur")
-
-        # Panel de detalle unificado debajo
-        st.markdown(
-            f"""<div style="padding:14px 18px;background:rgba(148,163,184,0.08);
-                 border-radius:10px;border-left:3px solid {_color_prog};margin-top:-8px;">
-              <div style="font-size:0.85rem;color:#94a3b8;letter-spacing:0.04em;
-                          font-weight:600;text-transform:uppercase;margin-bottom:8px;">
-                Detalle del tiempo de atención
-              </div>
-              <table style="width:100%;border-collapse:collapse;font-size:0.92rem;">
-                <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Programada → Ejecución</td>
-                  <td style="padding:6px 0;text-align:right;color:{_color_prog};font-weight:600;font-size:1.05rem;">
-                    {_fmt_h_d(_avg_h_prog)}
-                  </td>
-                  <td style="padding:6px 16px;color:var(--text-color, #475569);font-size:0.82rem;text-align:right;">
-                    mediana {_fmt_h_d(_med_h_prog)}
-                  </td>
-                </tr>
-                <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Duración real del trabajo</td>
-                  <td style="padding:6px 0;text-align:right;color:{_color_dur};font-weight:600;font-size:1.05rem;">
-                    {_fmt_h_d(_avg_h_dur)}
-                  </td>
-                  <td style="padding:6px 16px;color:var(--text-color, #475569);font-size:0.82rem;text-align:right;">
-                    mediana {_fmt_h_d(_med_h_dur)} · {_ot_dur_n:,} OTs con inicio
-                  </td>
-                </tr>
-                <tr style="border-bottom:1px solid rgba(148,163,184,0.25);">
-                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">OTs evaluadas</td>
-                  <td style="padding:6px 0;text-align:right;color:var(--text-color, #0f172a);font-weight:600;">{_ot_eval:,}</td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td style="padding:6px 0;font-weight:600;color:var(--text-color, #0f172a);">Atendidas a tiempo (criterio crudo)</td>
-                  <td style="padding:6px 0;text-align:right;color:#10b981;font-weight:600;">{_pct_a_tiempo}%</td>
-                  <td></td>
-                </tr>
-              </table>
-              <div style="color:var(--text-color, #475569);font-size:0.78rem;margin-top:10px;
-                          padding-top:8px;border-top:1px solid rgba(148,163,184,0.25);">
-                Métrica 1 (<b>Programada → Ejecución</b>): cumplimiento del plazo
-                comprometido. Valores negativos = ejecutada antes de lo programado.<br>
-                Métrica 2 (<b>Duración real del trabajo</b>): tiempo entre que el
-                técnico abre la OT en Fracttal (fecha_inicio) y la cierra
-                (fecha_finalización). Indica cuánto tarda haciendo el trabajo real.
-              </div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-
-        st.divider()
-
-        # Tipo de equipo a partir del nombre (lavadora / aspiradora / etc.)
-        def _tipo_eq(s):
-            s = str(s or "").upper()
-            if "LAVADORA" in s:        return "🚿 Lavadora"
-            if "ASPIRA"   in s:        return "🌀 Aspiradora"
-            if "LAVAINTER" in s or "INTERIOR" in s: return "🧽 Lava-interior"
-            if "LAVABICI" in s:        return "🚲 Lava-bicicletas"
-            if "TERMO"    in s:        return "♨️ Termo"
-            if "BOMBA"    in s or "BBA" in s: return "🔧 Bomba"
-            if "ABLAND"   in s:        return "💧 Ablandador"
-            if "HIDROPACK" in s:       return "⚙️ Hidropack"
-            if "TWISTER"  in s:        return "🌪️ Twister"
-            if "SECADO"   in s or "DRY" in s: return "🌬️ Secador"
-            return "🔩 Otro"
-
-        # Plazo restante (en días) hasta la fecha programada
-        _df_semana["_fp_norm"] = _df_semana["_fp_dt"].dt.normalize()
-        _df_semana["_ff_norm"] = _df_semana["_ff_dt"].dt.normalize()
-        _df_semana["dias_restantes"] = (_df_semana["_fp_norm"] - _hoy).dt.days
-        # Atraso real cuando hay finalización: días entre ejecución y programada
-        _df_semana["dias_ejec_vs_prog"] = (
-            _df_semana["_ff_norm"] - _df_semana["_fp_norm"]
-        ).dt.days
-        # ¿Está finalizada? (mismo criterio que el resto de KPIs)
-        _df_semana["_esta_fin"] = (
-            _df_semana["estado_tarea"].isin(["Finalizada"])
-            | _df_semana["estado"].isin(["Finalizadas"])
-        )
-
-        st.markdown(
-            f'<div class="section-header">📅  OTs programadas en el período '
-            f'<span style="color:#94a3b8;font-weight:500;font-size:0.85rem;">'
-            f'· {len(_df_semana)} encontradas</span></div>',
-            unsafe_allow_html=True,
-        )
-
-        if _df_semana.empty:
-            st.warning(
-                "No hay OTs preventivas programadas para este período en Supabase. "
-                "Esto puede indicar que: (a) el sync aún no trajo OTs futuras desde Fracttal, "
-                "o (b) las OTs de este período aún no se han generado en Fracttal."
-            )
-        else:
-            _df_semana_sorted = _df_semana.sort_values("_fp_dt")
-
-            def _plazo_label(row):
-                # Si está finalizada → comparar fecha_ejecución vs programada
-                if row["_esta_fin"] and pd.notna(row["_ff_norm"]):
-                    d = int(row["dias_ejec_vs_prog"])
-                    if d < 0:   return f"✅ Cumplida {-d}d antes"
-                    if d == 0:  return "✅ Cumplida el día"
-                    return f"⚠️ Cumplida {d}d tarde"
-                # No finalizada → plazo hasta fecha programada
-                d = int(row["dias_restantes"])
-                if d > 0:   return f"⏳ en {d}d"
-                if d == 0:  return "🟢 hoy"
-                return f"⚠️ Vencida hace {-d}d"
-
-            _df_show = pd.DataFrame({
-                "F. Programada": _df_semana_sorted["_fp_dt"].dt.strftime("%d/%m/%Y").values,
-                "F. Ejecución":  _df_semana_sorted["_ff_dt"].dt.strftime("%d/%m/%Y").fillna("—").values,
-                "Plazo":         _df_semana_sorted.apply(_plazo_label, axis=1).values,
-                "OT":            _df_semana_sorted["id_ot"].values,
-                "Código":        _df_semana_sorted["codigo_activo"].fillna("—").values,
-                "Tipo equipo":   _df_semana_sorted["nombre_activo"].apply(_tipo_eq).values,
-                "Activo":        _df_semana_sorted["nombre_activo"].fillna("—").values,
-                "Estación":      _df_semana_sorted.get("estacion", _df_semana_sorted.get("ubicacion","")).fillna("—").values,
-                "Cód. EDS":      _df_semana_sorted.get("codigo_eds", _df_semana_sorted.get("clasificacion_2","")).fillna("—").values,
-                "Plan":          _df_semana_sorted.get("plan_tareas", pd.Series([""]*len(_df_semana_sorted))).fillna("—").values,
-                "Responsable":   _df_semana_sorted["responsable"].fillna("—").values,
-                "Estado":        _df_semana_sorted["estado"].fillna("—").values,
-                "Estado tarea":  _df_semana_sorted["estado_tarea"].fillna("—").values,
-            })
-            _show_df(_df_show.reset_index(drop=True), hide_index=True, use_container_width=True,
-                column_config={
-                    "F. Programada": st.column_config.TextColumn(width=100),
-                    "F. Ejecución":  st.column_config.TextColumn(width=100),
-                    "Plazo":         st.column_config.TextColumn(width=160),
-                    "OT":            st.column_config.TextColumn(width=85),
-                    "Código":        st.column_config.TextColumn(width=85),
-                    "Tipo equipo":   st.column_config.TextColumn(width=130),
-                    "Activo":        st.column_config.TextColumn(width=240),
-                    "Estación":      st.column_config.TextColumn(width=200),
-                    "Cód. EDS":      st.column_config.TextColumn(width=90),
-                    "Plan":          st.column_config.TextColumn(width=200),
-                    "Responsable":   st.column_config.TextColumn(width=160),
-                    "Estado":        st.column_config.TextColumn(width=100),
-                    "Estado tarea":  st.column_config.TextColumn(width=110),
-                })
-            _sfin_m  = _df_semana["_esta_fin"]
-            _snoi_m  = _df_semana["estado_tarea"].isin(["No Iniciada"]) & ~_sfin_m
-            _sfin    = int(_sfin_m.sum())
-            _sproc   = int((~_sfin_m & ~_snoi_m & ~_df_semana["estado"].isin(["Cancelado"])).sum())
-            _snoi    = int(_snoi_m.sum())
-            # Solo cuenta como vencida si NO está finalizada y ya pasó la fecha
-            _venc    = int(((_df_semana["dias_restantes"] < 0) & ~_sfin_m).sum())
-            st.caption(f"{len(_df_show):,} OTs · {_sfin} finalizadas · {_sproc} en proceso · "
-                       f"{_snoi} no iniciadas · {_venc} pendientes vencidas")
-        st.divider()
-
-        # ── OTs vencidas (programadas en pasado y no finalizadas) ─────────
-        st.markdown('<div class="section-header">⚠️  OTs vencidas (no finalizadas)</div>',
-                    unsafe_allow_html=True)
-        # Excluir OTs anuladas — el mismo criterio que el velocímetro:
-        # Cancelado / ERROR DE INGRESO / EQUIPO CON RECAMBIO no representan
-        # mantenimientos pendientes, son OTs que se anularon por error.
-        _df_venc = _dfplan[
-            (_dfplan["_fp_dt"] < _hoy) &
-            (~_dfplan["estado"].isin(_ESTADOS_NO_CUENTAN | {"Finalizadas"})) &
-            (~_dfplan["estado_tarea"].isin(["Finalizada"]))   # excluir DONE normalizados
-        ].copy()
-        _df_venc["_atraso"] = (_hoy - _df_venc["_fp_dt"]).dt.days
-        _df_venc = _df_venc.sort_values("_atraso", ascending=False)
-        if _df_venc.empty:
-            st.success("✅ No hay OTs preventivas vencidas.")
-        else:
-            _df_venc_show = _df_venc[[c for c in [
-                "fecha_programada","_atraso","id_ot","responsable",
-                "nombre_tarea","tipo_tarea","activador","estado","estado_tarea"
-            ] if c in _df_venc.columns]].copy()
-            _df_venc_show["fecha_programada"] = pd.to_datetime(
-                _df_venc_show["fecha_programada"], errors="coerce").dt.strftime("%d/%m/%Y")
-            _df_venc_show.rename(columns={
-                "fecha_programada":"F.Prog.","_atraso":"Atraso (días)","id_ot":"OT",
-                "responsable":"Responsable","nombre_tarea":"Tarea","tipo_tarea":"Tipo",
-                "activador":"Activador","estado":"Estado","estado_tarea":"Estado Tarea"
-            }, inplace=True)
-            _show_df(_df_venc_show.reset_index(drop=True), hide_index=True, use_container_width=True,
-                column_config={
-                    "F.Prog.":       st.column_config.TextColumn(width=90),
-                    "Atraso (días)": st.column_config.NumberColumn(format="%d días", width=105),
-                    "OT":            st.column_config.TextColumn(width=90),
-                    "Responsable":   st.column_config.TextColumn(width=180),
-                    "Tarea":         st.column_config.TextColumn(width=200),
-                    "Tipo":          st.column_config.TextColumn(width=170),
-                    "Activador":     st.column_config.TextColumn(width=100),
-                    "Estado":        st.column_config.TextColumn(width=100),
-                    "Estado Tarea":  st.column_config.TextColumn(width=110),
-                })
-            st.caption(f"⚠️ {len(_df_venc_show):,} OTs preventivas vencidas sin finalizar")
-        st.divider()
-
-        # ── Próximas OTs futuras ───────────────────────────────────────────
-        st.markdown('<div class="section-header">🔮  Próximas OTs programadas (hoy en adelante)</div>',
-                    unsafe_allow_html=True)
         st.caption(
-            "Mantenciones preventivas **pendientes** con fecha programada de hoy en "
-            "adelante. Se excluyen OTs anuladas (Cancelado / Error de ingreso) y "
-            "las que ya se ejecutaron anticipadamente — éstas se ven en el cuadro "
-            "principal de la semana."
+            "Vista **Kanban** de MPs programadas: semana en curso + 2 siguientes. "
+            "Agrupadas por cliente. Cada OT muestra su estado — "
+            "✅ Realizada · 🟡 En Progreso · ⚪ Pendiente. "
+            "Al top de cada columna: cuántas de las programadas ya se ejecutaron. "
+            "Se excluyen OTs anuladas (Cancelado / Error ingreso / Equipo con recambio)."
         )
-        _df_fut = _dfplan[
-            (_dfplan["_fp_dt"].dt.normalize() >= _hoy)
-            & (~_dfplan["estado"].isin(_ESTADOS_NO_CUENTAN | {"Finalizadas"}))
-            & (~_dfplan["estado_tarea"].isin(["Finalizada"]))
-        ].copy().sort_values("_fp_dt")
-        if _df_fut.empty:
-            st.info("No hay OTs preventivas pendientes con fecha futura.")
-        else:
-            _df_fut["_dias_rest"] = (_df_fut["_fp_dt"].dt.normalize() - _hoy).dt.days
-            _df_fut["_barra"] = _df_fut["_dias_rest"].clip(lower=0, upper=30)
 
-            _fut_show = pd.DataFrame({
-                "F. Programada": _df_fut["_fp_dt"].dt.strftime("%d/%m/%Y").values,
-                "Plazo":         _df_fut["_dias_rest"].apply(
-                    lambda d: "🟢 hoy" if d == 0
-                    else (f"⏳ en {d} día{'s' if d != 1 else ''}")
-                ).values,
-                "⏱ Barra (días)": _df_fut["_barra"].values,
-                "OT":            _df_fut["id_ot"].values,
-                "Código":        _df_fut["codigo_activo"].fillna("—").values,
-                "Tipo equipo":   _df_fut["nombre_activo"].apply(_tipo_eq).values,
-                "Activo":        _df_fut["nombre_activo"].fillna("—").values,
-                "Estación":      _df_fut.get("estacion", _df_fut.get("ubicacion","")).fillna("—").values,
-                "Cód. EDS":      _df_fut.get("codigo_eds", _df_fut.get("clasificacion_2","")).fillna("—").values,
-                "Plan":          _df_fut.get("plan_tareas", pd.Series([""]*len(_df_fut))).fillna("—").values,
-                "Activador":     _df_fut["activador"].fillna("—").values,
-                "Responsable":   _df_fut["responsable"].fillna("—").values,
-                "Estado":        _df_fut["estado"].fillna("—").values,
+        # Universo: TODAS las MPs operativas (ya excluye anuladas por _dfp_op).
+        # Deduplicar por id_ot para evitar contar 2 veces las OTs compuestas.
+        _dfplan = _dfp_op.copy()
+        _dfplan["_fp"] = pd.to_datetime(
+            _dfplan["fecha_programada"], errors="coerce", utc=True
+        ).dt.tz_convert("America/Santiago").dt.tz_localize(None).dt.normalize()
+        _dfplan = _dfplan[_dfplan["_fp"].notna()].copy()
+        _dfplan = _dfplan.drop_duplicates(subset=["id_ot"], keep="first")
+
+        _hoy_pl = pd.Timestamp.today().normalize()
+        _lun_actual = _hoy_pl - pd.Timedelta(days=_hoy_pl.weekday())
+        _semanas = []
+        for _n in range(3):
+            _lun = _lun_actual + pd.Timedelta(weeks=_n)
+            _dom = _lun + pd.Timedelta(days=6)
+            _titulo = ["Semana actual", "Próxima semana", "Sub-siguiente"][_n]
+            _semanas.append({
+                "titulo": _titulo, "lun": _lun, "dom": _dom,
+                "iso": _lun.isocalendar().week,
             })
-            _show_df(_fut_show.reset_index(drop=True), hide_index=True, use_container_width=True,
-                column_config={
-                    "F. Programada":  st.column_config.TextColumn(width=100),
-                    "Plazo":          st.column_config.TextColumn(width=110),
-                    "⏱ Barra (días)": st.column_config.ProgressColumn(
-                        help="Días restantes hasta la fecha programada (0–30+)",
-                        format="%d d", min_value=0, max_value=30, width=140,
-                    ),
-                    "OT":             st.column_config.TextColumn(width=85),
-                    "Código":         st.column_config.TextColumn(width=85),
-                    "Tipo equipo":    st.column_config.TextColumn(width=130),
-                    "Activo":         st.column_config.TextColumn(width=240),
-                    "Estación":       st.column_config.TextColumn(width=200),
-                    "Cód. EDS":       st.column_config.TextColumn(width=90),
-                    "Plan":           st.column_config.TextColumn(width=200),
-                    "Activador":      st.column_config.TextColumn(width=100),
-                    "Responsable":    st.column_config.TextColumn(width=160),
-                    "Estado":         st.column_config.TextColumn(width=110),
-                })
-            _hoy_n = int((_df_fut["_dias_rest"] == 0).sum())
-            _3d    = int(((_df_fut["_dias_rest"] > 0) & (_df_fut["_dias_rest"] <= 3)).sum())
-            _7d    = int(((_df_fut["_dias_rest"] > 3) & (_df_fut["_dias_rest"] <= 7)).sum())
-            _mas   = int((_df_fut["_dias_rest"] > 7).sum())
-            st.caption(
-                f"**{len(_fut_show):,} OTs pendientes** · "
-                f"🟢 {_hoy_n} para hoy · ⏳ {_3d} en 1–3 días · {_7d} en 4–7 días · "
-                f"{_mas} más allá de 7 días."
-            )
 
-    # ── Tab 5: Por Activo/EDS ─────────────────────────────────────────────
+        _cols_kan = st.columns(3)
+        for _idx, _sem in enumerate(_semanas):
+            _lun, _dom = _sem["lun"], _sem["dom"]
+            _df_sem = _dfplan[(_dfplan["_fp"] >= _lun) & (_dfplan["_fp"] <= _dom)].copy()
+            _tot_sem   = len(_df_sem)
+            _real_sem  = int((_df_sem["estado_tarea"] == "Finalizada").sum())
+            _pend_sem  = _tot_sem - _real_sem
+            _pct_sem   = round(_real_sem / _tot_sem * 100) if _tot_sem else 0
+            _color_top = "#01798A" if _idx == 0 else "#3B82F6" if _idx == 1 else "#8B5CF6"
+            _bar_color = ("#10b981" if _pct_sem >= 90
+                          else "#f59e0b" if _pct_sem >= 60 else "#ef4444")
+
+            with _cols_kan[_idx]:
+                # Encabezado semana
+                st.markdown(
+                    f"""<div style='background:{_color_top}; color:white; padding:12px 14px;
+                        border-radius:8px 8px 0 0;'>
+                      <div style='font-weight:700; font-size:1rem;'>📅 {_sem['titulo']}</div>
+                      <div style='font-size:0.78rem; opacity:0.9;'>
+                        ISO {_sem['iso']} · {_lun.strftime('%d/%m')} – {_dom.strftime('%d/%m/%Y')}
+                      </div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                # KPI + barra
+                st.markdown(
+                    f"""<div style='background:{_t["card"]}; padding:10px 14px;
+                         border-radius:0 0 8px 8px; border:1px solid {_t["border"]};
+                         border-top:none; margin-bottom:12px;'>
+                      <div style='font-size:0.88rem; color:{_t["text"]};'>
+                        <b>{_real_sem}</b> / {_tot_sem} realizadas · <b>{_pct_sem}%</b>
+                        <span style='color:{_t["muted"]}; font-size:0.78rem;'> ·
+                        {_pend_sem} pendientes</span>
+                      </div>
+                      <div style='height:6px; background:rgba(148,163,184,0.2);
+                                  border-radius:3px; margin-top:6px;'>
+                        <div style='width:{_pct_sem}%; height:6px;
+                                    background:{_bar_color}; border-radius:3px;'></div>
+                      </div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+                if _tot_sem == 0:
+                    st.info("Sin MPs programadas en esta semana.")
+                    continue
+
+                # Agrupar por cliente. Orden: COPEC → Aramco → Shell → Particulares → resto.
+                _CLI_ORDER = ["COPEC", "Aramco (Esmax)", "ESMAX (Aramco)",
+                              "SHELL (Enex)", "Particulares"]
+                _clis_disp = sorted(
+                    _df_sem["cliente"].dropna().unique().tolist(),
+                    key=lambda c: (_CLI_ORDER.index(c) if c in _CLI_ORDER else 99, c),
+                )
+                for _cli in _clis_disp:
+                    _grp = _df_sem[_df_sem["cliente"] == _cli].sort_values("_fp")
+                    _tot_c = len(_grp)
+                    _real_c = int((_grp["estado_tarea"] == "Finalizada").sum())
+                    _pct_c = round(_real_c / _tot_c * 100) if _tot_c else 0
+                    _cli_icon = ("🟠" if "COPEC" in _cli.upper()
+                                 else "🟢" if "ARAMCO" in _cli.upper() or "ESMAX" in _cli.upper()
+                                 else "🟡" if "SHELL" in _cli.upper() else "⚫")
+                    with st.expander(
+                        f"{_cli_icon} {_cli} · {_real_c}/{_tot_c} ({_pct_c}%)",
+                        expanded=(_idx == 0 and len(_clis_disp) <= 4),
+                    ):
+                        for _, _mp in _grp.iterrows():
+                            _st_mp = str(_mp.get("estado_tarea", "") or "").strip()
+                            if _st_mp == "Finalizada":
+                                _badge, _cbdg = "✅ Realizada", "#10b981"
+                            elif _st_mp == "En Progreso":
+                                _badge, _cbdg = "🟡 En Progreso", "#f59e0b"
+                            else:
+                                _badge, _cbdg = "⚪ Pendiente", "#94a3b8"
+                            _est_nom = str(_mp.get("estacion", "") or
+                                           _mp.get("codigo_eds", "") or "—")
+                            _plan_raw = str(_mp.get("plan_tareas", "") or "—")
+                            _plan_tit = _smart_title_series(pd.Series([_plan_raw])).iloc[0]
+                            _resp_mp = str(_mp.get("responsable", "") or "—")
+                            _resp_tit = _smart_title_series(pd.Series([_resp_mp])).iloc[0]
+                            _fp_lbl = _mp["_fp"].strftime("%a %d/%m")
+                            _est_tit = _smart_title_series(pd.Series([_est_nom])).iloc[0]
+                            st.markdown(
+                                f"""<div style='background:{_t["card"]};
+                                    border:1px solid {_t["border"]};
+                                    border-left:3px solid {_cbdg};
+                                    border-radius:6px; padding:8px 10px;
+                                    margin-bottom:6px; font-size:0.80rem;'>
+                                  <div style='color:{_t["text"]};'><b>{_est_tit[:52]}</b></div>
+                                  <div style='color:{_t["muted"]}; font-size:0.75rem;
+                                              margin-top:2px;'>{_plan_tit[:60]}</div>
+                                  <div style='display:flex; justify-content:space-between;
+                                              margin-top:4px; font-size:0.72rem;'>
+                                    <span style='color:{_t["muted"]};'>{_resp_tit[:28]} · {_fp_lbl}</span>
+                                    <span style='color:{_cbdg}; font-weight:600;'>{_badge}</span>
+                                  </div>
+                                  <div style='color:{_t["muted"]}; font-size:0.70rem;
+                                              margin-top:2px;'>{_mp["id_ot"]}</div>
+                                </div>""",
+                                unsafe_allow_html=True,
+                            )
+
     with _ptab_eds:
         if _dfp_full.empty:
             st.info("Sin datos de mantenciones preventivas.")
