@@ -73,6 +73,18 @@ st.markdown(f"""
                   border-radius: 12px; font-size: 0.78em; font-weight: 600; }}
     .badge-ok   {{ background: {OCCIM_BLUE}; color: #fff; padding: 2px 8px;
                   border-radius: 12px; font-size: 0.78em; font-weight: 600; }}
+    .badge-crit {{ background: #dc2626; color: #fff; padding: 2px 10px;
+                  border-radius: 12px; font-size: 0.78em; font-weight: 700;
+                  box-shadow: 0 0 0 2px rgba(220,38,38,0.15); }}
+    .banner-crit {{
+        background: linear-gradient(90deg, #fee2e2 0%, #fef2f2 100%);
+        border-left: 5px solid #dc2626;
+        padding: 14px 18px;
+        border-radius: 8px;
+        margin-bottom: 14px;
+    }}
+    .banner-crit .title {{ color: #991b1b; font-weight: 700; font-size: 1.05em; }}
+    .banner-crit .sub   {{ color: #7f1d1d; font-size: 0.9em; }}
 
     /* Botones primarios (Ingresar, Validar y firmar…) — cubre todos los kinds */
     button[kind="primary"],
@@ -317,27 +329,41 @@ def render_home(periodo: date, cliente: str):
 
     df = eds_reincidentes(periodo, cliente=cliente)
     estados = db.estados_del_periodo(periodo)
+    val_prev = db.validaciones_anteriores(periodo)
+
+    # Marcar críticas: EDS con reincidencia hoy que ya fueron validadas antes,
+    # y que aún no están validadas en el periodo actual.
+    df = df.copy()
+    df["_critica"] = df["codigo_eds"].apply(
+        lambda c: (c in val_prev) and not estados.get(c, {}).get("validado")
+    )
+    df["_ya_validada"] = df["codigo_eds"].apply(
+        lambda c: bool(estados.get(c, {}).get("validado"))
+    )
+    # Orden: primero las críticas, luego el resto, siempre por N° desc
+    df = df.sort_values(
+        by=["_critica", "n_llamados"], ascending=[False, False]
+    ).reset_index(drop=True)
 
     total = len(df)
-    validadas = sum(1 for e in estados.values() if e.get("validado"))
-    pendientes = total - sum(
-        1 for _, r in df.iterrows()
-        if estados.get(r["codigo_eds"], {}).get("validado")
-    )
+    n_criticas = int(df["_critica"].sum())
+    n_validadas = int(df["_ya_validada"].sum())
+    n_pendientes = total - n_validadas
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("EDS con ≥3 correctivos", total)
-    c2.metric("Pendientes", pendientes)
-    c3.metric("Validadas", min(validadas, total))
+    c2.metric("Pendientes", n_pendientes)
+    c3.metric("Reincidentes 🔴", n_criticas)
+    c4.metric("Validadas", n_validadas)
 
     if df.empty:
         st.info("No hay EDS con 3 o más correctivos en este periodo.")
         return
 
     st.markdown("### EDS reincidentes")
-    st.caption("Ordenadas por N° de llamados descendente. Click para revisar y clasificar.")
+    st.caption("Ordenadas: 🔴 reincidentes primero, luego por N° de llamados. Click para revisar y clasificar.")
 
-    hdr = st.columns([1, 3, 2, 1, 2, 1])
+    hdr = st.columns([1, 3, 2, 1, 3, 1])
     hdr[0].markdown("**EDS**")
     hdr[1].markdown("**Estación**")
     hdr[2].markdown("**Cliente**")
@@ -348,11 +374,13 @@ def render_home(periodo: date, cliente: str):
     for _, row in df.iterrows():
         cod = row["codigo_eds"]
         est = estados.get(cod, {})
-        cols = st.columns([1, 3, 2, 1, 2, 1])
+        prev = val_prev.get(cod, [])
+        cols = st.columns([1, 3, 2, 1, 3, 1])
         cols[0].write(cod or "—")
         cols[1].write(row.get("estacion") or "—")
         cols[2].write(row.get("cliente") or "—")
         cols[3].write(int(row["n_llamados"]))
+
         if est.get("validado"):
             firmante = est.get("validado_por_nombre") or "—"
             _at = est.get("validado_at")
@@ -367,11 +395,21 @@ def render_home(periodo: date, cliente: str):
                 + (f" · {fecha}" if fecha else "") + "</span>",
                 unsafe_allow_html=True,
             )
+        elif row["_critica"] and prev:
+            p = prev[0]
+            _p_periodo = pd.to_datetime(p["periodo"]).strftime("%b %Y").lower()
+            _p_firmante = p.get("validado_por_nombre") or "—"
+            cols[4].markdown(
+                f'<span class="badge-crit">🔴 Reincidente — validada por '
+                f'{_p_firmante} en {_p_periodo}</span>',
+                unsafe_allow_html=True,
+            )
         else:
             cols[4].markdown(
                 '<span class="badge-pend">🔔 Pendiente</span>',
                 unsafe_allow_html=True,
             )
+
         if cols[5].button("Abrir", key=f"open_{cod}"):
             st.session_state["eds_detalle"] = cod
             st.rerun()
@@ -525,6 +563,34 @@ def render_detalle(codigo_eds: str, periodo: date):
         _at = fila.get("validado_at")
         _at_txt = pd.to_datetime(_at).strftime("%d/%m/%Y %H:%M") if _at else "—"
         st.success(f"✅ Validado por **{fila.get('validado_por_nombre') or '—'}** el {_at_txt}")
+
+    # ── Banner de reincidencia crítica (si esta EDS ya fue validada antes) ──
+    if not ya_validado:
+        _prev_map = db.validaciones_anteriores(periodo)
+        _prev = _prev_map.get(codigo_eds, [])
+        if _prev:
+            p = _prev[0]
+            _p_periodo = pd.to_datetime(p["periodo"]).strftime("%B %Y").capitalize()
+            _p_firmante = p.get("validado_por_nombre") or "—"
+            _p_clasif = p.get("clasificaciones") or {}
+            _p_grupos = _p_clasif.get("grupos") or []
+            _motivos_previos = ", ".join(
+                (g.get("nombre") or "—") for g in _p_grupos
+            ) or "—"
+            st.markdown(
+                f"""
+                <div class="banner-crit">
+                    <div class="title">🔴 Reincidencia — esta EDS ya fue validada antes</div>
+                    <div class="sub">
+                        Validada por <b>{_p_firmante}</b> en <b>{_p_periodo}</b>.<br>
+                        Motivos firmados en esa validación: <b>{_motivos_previos}</b>.<br>
+                        Aunque hoy es <b>{_me['nombre']}</b> quien la revisa, considera si los nuevos
+                        llamados repiten los motivos anteriores.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     state = _cargar_estado_edicion(codigo_eds, periodo, fila)
     grupos: list[dict] = state["grupos"]

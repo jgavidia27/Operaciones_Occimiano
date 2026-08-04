@@ -105,6 +105,25 @@ def estados_del_periodo(periodo: date) -> dict[str, dict]:
     return {r["codigo_eds"]: r for r in rows}
 
 
+def validaciones_anteriores(periodo_actual: date) -> dict[str, list[dict]]:
+    """{codigo_eds: [validaciones firmadas anteriores, orden desc por periodo]}.
+    Se usa para detectar EDS 'Reincidente crítica' — las que ya fueron validadas
+    en algún mes previo y vuelven a aparecer con reincidencia en el mes actual.
+    """
+    rows = _query(
+        TABLE,
+        f"select=codigo_eds,periodo,validado_por_nombre,validado_at,clasificaciones"
+        f"&validado=eq.true"
+        f"&periodo=lt.{periodo_actual.isoformat()}"
+        f"&order=periodo.desc",
+        limit=2000,
+    )
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["codigo_eds"], []).append(r)
+    return out
+
+
 def historial(limit: int = 500) -> pd.DataFrame:
     rows = _query(
         TABLE,
