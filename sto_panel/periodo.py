@@ -20,8 +20,16 @@ def ultimo_mes_cerrado(hoy: date | None = None) -> date:
     return date(hoy.year, hoy.month - 1, 1)
 
 
-def periodo_label(p: date) -> str:
-    return f"{MESES_ES[p.month]} {p.year}"
+def mes_actual(hoy: date | None = None) -> date:
+    hoy = hoy or date.today()
+    return date(hoy.year, hoy.month, 1)
+
+
+def periodo_label(p: date, hoy: date | None = None) -> str:
+    base = f"{MESES_ES[p.month]} {p.year}"
+    if p == mes_actual(hoy):
+        base += " (en curso)"
+    return base
 
 
 def periodo_rango(p: date) -> tuple[date, date]:
@@ -33,11 +41,11 @@ def periodo_rango(p: date) -> tuple[date, date]:
 
 def periodos_disponibles(desde: date = date(2026, 1, 1),
                          hoy: date | None = None) -> list[date]:
-    """Lista de primeros-de-mes desde `desde` hasta el último mes cerrado,
-    orden descendente (más reciente primero)."""
-    ult = ultimo_mes_cerrado(hoy)
-    out: list[date] = []
-    cur = ult
+    """Lista de primeros-de-mes desde `desde` hasta el mes en curso,
+    orden descendente (mes en curso primero, luego cerrados)."""
+    actual = mes_actual(hoy)
+    out: list[date] = [actual]
+    cur = ultimo_mes_cerrado(hoy)
     while cur >= desde:
         out.append(cur)
         cur = date(cur.year - 1, 12, 1) if cur.month == 1 else date(cur.year, cur.month - 1, 1)
