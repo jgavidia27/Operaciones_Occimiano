@@ -3,3 +3,6 @@ pandas>=2.0,<3.0
 plotly>=5.18,<7.0
 requests>=2.31
 openpyxl>=3.1
+# Pin starlette compatible: >=0.48 rompe con brotli-asgi / GZipResponder
+# (bug 'thread_minimum_size' missing) que tumba la app en Streamlit Cloud.
+starlette<0.48
