@@ -256,20 +256,24 @@ def fetch_subtareas_numeral(folio: str) -> list:
                     else:
                         idx[kid]["cubre_fichero"] = val[:10]
             elif "FLOWEY" in desc:
-                # Preguntas Aramco (subtareas #44 y #45 del PLAN MTTO GENERAL MSELF).
-                # #44: "¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?"     → SI/NO
-                # #45: "¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS…?"   → lista libre
+                # Preguntas Aramco. Cada plan tiene su propia redacción:
+                #   • "¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?"   → SI/NO
+                #   • "OCUPA INSUMOS FLOWEY? - SI / NO"        → SI/NO
+                #   • "¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS…?" → lista
+                # La lógica: si la pregunta habla de "diluido" o "agua" es
+                # la segunda; cualquier otra pregunta FLOWEY con SI/NO cae
+                # en 'utiliza' (verbo agnóstico — UTILIZA/OCUPA/USA/etc.).
                 if not val_empty:
                     _v = val.lower()
-                    if "UTILIZA" in desc:
+                    if "DILUID" in desc or "AGUA" in desc:
+                        idx[kid]["flowey_diluido_agua"] = val[:40]
+                    else:
                         if _v in ("true", "si", "sí", "yes", "1"):
                             idx[kid]["flowey_utiliza"] = "SI"
                         elif _v in ("false", "no", "0"):
                             idx[kid]["flowey_utiliza"] = "NO"
                         else:
                             idx[kid]["flowey_utiliza"] = val[:20]
-                    elif "DILUID" in desc or "AGUA" in desc:
-                        idx[kid]["flowey_diluido_agua"] = val[:40]
             elif "FICHERO" in desc and ("ACEPTA" in desc and "MONEDA" in desc):
                 # "¿EL FICHERO ACEPTA MONEDAS?" — todos los clientes,
                 # planes con equipo FICHERO, plantilla actualizada 2026-07-31.
