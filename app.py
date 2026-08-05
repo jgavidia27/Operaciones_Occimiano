@@ -16251,7 +16251,7 @@ elif _page == _NAV_PAGES[2]:
                             else:
                                 _badge, _cbdg = "⚪ Pendiente", "#94a3b8"
                             # Limpiar 'estacion' que viene como '// COPEC/ COPEC BUIN/'
-                            # → tomar la penúltima parte (nombre de la EDS).
+                            # → tomar la última parte (nombre de la EDS).
                             _est_raw = str(_mp.get("estacion", "") or "").strip()
                             _partes = [p.strip() for p in _est_raw.split("/") if p.strip()]
                             _est_bonito = _partes[-1] if _partes else "—"
@@ -16264,29 +16264,22 @@ elif _page == _NAV_PAGES[2]:
                             _resp_tit = _smart_title_series(pd.Series([_resp_mp])).iloc[0]
                             _fp_lbl = _mp["_fp"].strftime("%a %d/%m")
                             _est_tit = _smart_title_series(pd.Series([_est_bonito])).iloc[0]
-                            st.markdown(
-                                f"""<div style='background:{_t["card"]};
-                                    border:1px solid {_t["border"]};
-                                    border-left:3px solid {_cbdg};
-                                    border-radius:6px; padding:8px 10px;
-                                    margin-bottom:6px; font-size:0.80rem;'>
-                                  <div style='color:{_t["text"]};'>
-                                    <b>{_cod_eds}</b> · {_est_tit[:42]}
-                                  </div>
-                                  <div style='color:{_t["muted"]}; font-size:0.72rem;
-                                              margin-top:2px;'>🔧 {_activo_tit[:55]}</div>
-                                  <div style='color:{_t["muted"]}; font-size:0.72rem;
-                                              margin-top:1px;'>📋 {_plan_tit[:55]}</div>
-                                  <div style='display:flex; justify-content:space-between;
-                                              margin-top:4px; font-size:0.72rem;'>
-                                    <span style='color:{_t["muted"]};'>{_resp_tit[:26]} · {_fp_lbl}</span>
-                                    <span style='color:{_cbdg}; font-weight:600;'>{_badge}</span>
-                                  </div>
-                                  <div style='color:{_t["muted"]}; font-size:0.68rem;
-                                              margin-top:2px;'>{_mp["id_ot"]}</div>
-                                </div>""",
-                                unsafe_allow_html=True,
-                            )
+                            # Card con contenedor nativo de Streamlit — evita el
+                            # bug de React 'removeChild' que ocurría con HTML
+                            # custom pesado en loops grandes.
+                            with st.container(border=True):
+                                st.markdown(
+                                    f"**{_cod_eds}** · {_est_tit[:42]}  \n"
+                                    f"<span style='font-size:0.75rem;'>🔧 {_activo_tit[:55]}</span>  \n"
+                                    f"<span style='font-size:0.75rem;'>📋 {_plan_tit[:55]}</span>  \n"
+                                    f"<span style='font-size:0.72rem;color:{_t['muted']};'>"
+                                    f"{_resp_tit[:26]} · {_fp_lbl}</span> "
+                                    f"<span style='font-size:0.72rem;color:{_cbdg};font-weight:600;'>"
+                                    f"· {_badge}</span>  \n"
+                                    f"<span style='font-size:0.68rem;color:{_t['muted']};'>"
+                                    f"{_mp['id_ot']}</span>",
+                                    unsafe_allow_html=True,
+                                )
 
     with _ptab_eds:
         if _dfp_full.empty:
