@@ -281,18 +281,17 @@ def resetear_vista(page):
         pass
 
 
-def cerrar_ot(page, folio: str, dry_run: bool = False) -> tuple:
+def cerrar_ot(page, folio: str, dry_run: bool = False, debug: bool = False) -> tuple:
     """Flujo: buscar folio -> click fila -> click AI -> click Finalizadas
     -> confirmar -> volver a lista.
-    Retorna (resultado, motivo, duracion_ms)."""
+    Retorna (resultado, motivo, duracion_ms).
+
+    debug=False (default): sin screenshots ni logs extensos. Rápido.
+    debug=True: guarda 4 screenshots por OT + logs verbosos."""
     t0 = time.time()
     try:
         # Resetear vista para cada OT (limpia modales, buscador previo, etc)
         resetear_vista(page)
-
-        # Log estado actual
-        log(f"   URL actual: {page.url}")
-        log(f"   Titulo: {page.title()[:60]}")
 
         # Si perdio sesion, re-login
         if "login" in page.url.lower() or "signin" in page.url.lower():
@@ -300,81 +299,43 @@ def cerrar_ot(page, folio: str, dry_run: bool = False) -> tuple:
             login(page)
             ir_a_lista_ots(page)
 
-        # DEBUG: guardar screenshot + HTML al llegar a la lista
-        page.screenshot(path="debug_lista_ots.png", full_page=True)
-        with open("debug_lista_ots.html", "w", encoding="utf-8") as f:
-            f.write(page.content())
-        log("   DEBUG: guardado debug_lista_ots.png + debug_lista_ots.html")
+        if debug:
+            page.screenshot(path="debug_lista_ots.png", full_page=True)
 
-        # Listar TODOS los botones cerca del top (para encontrar iconos de vista)
-        botones_top = page.evaluate("""() => {
-            const btns = Array.from(document.querySelectorAll('button'));
-            return btns.filter(b => {
-                const r = b.getBoundingClientRect();
-                return b.offsetParent !== null && r.top < 200 && r.left < 400;
-            }).map(b => ({
-                text: (b.innerText || '').trim().slice(0, 40),
-                title: b.title || '',
-                ariaLabel: b.getAttribute('aria-label') || '',
-                class: b.className.slice(0, 80),
-                iconClass: b.querySelector('i')?.className || '',
-                rect: {top: Math.round(b.getBoundingClientRect().top),
-                       left: Math.round(b.getBoundingClientRect().left)}
-            }));
-        }""")
-        log(f"   Botones top-left encontrados: {len(botones_top)}")
-        for i, b in enumerate(botones_top):
-            log(f"      [{i}] icon='{b['iconClass'][:40]}' aria='{b['ariaLabel']}' title='{b['title']}' text='{b['text'][:20]}' pos=({b['rect']['top']},{b['rect']['left']})")
-
-        # Listar inputs para diagnostico
-        inputs_info = page.evaluate("""() => {
-            const inputs = Array.from(document.querySelectorAll('input'));
-            return inputs.filter(i => i.offsetParent !== null).map(i => ({
-                type: i.type,
-                placeholder: i.placeholder,
-                name: i.name,
-                ariaLabel: i.getAttribute('aria-label')
-            }));
-        }""")
-        log(f"   Inputs visibles: {len(inputs_info)}")
-        for i, inp in enumerate(inputs_info[:5]):
-            log(f"      [{i}] type={inp['type']} placeholder='{inp['placeholder']}' name='{inp['name']}' aria='{inp['ariaLabel']}'")
-
-        # 1. Escribir folio en el buscador — probar multiples estrategias
+        # 1. Escribir folio en el buscador — probar las 2 estrategias más
+        # comunes (que en la práctica cubren 99%). Timeout corto para no
+        # gastar 15s cuando la primera funciona el 90% de las veces.
         buscador = None
-        estrategias = [
-            lambda: page.get_by_placeholder("Buscar...", exact=True),
-            lambda: page.get_by_placeholder("Buscar"),
+        for get_loc in [
+            lambda: page.get_by_placeholder("Buscar", exact=False),
             lambda: page.locator('input[placeholder*="Buscar"]').first,
             lambda: page.locator('input[type="search"]').first,
-            lambda: page.locator('input[type="text"]:visible').first,
-            lambda: page.locator('.search input, .buscar input').first,
-        ]
-        for i, get_loc in enumerate(estrategias):
+        ]:
             try:
                 loc = get_loc()
-                loc.wait_for(state="visible", timeout=3000)
+                loc.wait_for(state="visible", timeout=1500)
                 buscador = loc
-                log(f"   buscador encontrado (estrategia {i+1})")
                 break
             except Exception:
                 continue
         if buscador is None:
-            # Screenshot para debug
-            page.screenshot(path=f"debug_no_buscador_{folio}.png", full_page=True)
-            raise RuntimeError(f"No se encontro buscador. Screenshot guardado en debug_no_buscador_{folio}.png")
+            if debug:
+                page.screenshot(path=f"debug_no_buscador_{folio}.png", full_page=True)
+            raise RuntimeError("No se encontro buscador")
 
-        buscador.click(timeout=5000)
+        buscador.click(timeout=3000)
         buscador.fill("")
-        page.wait_for_timeout(300)
-        buscador.type(folio, delay=30)
-        page.wait_for_timeout(2000)  # esperar a que filtre
+        buscador.type(folio, delay=20)
+        # Espera activa a que la fila del folio aparezca (en vez de sleep fijo)
+        try:
+            page.locator(f'text={folio}').first.wait_for(state="visible", timeout=5000)
+        except Exception:
+            page.wait_for_timeout(1500)
 
         # 2. Click en la fila con el folio
         fila = page.locator(f'text={folio}').first
-        fila.click(timeout=10000)
-        log(f"   click en fila {folio} OK")
-        page.wait_for_timeout(2500)
+        fila.click(timeout=8000)
+        page.wait_for_timeout(1200)
 
         # 3. Click en boton "..." (3 puntos verticales) al lado de Guardar.
         # NO es el boton "AI" - ese abre el chat asistente. Es un IconButton
