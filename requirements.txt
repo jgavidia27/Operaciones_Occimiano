@@ -7,6 +7,9 @@ flask>=3.0.0
 gunicorn>=21.2.0
 # Kanban drag & drop del panel Análisis STO Occim (sto_panel/)
 streamlit-sortables>=0.3.0
+# Pin defensivo: starlette>=0.48 rompe GZipResponder en Streamlit Cloud
+# ('missing thread_minimum_size'). Bloquea el startup del dashboard.
+starlette<0.48
 
 # Módulo HHEE — scrapers + Google Drive API (solo GitHub Actions cron)
 playwright>=1.40.0
