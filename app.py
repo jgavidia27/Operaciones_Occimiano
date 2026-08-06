@@ -15674,9 +15674,13 @@ elif _page == _NAV_PAGES[2]:
                     "Observación":   _res["obs"],
                     "Plan":          str(_r.get("plan_tareas", "") or "—")[:40],
                 }
-                # Columnas FLOWEY solo para Aramco (ESMAX / Aramco)
+                # Columnas FLOWEY solo cuando el usuario filtra por Aramco
+                # (evita ruido — el resto de clientes no tienen esa pregunta
+                # en su checklist, por lo que aparecerían siempre como "—").
+                _sel_up = _sel_cli_r.upper()
+                _is_aramco_view = ("ARAMCO" in _sel_up) or ("ESMAX" in _sel_up)
                 _cli_up = str(_r.get("cliente", "")).upper()
-                if "ARAMCO" in _cli_up or "ESMAX" in _cli_up:
+                if _is_aramco_view and ("ARAMCO" in _cli_up or "ESMAX" in _cli_up):
                     _row["FLOWEY utiliza"]      = _fl["flowey_utiliza"]
                     _row["FLOWEY diluido agua"] = _fl["flowey_diluido"]
                 _rows_out.append(_row)
@@ -15726,6 +15730,13 @@ elif _page == _NAV_PAGES[2]:
                     "FLOWEY diluido agua": st.column_config.TextColumn(width=130,
                         help="Solo Aramco. Respuesta a '¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS CON AGUA?'"),
                 }
+                # Aviso: FLOWEY solo aparece filtrando por Aramco
+                if not _is_aramco_view:
+                    st.caption(
+                        "ℹ️ Las columnas **FLOWEY utiliza** / **FLOWEY diluido agua** solo aparecen "
+                        "al filtrar por cliente **Aramco (Esmax)** — es la única marca cuyo checklist "
+                        "contiene esas preguntas."
+                    )
                 _show_df(_df_out.reset_index(drop=True), hide_index=True,
                          width="stretch", column_config=_cfg)
 
