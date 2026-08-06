@@ -9640,10 +9640,13 @@ elif _page == _NAV_PAGES[0]:
             with _sf4:
                 if _equipo_sla != "Todos":
                     _grp_key_filt = _LABEL_TO_GRUPO.get(_equipo_sla, "")
-                    # Nombres desde el dato real (igual que Precisión) — incluye al senior
+                    # Dropdown = roster actual del equipo (post-transferencias). Aunque
+                    # Ferrari tenga histórico bajo Juan Gallardo antes del 5-jul, hoy
+                    # es de Bahamonde → solo aparece ahí. Los KPIs sí respetan la
+                    # transferencia por fecha, esto solo limpia el selector.
                     _tec_sla_opts = ["Todos"] + sorted(
                         t for t in df_sla_src[df_sla_src["equipo"] == _grp_key_filt]["tecnico"].dropna().unique()
-                        if not _es_excluido(t)
+                        if not _es_excluido(t) and _get_equipo(t) == _grp_key_filt
                     )
                 else:
                     _tec_sla_opts = ["Todos"] + sorted(
@@ -10445,9 +10448,10 @@ elif _page == _NAV_PAGES[0]:
                     _grp_rc_k = _LABEL_TO_GRUPO.get(_eq_rc)
                     _tec_reinc = set(df_reinc[df_reinc["grupo_responsable"] == _grp_rc_k]["tecnico_responsable"].dropna().unique())
                     _tec_pm = set(_pm_team[_pm_team["equipo"] == _grp_rc_k]["technician"].dropna().unique())
+                    # Dropdown = roster actual del equipo (post-transferencias).
                     _tec_rc_opts = ["Todos"] + sorted(
                         t for t in (_tec_reinc | _tec_pm)
-                        if not _es_excluido(t)
+                        if not _es_excluido(t) and _get_equipo(t) == _grp_rc_k
                     )
                 else:
                     _tec_reinc = set(df_reinc["tecnico_responsable"].dropna().unique())
@@ -11544,9 +11548,10 @@ elif _page == _NAV_PAGES[0]:
                 # Antes se usaban los nombres cortos de GRUPOS_TERRENO["miembros"] (ej "Jorge Rodriguez"),
                 # pero df_ot_scores["tecnico"] contiene nombres completos ("Jorge Raúl  Rodríguez Fuentes")
                 # → el filtro nunca coincidía → "No hay OTs cerradas".
+                # Dropdown = roster actual del equipo (post-transferencias).
                 _tec_kpi_opts = ["Todos"] + sorted(
                     t for t in df_kpi_raw[df_kpi_raw["equipo"] == _grp_kpi]["tecnico"].dropna().unique()
-                    if not _es_excluido(t)
+                    if not _es_excluido(t) and _get_equipo(t) == _grp_kpi
                 )
             else:
                 _tec_kpi_opts = ["Todos"] + sorted(
