@@ -262,9 +262,28 @@ TRANSFERENCIAS_EQUIPO: list[dict] = [
         "tecnico_patterns": ["ignacio ferrari", "vergara ferrari"],
         "desde": "Juan Gallardo",
         "hacia": "Victor Bahamonde",
-        "fecha": "2026-06-22",
+        "fecha": "2026-07-05",
     },
 ]
+
+
+# ── Técnicos inactivos (no aparecen en filtros/dropdowns) ─────────────────
+# Se conservan en GRUPOS_TERRENO / TECH_NAME_MAP para que sus datos históricos
+# sigan mapeando al equipo correcto y las estadísticas retroactivas no cambien,
+# pero al usuario NO se le ofrece seleccionarlos en el filtro Técnico.
+TECNICOS_INACTIVOS: dict[str, dict] = {
+    # "nombre_corto": {"nombre_full": ..., "equipo": ..., "hasta": "YYYY-MM-DD"}
+    "Eduardo Toro": {
+        "nombre_full": "Eduardo Toro Ramos",
+        "equipo": "Victor Bahamonde",
+        "hasta": "2026-06-19",  # último día trabajado
+    },
+}
+
+# Set con nombres completos (para filtrar dropdown por full name en app.py)
+TECNICOS_INACTIVOS_FULL: frozenset[str] = frozenset(
+    v["nombre_full"] for v in TECNICOS_INACTIVOS.values()
+)
 
 
 def aplicar_transferencias(df, col_fecha, col_equipo="equipo", col_tecnico=None):

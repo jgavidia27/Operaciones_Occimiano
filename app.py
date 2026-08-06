@@ -31,6 +31,7 @@ from data import (
     build_reincidencias, build_numeral_historial, analizar_secuencias, CAT_LABEL,
     NUMERAL_MOTIVO_LABEL, aplicar_numerales_subtarea,
     GRUPOS_TERRENO, get_grupo_tecnico, aplicar_transferencias, TECNICOS_NO_APLICA,
+    TECNICOS_INACTIVOS_FULL,
     SENIORS, SENIOR_MULTI_TEAMS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
 )
@@ -2961,6 +2962,9 @@ if _page == _NAV_PAGES[1]:
                 with ef7:
                     _tec_pool_t = sorted(TECNICOS_OCCIMIANO_FULL) if sel_eq_t == "Todos" \
                                   else sorted(_equipo_to_full.get(sel_eq_t, []))
+                    # Excluir técnicos inactivos del dropdown (sus datos históricos
+                    # se conservan; solo dejan de ser seleccionables).
+                    _tec_pool_t = [t for t in _tec_pool_t if t not in TECNICOS_INACTIVOS_FULL]
                     sel_tec_t = st.selectbox("Técnico", ["Todos"] + _tec_pool_t,
                                              key=f"tec_tec_{sel_eq_t}")
             else:
@@ -8576,17 +8580,24 @@ elif _page == _NAV_PAGES[0]:
                     return _GRUPOS_NORM[alias]
         return "Sin equipo"
 
+    _INACTIVOS_NORM: set[str] = {_norm_n(t) for t in TECNICOS_INACTIVOS_FULL}
+
     def _es_excluido(t) -> bool:
-        """True si el técnico está en TECNICOS_NO_APLICA."""
+        """True si el técnico está en TECNICOS_NO_APLICA o TECNICOS_INACTIVOS.
+
+        Los inactivos NO se muestran en los dropdowns de técnico, pero sus datos
+        históricos siguen contando (asignados al equipo original vía _get_equipo).
+        """
         if not isinstance(t, str) or not t.strip():
             return False
         norm = _norm_n(t.strip())
-        if norm in _NO_APLICA_NORM:
+        if norm in _NO_APLICA_NORM or norm in _INACTIVOS_NORM:
             return True
         parts = t.strip().split()
         for _i in range(len(parts)):
             for _j in range(_i + 1, len(parts)):
-                if _norm_n(f"{parts[_i]} {parts[_j]}") in _NO_APLICA_NORM:
+                _al = _norm_n(f"{parts[_i]} {parts[_j]}")
+                if _al in _NO_APLICA_NORM or _al in _INACTIVOS_NORM:
                     return True
         return False
 
