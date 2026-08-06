@@ -5159,42 +5159,114 @@ elif _page == _NAV_PAGES[3]:
             if not _cm_chart_src.empty and "eds_occim" in _cm_chart_src.columns:
                 _cm_chart_src = _cm_chart_src[_cm_chart_src["eds_occim"] == _eds_sel_code]
 
-        _pm_by_m = (
-            _pm_chart_src[_pm_chart_src["mes_str"].isin(_MESES_DISP) if "mes_str" in _pm_chart_src.columns else pd.Series(True, index=_pm_chart_src.index)]
-            .groupby("mes_num")["folio"].nunique()
-            .reset_index()
-            .rename(columns={"mes_num":"mes","folio":"PM"})
-        ) if not _pm_chart_src.empty else pd.DataFrame(columns=["mes","PM"])
+        # Filtrar los sources también por los meses seleccionados
+        # (antes usaba todo el año → el gráfico ignoraba el filtro Mes)
+        _meses_nums_sel = sorted({int(m.split("-")[1]) for m in _meses_activos})
+        _anios_nums_sel = sorted({int(m.split("-")[0]) for m in _meses_activos})
 
-        _cm_by_m = (
-            _cm_chart_src[_cm_chart_src["Mes"].isin(range(1, _cur_month+1))]
-            .groupby("Mes")["n_llamado"].count()
-            .reset_index()
-            .rename(columns={"Mes":"mes","n_llamado":"CM"})
-        ) if not _cm_chart_src.empty and "Mes" in _cm_chart_src.columns else pd.DataFrame(columns=["mes","CM"])
-
-        _chart_base = pd.DataFrame({"mes": list(range(1, _cur_month+1))})
-        _chart_df = _chart_base.merge(_pm_by_m, on="mes", how="left").merge(_cm_by_m, on="mes", how="left").fillna(0)
-        _chart_df["mes_lbl"] = _chart_df["mes"].map(_MES_ES)
+        if "mes_str" in _pm_chart_src.columns:
+            _pm_chart_src = _pm_chart_src[_pm_chart_src["mes_str"].isin(_meses_activos)]
+        if "Mes" in _cm_chart_src.columns and "fecha_llamado" in _cm_chart_src.columns:
+            _cm_fll = pd.to_datetime(_cm_chart_src["fecha_llamado"], errors="coerce")
+            _cm_chart_src = _cm_chart_src[
+                _cm_fll.dt.year.isin(_anios_nums_sel)
+                & _cm_chart_src["Mes"].isin(_meses_nums_sel)
+            ]
 
         import plotly.graph_objects as go
-        # Etiquetas: mostrar count solo si > 0
-        _pm_txt = [str(int(v)) if v > 0 else "" for v in _chart_df["PM"]]
-        _cm_txt = [str(int(v)) if v > 0 else "" for v in _chart_df["CM"]]
-        _fig_main = go.Figure()
-        _fig_main.add_trace(go.Bar(
-            x=_chart_df["mes_lbl"], y=_chart_df["PM"],
-            name="Preventivo", marker_color=_col["cm"], opacity=0.92,
-            text=_pm_txt, textposition="inside", textfont=dict(color="#555555", size=12),
-        ))
-        _fig_main.add_trace(go.Bar(
-            x=_chart_df["mes_lbl"], y=_chart_df["CM"],
-            name="Correctivo (llamados)", marker_color=_col["pm"], opacity=0.92,
-            text=_cm_txt, textposition="inside", textfont=dict(color="white", size=12),
-        ))
+
+        # Vista SEMANAL cuando el usuario eligió UN solo mes
+        _vista_semanal = len(_meses_activos) == 1
+        if _vista_semanal:
+            _yy, _mm = _meses_activos[0].split("-")
+            _yy, _mm = int(_yy), int(_mm)
+            _mes_ini = pd.Timestamp(_yy, _mm, 1)
+            _mes_fin = (_mes_ini + pd.offsets.MonthBegin(1)) - pd.Timedelta(days=1)
+
+            # Semanas ISO dentro del mes (recortadas al mes)
+            _weeks = []
+            _cur = _mes_ini
+            while _cur <= _mes_fin:
+                _wk_ini = _cur - pd.Timedelta(days=_cur.weekday())          # lunes
+                _wk_fin = _wk_ini + pd.Timedelta(days=6)                     # domingo
+                _seg_ini = max(_wk_ini, _mes_ini)
+                _seg_fin = min(_wk_fin, _mes_fin)
+                _weeks.append((_seg_ini, _seg_fin))
+                _cur = _wk_fin + pd.Timedelta(days=1)
+
+            def _count_by_week(df, date_col, id_col, uniq):
+                if df.empty or date_col not in df.columns:
+                    return [0] * len(_weeks)
+                _d = pd.to_datetime(df[date_col], errors="coerce")
+                out = []
+                for _ini, _fin in _weeks:
+                    _mask = (_d >= _ini) & (_d <= _fin + pd.Timedelta(hours=23, minutes=59))
+                    _sub = df[_mask]
+                    out.append(_sub[id_col].nunique() if uniq else len(_sub))
+                return out
+
+            _pm_vals = _count_by_week(_pm_chart_src, "cal_date_maintenance"
+                                       if "cal_date_maintenance" in _pm_chart_src.columns
+                                       else "fecha_programada", "folio", True)
+            # correctivas: cuenta por fecha_llamado
+            _cm_vals = _count_by_week(_cm_chart_src, "fecha_llamado", "n_llamado", False)
+
+            _labels = [f"Sem {i+1}\n{ini.strftime('%d')}–{fin.strftime('%d')}"
+                       for i, (ini, fin) in enumerate(_weeks)]
+            _pm_txt = [str(int(v)) if v > 0 else "" for v in _pm_vals]
+            _cm_txt = [str(int(v)) if v > 0 else "" for v in _cm_vals]
+
+            _fig_main = go.Figure()
+            _fig_main.add_trace(go.Bar(
+                x=_labels, y=_pm_vals,
+                name="Preventivo", marker_color=_col["cm"], opacity=0.92,
+                text=_pm_txt, textposition="inside", textfont=dict(color="#555555", size=12),
+            ))
+            _fig_main.add_trace(go.Bar(
+                x=_labels, y=_cm_vals,
+                name="Correctivo (llamados)", marker_color=_col["pm"], opacity=0.92,
+                text=_cm_txt, textposition="inside", textfont=dict(color="white", size=12),
+            ))
+            _titulo = (f"Mantenciones {_MES_ES[_mm]} {_yy} — "
+                       f"{_col['label'] if _eds_sel_nombre == 'Todas' else _eds_sel_nombre} "
+                       f"· vista semanal")
+        else:
+            _pm_by_m = (
+                _pm_chart_src.groupby("mes_num")["folio"].nunique()
+                .reset_index().rename(columns={"mes_num":"mes","folio":"PM"})
+            ) if not _pm_chart_src.empty and "mes_num" in _pm_chart_src.columns else pd.DataFrame(columns=["mes","PM"])
+
+            _cm_by_m = (
+                _cm_chart_src.groupby("Mes")["n_llamado"].count()
+                .reset_index().rename(columns={"Mes":"mes","n_llamado":"CM"})
+            ) if not _cm_chart_src.empty and "Mes" in _cm_chart_src.columns else pd.DataFrame(columns=["mes","CM"])
+
+            _chart_base = pd.DataFrame({"mes": _meses_nums_sel})
+            _chart_df = (_chart_base
+                         .merge(_pm_by_m, on="mes", how="left")
+                         .merge(_cm_by_m, on="mes", how="left").fillna(0))
+            _chart_df["mes_lbl"] = _chart_df["mes"].map(_MES_ES)
+
+            _pm_txt = [str(int(v)) if v > 0 else "" for v in _chart_df["PM"]]
+            _cm_txt = [str(int(v)) if v > 0 else "" for v in _chart_df["CM"]]
+            _fig_main = go.Figure()
+            _fig_main.add_trace(go.Bar(
+                x=_chart_df["mes_lbl"], y=_chart_df["PM"],
+                name="Preventivo", marker_color=_col["cm"], opacity=0.92,
+                text=_pm_txt, textposition="inside", textfont=dict(color="#555555", size=12),
+            ))
+            _fig_main.add_trace(go.Bar(
+                x=_chart_df["mes_lbl"], y=_chart_df["CM"],
+                name="Correctivo (llamados)", marker_color=_col["pm"], opacity=0.92,
+                text=_cm_txt, textposition="inside", textfont=dict(color="white", size=12),
+            ))
+            _anio_lbl = _anios_nums_sel[0] if len(_anios_nums_sel) == 1 else _cur_year
+            _titulo = (f"Mantenciones {_anio_lbl} — "
+                       f"{_col['label'] if _eds_sel_nombre == 'Todas' else _eds_sel_nombre}")
+
         _fig_main.update_layout(
             barmode="stack",
-            title=dict(text=f"Mantenciones {_cur_year} — {_col['label'] if _eds_sel_nombre == 'Todas' else _eds_sel_nombre}", font_size=14),
+            title=dict(text=_titulo, font_size=14),
             height=340,
             margin=dict(l=0, r=0, t=40, b=0),
             legend=dict(orientation="h", y=-0.15),
@@ -5204,7 +5276,8 @@ elif _page == _NAV_PAGES[3]:
             xaxis=dict(gridcolor=_t["border"]),
             yaxis=dict(gridcolor=_t["border"], title="N° mantenciones"),
         )
-        st.plotly_chart(_fig_main, use_container_width=True, key=f"chart_main_{_ck}_{_eds_sel_nombre}")
+        st.plotly_chart(_fig_main, use_container_width=True,
+                        key=f"chart_main_{_ck}_{_eds_sel_nombre}_{len(_meses_activos)}")
 
         # ── SECCIÓN CONDICIONAL ──────────────────────────────────────────────
         if _eds_sel_nombre == "Todas":
