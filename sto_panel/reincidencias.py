@@ -57,36 +57,95 @@ def _correctivos_rango(desde_iso: str, hasta_iso: str) -> pd.DataFrame:
     return df
 
 
-# ── Detección de disparos ─────────────────────────────────────────────────
+# ── Detección de casos ────────────────────────────────────────────────────
 
-def detectar_disparos(fechas_asc: list[pd.Timestamp],
-                      ventana_dias: int = DEFAULT_VENTANA_DIAS
-                      ) -> list[tuple[pd.Timestamp, tuple[int, int]]]:
-    """Detecta todos los disparos DISJUNTOS de reincidencia.
+def detectar_casos(fechas_asc: list[pd.Timestamp],
+                   firmas_iso: dict[str, str] | set[str],
+                   ventana_dias: int = DEFAULT_VENTANA_DIAS) -> list[dict]:
+    """Detecta los casos de reincidencia de una EDS con la regla real:
 
-    Un disparo = 3+ llamados dentro de una ventana móvil de `ventana_dias`.
-    Se define por el 3er llamado (fecha_disparo). Una vez disparado, la
-    ventana se extiende mientras siga cabiendo un 4°, 5°, etc. dentro de
-    ventana_dias desde el 1er llamado del grupo. Al cerrar, el próximo
-    disparo empieza desde el siguiente llamado.
+    - **Sin caso activo:** los llamados se acumulan; cuando llegan 3 dentro
+      de una ventana de 20 días desde el 1º, se **ABRE UN CASO** con
+      fecha_disparo = fecha del 3er llamado.
+    - **Caso abierto (no firmado):** TODOS los llamados posteriores suman
+      al caso, sin importar los días.
+    - **Caso firmado (cerrado):** se cierra con los llamados que caían
+      dentro de la ventana de 20 días desde su 1er llamado. El próximo
+      llamado, si está dentro de 20 días desde el último del caso cerrado,
+      abre un **caso crítico** (🔴 reincidente); si excede 20 días, la EDS
+      queda "limpia" y el ciclo empieza de cero.
 
-    Retorna lista de (fecha_disparo, (i_inicio, i_fin)) donde los índices
-    apuntan a la lista original.
+    Retorna lista de casos:
+      {fecha_disparo (date), primer_llamado (date), ultimo_llamado (date),
+       n_llamados (int), cerrado (bool), critico (bool),
+       indices (tuple[int,int])}
     """
-    disparos = []
+    # Normalizar: acepta set{iso} o dict{iso: ultimo_iso}
+    if isinstance(firmas_iso, set):
+        firmas_dict = {d: d for d in firmas_iso}
+    else:
+        firmas_dict = dict(firmas_iso or {})
+
+    casos: list[dict] = []
     n = len(fechas_asc)
     i = 0
-    while i <= n - 3:
-        span = (fechas_asc[i + 2] - fechas_asc[i]).days
-        if span <= ventana_dias:
-            j = i + 2
-            while j + 1 < n and (fechas_asc[j + 1] - fechas_asc[i]).days <= ventana_dias:
-                j += 1
-            disparos.append((fechas_asc[i + 2], (i, j)))
-            i = j + 1
-        else:
+    prev_cerrado_ultimo: pd.Timestamp | None = None
+
+    while i < n:
+        if i + 2 >= n or (fechas_asc[i + 2] - fechas_asc[i]).days > ventana_dias:
+            if prev_cerrado_ultimo is not None and \
+               (fechas_asc[i] - prev_cerrado_ultimo).days > ventana_dias:
+                prev_cerrado_ultimo = None
             i += 1
-    return disparos
+            continue
+
+        primer_idx   = i
+        disparo_idx  = i + 2
+        fecha_disp   = fechas_asc[disparo_idx]
+        disp_iso     = fecha_disp.date().isoformat()
+        ultimo_iso   = firmas_dict.get(disp_iso)
+        cerrado      = ultimo_iso is not None
+
+        critico = False
+        if prev_cerrado_ultimo is not None:
+            gap = (fechas_asc[primer_idx] - prev_cerrado_ultimo).days
+            if gap <= ventana_dias:
+                critico = True
+
+        if not cerrado:
+            # Caso abierto: absorbe TODOS los llamados posteriores
+            ultimo_idx = n - 1
+            casos.append({
+                "fecha_disparo":   fecha_disp.date(),
+                "primer_llamado":  fechas_asc[primer_idx].date(),
+                "ultimo_llamado":  fechas_asc[ultimo_idx].date(),
+                "n_llamados":      ultimo_idx - primer_idx + 1,
+                "cerrado":         False,
+                "critico":         critico,
+                "indices":         (primer_idx, ultimo_idx),
+            })
+            break
+        else:
+            # Caso cerrado: corta en el `ultimo_llamado_iso` que se guardó al firmar
+            # Si no hay (firma antigua), usa la ventana de 20 días desde el 1º
+            ultimo_ts = pd.Timestamp(ultimo_iso)
+            j = disparo_idx
+            while j + 1 < n and fechas_asc[j + 1] <= ultimo_ts:
+                j += 1
+            ultimo_idx = j
+            casos.append({
+                "fecha_disparo":   fecha_disp.date(),
+                "primer_llamado":  fechas_asc[primer_idx].date(),
+                "ultimo_llamado":  fechas_asc[ultimo_idx].date(),
+                "n_llamados":      ultimo_idx - primer_idx + 1,
+                "cerrado":         True,
+                "critico":         critico,
+                "indices":         (primer_idx, ultimo_idx),
+            })
+            prev_cerrado_ultimo = fechas_asc[ultimo_idx]
+            i = ultimo_idx + 1
+
+    return casos
 
 
 # ── API pública ───────────────────────────────────────────────────────────
@@ -94,74 +153,76 @@ def detectar_disparos(fechas_asc: list[pd.Timestamp],
 def eds_con_reincidencia(rango_dias: int = DEFAULT_RANGO_DIAS,
                          cliente: str | None = None,
                          ventana_dias: int = DEFAULT_VENTANA_DIAS,
-                         hoy: date | None = None) -> pd.DataFrame:
-    """Retorna una fila por cada disparo de reincidencia dentro del rango.
+                         hoy: date | None = None,
+                         firmas_por_eds: dict[str, set[str]] | None = None
+                         ) -> pd.DataFrame:
+    """Retorna una fila por cada caso de reincidencia con disparo en el rango.
+
+    `firmas_por_eds`: {codigo_eds: {fecha_disparo_iso, ...}} — casos firmados
+                       en Supabase. Se usa para saber cuáles casos están cerrados.
 
     Columnas: codigo_eds, cliente, estacion, comuna, fecha_disparo,
-              n_llamados_ventana, primer_llamado, ultimo_llamado.
+              n_llamados, primer_llamado, ultimo_llamado, cerrado, critico.
     Orden: fecha_disparo desc.
     """
     hoy = hoy or date.today()
-    hasta = hoy + timedelta(days=1)                # exclusivo (incluye hoy)
-    # Amortiguar `ventana_dias` extra hacia atrás para captar ventanas que
-    # empiezan antes del rango pero cuyo 3er llamado cae dentro del rango.
-    desde = hoy - timedelta(days=rango_dias + ventana_dias)
+    hasta = hoy + timedelta(days=1)
+    # Miramos bastante hacia atrás para reconstruir correctamente casos abiertos
+    # que empezaron antes del rango pero siguen activos.
+    desde = hoy - timedelta(days=rango_dias + 180)
 
     df = _correctivos_rango(desde.isoformat(), hasta.isoformat())
+    empty_cols = ["codigo_eds", "cliente", "estacion", "comuna",
+                  "fecha_disparo", "n_llamados", "primer_llamado",
+                  "ultimo_llamado", "cerrado", "critico"]
     if df.empty:
-        return pd.DataFrame(columns=[
-            "codigo_eds", "cliente", "estacion", "comuna",
-            "fecha_disparo", "n_llamados_ventana",
-            "primer_llamado", "ultimo_llamado",
-        ])
+        return pd.DataFrame(columns=empty_cols)
     if cliente and cliente != "Todos":
         df = df[df["cliente"] == cliente]
 
+    firmas_por_eds = firmas_por_eds or {}
     comunas = _mapa_comunas()
     filas: list[dict] = []
-    fecha_min_disparo = pd.Timestamp(hoy - timedelta(days=rango_dias))
+    fecha_min_disparo = pd.Timestamp(hoy - timedelta(days=rango_dias)).date()
 
     for cod_eds, g in df.groupby("codigo_eds", dropna=True):
         g = g.sort_values("fecha_creacion").reset_index(drop=True)
         fechas = list(g["fecha_creacion"])
-        for f_disp, (i0, i1) in detectar_disparos(fechas, ventana_dias):
-            if f_disp < fecha_min_disparo:
-                continue  # el disparo cayó fuera del rango pedido
+        firmas = firmas_por_eds.get(cod_eds, set())
+        casos = detectar_casos(fechas, firmas, ventana_dias)
+        for c in casos:
+            if c["fecha_disparo"] < fecha_min_disparo:
+                continue
             filas.append({
-                "codigo_eds":         cod_eds,
-                "cliente":            g["cliente"].iloc[0],
-                "estacion":           g["estacion"].iloc[0],
-                "comuna":             comunas.get(cod_eds, ""),
-                "fecha_disparo":      f_disp.date(),
-                "n_llamados_ventana": i1 - i0 + 1,
-                "primer_llamado":     fechas[i0].date(),
-                "ultimo_llamado":     fechas[i1].date(),
+                "codigo_eds":     cod_eds,
+                "cliente":        g["cliente"].iloc[0],
+                "estacion":       g["estacion"].iloc[0],
+                "comuna":         comunas.get(cod_eds, ""),
+                "fecha_disparo":  c["fecha_disparo"],
+                "n_llamados":     c["n_llamados"],
+                "primer_llamado": c["primer_llamado"],
+                "ultimo_llamado": c["ultimo_llamado"],
+                "cerrado":        c["cerrado"],
+                "critico":        c["critico"],
             })
 
     if not filas:
-        return pd.DataFrame(columns=[
-            "codigo_eds", "cliente", "estacion", "comuna",
-            "fecha_disparo", "n_llamados_ventana",
-            "primer_llamado", "ultimo_llamado",
-        ])
-
-    out = pd.DataFrame(filas).sort_values(
+        return pd.DataFrame(columns=empty_cols)
+    return pd.DataFrame(filas).sort_values(
         "fecha_disparo", ascending=False
     ).reset_index(drop=True)
-    return out
 
 
-def correctivos_de_ventana(codigo_eds: str, fecha_disparo: date,
-                           ventana_dias: int = DEFAULT_VENTANA_DIAS) -> pd.DataFrame:
-    """Devuelve los correctivos que integraron la ventana asociada al disparo.
-
-    La ventana se define como [fecha_disparo - ventana_dias, fecha_disparo + ventana_dias]
-    y se recorta al bloque de llamados consecutivos que caen dentro de esa franja
-    en torno al disparo (mismo criterio de detección).
-    """
-    # Traer un rango amplio (2×ventana) alrededor del disparo para cubrir el bloque
-    desde = fecha_disparo - timedelta(days=ventana_dias)
-    hasta = fecha_disparo + timedelta(days=ventana_dias + 1)
+def correctivos_del_caso(codigo_eds: str, fecha_disparo: date,
+                         firmas: set[str] | None = None,
+                         ventana_dias: int = DEFAULT_VENTANA_DIAS) -> pd.DataFrame:
+    """Devuelve todos los correctivos que integran el caso identificado por
+    (codigo_eds, fecha_disparo). Aplica la misma lógica de detección para
+    determinar si el caso está abierto (absorbe todo) o cerrado (recorta a
+    la ventana de 20 días)."""
+    # Rango amplio hacia atrás y hacia adelante para reconstruir el caso
+    desde = fecha_disparo - timedelta(days=180)
+    hasta = date.today() + timedelta(days=1)
     rows = _query(
         "ordenes_trabajo",
         f"select=id_ot,codigo_eds,cliente,estacion,responsable,fecha_creacion,"
@@ -171,7 +232,7 @@ def correctivos_de_ventana(codigo_eds: str, fecha_disparo: date,
         f"&fecha_creacion=gte.{desde.isoformat()}"
         f"&fecha_creacion=lt.{hasta.isoformat()}"
         f"&order=fecha_creacion.asc",
-        limit=1000,
+        limit=2000,
     )
     if not rows:
         return pd.DataFrame()
@@ -180,14 +241,13 @@ def correctivos_de_ventana(codigo_eds: str, fecha_disparo: date,
         df["fecha_creacion"], errors="coerce", utc=True
     ).dt.tz_convert(None)
 
-    # Reconstruir la ventana exacta: reproducir el algoritmo de detección y
-    # quedarnos con el bloque cuyo 3er llamado coincide con fecha_disparo.
     fechas = list(df["fecha_creacion"])
-    for f_disp, (i0, i1) in detectar_disparos(fechas, ventana_dias):
-        if f_disp.date() == fecha_disparo:
+    casos = detectar_casos(fechas, firmas or set(), ventana_dias)
+    for c in casos:
+        if c["fecha_disparo"] == fecha_disparo:
+            i0, i1 = c["indices"]
             return df.iloc[i0:i1 + 1].reset_index(drop=True)
-    # Fallback: si por alguna razón no matchea, devolver el rango completo
-    return df
+    return df  # fallback
 
 
 def clientes_en_rango(rango_dias: int = DEFAULT_RANGO_DIAS,

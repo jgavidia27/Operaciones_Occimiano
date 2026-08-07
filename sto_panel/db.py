@@ -80,9 +80,16 @@ def upsert_textos(codigo_eds: str, fecha_disparo: date,
 
 
 def firmar(codigo_eds: str, fecha_disparo: date, email: str, nombre: str,
-           clasificaciones: dict, resumen: str, solucion: str) -> bool:
+           clasificaciones: dict, resumen: str, solucion: str,
+           ultimo_llamado: date | None = None) -> bool:
+    """Al firmar guardamos también `ultimo_llamado_iso` dentro del JSONB
+    para que la detección posterior sepa dónde termina el caso cerrado y
+    dónde puede empezar uno nuevo."""
+    clasif = dict(clasificaciones)
+    if ultimo_llamado is not None:
+        clasif["ultimo_llamado_iso"] = ultimo_llamado.isoformat()
     return _upsert(codigo_eds, fecha_disparo, {
-        "clasificaciones":     clasificaciones,
+        "clasificaciones":     clasif,
         "resumen_falla":       resumen,
         "solucion_propuesta":  solucion,
         "validado":            True,
@@ -145,6 +152,29 @@ def eds_con_validacion_previa(codigos_eds: list[str],
         limit=5000,
     )
     return {r["codigo_eds"] for r in rows}
+
+
+def firmas_por_eds(codigos_eds: list[str]) -> dict[str, dict[str, str]]:
+    """Retorna {codigo_eds: {fecha_disparo_iso: ultimo_llamado_iso}} para las
+    firmas validadas. `ultimo_llamado_iso` puede ser igual a fecha_disparo si
+    la firma es antigua (antes de guardar ese campo)."""
+    if not codigos_eds:
+        return {}
+    eds_in = ",".join(codigos_eds)
+    rows = _query(
+        TABLE,
+        f"select=codigo_eds,fecha_disparo,validado,clasificaciones"
+        f"&codigo_eds=in.({eds_in})",
+        limit=5000,
+    )
+    out: dict[str, dict[str, str]] = {}
+    for r in rows:
+        if not r.get("validado"):
+            continue
+        clasif = r.get("clasificaciones") or {}
+        ultimo = clasif.get("ultimo_llamado_iso") or r["fecha_disparo"]
+        out.setdefault(r["codigo_eds"], {})[r["fecha_disparo"]] = ultimo
+    return out
 
 
 def historial(limit: int = 500) -> pd.DataFrame:

@@ -27,7 +27,7 @@ from data import SENIORS  # noqa: E402
 from mobile_auth import USERS, ADMINS  # noqa: E402
 
 from reincidencias import (  # noqa: E402
-    eds_con_reincidencia, correctivos_de_ventana, clientes_en_rango,
+    eds_con_reincidencia, correctivos_del_caso, clientes_en_rango,
     top_eds_ultimos_dias, DEFAULT_VENTANA_DIAS, DEFAULT_RANGO_DIAS,
 )
 from ui_kanban import render_kanban  # noqa: E402
@@ -426,26 +426,23 @@ def render_home(rango_dias: int, cliente: str):
     st.caption(f"{RANGOS_LABEL[rango_dias]} · Ventana de {DEFAULT_VENTANA_DIAS} días para detectar reincidencia"
                + (f" · {cliente}" if cliente != "Todos" else ""))
 
-    df = eds_con_reincidencia(rango_dias=rango_dias, cliente=cliente)
+    # Primera pasada: obtener candidatos de EDS para pedir sus firmas
+    _preview = eds_con_reincidencia(rango_dias=rango_dias, cliente=cliente,
+                                     firmas_por_eds={})
+    eds_candidatas = list(_preview["codigo_eds"].unique()) if not _preview.empty else []
+    firmas = db.firmas_por_eds(eds_candidatas)
+
+    # Segunda pasada: ahora con firmas reales, detección correcta
+    df = eds_con_reincidencia(rango_dias=rango_dias, cliente=cliente,
+                              firmas_por_eds=firmas)
 
     pares = [(r["codigo_eds"], r["fecha_disparo"]) for _, r in df.iterrows()]
     estados = db.estados_por_disparos(pares) if pares else {}
 
-    # Detectar reincidentes críticas: EDS que YA fueron firmadas antes del disparo actual
-    hoy = date.today()
-    if not df.empty:
-        eds_con_prev = db.eds_con_validacion_previa(
-            list(df["codigo_eds"].unique()), antes_de=hoy
-        )
-    else:
-        eds_con_prev = set()
-
     df = df.copy()
-    df["_ya_validada"] = [
-        bool(estados.get((r["codigo_eds"], r["fecha_disparo"].isoformat()), {}).get("validado"))
-        for _, r in df.iterrows()
-    ]
-    df["_critica"] = df["codigo_eds"].isin(eds_con_prev) & ~df["_ya_validada"]
+    df["_ya_validada"] = df["cerrado"]
+    # "Crítica" ahora viene directo de la lógica (caso nuevo tras uno cerrado)
+    df["_critica"] = df["critico"] & ~df["_ya_validada"]
     df = df.sort_values(
         by=["_critica", "fecha_disparo"], ascending=[False, False]
     ).reset_index(drop=True)
@@ -487,7 +484,7 @@ def render_home(rango_dias: int, cliente: str):
         cols[1].write((row.get("estacion") or "").title() or "—")
         cols[2].write((row.get("comuna") or "").title() or "—")
         cols[3].write(_cliente_bonito(row.get("cliente")))
-        cols[4].write(int(row["n_llamados_ventana"]))
+        cols[4].write(int(row["n_llamados"]))
         cols[5].write(fd.strftime("%d-%m-%Y"))
 
         if est.get("validado"):
@@ -553,7 +550,8 @@ def render_detalle(codigo_eds: str, fecha_disparo: date):
         st.title(f"EDS {codigo_eds}")
         st.caption(f"Disparo de reincidencia: {fecha_disparo.strftime('%d-%m-%Y')}")
 
-    df = correctivos_de_ventana(codigo_eds, fecha_disparo)
+    firmas_eds = db.firmas_por_eds([codigo_eds]).get(codigo_eds, set())
+    df = correctivos_del_caso(codigo_eds, fecha_disparo, firmas=firmas_eds)
     fila = db.get(codigo_eds, fecha_disparo) or {}
     ya_validado = bool(fila.get("validado"))
 
@@ -565,7 +563,7 @@ def render_detalle(codigo_eds: str, fecha_disparo: date):
     estacion = df["estacion"].dropna().iloc[0] if not df.empty else ""
     st.markdown(
         f"**{(estacion or '—').title()}** · Cliente: **{_cliente_bonito(cliente)}** · "
-        f"Correctivos en la ventana: **{len(df)}** · "
+        f"Correctivos del caso: **{len(df)}** · "
         f"Del {pd.to_datetime(df['fecha_creacion'].min()).strftime('%d-%m-%Y')} "
         f"al {pd.to_datetime(df['fecha_creacion'].max()).strftime('%d-%m-%Y')}"
     )
@@ -795,12 +793,15 @@ def render_detalle(codigo_eds: str, fecha_disparo: date):
             for e in errores:
                 st.error(e)
         else:
+            # Último llamado del caso = fecha máxima entre los llamados mostrados
+            _ult = pd.to_datetime(df["fecha_creacion"].max()).date()
             ok = db.firmar(
                 codigo_eds, fecha_disparo,
                 email=_me["email"], nombre=_me["nombre"],
                 clasificaciones=_serializar(state),
                 resumen=state.get("resumen") or "",
                 solucion=state.get("solucion") or "",
+                ultimo_llamado=_ult,
             )
             if ok:
                 st.success("✅ Validación firmada. Gracias.")
