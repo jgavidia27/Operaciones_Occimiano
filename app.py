@@ -15774,7 +15774,13 @@ elif _page == _NAV_PAGES[2]:
                 _is_aramco_view = ("ARAMCO" in _sel_up) or ("ESMAX" in _sel_up)
                 _cli_up = str(_r.get("cliente", "")).upper()
                 if _is_aramco_view and ("ARAMCO" in _cli_up or "ESMAX" in _cli_up):
-                    _row["FLOWEY utiliza"]      = _fl["flowey_utiliza"]
+                    _fu_raw = str(_fl["flowey_utiliza"] or "").strip().upper()
+                    if _fu_raw == "SI":
+                        _row["FLOWEY utiliza"] = "✅"
+                    elif _fu_raw == "NO":
+                        _row["FLOWEY utiliza"] = "❌"
+                    else:
+                        _row["FLOWEY utiliza"] = _fl["flowey_utiliza"]
                     _row["FLOWEY diluido agua"] = _fl["flowey_diluido"]
                 _rows_out.append(_row)
 
