@@ -15744,6 +15744,9 @@ elif _page == _NAV_PAGES[2]:
                                 "flowey_diluido": _fd.iloc[0] if not _fd.empty else "—",
                             }
 
+            # Mapa codigo_eds → nombre/dirección para columna "Estación"
+            _eds_nombre_map_rea = _build_eds_nombre_map(df_eds)
+
             # ── Armar tabla ─────────────────────────────────────────────────
             _rows_out = []
             for _, _r in _dfr.sort_values("fecha_finalizacion", ascending=False).iterrows():
@@ -15753,11 +15756,14 @@ elif _page == _NAV_PAGES[2]:
                     "obs": "Sin subtareas en Supabase (aún sin sync)"
                 })
                 _fl  = _flowey_por_ot.get(_fol, {"flowey_utiliza": "—", "flowey_diluido": "—"})
+                _cod_eds = str(_r.get("codigo_eds", "") or _r.get("estacion", "") or "—")
+                _nom_eds = _eds_nombre_map_rea.get(_cod_eds, "") or "—"
                 _row = {
                     "Cliente":       str(_r.get("cliente", "") or "—"),
                     "Fecha finaliz.": _r["_ff_d"] if pd.notna(_r["_ff_d"]) else "—",
                     "N° OT":         _fol,
-                    "EDS":           str(_r.get("codigo_eds", "") or _r.get("estacion", "") or "—"),
+                    "EDS":           _cod_eds,
+                    "Estación":      _nom_eds,
                     "Técnico":       str(_r.get("responsable", "") or "—"),
                     "Duración":      _r["_dur_disp"],
                     "Dentro plazo":  "✅ Sí" if _r["_dentro_plazo"] else "❌ No",
@@ -15788,6 +15794,7 @@ elif _page == _NAV_PAGES[2]:
                 _rows_out = [
                     r for r in _rows_out
                     if _buscar_r in (r["N° OT"].upper() + " " + r["EDS"].upper()
+                                     + " " + str(r.get("Estación","")).upper()
                                      + " " + r["Técnico"].upper())
                 ]
 
@@ -15796,7 +15803,7 @@ elif _page == _NAV_PAGES[2]:
             else:
                 _df_out = pd.DataFrame(_rows_out)
                 # Reordenar: si hay col FLOWEY, dejarlas al final
-                _cols_base = ["Cliente","Fecha finaliz.","N° OT","EDS","Técnico",
+                _cols_base = ["Cliente","Fecha finaliz.","N° OT","EDS","Estación","Técnico",
                               "Duración","Dentro plazo","Planes ejecutados",
                               "OK / Total","% Completitud","Observación","Plan"]
                 _cols_flow = [c for c in ("FLOWEY utiliza","FLOWEY diluido agua")
@@ -15808,6 +15815,8 @@ elif _page == _NAV_PAGES[2]:
                     "Fecha finaliz.": st.column_config.TextColumn(width=100),
                     "N° OT":          st.column_config.TextColumn(width=95),
                     "EDS":            st.column_config.TextColumn(width=95),
+                    "Estación":       st.column_config.TextColumn(width=220,
+                        help="Nombre / dirección de la estación (según catálogo de EDS)."),
                     "Técnico":        st.column_config.TextColumn(width=180),
                     "Duración":       st.column_config.TextColumn(width=85),
                     "Dentro plazo":   st.column_config.TextColumn(width=100,
