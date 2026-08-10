@@ -15904,11 +15904,14 @@ elif _page == _NAV_PAGES[2]:
                         if vs == "SI":  return "✅ Sí"
                         if vs == "NO":  return "❌ No"
                         return str(v)
+                    _cod_eds_f = str(_meta.get("codigo_eds","") or _meta.get("estacion","") or "—")
+                    _nom_eds_f = _eds_nombre_map_rea.get(_cod_eds_f, "") or "—"
                     _rows_fich.append({
                         "Cliente":    str(_meta.get("cliente","") or "—"),
                         "Fecha":      _ff.tz_convert("America/Santiago").strftime("%d/%m/%Y") if pd.notna(_ff) else "—",
                         "N° OT":      _fol,
-                        "EDS":        str(_meta.get("codigo_eds","") or _meta.get("estacion","") or "—"),
+                        "EDS":        _cod_eds_f,
+                        "Estación":   _nom_eds_f,
                         "Técnico":    str(_meta.get("responsable","") or "—"),
                         "Cód. Equipo": str(_r.get("codigo_activo","") or "—"),
                         "Equipo":      str(_r.get("nombre_activo","") or "—"),
@@ -15954,6 +15957,8 @@ elif _page == _NAV_PAGES[2]:
                                  "Fecha":              st.column_config.TextColumn(width=95),
                                  "N° OT":              st.column_config.TextColumn(width=95),
                                  "EDS":                st.column_config.TextColumn(width=100),
+                                 "Estación":           st.column_config.TextColumn(width=220,
+                                     help="Nombre / dirección de la estación (según catálogo de EDS)."),
                                  "Técnico":            st.column_config.TextColumn(width=180),
                                  "Cód. Equipo":        st.column_config.TextColumn(width=95,
                                      help="Código del activo en Fracttal (ej. EQ-6766)"),
