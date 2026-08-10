@@ -2409,140 +2409,6 @@ if _page == _NAV_PAGES[1]:
                     _apply_plot_theme(_f); st.session_state[_k] = _f
                 st.plotly_chart(st.session_state[_k], width="stretch")
 
-            st.markdown('<div class="section-header">Ranking de EDS por llamados (2026)</div>', unsafe_allow_html=True)
-
-            # Pre-calcular % uso SLA por OT (tiempo real / umbral × 100)
-            # para tener un indicador real incluso cuando cumplimiento=0%
-            def _td_h_c(v):
-                try: return pd.to_timedelta(v).total_seconds()/3600
-                except: return float("nan")
-            def _zona_c(z):
-                z=str(z).upper().strip()
-                if any(k in z for k in ["SANTIAGO","METRO","RM","R.M."]): return "Santiago"
-                return "Regiones"
-            _df_sla_uso = df_ll.copy()
-            _df_sla_uso["_h"] = _df_sla_uso.get(
-                "tiempo_resp_real", pd.Series(dtype=object, index=_df_sla_uso.index)
-            ).apply(_td_h_c)
-            _df_sla_uso["_zona"] = _df_sla_uso.get(
-                "zona", pd.Series("", index=_df_sla_uso.index)
-            ).apply(_zona_c)
-            _df_sla_uso["_sla"] = [
-                _get_sla_h(c, p, z)
-                for c, p, z in zip(
-                    _df_sla_uso.get("cliente",  pd.Series("", index=_df_sla_uso.index)),
-                    _df_sla_uso.get("prioridad", pd.Series("", index=_df_sla_uso.index)),
-                    _df_sla_uso["_zona"],
-                )
-            ]
-            _df_sla_uso["_pct"] = (
-                (_df_sla_uso["_h"] / _df_sla_uso["_sla"] * 100)
-                .where(
-                    _df_sla_uso["_h"].notna() &
-                    pd.Series([pd.notna(x) for x in _df_sla_uso["_sla"]], index=_df_sla_uso.index)
-                )
-            )
-            _eds_avg_pct = (
-                _df_sla_uso.groupby("eds_occim")["_pct"].mean().round(1)
-                .reset_index().rename(columns={"_pct": "pct_sla_uso"})
-            )
-
-            _kpis_raw_c = kpis_por_eds(df_ll)
-            if not df_eds.empty:
-                _eds_act = df_eds[df_eds["activa"]].copy()
-                if sel_cl_c != "Todos":
-                    _eds_act = _eds_act[_eds_act["cliente"] == sel_cl_c]
-                _bc = [c for c in ["eds_occim","eds_cliente","cliente","direccion","comuna","zona_occim","region"]
-                       if c in _eds_act.columns]
-                _eds_base = _eds_act[_bc].drop_duplicates("eds_occim")
-                if not _kpis_raw_c.empty:
-                    # Partir desde los llamados reales (no desde el listado completo de EDS)
-                    # → garantiza que aparecen todos los llamados aunque su código no esté en df_eds
-                    kpis_ll = _kpis_raw_c.merge(
-                        _eds_base.drop(columns=["cliente"], errors="ignore"),
-                        on="eds_occim", how="left")
-                else:
-                    kpis_ll = pd.DataFrame()
-                for _col in ["total_llamados","p1","p2","p3","p4","cumple","no_cumple"]:
-                    if _col in kpis_ll.columns:
-                        kpis_ll[_col] = kpis_ll[_col].fillna(0).astype(int)
-                if "pct_cumplimiento" in kpis_ll.columns:
-                    kpis_ll["pct_cumplimiento"] = kpis_ll["pct_cumplimiento"].fillna(0.0)
-                # Solo EDS que han tenido al menos 1 llamado
-                if not kpis_ll.empty and "total_llamados" in kpis_ll.columns:
-                    kpis_ll = kpis_ll[kpis_ll["total_llamados"] > 0]
-                # Unir % promedio de uso SLA (tiempo real / umbral × 100)
-                if not kpis_ll.empty:
-                    kpis_ll = kpis_ll.merge(_eds_avg_pct, on="eds_occim", how="left")
-            else:
-                kpis_ll = _kpis_raw_c
-                kpis_ll = kpis_ll.merge(_eds_avg_pct, on="eds_occim", how="left")
-            if not kpis_ll.empty:
-                # Nombre para mostrar: estaciones_servicio.nombre → Fracttal third-party → código
-                kpis_ll["nombre"] = kpis_ll.apply(
-                    lambda r: r.get("direccion","") if pd.notna(r.get("direccion")) and str(r.get("direccion","")).strip()
-                    else (station_name_map.get(str(r["eds_occim"]), "") or str(r["eds_occim"])),
-                    axis=1)
-                if "ultimo_llamado" in kpis_ll.columns:
-                    kpis_ll["ultimo_llamado"] = (pd.to_datetime(kpis_ll["ultimo_llamado"],errors="coerce")
-                                                 .dt.strftime("%d/%m/%Y"))
-                # Filtro definitivo: solo EDS con al menos 1 llamado real
-                # (doble garantía: el filtro previo pudo no alcanzar si total_llamados llegó como NaN)
-                if "total_llamados" in kpis_ll.columns:
-                    kpis_ll = kpis_ll[kpis_ll["total_llamados"].fillna(0).astype(int) > 0]
-
-                _ll_buscar = st.text_input("🔍 Buscar estación (código, dirección, comuna)",
-                                           key="ll_buscar", placeholder="ej: Talagante, 60783, SH_647")
-                if _ll_buscar:
-                    _q = _ll_buscar.lower()
-                    _mask = (
-                        kpis_ll["eds_occim"].astype(str).str.lower().str.contains(_q, na=False)
-                        | kpis_ll.get("eds_cliente",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
-                        | kpis_ll.get("nombre",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
-                        | kpis_ll.get("direccion",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
-                        | kpis_ll.get("comuna",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
-                    )
-                    kpis_ll = kpis_ll[_mask]
-
-                # Columnas a mostrar: solo las relevantes (sin desglose de prioridad)
-                _dc = [c for c in ["eds_occim", "nombre", "cliente", "comuna",
-                                   "total_llamados", "pct_cumplimiento",
-                                   "ultimo_llamado", "ultimo_tecnico"]
-                       if c in kpis_ll.columns]
-                _kpis_disp = (
-                    kpis_ll[_dc]
-                    .sort_values("total_llamados", ascending=False)
-                    .rename(columns={
-                        "eds_occim":        "Cód. Occim",
-                        "nombre":           "Nombre / Dirección",
-                        "cliente":          "Cliente",
-                        "comuna":           "Comuna",
-                        "total_llamados":   "Llamados",
-                        "pct_cumplimiento": "% Cumpl. SLA",
-                        "ultimo_llamado":   "Último Llamado",
-                        "ultimo_tecnico":   "Último Técnico",
-                    })
-                )
-                if not _kpis_disp.empty:
-                    _show_df(_kpis_disp, width="stretch", hide_index=True,
-                        column_config={
-                            "Cód. Occim":         st.column_config.TextColumn(width=100),
-                            "Nombre / Dirección": st.column_config.TextColumn(width=280),
-                            "Cliente":            st.column_config.TextColumn(width=110),
-                            "Comuna":             st.column_config.TextColumn(width=120),
-                            "Llamados":           st.column_config.NumberColumn(
-                                                    format="%d", width=90),
-                            "% Cumpl. SLA":       st.column_config.ProgressColumn(
-                                                    label="% Cumpl. SLA",
-                                                    min_value=0, max_value=100,
-                                                    format="%.1f%%"),
-                            "Último Llamado":     st.column_config.TextColumn(width=110),
-                            "Último Técnico":     st.column_config.TextColumn(width=140),
-                        })
-                else:
-                    st.info("Sin llamados en el período seleccionado.")
-
-            st.divider()
             st.markdown('<div class="section-header">⏱ Cumplimiento de SLA por OT</div>', unsafe_allow_html=True)
             st.caption("Tiempo de resolución real por cada llamado cerrado, comparado con el umbral de SLA según prioridad y zona.")
 
@@ -2919,6 +2785,144 @@ if _page == _NAV_PAGES[1]:
                     })
             else:
                 st.info("No hay llamados con fechas de apertura y cierre registradas en el período seleccionado.")
+            st.divider()
+            st.markdown('<div class="section-header">Ranking de EDS por llamados (2026)</div>', unsafe_allow_html=True)
+
+            # Pre-calcular % uso SLA por OT (tiempo real / umbral × 100)
+            # para tener un indicador real incluso cuando cumplimiento=0%
+            def _td_h_c(v):
+                try: return pd.to_timedelta(v).total_seconds()/3600
+                except: return float("nan")
+            def _zona_c(z):
+                z=str(z).upper().strip()
+                if any(k in z for k in ["SANTIAGO","METRO","RM","R.M."]): return "Santiago"
+                return "Regiones"
+            _df_sla_uso = df_ll.copy()
+            _df_sla_uso["_h"] = _df_sla_uso.get(
+                "tiempo_resp_real", pd.Series(dtype=object, index=_df_sla_uso.index)
+            ).apply(_td_h_c)
+            _df_sla_uso["_zona"] = _df_sla_uso.get(
+                "zona", pd.Series("", index=_df_sla_uso.index)
+            ).apply(_zona_c)
+            _df_sla_uso["_sla"] = [
+                _get_sla_h(c, p, z)
+                for c, p, z in zip(
+                    _df_sla_uso.get("cliente",  pd.Series("", index=_df_sla_uso.index)),
+                    _df_sla_uso.get("prioridad", pd.Series("", index=_df_sla_uso.index)),
+                    _df_sla_uso["_zona"],
+                )
+            ]
+            _df_sla_uso["_pct"] = (
+                (_df_sla_uso["_h"] / _df_sla_uso["_sla"] * 100)
+                .where(
+                    _df_sla_uso["_h"].notna() &
+                    pd.Series([pd.notna(x) for x in _df_sla_uso["_sla"]], index=_df_sla_uso.index)
+                )
+            )
+            _eds_avg_pct = (
+                _df_sla_uso.groupby("eds_occim")["_pct"].mean().round(1)
+                .reset_index().rename(columns={"_pct": "pct_sla_uso"})
+            )
+
+            _kpis_raw_c = kpis_por_eds(df_ll)
+            if not df_eds.empty:
+                _eds_act = df_eds[df_eds["activa"]].copy()
+                if sel_cl_c != "Todos":
+                    _eds_act = _eds_act[_eds_act["cliente"] == sel_cl_c]
+                _bc = [c for c in ["eds_occim","eds_cliente","cliente","direccion","comuna","zona_occim","region"]
+                       if c in _eds_act.columns]
+                _eds_base = _eds_act[_bc].drop_duplicates("eds_occim")
+                if not _kpis_raw_c.empty:
+                    # Partir desde los llamados reales (no desde el listado completo de EDS)
+                    # → garantiza que aparecen todos los llamados aunque su código no esté en df_eds
+                    kpis_ll = _kpis_raw_c.merge(
+                        _eds_base.drop(columns=["cliente"], errors="ignore"),
+                        on="eds_occim", how="left")
+                else:
+                    kpis_ll = pd.DataFrame()
+                for _col in ["total_llamados","p1","p2","p3","p4","cumple","no_cumple"]:
+                    if _col in kpis_ll.columns:
+                        kpis_ll[_col] = kpis_ll[_col].fillna(0).astype(int)
+                if "pct_cumplimiento" in kpis_ll.columns:
+                    kpis_ll["pct_cumplimiento"] = kpis_ll["pct_cumplimiento"].fillna(0.0)
+                # Solo EDS que han tenido al menos 1 llamado
+                if not kpis_ll.empty and "total_llamados" in kpis_ll.columns:
+                    kpis_ll = kpis_ll[kpis_ll["total_llamados"] > 0]
+                # Unir % promedio de uso SLA (tiempo real / umbral × 100)
+                if not kpis_ll.empty:
+                    kpis_ll = kpis_ll.merge(_eds_avg_pct, on="eds_occim", how="left")
+            else:
+                kpis_ll = _kpis_raw_c
+                kpis_ll = kpis_ll.merge(_eds_avg_pct, on="eds_occim", how="left")
+            if not kpis_ll.empty:
+                # Nombre para mostrar: estaciones_servicio.nombre → Fracttal third-party → código
+                kpis_ll["nombre"] = kpis_ll.apply(
+                    lambda r: r.get("direccion","") if pd.notna(r.get("direccion")) and str(r.get("direccion","")).strip()
+                    else (station_name_map.get(str(r["eds_occim"]), "") or str(r["eds_occim"])),
+                    axis=1)
+                if "ultimo_llamado" in kpis_ll.columns:
+                    kpis_ll["ultimo_llamado"] = (pd.to_datetime(kpis_ll["ultimo_llamado"],errors="coerce")
+                                                 .dt.strftime("%d/%m/%Y"))
+                # Filtro definitivo: solo EDS con al menos 1 llamado real
+                # (doble garantía: el filtro previo pudo no alcanzar si total_llamados llegó como NaN)
+                if "total_llamados" in kpis_ll.columns:
+                    kpis_ll = kpis_ll[kpis_ll["total_llamados"].fillna(0).astype(int) > 0]
+
+                _ll_buscar = st.text_input("🔍 Buscar estación (código, dirección, comuna)",
+                                           key="ll_buscar", placeholder="ej: Talagante, 60783, SH_647")
+                if _ll_buscar:
+                    _q = _ll_buscar.lower()
+                    _mask = (
+                        kpis_ll["eds_occim"].astype(str).str.lower().str.contains(_q, na=False)
+                        | kpis_ll.get("eds_cliente",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
+                        | kpis_ll.get("nombre",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
+                        | kpis_ll.get("direccion",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
+                        | kpis_ll.get("comuna",pd.Series(dtype=str)).fillna("").str.lower().str.contains(_q,na=False)
+                    )
+                    kpis_ll = kpis_ll[_mask]
+
+                # Columnas a mostrar: solo las relevantes (sin desglose de prioridad)
+                _dc = [c for c in ["eds_occim", "nombre", "cliente", "comuna",
+                                   "total_llamados", "pct_cumplimiento",
+                                   "ultimo_llamado", "ultimo_tecnico"]
+                       if c in kpis_ll.columns]
+                _kpis_disp = (
+                    kpis_ll[_dc]
+                    .sort_values("total_llamados", ascending=False)
+                    .rename(columns={
+                        "eds_occim":        "Cód. Occim",
+                        "nombre":           "Nombre / Dirección",
+                        "cliente":          "Cliente",
+                        "comuna":           "Ciudad",
+                        "total_llamados":   "Llamados",
+                        "pct_cumplimiento": "% Cumpl. SLA",
+                        "ultimo_llamado":   "Último Llamado",
+                        "ultimo_tecnico":   "Último Técnico",
+                    })
+                )
+                # Title Case a Cliente / Ciudad (vienen en MAYÚSCULA de Fracttal).
+                for _colt in ("Cliente", "Ciudad"):
+                    if _colt in _kpis_disp.columns:
+                        _kpis_disp[_colt] = _smart_title_series(_kpis_disp[_colt])
+                if not _kpis_disp.empty:
+                    _show_df(_kpis_disp, width="stretch", hide_index=True,
+                        column_config={
+                            "Cód. Occim":         st.column_config.TextColumn(width=100),
+                            "Nombre / Dirección": st.column_config.TextColumn(width=280),
+                            "Cliente":            st.column_config.TextColumn(width=110),
+                            "Ciudad":             st.column_config.TextColumn(width=120),
+                            "Llamados":           st.column_config.NumberColumn(
+                                                    format="%d", width=90),
+                            "% Cumpl. SLA":       st.column_config.ProgressColumn(
+                                                    label="% Cumpl. SLA",
+                                                    min_value=0, max_value=100,
+                                                    format="%.1f%%"),
+                            "Último Llamado":     st.column_config.TextColumn(width=110),
+                            "Último Técnico":     st.column_config.TextColumn(width=140),
+                        })
+                else:
+                    st.info("Sin llamados en el período seleccionado.")
+
 
         # ══════════════════════════════════════════════════════════════════════
         # SUB-PESTAÑA: SERVICIO TÉCNICO
