@@ -2403,9 +2403,22 @@ if _page == _NAV_PAGES[1]:
                 if _k not in st.session_state:
                     _f = px.bar(_monthly_c, x="mes_lbl", y="llamados", color="prioridad",
                                 color_discrete_map=prio_colors, title="Llamados por mes y prioridad",
-                                barmode="stack", category_orders={"mes_lbl": _mes_ord_c})
+                                barmode="stack", category_orders={"mes_lbl": _mes_ord_c},
+                                text="llamados")
+                    _f.update_traces(textposition="inside", textfont=dict(color="white", size=12),
+                                     insidetextanchor="middle", cliponaxis=False)
+                    # Total apilado sobre cada barra (aparece con 1 o varias prioridades)
+                    _tot_mes = _monthly_c.groupby("mes_lbl", as_index=False)["llamados"].sum()
+                    _tot_mes["mes_lbl"] = pd.Categorical(_tot_mes["mes_lbl"], categories=_mes_ord_c, ordered=True)
+                    _tot_mes = _tot_mes.sort_values("mes_lbl")
+                    for _, _rw in _tot_mes.iterrows():
+                        _f.add_annotation(x=_rw["mes_lbl"], y=_rw["llamados"],
+                                          text=f"<b>{int(_rw['llamados'])}</b>",
+                                          showarrow=False, yshift=10,
+                                          font=dict(size=12))
                     _f.update_layout(xaxis_title="", yaxis_title="Llamados",
-                                     legend_title="Prioridad", xaxis_type="category")
+                                     legend_title="Prioridad", xaxis_type="category",
+                                     uniformtext_minsize=9, uniformtext_mode="hide")
                     _apply_plot_theme(_f); st.session_state[_k] = _f
                 st.plotly_chart(st.session_state[_k], width="stretch")
 
