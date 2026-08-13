@@ -8,7 +8,7 @@ Ejecutar local:   python mobile_sto.py
 Deploy Render:    gunicorn mobile_sto:app
 """
 
-import json, os, traceback, secrets
+import json, os, sys, traceback, secrets
 from datetime import datetime, date, timedelta
 
 from flask import Flask, request, render_template_string, send_file, redirect, url_for, session
@@ -698,18 +698,27 @@ def index():
         updated_at=data.get("updated_at", "—"),
         now=datetime.now(),
     )
-  except Exception:
+  except Exception as _e:
+    import html as _html_esc
     tb = traceback.format_exc()
+    # Escapar HTML para asegurar que se muestre completo (evita cortes en '<')
+    tb_safe = _html_esc.escape(tb)
+    err_line = _html_esc.escape(f"{type(_e).__name__}: {_e}")
+    py_ver = _html_esc.escape(sys.version.split()[0])
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Error</title>
-    <style>body{{font-family:monospace;background:#151B23;color:#e2e8f0;padding:16px}}
-    pre{{white-space:pre-wrap;word-break:break-all;font-size:12px;background:#1e293b;
-    padding:12px;border-radius:8px;overflow-x:auto}}
-    a{{color:#3b82f6}}</style></head><body>
-    <h2 style="color:#ef4444">Error al cargar datos</h2>
-    <p><a href="/">Volver al inicio</a></p>
-    <pre>{tb}</pre></body></html>""", 500
+    <style>body{{font-family:monospace;background:#151B23;color:#e2e8f0;padding:16px;margin:0}}
+    pre{{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#1e293b;
+    padding:12px;border-radius:8px;overflow:auto;max-height:70vh;line-height:1.4}}
+    a{{color:#3b82f6}} .info{{color:#94a3b8;font-size:12px;margin:8px 0}}
+    .err{{color:#f87171;background:#3b1f1f;padding:8px 12px;border-radius:6px;
+    margin:8px 0;font-size:13px}}
+    </style></head><body>
+    <h2 style="color:#ef4444;margin:0 0 8px">Error al cargar datos</h2>
+    <div class="info">Python {py_ver} · <a href="/">Volver al inicio</a></div>
+    <div class="err">{err_line}</div>
+    <pre>{tb_safe}</pre></body></html>""", 500
 
 
 ERROR_TEMPLATE = r"""

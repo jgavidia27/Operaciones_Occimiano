@@ -9,6 +9,9 @@ services:
     buildCommand: pip install "flask==3.0.3" "jinja2==3.1.4" "werkzeug==3.0.4" "gunicorn==22.0.0" "requests==2.32.3"
     startCommand: gunicorn mobile_sto:app --bind 0.0.0.0:$PORT
     envVars:
+      # Forzar Python 3.12 (Render por default usa 3.14 → rompe Jinja2)
+      - key: PYTHON_VERSION
+        value: "3.12.7"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
