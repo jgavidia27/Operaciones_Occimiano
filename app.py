@@ -13990,6 +13990,67 @@ elif _page == _NAV_PAGES[0]:
         # ── Cargar datos de SLA ───────────────────────────────────────────────
         _sla_key_bono = f"_sla_proc_v5_{len(df_llamados)}"
         _df_sla_bono = st.session_state.get(_sla_key_bono, pd.DataFrame())
+        # Fallback: si la pestaña 'Desempeño SLA' aún no fue visitada,
+        # session_state está vacío → recomputamos aquí el pipeline mínimo
+        # (mismas fórmulas que la pestaña SLA, líneas 9460+) para no
+        # dejar 'Sin datos' toda la fila cuando el usuario entra directo
+        # a Resumen Bonos.
+        if _df_sla_bono.empty and not df_llamados.empty:
+            _src_bn = df_llamados[
+                df_llamados["fecha_atencion"].notna() &
+                df_llamados["fecha_llamado"].notna()
+            ].copy()
+            if not _src_bn.empty:
+                # Horas de resolución
+                if "tiempo_resp_real" in _src_bn.columns:
+                    _src_bn["horas_resolucion"] = (
+                        pd.to_timedelta(_src_bn["tiempo_resp_real"], errors="coerce")
+                        .dt.total_seconds() / 3600
+                    ).clip(lower=0).round(2)
+                    _miss = _src_bn["horas_resolucion"].isna()
+                    if _miss.any():
+                        _src_bn.loc[_miss, "horas_resolucion"] = (
+                            (pd.to_datetime(_src_bn.loc[_miss, "fecha_atencion"]) -
+                             pd.to_datetime(_src_bn.loc[_miss, "fecha_llamado"]))
+                            .dt.total_seconds() / 3600
+                        ).clip(lower=0).round(2)
+                else:
+                    _src_bn["horas_resolucion"] = (
+                        (pd.to_datetime(_src_bn["fecha_atencion"]) -
+                         pd.to_datetime(_src_bn["fecha_llamado"]))
+                        .dt.total_seconds() / 3600
+                    ).clip(lower=0).round(2)
+                _src_bn["prioridad"] = _src_bn["prioridad"].fillna("").str.strip().str.upper()
+                # Zona
+                if "zona" in _src_bn.columns:
+                    _zn = _src_bn["zona"].fillna("").astype(str).str.upper().str.strip()
+                    _src_bn["zona_norm"] = _zn.where(
+                        ~_zn.str.contains("SANTIAGO|METRO|R\\.M\\.|^RM$", regex=True, na=False),
+                        "Santiago"
+                    ).where(
+                        _zn.str.contains("SANTIAGO|METRO|R\\.M\\.|^RM$", regex=True, na=False),
+                        "Regiones"
+                    )
+                else:
+                    _src_bn["zona_norm"] = "Santiago"
+                # cumple_sla — usar 'cumplimiento' del Excel si existe
+                if "cumplimiento" in _src_bn.columns:
+                    _src_bn["cumple_sla"] = _src_bn["cumplimiento"].map(
+                        {"CUMPLE": True, "NO CUMPLE": False}
+                    )
+                # Mes + normalización técnico → equipo (usa aplicar_transferencias)
+                _src_bn["fecha_llamado_dt"] = pd.to_datetime(_src_bn["fecha_llamado"], errors="coerce")
+                _src_bn["mes"] = _src_bn["fecha_llamado_dt"].dt.to_period("M").astype(str)
+                _src_bn["tecnico"] = _src_bn["tecnico"].apply(
+                    lambda t: _excel_to_full.get(str(t).strip(), str(t).strip())
+                    if isinstance(t, str) and t.strip() else t
+                )
+                _src_bn["equipo"] = _src_bn["tecnico"].apply(_get_equipo)
+                aplicar_transferencias(_src_bn, "fecha_llamado_dt", "equipo", "tecnico")
+                _src_bn = _src_bn[~_src_bn["tecnico"].apply(_es_excluido)].copy()
+                _df_sla_bono = _src_bn
+                # Cachear para siguientes rerenders de la misma sesión
+                st.session_state[_sla_key_bono] = _df_sla_bono.copy()
         if not _df_sla_bono.empty and "mes" in _df_sla_bono.columns:
             _df_sla_bono = _df_sla_bono[
                 _df_sla_bono["mes"].astype(str).isin(_meses_bono_activos)
