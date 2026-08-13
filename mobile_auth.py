@@ -24,7 +24,6 @@ USERS = {
     "jgallardo@occimiano.cl":  {"full": "Juan Antonio Gallardo Romero",  "short": "Juan Gallardo",     "team": "Juan Gallardo"},
     "jhein@occimiano.cl":      {"full": "Javier Hein Pacheco",           "short": "Javier Hein",       "team": "Juan Gallardo"},
     "ecarrasco@occimiano.cl":  {"full": "Edison Jhon Carrasco Navarro",  "short": "Edison Carrasco",   "team": "Juan Gallardo"},
-    "ivergara@occimiano.cl":   {"full": "Iván Ignacio Vergara Ferrari",  "short": "Ignacio Ferrari",   "team": "Juan Gallardo"},
     # Equipo Luis Pinto
     "lpinto@occimiano.cl":     {"full": "Luis Alberto Pinto Jofre",      "short": "Luis Pinto",        "team": "Luis Pinto"},
     "jtoro@occimiano.cl":      {"full": "Juan Francisco Toro Jimenez",   "short": "Juan Francisco",    "team": "Luis Pinto"},
@@ -33,6 +32,8 @@ USERS = {
     # Equipo Victor Bahamonde
     "vbahamonde@occimiano.cl": {"full": "Victor Hugo Bahamonde Bustamante","short":"Victor Bahamonde", "team": "Victor Bahamonde"},
     "mflores@occimiano.cl":    {"full": "Martín Ignacio Flores Galaz",   "short": "Martin Flores",     "team": "Victor Bahamonde"},
+    # Iván Ignacio Vergara Ferrari — transferido desde Juan Gallardo el 2026-07-05
+    "ivergara@occimiano.cl":   {"full": "Iván Ignacio Vergara Ferrari",  "short": "Ignacio Ferrari",   "team": "Victor Bahamonde"},
     # Equipo Carlos Avila Norte
     "cavila@occimiano.cl":     {"full": "Carlos Alberto Avila Palacios", "short": "Carlos Avila",      "team": "Carlos Avila Norte"},
     "eperez@occimiano.cl":     {"full": "Edson José Pérez Henríquez",    "short": "Edson Perez",       "team": "Carlos Avila Norte"},
