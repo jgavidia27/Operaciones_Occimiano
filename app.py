@@ -15009,6 +15009,7 @@ elif _page == _NAV_PAGES[0]:
                     _bt.append({"key":_gk,"label":_EQUIPO_LABEL.get(_gk,_gk),
                         "senior":_gv.get("senior",""),"n_eq":_n,
                         "pp_ind":ppi,"pp_eq":ppe,"n_semanas_cc":ncc,"bono_cc_eq":100000*ncc,
+                        "bono_eq_equipo":be,  # Bono colectivo por equipo — usable aunque tecs quede vacio por filtro mobile
                         "tecs":_trs,
                         "eq":{"sla_pct":esp,"sla_ok":eso,"sla_tot":est,"sla_niv":ens,
                             "mp_pct":emp,"mp_f":efl,"mp_pm":epm,"mp_niv":enm,

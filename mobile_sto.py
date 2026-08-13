@@ -655,6 +655,7 @@ def index():
                 "key":eq_key,"label":equipos_label.get(eq_key,eq_key),
                 "senior":eq_info.get("senior",""),"n_eq":n_eq,
                 "pp_ind":ppi,"pp_eq":ppe,"n_semanas_cc":0,"bono_cc_eq":0,
+                "bono_eq_equipo":be,  # Bono colectivo por equipo — usable aunque tecs quede vacio por filtro
                 "tecs":tec_rows,
                 "eq":{"sla_pct":eq_sp,"sla_ok":eq_sla_ok,"sla_tot":eq_sla_tot,"sla_niv":ens,
                     "mp_pct":eq_mp,"mp_f":eq_fallas,"mp_pm":eq_pms,"mp_niv":enm,
@@ -1125,7 +1126,7 @@ HTML_TEMPLATE = r"""
             </td>
             {% endfor %}
             <td style="padding:6px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.08);font-style:italic;background:rgba(1,121,138,0.1);">
-              <span style="font-weight:700;color:{{ nivel_color(eq.eq.cumpl) }};">{{ clp_fmt(eq.tecs[0].bono_eq) }}</span>
+              <span style="font-weight:700;color:{{ nivel_color(eq.eq.cumpl) }};">{{ clp_fmt(eq.tecs[0].bono_eq if eq.tecs else (eq.bono_eq_equipo or 0)) }}</span>
             </td>
           </tr>
           {% if eq.n_semanas_cc is defined and eq.n_semanas_cc > 0 %}
