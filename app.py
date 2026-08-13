@@ -14107,6 +14107,25 @@ elif _page == _NAV_PAGES[0]:
 
         # ── Cargar datos de MP (reincidencias) ────────────────────────────────
         _df_reinc_bono = st.session_state.get("df_reinc", pd.DataFrame()).copy()
+        # Fallback: si la pestaña 'Efectividad MP' aún no fue visitada,
+        # session_state["df_reinc"] está vacío → toda la fila MP salía en 100%
+        # (0 fallas / N PMs). Recomputamos con el mismo pipeline que Efectividad MP
+        # (linea ~10350).
+        if _df_reinc_bono.empty and not df_wo.empty:
+            _CLIENTES_SLA_R = {"COPEC", "Aramco (Esmax)", "ESMAX (Aramco)", "SHELL (Enex)", "ABASTIBLE"}
+            _df_wo_reinc_bn = (df_wo[df_wo["client"].isin(_CLIENTES_SLA_R)].copy()
+                               if "client" in df_wo.columns else df_wo)
+            try:
+                _df_reinc_bono = _sc("df_reinc", _wo_sig,
+                    lambda: build_reincidencias(_df_wo_reinc_bn, _excel_to_full)).copy()
+                # Filtro desde enero 2026 — igual que Efectividad MP
+                if not _df_reinc_bono.empty and "fecha_cm" in _df_reinc_bono.columns:
+                    _df_reinc_bono = _df_reinc_bono[
+                        pd.to_datetime(_df_reinc_bono["fecha_cm"], errors="coerce")
+                        >= pd.Timestamp("2026-01-01")
+                    ].copy()
+            except Exception:
+                _df_reinc_bono = pd.DataFrame()
         if not _df_reinc_bono.empty and "falla_tipo" in _df_reinc_bono.columns:
             # Solo F.A.O (Falla Atribuible a Occimiano) cuenta para el bono
             _df_reinc_bono = _df_reinc_bono[
