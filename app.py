@@ -8239,16 +8239,88 @@ elif _page == _NAV_PAGES[4]:
                 _show_df(_g[_cols_final].reset_index(drop=True), use_container_width=True,
                          hide_index=True, column_config=_cfg)
 
+        # ── Helper: desglose justificado / injustificado + dias uso ──
+        # Justificado  = uso en L-V (cualquier hora) o finde con turno asignado
+        # Injustificado = uso en sabado/domingo SIN turno asignado (STO)
+        def _desglose_uso(_df_in, _turnos_finde_set):
+            """Retorna DataFrame con: patente, tecnico, equipo, km_just, km_injust,
+            dias_just, dias_injust, dias_uso_str (formateado)."""
+            if _df_in.empty:
+                return pd.DataFrame()
+            _d = _df_in.copy()
+            _d["fecha_d"] = pd.to_datetime(_d["fecha"]).dt.date
+            # Normalizador de nombre (mismo criterio que vista dia)
+            def _norm_n_v(s):
+                import unicodedata as _u
+                if not s: return set()
+                _s = ''.join(c for c in _u.normalize('NFD', str(s)) if _u.category(c) != 'Mn')
+                return set(w for w in _s.upper().split() if len(w) >= 3)
+            _t_map = {}  # fecha -> [set_palabras_tecnico]
+            for _tec_n, _f in _turnos_finde_set:
+                _t_map.setdefault(_f, []).append(_norm_n_v(_tec_n))
+            def _es_justif(row):
+                _f = row["fecha_d"]
+                if _f.weekday() < 5:
+                    return True  # L-V siempre justificado
+                _pal = _norm_n_v(row.get("nombre_completo",""))
+                if not _pal:
+                    return False  # sin tecnico -> injustificado (revisar)
+                for _tp in _t_map.get(_f, []):
+                    if len(_pal & _tp) >= 2:
+                        return True  # de turno en el finde
+                return False
+            _d["_justif"] = _d.apply(_es_justif, axis=1)
+            # Aggregar por (patente, tecnico, equipo)
+            _rows = []
+            for (pat, tec, eq), _sub in _d.groupby(
+                    ["patente", "nombre_completo", "equipo"], dropna=False):
+                _just = _sub[_sub["_justif"]]
+                _inj  = _sub[~_sub["_justif"]]
+                _km_j = round(float(_just["km"].sum()), 1)
+                _km_i = round(float(_inj["km"].sum()), 1)
+                _d_j = sorted(set(_just["fecha_d"]))
+                _d_i = sorted(set(_inj["fecha_d"]))
+                _rows.append({
+                    "Patente": pat or "—",
+                    "Técnico": tec or "(sin técnico)",
+                    "Equipo":  eq or "—",
+                    "KM justificado":   _km_j,
+                    "KM injustificado": _km_i,
+                    "Días uso":         len(_d_j) + len(_d_i),
+                    "Días injustificados": ", ".join(
+                        d.strftime("%a %d-%m") for d in _d_i
+                    ) if _d_i else "—",
+                    "Total km": round(_km_j + _km_i, 1),
+                })
+            _out = pd.DataFrame(_rows)
+            if _out.empty:
+                return _out
+            _out = _out[_out["Total km"] >= _veh_min_km]
+            # Ordenar: injustificados arriba (para revisar), luego mas KM
+            return _out.sort_values(
+                ["KM injustificado", "Total km"], ascending=[False, False]
+            ).reset_index(drop=True)
+
+        _CFG_SEM_MES = {
+            "KM justificado":    st.column_config.NumberColumn(format="%.1f km", width=130),
+            "KM injustificado":  st.column_config.NumberColumn(format="%.1f km", width=140,
+                help="Uso en sábado/domingo sin turno asignado en Planificación STO"),
+            "Días uso":          st.column_config.NumberColumn(format="%d", width=80),
+            "Días injustificados": st.column_config.TextColumn(width=280),
+            "Total km":          st.column_config.NumberColumn(format="%.1f km", width=100),
+            "Patente":           st.column_config.TextColumn(width=90),
+            "Técnico":           st.column_config.TextColumn(width=210),
+            "Equipo":            st.column_config.TextColumn(width=150),
+        }
+
         # ── Vista Semana ──
-        elif _veh_vista == "🗓️ Semana":
+        if _veh_vista == "🗓️ Semana":
             _hoy_v = _date_veh.today()
-            # Empezar en el lunes de la semana actual
             _lun = _hoy_v - _td_veh(days=_hoy_v.weekday())
             _lun_sel = st.date_input(
                 "Semana empieza el lunes:", value=_lun - _td_veh(days=7),
                 key="veh_semana_lun",
             )
-            # Ajustar al lunes de la semana seleccionada
             _lun_sel = _lun_sel - _td_veh(days=_lun_sel.weekday())
             _dom_sel = _lun_sel + _td_veh(days=6)
             st.caption(f"Semana: **{_lun_sel.strftime('%d-%m-%Y')} (Lun)** → **{_dom_sel.strftime('%d-%m-%Y')} (Dom)**")
@@ -8257,34 +8329,24 @@ elif _page == _NAV_PAGES[4]:
             if _df.empty:
                 st.info("No hay eventos GPS para esta semana.")
             else:
-                # Pivot: filas = patente/tecnico, columnas = días L-D, celdas = km
-                _df["km"] = _df["km"].astype(float)
-                _df["fecha_d"] = pd.to_datetime(_df["fecha"]).dt.date
-                _pt = _df.groupby(["patente","nombre_completo","fecha_d"],
-                                    dropna=False)["km"].sum().reset_index()
-                _pivot = _pt.pivot_table(index=["patente","nombre_completo"], columns="fecha_d",
-                                           values="km", aggfunc="sum", fill_value=0,
-                                           dropna=False).round(1)
-                # Asegurar 7 columnas (L-D)
-                _dias_sem = [_lun_sel + _td_veh(days=i) for i in range(7)]
-                for _d in _dias_sem:
-                    if _d not in _pivot.columns:
-                        _pivot[_d] = 0.0
-                _pivot = _pivot[_dias_sem]  # ordenar
-                # Renombrar columnas a "Lun 08-07", "Mar 09-07", etc
-                _DIAS_SEM = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"]
-                _pivot.columns = [f"{_DIAS_SEM[i]} {_d.strftime('%d-%m')}"
-                                    for i, _d in enumerate(_dias_sem)]
-                _pivot["Total"] = _pivot.sum(axis=1).round(1)
-                _pivot = _pivot.reset_index()
-                _pivot = _pivot.rename(columns={"patente":"Patente","nombre_completo":"Técnico"})
-                st.markdown(f"**{len(_pivot)} vehículos** · Total semana: **{_pivot['Total'].sum():.1f} km**")
-                _show_df(_pivot, use_container_width=True, hide_index=True)
+                _tab_sem = _desglose_uso(_df, _load_turnos_finde_desde_json())
+                if _tab_sem.empty:
+                    st.info("Sin uso ≥ umbral seleccionado.")
+                else:
+                    _n_inj = int((_tab_sem["KM injustificado"] > 0).sum())
+                    _km_tot = _tab_sem["Total km"].sum()
+                    _km_inj = _tab_sem["KM injustificado"].sum()
+                    _hdr = (f"**{len(_tab_sem)} vehículos con uso** · "
+                            f"Total: **{_km_tot:.1f} km**")
+                    if _n_inj > 0:
+                        _hdr += f' · <span style="color:#dc2626;font-weight:700;">🔴 {_n_inj} con uso INJUSTIFICADO ({_km_inj:.1f} km)</span>'
+                    st.markdown(_hdr, unsafe_allow_html=True)
+                    _show_df(_tab_sem, use_container_width=True, hide_index=True,
+                             column_config=_CFG_SEM_MES)
 
         # ── Vista Mes ──
-        else:  # "📆 Mes"
+        elif _veh_vista == "📆 Mes":
             _hoy_v = _date_veh.today()
-            _mes_default = _hoy_v.strftime("%Y-%m")
             _c1m, _c2m = st.columns(2)
             with _c1m:
                 _anio = st.selectbox("Año", [2026, 2027, 2025], key="veh_anio")
@@ -8302,20 +8364,20 @@ elif _page == _NAV_PAGES[4]:
             if _df.empty:
                 st.info(f"No hay eventos GPS para {_mes:02d}/{_anio}.")
             else:
-                _df["fecha_d"] = pd.to_datetime(_df["fecha"]).dt.date
-                # Semana ISO (1..5) del mes: por día del mes → 1+(dia-1)//7
-                _df["sem_mes"] = _df["fecha_d"].apply(lambda d: 1 + (d.day - 1) // 7)
-                _pt = _df.groupby(["patente","nombre_completo","sem_mes"],
-                                    dropna=False)["km"].sum().reset_index()
-                _pivot = _pt.pivot_table(index=["patente","nombre_completo"], columns="sem_mes",
-                                           values="km", aggfunc="sum", fill_value=0,
-                                           dropna=False).round(1)
-                # Renombrar
-                _pivot.columns = [f"Sem {c}" for c in _pivot.columns]
-                _pivot["Total mes"] = _pivot.sum(axis=1).round(1)
-                _pivot = _pivot.reset_index().rename(columns={"patente":"Patente","nombre_completo":"Técnico"})
-                st.markdown(f"**{len(_pivot)} vehículos** · Total mes: **{_pivot['Total mes'].sum():.1f} km**")
-                _show_df(_pivot, use_container_width=True, hide_index=True)
+                _tab_mes = _desglose_uso(_df, _load_turnos_finde_desde_json())
+                if _tab_mes.empty:
+                    st.info("Sin uso ≥ umbral seleccionado.")
+                else:
+                    _n_inj = int((_tab_mes["KM injustificado"] > 0).sum())
+                    _km_tot = _tab_mes["Total km"].sum()
+                    _km_inj = _tab_mes["KM injustificado"].sum()
+                    _hdr = (f"**{len(_tab_mes)} vehículos con uso** · "
+                            f"Total mes: **{_km_tot:.1f} km**")
+                    if _n_inj > 0:
+                        _hdr += f' · <span style="color:#dc2626;font-weight:700;">🔴 {_n_inj} con uso INJUSTIFICADO ({_km_inj:.1f} km)</span>'
+                    st.markdown(_hdr, unsafe_allow_html=True)
+                    _show_df(_tab_mes, use_container_width=True, hide_index=True,
+                             column_config=_CFG_SEM_MES)
 
         # ── Alertas: uso fin de semana SIN turno ──
         st.divider()
