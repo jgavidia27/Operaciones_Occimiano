@@ -6238,11 +6238,13 @@ elif _page == _NAV_PAGES[3]:
                 _det_prev = df_pm_f[df_pm_f["eds_occim"].astype(str) == _sel_eds_det].copy()
 
             # ── Enriquecer correctivos con causa raíz / tipo falla / comentario
+            # + codigo/nombre del equipo (para clasificar Lavadora/Aspiradora/etc).
             # desde df_wo_c (ordenes_trabajo). Match por folio OS-XXXX.
             _wo_lookup = pd.DataFrame()
             if not df_wo_c.empty and "folio" in df_wo_c.columns:
                 _cols_wo = [c for c in ("folio","failure_type","failure_cause",
-                                        "comentario_tecnico") if c in df_wo_c.columns]
+                                        "comentario_tecnico","equipment_code","equipment")
+                            if c in df_wo_c.columns]
                 if len(_cols_wo) >= 2:
                     _wo_lookup = df_wo_c[_cols_wo].drop_duplicates(subset="folio")
 
@@ -6281,6 +6283,41 @@ elif _page == _NAV_PAGES[3]:
                 _det_corr_disp["Comentario técnico"] = _det_corr_disp.get(
                     "comentario_tecnico", pd.Series("—", index=_det_corr_disp.index)
                 ).fillna("").astype(str).replace({"": "—", "None": "—", "nan": "—"})
+                # ── Cód. Equipo (EQ-XXXX) y Equipo (Lavadora/Aspiradora/etc) ──
+                _det_corr_disp["Cód. Equipo"] = _det_corr_disp.get(
+                    "equipment_code", pd.Series("", index=_det_corr_disp.index)
+                ).fillna("").astype(str).replace({"": "—", "None": "—", "nan": "—"})
+                # Clasificar por primer token del nombre del activo — misma
+                # logica de _tipo_activo() en sync_numerales_subtarea.
+                def _clasif_equipo(nombre):
+                    n = str(nombre or "").strip().upper()
+                    if not n:
+                        return "—"
+                    first = n.split()[0]
+                    if first == "LAVAINTERIORES" or first.startswith("LAVATAP"):
+                        return "🧽 Lavainterior"
+                    if first.startswith("ASPIRA"):
+                        return "🌀 Aspiradora"
+                    if first.startswith("LAVADORA") or first.startswith("HIDROLAV"):
+                        return "🚿 Lavadora"
+                    if first.startswith("ABLANDADOR"):
+                        return "💧 Ablandador"
+                    if first == "FICHERO":
+                        return "🎫 Fichero"
+                    if first == "TERMO":
+                        return "🔥 Termo"
+                    if first in ("BOMBA", "BOMBAS"):
+                        return "⚙️ Bomba"
+                    if first == "KIT":
+                        return "🧰 Kit"
+                    if first == "COMPRESOR":
+                        return "🌬️ Compresor"
+                    if first == "DISPENSADOR":
+                        return "🧴 Dispensador"
+                    return f"⚫ {first.title()}"
+                _det_corr_disp["Equipo"] = _det_corr_disp.get(
+                    "equipment", pd.Series("", index=_det_corr_disp.index)
+                ).apply(_clasif_equipo)
                 _det_corr_disp = _det_corr_disp.rename(columns={
                     _fol_col: "N° OT" if _fol_col else "N° OT",
                     "prioridad":       "Prioridad",
@@ -6297,7 +6334,8 @@ elif _page == _NAV_PAGES[3]:
                         return s.title() if s else "—"
                     _det_corr_disp["SLA"] = _det_corr_disp["SLA"].apply(_sla_icon)
                 _cols_show_corr = [c for c in ["Fecha","N° OT","Prioridad","Técnico","SLA",
-                                                "Tipo falla","Causa raíz","Comentario técnico"]
+                                                "Tipo falla","Cód. Equipo","Equipo",
+                                                "Causa raíz","Comentario técnico"]
                                     if c in _det_corr_disp.columns]
                 _det_corr_disp = _det_corr_disp[_cols_show_corr]
 
@@ -6360,9 +6398,13 @@ elif _page == _NAV_PAGES[3]:
                             "Prioridad":          st.column_config.TextColumn(width=80),
                             "Técnico":            st.column_config.TextColumn(width=170),
                             "SLA":                st.column_config.TextColumn(width=105),
-                            "Tipo falla":         st.column_config.TextColumn(width=170,
+                            "Tipo falla":         st.column_config.TextColumn(width=140,
                                 help="Clasificación administrativa (F.N.A.O./F.A.O./etc)"),
-                            "Causa raíz":         st.column_config.TextColumn(width=220,
+                            "Cód. Equipo":        st.column_config.TextColumn(width=100,
+                                help="Código Fracttal del activo (EQ-XXXX)"),
+                            "Equipo":             st.column_config.TextColumn(width=140,
+                                help="Tipo del equipo (Lavadora / Aspiradora / Ablandador / etc)"),
+                            "Causa raíz":         st.column_config.TextColumn(width=210,
                                 help="Causa específica registrada por el técnico"),
                             "Comentario técnico": st.column_config.TextColumn(width=320,
                                 help="Qué hizo el técnico en terreno (nota de la OT en Fracttal)"),
