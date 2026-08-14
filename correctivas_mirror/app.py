@@ -2213,6 +2213,92 @@ if vista == "🔗 Enlace Copec":
                              "Sin cerrar":      st.column_config.TextColumn(width=90),
                          })
 
+    # ── ALERTA CRÍTICA: OT Finalizada en Fracttal pero abierta en Enlace ─
+    # Si Fracttal ya validó (fecha_finalizacion poblada) y Enlace sigue
+    # abierto, hay un problema operativo — el técnico olvidó cerrar en
+    # Enlace pese a completar todo el flujo en Fracttal.
+    _abiertos_enl = df[df["estado"] != "CERRADO"].copy()
+    _abiertos_enl = _abiertos_enl[_abiertos_enl["os_fracttal"].fillna("") != ""]
+    _rows_desync = []
+    _hoy = pd.Timestamp.now(tz=_CL_TZ)
+    for _os_id, _grp in _abiertos_enl.groupby("os_fracttal"):
+        _ot_info = _ots_detalle.get(_os_id) or {}
+        _estado_frac = str(_ot_info.get("estado") or "").strip()
+        _ff = _ot_info.get("fecha_finalizacion")
+        if _estado_frac != "Finalizadas" or not _ff:
+            continue
+        try:
+            _ff_dt = pd.to_datetime(_ff, errors="coerce", utc=True).tz_convert(_CL_TZ)
+        except Exception:
+            continue
+        if pd.isna(_ff_dt):
+            continue
+        _dias = int((_hoy - _ff_dt).total_seconds() / 86400)
+        # Datos del par (Plan + Repuestos si es preventivo)
+        _plans = _grp[_grp["_clase"] == "PLAN"]
+        _reps  = _grp[_grp["_clase"] == "REPUESTOS"]
+        _r = (_plans.iloc[0] if not _plans.empty else _grp.iloc[0])
+        _tipo_up = str(_r.get("tipo_aviso") or "").upper()
+        _tipo_lbl = "Preventivo (MP)" if _tipo_up == "PREVENTIVO" else "Correctivo"
+        if _tipo_up == "PREVENTIVO":
+            _m_fija = " + ".join(str(x) for x in _plans["id_sap"]) if not _plans.empty else "—"
+            _m_var  = " + ".join(str(x) for x in _reps["id_sap"])  if not _reps.empty  else "—"
+        else:
+            _m_fija = " + ".join(str(x) for x in _grp["id_sap"])
+            _m_var  = ""
+        _estados_enl = " / ".join(sorted({
+            ESTADO_META.get(e, ("⚪", e))[0] + " " + ESTADO_META.get(e, ("", e))[1]
+            for e in _grp["estado"]
+        }))
+        _rows_desync.append({
+            "N° OT Fracttal": _os_id,
+            "Tipo": _tipo_lbl,
+            "Técnico": _ot_info.get("responsable") or "—",
+            "M. Fija":     _m_fija,
+            "M. Variable": _m_var,
+            "EDS":         _r.get("eds_codigo") or "",
+            "Dirección":   _title_smart(_r.get("descripcion_instalacion") or ""),
+            "Estado Enlace":   _estados_enl,
+            "Cierre Fracttal": _ff_dt.strftime("%d/%m/%Y %H:%M"),
+            "_dias": _dias,
+            "Días desde cierre Fracttal": (
+                f"🔴 {_dias}d" if _dias > 7 else
+                f"🟠 {_dias}d" if _dias > 3 else
+                f"🟡 {_dias}d" if _dias > 0 else
+                f"🟢 hoy"
+            ),
+        })
+
+    if _rows_desync:
+        _desync_df = pd.DataFrame(_rows_desync).sort_values("_dias", ascending=False).drop(columns=["_dias"])
+        st.markdown(
+            f'<div style="background:#fef2f2;border-left:4px solid #b91c1c;'
+            f'padding:12px 16px;border-radius:6px;margin:12px 0">'
+            f'<b style="color:#7f1d1d">⚠️ {len(_desync_df)} OTs Finalizadas en Fracttal '
+            f'pero ABIERTAS en Enlace</b>'
+            f'<div style="color:#7f1d1d;font-size:0.85em;margin-top:4px">'
+            f'Fracttal ya validó administrativamente estas OTs (2ª validación completa), '
+            f'pero en Enlace siguen abiertas. Cierre pendiente que urge — Copec no paga '
+            f'hasta cerrar Enlace.'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(_desync_df, hide_index=True, use_container_width=True,
+                     height=min(400, 55 + 35 * len(_desync_df)),
+                     column_config={
+                         "N° OT Fracttal":  st.column_config.TextColumn(width=105),
+                         "Tipo":            st.column_config.TextColumn(width=130),
+                         "Técnico":         st.column_config.TextColumn(width=180),
+                         "M. Fija":         st.column_config.TextColumn(width=100),
+                         "M. Variable":     st.column_config.TextColumn(width=100),
+                         "EDS":             st.column_config.TextColumn(width=70),
+                         "Dirección":       st.column_config.TextColumn(width=240),
+                         "Estado Enlace":   st.column_config.TextColumn(width=200),
+                         "Cierre Fracttal": st.column_config.TextColumn(width=125),
+                         "Días desde cierre Fracttal": st.column_config.TextColumn(width=180,
+                             help="🟢 hoy · 🟡 1-3d · 🟠 4-7d · 🔴 >7d"),
+                     })
+
     # ── Filtros ─────────────────────────────────────────────────────
     st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
     f1, f2, f3, f4 = st.columns([1.2, 1.5, 1.2, 2.5])
