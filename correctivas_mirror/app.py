@@ -3289,8 +3289,50 @@ if vista == "🔍 Cierre Fracttal":
         )
 
         # Folios seleccionados por el usuario
-        _folios_seleccionados = _edited.loc[
-            _edited["Cerrar"] == True, _folio_col].dropna().tolist()
+        _sel_all = _edited.loc[_edited["Cerrar"] == True].copy()
+        _sel_all[_folio_col] = _sel_all[_folio_col].fillna("")
+        _sel_all = _sel_all[_sel_all[_folio_col] != ""]
+
+        # RESTRICCIÓN operativa: EDS de zona norte Copec (código 10xxx) y
+        # la EDS 20830 solo pueden cerrarse el ÚLTIMO día del mes.
+        # Regla del negocio: cierre mensual en bloque para estas estaciones
+        # (facturación consolidada).
+        import calendar as _cal_r
+        _hoy = datetime.now()
+        _ult_dia_mes = _cal_r.monthrange(_hoy.year, _hoy.month)[1]
+        _es_ultimo_dia = (_hoy.day == _ult_dia_mes)
+
+        def _es_eds_restringida(cod):
+            s = str(cod or "").strip()
+            if not s: return False
+            return s.startswith("10") or s == "20830"
+
+        # Buscar la columna de EDS en la tabla (puede ser "Cód. EDS" o "eds_occim")
+        _eds_col = None
+        for _c in ("Cód. EDS", "eds_occim", "Cod. EDS"):
+            if _c in _sel_all.columns:
+                _eds_col = _c; break
+
+        _folios_seleccionados = []
+        _folios_bloqueados = []
+        if _eds_col:
+            _mask_bloq = _sel_all[_eds_col].map(_es_eds_restringida)
+            if not _es_ultimo_dia:
+                _folios_bloqueados = _sel_all.loc[_mask_bloq, _folio_col].tolist()
+                _folios_seleccionados = _sel_all.loc[~_mask_bloq, _folio_col].tolist()
+            else:
+                _folios_seleccionados = _sel_all[_folio_col].tolist()
+        else:
+            _folios_seleccionados = _sel_all[_folio_col].tolist()
+
+        if _folios_bloqueados:
+            st.warning(
+                f"🚫 **{len(_folios_bloqueados)} OT(s) BLOQUEADAS para cerrar** "
+                f"(EDS zona norte 10xxx o EDS 20830 — solo se cierran el último "
+                f"día del mes). Excluidas del batch: "
+                f"{', '.join(_folios_bloqueados[:10])}"
+                f"{'…' if len(_folios_bloqueados) > 10 else ''}"
+            )
 
         if _folios_seleccionados:
             st.success(
