@@ -5896,10 +5896,13 @@ elif _page == _NAV_PAGES[3]:
         #    el multiselect de mes, así que la tabla ahora sí reacciona.
         _df_tbl = df_eds_c.copy()
 
-        # Agregado de CORRECTIVAS por EDS (desde df_ll_f, ya filtrado por mes)
+        # Agregado de CORRECTIVAS por EDS (desde df_ll_f, ya filtrado por mes).
+        # Contamos TODAS las filas (no solo n_llamado no-nulo) — hay correctivas
+        # sin nº aviso Copec (parsing incompleto del robot email) que igual
+        # cuentan como servicio. Esto hace que el listado coincida con el detalle.
         if not df_ll_f.empty and "eds_occim" in df_ll_f.columns:
             _agg_corr = (df_ll_f.groupby("eds_occim", dropna=True).agg(
-                correctivas=("n_llamado", "count"),
+                correctivas=("eds_occim", "size"),  # cuenta todas las filas
                 p1=("prioridad", lambda x: (x.astype(str).str.upper() == "P1").sum()),
                 ultima_correctiva=("fecha_llamado", "max"),
                 ultimo_tecnico=("tecnico", lambda x: x.dropna().iloc[-1]
