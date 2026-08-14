@@ -8280,6 +8280,9 @@ elif _page == _NAV_PAGES[4]:
                 _km_i = round(float(_inj["km"].sum()), 1)
                 _d_j = sorted(set(_just["fecha_d"]))
                 _d_i = sorted(set(_inj["fecha_d"]))
+                # strftime %a depende del locale del OS (en Windows suele salir
+                # en ingles: Sat/Sun). Forzamos abreviaturas en espanol.
+                _DIA_ES = {0:"Lun",1:"Mar",2:"Mié",3:"Jue",4:"Vie",5:"Sáb",6:"Dom"}
                 _rows.append({
                     "Patente": pat or "—",
                     "Técnico": tec or "(sin técnico)",
@@ -8288,7 +8291,7 @@ elif _page == _NAV_PAGES[4]:
                     "KM injustificado": _km_i,
                     "Días uso":         len(_d_j) + len(_d_i),
                     "Días injustificados": ", ".join(
-                        d.strftime("%a %d-%m") for d in _d_i
+                        f"{_DIA_ES[d.weekday()]} {d.strftime('%d-%m')}" for d in _d_i
                     ) if _d_i else "—",
                     "Total km": round(_km_j + _km_i, 1),
                 })
