@@ -5386,21 +5386,49 @@ elif _page == _NAV_PAGES[3]:
             )
         _meses_activos = _mes_sel if _mes_sel else _MESES_DISP
 
-        # Codigos EDS que quedan tras aplicar la zona seleccionada
-        # (se calcula una sola vez sobre df_ll_c — universo de EDS del cliente)
+        # Codigos EDS que quedan tras aplicar la zona seleccionada.
+        # IMPORTANTE: se calcula sobre el UNIVERSO COMPLETO del cliente
+        # (df_eds_c del catalogo + df_ll_c + df_wo_c), no solo sobre los
+        # que tienen llamados correctivos. Antes SH_152 (que solo tiene
+        # preventivas) quedaba fuera al filtrar por zona.
         _codes_zona_es = None
-        if _zona_sel_es != "Todas" and not df_ll_c.empty and "eds_occim" in df_ll_c.columns:
-            _df_z = df_ll_c[["eds_occim","eds_nombre","comuna"]].drop_duplicates("eds_occim") \
-                    if "comuna" in df_ll_c.columns else \
-                    df_ll_c[["eds_occim","eds_nombre"]].drop_duplicates("eds_occim").assign(comuna="")
-            _df_z = _df_z.reset_index(drop=True)  # index limpio para alinear con la lista
-            _z_series = [
-                _zona_row_es(company, eo, en, co)
-                for eo, en, co in zip(_df_z["eds_occim"], _df_z["eds_nombre"], _df_z.get("comuna", ""))
-            ]
-            _codes_zona_es = set(
-                _df_z["eds_occim"][pd.Series(_z_series, index=_df_z.index) == _zona_sel_es]
-            )
+        if _zona_sel_es != "Todas":
+            _uni_frames = []
+            # 1) Catalogo de EDS del cliente
+            if not df_eds_c.empty and "eds_occim" in df_eds_c.columns:
+                _tmp = df_eds_c[["eds_occim","nombre"]].copy()
+                _tmp = _tmp.rename(columns={"nombre":"eds_nombre"})
+                _tmp["comuna"] = df_eds_c.get("comuna", "")
+                _uni_frames.append(_tmp[["eds_occim","eds_nombre","comuna"]])
+            # 2) Llamados correctivos (por si hay EDS sin catalogo)
+            if not df_ll_c.empty and "eds_occim" in df_ll_c.columns:
+                _cols_ll = ["eds_occim","eds_nombre"]
+                if "comuna" in df_ll_c.columns:
+                    _cols_ll.append("comuna")
+                _tmp = df_ll_c[_cols_ll].copy()
+                if "comuna" not in _tmp.columns:
+                    _tmp["comuna"] = ""
+                _uni_frames.append(_tmp[["eds_occim","eds_nombre","comuna"]])
+            # 3) Preventivas/OTs del cliente (por si tampoco esta en catalogo)
+            if not df_wo_c.empty and "eds_occim" in df_wo_c.columns:
+                _tmp = df_wo_c[["eds_occim"]].copy()
+                _tmp["eds_nombre"] = df_wo_c.get("station", "")
+                _tmp["comuna"] = ""
+                _uni_frames.append(_tmp[["eds_occim","eds_nombre","comuna"]])
+            if _uni_frames:
+                _df_z = pd.concat(_uni_frames, ignore_index=True)
+                _df_z["eds_occim"] = _df_z["eds_occim"].fillna("").astype(str).str.strip()
+                _df_z = _df_z[_df_z["eds_occim"] != ""]
+                _df_z = _df_z.drop_duplicates("eds_occim").reset_index(drop=True)
+                _z_series = [
+                    _zona_row_es(company, eo, en, co)
+                    for eo, en, co in zip(_df_z["eds_occim"], _df_z["eds_nombre"], _df_z["comuna"])
+                ]
+                _codes_zona_es = set(
+                    _df_z["eds_occim"][pd.Series(_z_series, index=_df_z.index) == _zona_sel_es]
+                )
+            else:
+                _codes_zona_es = set()
 
         # Opciones EDS desde df_llamados (tienen eds_occim y eds_nombre)
         # Construir opciones enriquecidas: "60107 · E/S Vivaceta 715 · CONCHALÍ"
