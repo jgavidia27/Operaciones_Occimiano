@@ -4642,7 +4642,7 @@ if _page == _NAV_PAGES[1]:
                 _paro_total_seg = _paro_corr_seg + _paro_prev_seg
 
                 # ── KPIs ───────────────────────────────────────────────
-                _k1s, _k2s, _k3s, _k4s, _k5s = st.columns(5)
+                _k1s, _k2s, _k3s, _k4s, _k5s, _k6s = st.columns(6)
                 _k1s.metric("Llamados (P1)", f"{len(_df_up):,}",
                             delta=f"de {_n_total_corr_pre:,} correctivas · P2:{_n_p2_pre} P3:{_n_p3_pre} P4:{_n_p4_pre}",
                             help="Solo se cuentan correctivos P1 — únicos que detienen el equipo. "
@@ -4663,9 +4663,22 @@ if _page == _NAV_PAGES[1]:
                                  "y que cumplen los filtros de cliente/región/EDS.")
                 _k4s.metric("EDS evaluadas", f"{_n_eds_up:,}",
                             delta=f"{_rango_dias_up} días")
+                # Uptime General = correctivas + preventivas
                 _upt_pct = max(0.0, round(
                     (1 - _paro_total_seg / _total_seg_up) * 100, 3))
-                _k5s.metric("Uptime General", f"{_upt_pct}%",
+                # Uptime Neto = solo correctivas (excluye preventivas planificadas)
+                # → "empezar el partido 1-0": las MPs son mantencion necesaria, no
+                # deberian penalizar al equipo tecnico de cara al cliente.
+                _upt_neto = max(0.0, round(
+                    (1 - _paro_corr_seg / _total_seg_up) * 100, 3))
+                _k5s.metric("Uptime Neto", f"{_upt_neto}%",
+                            delta="solo correctivas",
+                            help=f"1 − (paro correctivo / (N EDS × horas del período)). "
+                                 f"Excluye preventivas — son mantención planificada, no fallas. "
+                                 f"Denominador: {_n_eds_up:,} EDS × {_rango_dias_up} días × 24h · "
+                                 f"Numerador: {int(_paro_corr_seg//3600):,}h correctivas.")
+                _k6s.metric("Uptime General", f"{_upt_pct}%",
+                            delta="correctivas + preventivas",
                             help=f"Denominador: {_n_eds_up:,} EDS × {_rango_dias_up} días × 24h · "
                                  f"Numerador: {int(_paro_corr_seg//3600):,}h correctivas "
                                  f"+ {int(_paro_prev_seg//3600):,}h preventivas "
@@ -4740,8 +4753,11 @@ if _page == _NAV_PAGES[1]:
                     _rk["Correctivas (h)"] = (_rk["Paro_corr_seg"] / 3600).round(1)
                     _rk["Preventivas (h)"] = (_rk["Paro_prev_seg"] / 3600).round(1)
                     # Uptime % por EDS (mismo denominador global: dias × 24h)
-                    _rk["Uptime %"] = (
+                    _rk["Uptime General %"] = (
                         (1 - _rk["Tiempo_paro_seg"] / _seg_equipo_up).clip(lower=0) * 100
+                    ).round(3)
+                    _rk["Uptime Neto %"] = (
+                        (1 - _rk["Paro_corr_seg"] / _seg_equipo_up).clip(lower=0) * 100
                     ).round(3)
                     # Excluir codigos que NO son EDS reales (PART-, OCCIM-, vacios)
                     _codigos_no_reales = ("PART-", "OCCIM", "OCCIM-", "AUTEC", "TEST")
@@ -4755,7 +4771,8 @@ if _page == _NAV_PAGES[1]:
                     _rk_show = _rk[[
                         "#", "eds_nombre", "eds_occim", "Llamados", "MPs_con_paro",
                         "Correctivas (h)", "Preventivas (h)",
-                        "Tiempo detenido (h:mm)", "Tiempo detenido (h)", "Uptime %"
+                        "Tiempo detenido (h:mm)", "Tiempo detenido (h)",
+                        "Uptime Neto %", "Uptime General %"
                     ]].rename(columns={
                         "eds_nombre":    "Estación",
                         "eds_occim":     "Cód. EDS",
@@ -4777,9 +4794,13 @@ if _page == _NAV_PAGES[1]:
                                 format="%.1f h", min_value=0,
                                 max_value=float(_rk["Tiempo detenido (h)"].max()) if not _rk.empty else 1,
                                 width=180),
-                            "Uptime %":                st.column_config.NumberColumn(
-                                format="%.3f%%", width=95,
-                                help="1 − (tiempo paro / (dias × 24h)) — 100% = siempre operativo"),
+                            "Uptime Neto %":           st.column_config.NumberColumn(
+                                format="%.3f%%", width=105,
+                                help="Solo correctivas — excluye preventivas planificadas (mantención "
+                                     "necesaria que no debería penalizar de cara al cliente)."),
+                            "Uptime General %":        st.column_config.NumberColumn(
+                                format="%.3f%%", width=115,
+                                help="Correctivas + Preventivas — vista completa del tiempo detenido."),
                         })
 
                 st.divider()
@@ -4881,8 +4902,11 @@ if _page == _NAV_PAGES[1]:
                         if s else "—")
                     _gpe["Correctivas (h)"] = (_gpe["Paro_corr_seg"] / 3600).round(1)
                     _gpe["Preventivas (h)"] = (_gpe["Paro_prev_seg"] / 3600).round(1)
-                    _gpe["Uptime %"] = (
+                    _gpe["Uptime General %"] = (
                         (1 - _gpe["Tiempo_paro_seg"] / _seg_equipo_up).clip(lower=0) * 100
+                    ).round(3)
+                    _gpe["Uptime Neto %"] = (
+                        (1 - _gpe["Paro_corr_seg"] / _seg_equipo_up).clip(lower=0) * 100
                     ).round(3)
                     # Excluir codigos que NO son EDS reales (PART-, OCCIM-, etc.)
                     _codigos_no_reales_g = ("PART-", "OCCIM", "OCCIM-", "AUTEC", "TEST")
@@ -4895,7 +4919,8 @@ if _page == _NAV_PAGES[1]:
                     _gpe_show = _gpe[[
                         "eds_occim","eds_nombre","cliente","Equipos_codigos","Equipos_nombres",
                         "Llamados","MPs","Correctivas (h)","Preventivas (h)",
-                        "Tiempo detenido (h:mm)","Última emergencia","Uptime %"
+                        "Tiempo detenido (h:mm)","Última emergencia",
+                        "Uptime Neto %","Uptime General %"
                     ]].rename(columns={
                         "eds_occim":       "Cód. EDS",
                         "eds_nombre":      "Estación",
@@ -4922,8 +4947,12 @@ if _page == _NAV_PAGES[1]:
                                  "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=125,
                                      help="Correctivas + Preventivas"),
                                  "Última emergencia":       st.column_config.TextColumn(width=105),
-                                 "Uptime %":                st.column_config.NumberColumn(
-                                     format="%.3f%%", width=95),
+                                 "Uptime Neto %":           st.column_config.NumberColumn(
+                                     format="%.3f%%", width=105,
+                                     help="Solo correctivas — excluye preventivas (mantención planificada)."),
+                                 "Uptime General %":        st.column_config.NumberColumn(
+                                     format="%.3f%%", width=115,
+                                     help="Correctivas + Preventivas — vista completa."),
                              })
                     st.caption(
                         f"Top 30 EDS ordenadas por tiempo total detenido · "
