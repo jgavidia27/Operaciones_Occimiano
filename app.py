@@ -4310,24 +4310,26 @@ if _page == _NAV_PAGES[1]:
                 _rango_dias_up = max(_total_dias, 1)
                 _seg_equipo_up = _rango_dias_up * 24 * 3600
 
-                # ── Cruce con OTs correctivas para traer equipo + cierre Fracttal ──
-                # df_llamados solo tiene EDS y fecha_atencion (cierre SLA en terreno).
-                # ordenes_trabajo tiene codigo_activo, nombre_activo y fecha_finalizacion
-                # (cierre administrativo en Fracttal, puede demorar días/semanas).
-                # IMPORTANTE: el merge resetea índices, por eso lo hacemos ANTES de
-                # calcular fechas (si no, las Series no se alinean en la resta).
-                with st.spinner("Cargando datos de OTs correctivas (equipos)…"):
+                # ── Cruce con OTs correctivas para traer equipo + tiempo de paro ──
+                # OBJETIVO: usar el tiempo REAL de paro del equipo (dato Fracttal),
+                # no la diferencia fecha_llamado → cierre (que sobreestima 10x
+                # porque incluye tiempo administrativo). Prioridad:
+                #   1) tiempo_paro_real_seg (si paro_equipo=True y valor > 0)
+                #   2) duracion_real_seg    (tiempo trabajado en la OT, aprox)
+                #   3) diferencia fecha_llamado → cierre (último fallback)
+                with st.spinner("Cargando datos de OTs correctivas (equipos + paro)…"):
                     _raw_corr_up = load_correctivas_supabase()
                 if _raw_corr_up:
                     _df_corr_up = pd.DataFrame(_raw_corr_up)[
                         ["id_ot","codigo_activo","nombre_activo",
-                         "fecha_finalizacion","duracion_real_seg"]
+                         "fecha_finalizacion","duracion_real_seg",
+                         "paro_equipo","tiempo_paro_real_seg"]
                     ].copy()
-                    _df_corr_up["duracion_real_seg"] = pd.to_numeric(
-                        _df_corr_up["duracion_real_seg"], errors="coerce").fillna(0)
+                    for _c in ("duracion_real_seg","tiempo_paro_real_seg"):
+                        _df_corr_up[_c] = pd.to_numeric(_df_corr_up[_c], errors="coerce").fillna(0)
+                    _df_corr_up["paro_equipo"] = _df_corr_up["paro_equipo"].fillna(False).astype(bool)
                     _df_corr_up["fecha_finalizacion"] = pd.to_datetime(
                         _df_corr_up["fecha_finalizacion"], errors="coerce", utc=True)
-                    # Una OT puede tener varios equipos concatenados — los unimos como vinieron
                     _df_corr_up = _df_corr_up.groupby("id_ot", as_index=False).agg(
                         codigo_activo=("codigo_activo",
                             lambda s: ", ".join(sorted({str(x).strip() for x in s if pd.notna(x)}))),
@@ -4335,20 +4337,28 @@ if _page == _NAV_PAGES[1]:
                             lambda s: " · ".join(sorted({str(x).strip() for x in s if pd.notna(x)}))),
                         fecha_finalizacion=("fecha_finalizacion", "max"),
                         duracion_real_seg=("duracion_real_seg", "sum"),
+                        tiempo_paro_real_seg=("tiempo_paro_real_seg", "sum"),
+                        paro_equipo=("paro_equipo", "any"),
                     )
                     _df_up = _df_up.merge(
                         _df_corr_up, how="left",
                         left_on="os_fracttal", right_on="id_ot"
                     ).reset_index(drop=True)
-                    _df_up["duracion_real_seg"] = _df_up["duracion_real_seg"].fillna(0)
+                    _df_up["duracion_real_seg"]     = _df_up["duracion_real_seg"].fillna(0)
+                    _df_up["tiempo_paro_real_seg"]  = _df_up["tiempo_paro_real_seg"].fillna(0)
+                    _df_up["paro_equipo"]           = _df_up["paro_equipo"].fillna(False)
                 else:
                     _df_up = _df_up.reset_index(drop=True)
                     _df_up["codigo_activo"] = ""
                     _df_up["nombre_activo"] = ""
                     _df_up["fecha_finalizacion"] = pd.NaT
                     _df_up["duracion_real_seg"] = 0
+                    _df_up["tiempo_paro_real_seg"] = 0
+                    _df_up["paro_equipo"] = False
 
-                # Tiempo detenido por llamado (en segundos), calculado DESPUÉS del merge
+                # ── Cálculo de paro por llamado con cascada de fallbacks ──
+                # Fallback 3 (proxy fecha_llamado → cierre) se calcula aquí para
+                # tenerlo disponible, pero solo se aplica si nada más funciona.
                 def _merge_dt_up(d, h):
                     d_ts = pd.to_datetime(d, errors="coerce")
                     h_str = h.astype(str).fillna("00:00:00").str[:8].replace(
@@ -4356,23 +4366,30 @@ if _page == _NAV_PAGES[1]:
                     return pd.to_datetime(
                         d_ts.dt.strftime("%Y-%m-%d") + " " + h_str,
                         errors="coerce")
-
                 _dt_ll_up = _merge_dt_up(_df_up["fecha_llamado"],
                                          _df_up.get("hora_llamado", pd.Series("", index=_df_up.index)))
                 _dt_at_up = _merge_dt_up(_df_up["fecha_atencion"],
                                          _df_up.get("hora_fin", pd.Series("", index=_df_up.index)))
-
-                # Cierre real = MIN(fecha_atencion, fecha_finalizacion)
-                #   - fecha_atencion (df_llamados): cierre técnico en terreno (cuando
-                #     el técnico cerró el SLA con el cliente)
-                #   - fecha_finalizacion (ordenes_trabajo): cierre administrativo
-                #     Fracttal — puede demorar días/semanas
-                _fin_tec = pd.to_datetime(
-                    _df_up["fecha_finalizacion"], errors="coerce", utc=True)
+                _fin_tec = pd.to_datetime(_df_up["fecha_finalizacion"], errors="coerce", utc=True)
                 if hasattr(_fin_tec, "dt") and _fin_tec.dt.tz is not None:
                     _fin_tec = _fin_tec.dt.tz_convert(None)
                 _cierre = pd.DataFrame({"a": _dt_at_up, "b": _fin_tec}).min(axis=1)
-                _df_up["_paro_seg"] = (_cierre - _dt_ll_up).dt.total_seconds().clip(lower=0).fillna(0)
+                # Proxy: fecha_llamado → cierre. Cap a 24h para no inflar por
+                # OTs administrativas de días/semanas (una P1 real no debería
+                # tomar más de 1 día en resolverse).
+                _proxy_seg = (_cierre - _dt_ll_up).dt.total_seconds().clip(lower=0, upper=24*3600).fillna(0)
+
+                # Cascada: real → duración → proxy (con cap 24h)
+                _paro_real = _df_up["tiempo_paro_real_seg"].where(
+                    (_df_up["paro_equipo"] == True) & (_df_up["tiempo_paro_real_seg"] > 0), 0)
+                _paro_dur = _df_up["duracion_real_seg"].where(
+                    (_paro_real == 0) & (_df_up["duracion_real_seg"] > 0), 0)
+                _paro_prox = _proxy_seg.where((_paro_real == 0) & (_paro_dur == 0), 0)
+                _df_up["_paro_seg"] = (_paro_real + _paro_dur + _paro_prox).clip(lower=0).fillna(0)
+                # Guardar fuente usada para transparencia (KPI + tabla ranking)
+                _df_up["_paro_fuente"] = "proxy"
+                _df_up.loc[_paro_real > 0, "_paro_fuente"] = "real"
+                _df_up.loc[_paro_dur > 0,  "_paro_fuente"] = "duracion"
 
                 st.markdown(
                     f"""<div style="background:rgba(1,121,138,0.10);border-left:3px solid #01798A;
@@ -4386,10 +4403,11 @@ if _page == _NAV_PAGES[1]:
                 )
                 st.caption(
                     "**Fórmula Uptime General**: 1 − (Σ horas detenidas por CORRECTIVAS + Σ horas detenidas por PREVENTIVAS) ÷ (N EDS × horas del período) · "
-                    "**Correctivas**: paro = desde `fecha_llamado` hasta el primer cierre real (mínimo entre `fecha_atención` y `fecha_finalización`). "
+                    "**Correctivas** (cascada por OT): 1) `tiempo_paro_real_seg` si `paro_equipo=SI` y >0 · "
+                    "2) fallback a `duracion_real_seg` (tiempo trabajado en la OT) · "
+                    "3) último fallback a `fecha_llamado → cierre` (capado a 24h para no inflar por OTs administrativas). "
                     "Solo cuentan según el filtro de prioridad (default: P1 = máquina detenida). "
-                    "**Preventivas**: paro = `tiempo_paro_real_seg` de OTs con `¿Paro de equipo? = SÍ` y `fecha_finalizacion` dentro del período. "
-                    "El % refleja el tiempo REAL en que la flota estuvo operativa considerando AMBOS mundos."
+                    "**Preventivas**: paro = `tiempo_paro_real_seg` de OTs con `¿Paro de equipo? = SÍ` y `fecha_finalizacion` dentro del período."
                 )
 
                 # ── Clasificación regional por eds_nombre / comuna ────
@@ -4554,6 +4572,33 @@ if _page == _NAV_PAGES[1]:
                                  f"Numerador: {int(_paro_corr_seg//3600):,}h correctivas "
                                  f"+ {int(_paro_prev_seg//3600):,}h preventivas "
                                  f"= {int(_paro_total_seg//3600):,}h detenidas totales.")
+
+                # ── Transparencia: de qué fuente vino el paro correctivo ──
+                if not _df_up.empty and "_paro_fuente" in _df_up.columns:
+                    _fnt = _df_up["_paro_fuente"].value_counts().to_dict()
+                    _n_real = _fnt.get("real", 0)
+                    _n_dur  = _fnt.get("duracion", 0)
+                    _n_prox = _fnt.get("proxy", 0)
+                    _n_tot  = _n_real + _n_dur + _n_prox
+                    if _n_tot > 0:
+                        _msg = (
+                            f'📊 <b>Fuente del paro por correctiva</b> ({_n_tot:,} OTs): '
+                            f'<span style="color:#22c55e;font-weight:600;">✅ Dato real Fracttal: {_n_real:,}</span> · '
+                            f'<span style="color:#f59e0b;font-weight:600;">⚠️ Fallback duración OT: {_n_dur:,}</span> · '
+                            f'<span style="color:#ef4444;font-weight:600;">❌ Proxy fecha→cierre (24h cap): {_n_prox:,}</span>'
+                        )
+                        if _n_real == 0 and _n_tot > 0:
+                            _msg += ('<br><span style="color:#f59e0b;font-size:0.82rem;">'
+                                     '💡 <b>Recomendación operacional:</b> los técnicos deben empezar a llenar '
+                                     '<code>¿Paro de equipo?</code> y el tiempo real de paro en las OTs correctivas de Fracttal '
+                                     'para que el Uptime refleje el tiempo REAL de indisponibilidad y no una aproximación.'
+                                     '</span>')
+                        st.markdown(
+                            f'<div style="background:rgba(148,163,184,0.10);border-left:3px solid #94a3b8;'
+                            f'padding:8px 14px;border-radius:6px;margin:8px 0 14px 0;font-size:0.85rem;">'
+                            f'{_msg}</div>',
+                            unsafe_allow_html=True,
+                        )
 
                 st.divider()
 
