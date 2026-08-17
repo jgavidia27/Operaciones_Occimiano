@@ -5393,11 +5393,14 @@ elif _page == _NAV_PAGES[3]:
             _df_z = df_ll_c[["eds_occim","eds_nombre","comuna"]].drop_duplicates("eds_occim") \
                     if "comuna" in df_ll_c.columns else \
                     df_ll_c[["eds_occim","eds_nombre"]].drop_duplicates("eds_occim").assign(comuna="")
+            _df_z = _df_z.reset_index(drop=True)  # index limpio para alinear con la lista
             _z_series = [
                 _zona_row_es(company, eo, en, co)
                 for eo, en, co in zip(_df_z["eds_occim"], _df_z["eds_nombre"], _df_z.get("comuna", ""))
             ]
-            _codes_zona_es = set(_df_z["eds_occim"][pd.Series(_z_series) == _zona_sel_es])
+            _codes_zona_es = set(
+                _df_z["eds_occim"][pd.Series(_z_series, index=_df_z.index) == _zona_sel_es]
+            )
 
         # Opciones EDS desde df_llamados (tienen eds_occim y eds_nombre)
         # Construir opciones enriquecidas: "60107 · E/S Vivaceta 715 · CONCHALÍ"
