@@ -4642,7 +4642,7 @@ if _page == _NAV_PAGES[1]:
 
                 # ── KPIs ───────────────────────────────────────────────
                 _k1s, _k2s, _k3s, _k4s, _k5s = st.columns(5)
-                _k1s.metric("P1 contados", f"{len(_df_up):,}",
+                _k1s.metric("Llamados (P1)", f"{len(_df_up):,}",
                             delta=f"de {_n_total_corr_pre:,} correctivas · P2:{_n_p2_pre} P3:{_n_p3_pre} P4:{_n_p4_pre}",
                             help="Solo se cuentan correctivos P1 — únicos que detienen el equipo. "
                                  f"P2/P3/P4 no aplican para uptime. En la vista Estaciones de servicio "
