@@ -4469,6 +4469,13 @@ if _page == _NAV_PAGES[1]:
                     for cl, eo, en, co in zip(_cli_up_col, _eds_up_col, _nom_up_col, _com_up_col)
                 ]
 
+                # Placeholder para el selector — la carga real ocurre despues
+                # con el pipeline completo de filtros. Si no lo iniciamos aca
+                # el uso en el selector (para juntar codigos EDS solo-prev)
+                # genera NameError.
+                if "_df_prev_up" not in dir():
+                    _df_prev_up = pd.DataFrame()
+
                 # ── Filtros: Cliente + Zona + EDS ─────────────────────
                 _fu1s, _fu2s, _fu3s = st.columns(3)
                 with _fu1s:
@@ -4601,17 +4608,11 @@ if _page == _NAV_PAGES[1]:
                                 _df_prev_up["cliente"].apply(_norm_cli) == _norm_cli(_up_sla_cli)
                             ]
 
-                        # Filtro 3: EDS (por codigo_eds que es el estándar)
+                        # Filtro 3: EDS (ahora _up_sla_eds es directamente el codigo, no el nombre)
                         if _up_sla_eds != "Todas" and not _df_prev_up.empty:
-                            # Buscar codigo_eds correspondiente al eds_nombre elegido en correctivas
-                            _cod_eds_sel = (
-                                df_llamados[df_llamados["eds_nombre"] == _up_sla_eds]
-                                ["eds_occim"].dropna().unique().tolist()
-                            )
-                            if _cod_eds_sel:
-                                _df_prev_up = _df_prev_up[
-                                    _df_prev_up["codigo_eds"].isin(_cod_eds_sel)
-                                ]
+                            _df_prev_up = _df_prev_up[
+                                _df_prev_up["codigo_eds"].astype(str) == _up_sla_eds
+                            ]
 
                         # Filtro 4: zona (misma logica que correctivas — por cliente)
                         if _up_sla_zona != "Todas" and not _df_prev_up.empty:
