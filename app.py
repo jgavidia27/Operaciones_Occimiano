@@ -4371,23 +4371,28 @@ if _page == _NAV_PAGES[1]:
                 _fin_tec = pd.to_datetime(_df_up["fecha_finalizacion"], errors="coerce", utc=True)
                 if hasattr(_fin_tec, "dt") and _fin_tec.dt.tz is not None:
                     _fin_tec = _fin_tec.dt.tz_convert(None)
-                _cierre = pd.DataFrame({"a": _dt_at_up, "b": _fin_tec}).min(axis=1)
-                # Proxy: fecha_llamado → cierre. Cap a 24h para no inflar por
-                # OTs administrativas de días/semanas (una P1 real no debería
-                # tomar más de 1 día en resolverse).
-                _proxy_seg = (_cierre - _dt_ll_up).dt.total_seconds().clip(lower=0, upper=24*3600).fillna(0)
-
-                # Cascada: real → duración → proxy (con cap 24h)
+                # NUEVA lógica (cascada REALISTA para P1 = máquina detenida):
+                # 1) tiempo_paro_real_seg si paro_equipo=SI y >0 → dato oficial
+                # 2) fecha_llamado → fecha_atencion (cierre técnico en terreno)
+                #    con cap 168h (1 semana) para blindar datos corruptos
+                # 3) fallback a duracion_real_seg
+                # Racional: SLA y Uptime deben ser coherentes — si SLA bajo,
+                # uptime también debe bajar. Usar 'duracion_real_seg' (30 min)
+                # sobrestimaba el uptime (~99.94% con SLA 80%).
+                _proxy_atencion = (_dt_at_up - _dt_ll_up).dt.total_seconds().clip(
+                    lower=0, upper=168*3600).fillna(0)
+                # Cascada nueva
                 _paro_real = _df_up["tiempo_paro_real_seg"].where(
                     (_df_up["paro_equipo"] == True) & (_df_up["tiempo_paro_real_seg"] > 0), 0)
+                _paro_atn = _proxy_atencion.where(
+                    (_paro_real == 0) & (_proxy_atencion > 0), 0)
                 _paro_dur = _df_up["duracion_real_seg"].where(
-                    (_paro_real == 0) & (_df_up["duracion_real_seg"] > 0), 0)
-                _paro_prox = _proxy_seg.where((_paro_real == 0) & (_paro_dur == 0), 0)
-                _df_up["_paro_seg"] = (_paro_real + _paro_dur + _paro_prox).clip(lower=0).fillna(0)
-                # Guardar fuente usada para transparencia (KPI + tabla ranking)
-                _df_up["_paro_fuente"] = "proxy"
+                    (_paro_real == 0) & (_paro_atn == 0) & (_df_up["duracion_real_seg"] > 0), 0)
+                _df_up["_paro_seg"] = (_paro_real + _paro_atn + _paro_dur).clip(lower=0).fillna(0)
+                # Fuente usada para transparencia (KPI + tabla ranking)
+                _df_up["_paro_fuente"] = "duracion"
+                _df_up.loc[_paro_atn > 0, "_paro_fuente"] = "atencion"
                 _df_up.loc[_paro_real > 0, "_paro_fuente"] = "real"
-                _df_up.loc[_paro_dur > 0,  "_paro_fuente"] = "duracion"
 
                 st.markdown(
                     f"""<div style="background:rgba(1,121,138,0.10);border-left:3px solid #01798A;
@@ -4402,9 +4407,9 @@ if _page == _NAV_PAGES[1]:
                 st.caption(
                     "**Fórmula Uptime General**: 1 − (Σ horas detenidas por CORRECTIVAS P1 + Σ horas detenidas por PREVENTIVAS) ÷ (N EDS × horas del período) · "
                     "**Correctivas** — solo se cuentan **P1 (máquina detenida)**. P2/P3/P4 no aplican (equipo sigue operativo). "
-                    "Cascada por OT: 1) `tiempo_paro_real_seg` si `paro_equipo=SI` y >0 · "
-                    "2) fallback a `duracion_real_seg` (tiempo trabajado en la OT) · "
-                    "3) último fallback a `fecha_llamado → cierre` (capado a 24h para no inflar por OTs administrativas). "
+                    "Cascada por OT: 1) `tiempo_paro_real_seg` si `paro_equipo=SI` y >0 (dato oficial Fracttal) · "
+                    "2) **`fecha_llamado → fecha_atencion`** (cap 168h) — refleja el tiempo REAL que la máquina estuvo detenida hasta que el técnico cerró el SLA · "
+                    "3) fallback a `duracion_real_seg` (tiempo trabajado en la OT). "
                     "**Preventivas**: paro = `tiempo_paro_real_seg` de OTs con `¿Paro de equipo? = SÍ` y `fecha_finalizacion` dentro del período."
                 )
 
@@ -4688,21 +4693,22 @@ if _page == _NAV_PAGES[1]:
                 if not _df_up.empty and "_paro_fuente" in _df_up.columns:
                     _fnt = _df_up["_paro_fuente"].value_counts().to_dict()
                     _n_real = _fnt.get("real", 0)
+                    _n_atn  = _fnt.get("atencion", 0)
                     _n_dur  = _fnt.get("duracion", 0)
-                    _n_prox = _fnt.get("proxy", 0)
-                    _n_tot  = _n_real + _n_dur + _n_prox
+                    _n_tot  = _n_real + _n_atn + _n_dur
                     if _n_tot > 0:
                         _msg = (
                             f'📊 <b>Fuente del paro por correctiva</b> ({_n_tot:,} OTs): '
                             f'<span style="color:#22c55e;font-weight:600;">✅ Dato real Fracttal: {_n_real:,}</span> · '
-                            f'<span style="color:#f59e0b;font-weight:600;">⚠️ Fallback duración OT: {_n_dur:,}</span> · '
-                            f'<span style="color:#ef4444;font-weight:600;">❌ Proxy fecha→cierre (24h cap): {_n_prox:,}</span>'
+                            f'<span style="color:#3b82f6;font-weight:600;">📅 Proxy fecha→atención (cap 168h): {_n_atn:,}</span> · '
+                            f'<span style="color:#f59e0b;font-weight:600;">⚠️ Fallback duración OT: {_n_dur:,}</span>'
                         )
                         if _n_real == 0 and _n_tot > 0:
-                            _msg += ('<br><span style="color:#f59e0b;font-size:0.82rem;">'
+                            _msg += ('<br><span style="color:#3b82f6;font-size:0.82rem;">'
                                      '💡 <b>Recomendación operacional:</b> los técnicos deben empezar a llenar '
-                                     '<code>¿Paro de equipo?</code> y el tiempo real de paro en las OTs correctivas de Fracttal '
-                                     'para que el Uptime refleje el tiempo REAL de indisponibilidad y no una aproximación.'
+                                     '<code>¿Paro de equipo?</code> y el tiempo real de paro en las OTs correctivas de Fracttal. '
+                                     'Mientras tanto se usa el proxy fecha_llamado → fecha_atencion (tiempo real que la máquina '
+                                     'estuvo detenida hasta que el técnico cerró el SLA).'
                                      '</span>')
                         st.markdown(
                             f'<div style="background:rgba(148,163,184,0.10);border-left:3px solid #94a3b8;'
