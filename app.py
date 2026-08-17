@@ -4908,6 +4908,12 @@ if _page == _NAV_PAGES[1]:
                     _gpe["Uptime Neto %"] = (
                         (1 - _gpe["Paro_corr_seg"] / _seg_equipo_up).clip(lower=0) * 100
                     ).round(3)
+                    # T. Funcionamiento y T. Total (formato h:mm)
+                    def _fmt_hm(s):
+                        s = max(0, int(s))
+                        return f"{s // 3600:,}h {(s % 3600) // 60:02d}m"
+                    _gpe["T. Funcionamiento"] = (_seg_equipo_up - _gpe["Tiempo_paro_seg"]).clip(lower=0).apply(_fmt_hm)
+                    _gpe["T. Total"] = _fmt_hm(_seg_equipo_up)
                     # Excluir codigos que NO son EDS reales (PART-, OCCIM-, etc.)
                     _codigos_no_reales_g = ("PART-", "OCCIM", "OCCIM-", "AUTEC", "TEST")
                     _mask_real_g = ~_gpe["eds_occim"].fillna("").astype(str).str.upper().str.startswith(
@@ -4918,16 +4924,16 @@ if _page == _NAV_PAGES[1]:
 
                     _gpe_show = _gpe[[
                         "eds_occim","eds_nombre","cliente","Equipos_codigos","Equipos_nombres",
-                        "Llamados","MPs","Correctivas (h)","Preventivas (h)",
-                        "Tiempo detenido (h:mm)","Última emergencia",
-                        "Uptime Neto %","Uptime General %"
+                        "Llamados","Correctivas (h)","Preventivas (h)",
+                        "Tiempo detenido (h:mm)","T. Funcionamiento","T. Total",
+                        "Última emergencia","Uptime Neto %","Uptime General %"
                     ]].rename(columns={
-                        "eds_occim":       "Cód. EDS",
-                        "eds_nombre":      "Estación",
-                        "cliente":         "Cliente",
-                        "Equipos_codigos": "Equipo(s)",
-                        "Equipos_nombres": "Tipo equipo",
-                        "MPs":             "MPs c/paro",
+                        "eds_occim":               "Cód. EDS",
+                        "eds_nombre":              "Estación",
+                        "cliente":                 "Cliente",
+                        "Equipos_codigos":         "Equipo(s)",
+                        "Equipos_nombres":         "Tipo equipo",
+                        "Tiempo detenido (h:mm)":  "T. Detenido",
                     })
                     _show_df(_gpe_show.reset_index(drop=True), hide_index=True,
                              use_container_width=True,
@@ -4939,13 +4945,14 @@ if _page == _NAV_PAGES[1]:
                                  "Tipo equipo":             st.column_config.TextColumn(width=180),
                                  "Llamados":                st.column_config.NumberColumn(
                                      format="%d", width=70),
-                                 "MPs c/paro":              st.column_config.NumberColumn(
-                                     format="%d", width=70,
-                                     help="MPs preventivas con paro de equipo"),
                                  "Correctivas (h)":         st.column_config.NumberColumn(format="%.1f", width=95),
                                  "Preventivas (h)":         st.column_config.NumberColumn(format="%.1f", width=95),
-                                 "Tiempo detenido (h:mm)":  st.column_config.TextColumn(width=125,
-                                     help="Correctivas + Preventivas"),
+                                 "T. Detenido":             st.column_config.TextColumn(width=110,
+                                     help="Tiempo total de paro (Correctivas + Preventivas)"),
+                                 "T. Funcionamiento":       st.column_config.TextColumn(width=125,
+                                     help="Tiempo operativo = T. Total − T. Detenido"),
+                                 "T. Total":                st.column_config.TextColumn(width=100,
+                                     help="Tiempo total del período evaluado (días × 24h)"),
                                  "Última emergencia":       st.column_config.TextColumn(width=105),
                                  "Uptime Neto %":           st.column_config.NumberColumn(
                                      format="%.3f%%", width=105,
