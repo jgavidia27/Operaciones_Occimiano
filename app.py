@@ -6742,7 +6742,7 @@ elif _page == _NAV_PAGES[3]:
                         return s.title() if s else "—"
                     _det_corr_disp["SLA"] = _det_corr_disp["SLA"].apply(_sla_icon)
                 _cols_show_corr = [c for c in ["Fecha","N° OT","Prioridad","Técnico","SLA",
-                                                "Tipo falla","Cód. Equipo","Equipo",
+                                                "Tipo falla","Cód. Equipo","Equipo","MIX",
                                                 "Causa raíz","Comentario técnico"]
                                     if c in _det_corr_disp.columns]
                 _det_corr_disp = _det_corr_disp[_cols_show_corr]
@@ -6781,9 +6781,37 @@ elif _page == _NAV_PAGES[3]:
 
             _n_corr = len(_det_corr_disp)
             _n_prev = len(_det_prev_disp)
-            _mk_a, _mk_b = st.columns(2)
+
+            # Desglose MIX / No MIX por codigo_activo — usar los diccionarios
+            # ya construidos en el listado superior (_mix_por_eds / _nomix_por_eds).
+            _mix_set_eds  = _mix_por_eds.get(_sel_eds_det, set())
+            _nomix_set_eds = _nomix_por_eds.get(_sel_eds_det, set())
+            def _clasif_mix(cod):
+                """Devuelve 'MIX', 'No MIX' o '—' (no lavadora / no clasificable)."""
+                if not cod or str(cod).strip() in ("", "—", "nan", "None"):
+                    return "—"
+                # Un codigo compuesto (EQ-6249, EQ-7847) → mirar cada uno
+                _pieces = [c.strip() for c in str(cod).split(",") if c.strip()]
+                _hits_mix = any(p in _mix_set_eds for p in _pieces)
+                _hits_nomix = any(p in _nomix_set_eds for p in _pieces)
+                if _hits_mix and not _hits_nomix: return "MIX"
+                if _hits_nomix and not _hits_mix: return "No MIX"
+                if _hits_mix and _hits_nomix:    return "Ambos"
+                return "—"
+            # Contadores en correctivos
+            if _n_corr > 0 and "Cód. Equipo" in _det_corr_disp.columns:
+                _det_corr_disp["MIX"] = _det_corr_disp["Cód. Equipo"].apply(_clasif_mix)
+                _n_corr_mix   = int((_det_corr_disp["MIX"] == "MIX").sum())
+                _n_corr_nomix = int((_det_corr_disp["MIX"] == "No MIX").sum())
+            else:
+                _n_corr_mix = _n_corr_nomix = 0
+            _mk_a, _mk_b, _mk_c, _mk_d = st.columns(4)
             _mk_a.metric("Correctivos en período", f"{_n_corr}")
-            _mk_b.metric("Preventivas en período", f"{_n_prev}")
+            _mk_b.metric("↳ En equipos MIX", f"{_n_corr_mix}",
+                         help="Correctivos sobre lavadoras MIX (propiedad Occimiano — mayor peso).")
+            _mk_c.metric("↳ En equipos No MIX", f"{_n_corr_nomix}",
+                         help="Correctivos sobre lavadoras del cliente (Aquapress u otras).")
+            _mk_d.metric("Preventivas en período", f"{_n_prev}")
 
             if _n_corr == 0 and _n_prev == 0:
                 st.info(f"La estación **{_sel_eds_det}** no tiene atenciones registradas "
@@ -6812,6 +6840,9 @@ elif _page == _NAV_PAGES[3]:
                                 help="Código Fracttal del activo (EQ-XXXX)"),
                             "Equipo":             st.column_config.TextColumn(width=140,
                                 help="Tipo del equipo (Lavadora / Aspiradora / Ablandador / etc)"),
+                            "MIX":                st.column_config.TextColumn(width=80,
+                                help="MIX = equipo propiedad Occimiano (mayor peso) · "
+                                     "No MIX = equipo del cliente · — = no clasificable"),
                             "Causa raíz":         st.column_config.TextColumn(width=210,
                                 help="Causa específica registrada por el técnico"),
                             "Comentario técnico": st.column_config.TextColumn(width=320,
