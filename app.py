@@ -4692,21 +4692,67 @@ if _page == _NAV_PAGES[1]:
                                                         for n in str(x).split(" · ") if n.strip()}))),
                         _ultimo_llamado=("fecha_llamado", "max"),
                     ))
-                    # Preventivas agregadas por EDS
+                    # Preventivas agregadas por EDS — traemos tambien cliente,
+                    # estacion, activos para poblar las EDS que SOLO tuvieron
+                    # preventivas (sin P1 correctivos) y evitar "None" en la tabla.
                     if not _df_prev_up.empty:
                         _gpe_prev = (_df_prev_up.groupby(
                             "codigo_eds", dropna=False, as_index=False
                         ).agg(
                             MPs=("id_ot", "count"),
                             Paro_prev_seg=("_paro_calc_seg", "sum"),
+                            _cliente_prev=("cliente",
+                                lambda s: next((str(x).strip() for x in s
+                                                if pd.notna(x) and str(x).strip()), "")),
+                            _estacion_prev=("estacion",
+                                lambda s: next((str(x).strip() for x in s
+                                                if pd.notna(x) and str(x).strip()), "")),
+                            _equipos_cod_prev=("codigo_activo",
+                                lambda s: ", ".join(sorted({str(x).strip() for x in s
+                                                            if pd.notna(x) and str(x).strip()}))),
+                            _equipos_nom_prev=("nombre_activo",
+                                lambda s: " · ".join(sorted({str(x).strip() for x in s
+                                                             if pd.notna(x) and str(x).strip()}))),
                         )).rename(columns={"codigo_eds": "eds_occim"})
                     else:
-                        _gpe_prev = pd.DataFrame(columns=["eds_occim","MPs","Paro_prev_seg"])
+                        _gpe_prev = pd.DataFrame(columns=[
+                            "eds_occim","MPs","Paro_prev_seg",
+                            "_cliente_prev","_estacion_prev",
+                            "_equipos_cod_prev","_equipos_nom_prev",
+                        ])
                     _gpe = _gpe_corr.merge(_gpe_prev, on="eds_occim", how="outer")
                     _gpe["Llamados"]      = _gpe["Llamados"].fillna(0).astype(int)
                     _gpe["MPs"]           = _gpe["MPs"].fillna(0).astype(int)
                     _gpe["Paro_corr_seg"] = _gpe["Paro_corr_seg"].fillna(0)
                     _gpe["Paro_prev_seg"] = _gpe["Paro_prev_seg"].fillna(0)
+                    # COALESCE: donde la metadata de correctivas viene NaN
+                    # (EDS solo-preventiva), rellenar con la de preventivas.
+                    for _c_corr, _c_prev in (
+                        ("eds_nombre",     "_estacion_prev"),
+                        ("cliente",        "_cliente_prev"),
+                        ("Equipos_codigos","_equipos_cod_prev"),
+                        ("Equipos_nombres","_equipos_nom_prev"),
+                    ):
+                        if _c_corr in _gpe.columns and _c_prev in _gpe.columns:
+                            _gpe[_c_corr] = _gpe[_c_corr].where(
+                                _gpe[_c_corr].astype(str).str.strip().ne("").fillna(False)
+                                & _gpe[_c_corr].notna(),
+                                _gpe[_c_prev],
+                            )
+                    # Fallback final: si sigue vacio, usar el catalogo df_eds
+                    if "eds_nombre" in _gpe.columns and not df_eds.empty:
+                        _nombre_map_up = _build_eds_nombre_map(df_eds)
+                        _mask_sin_nom = (_gpe["eds_nombre"].isna() |
+                            (_gpe["eds_nombre"].astype(str).str.strip() == ""))
+                        _gpe.loc[_mask_sin_nom, "eds_nombre"] = (
+                            _gpe.loc[_mask_sin_nom, "eds_occim"]
+                            .astype(str).map(_nombre_map_up)
+                        )
+                    # Reemplazar None/NaN restantes por "—" para no mostrar "None"
+                    for _c_disp in ("eds_nombre","cliente","Equipos_codigos","Equipos_nombres"):
+                        if _c_disp in _gpe.columns:
+                            _gpe[_c_disp] = (_gpe[_c_disp].fillna("—")
+                                .astype(str).replace({"": "—", "None": "—", "nan": "—"}))
                     _gpe["Tiempo_paro_seg"] = _gpe["Paro_corr_seg"] + _gpe["Paro_prev_seg"]
                     _gpe["Última emergencia"] = pd.to_datetime(
                         _gpe["_ultimo_llamado"], errors="coerce"
