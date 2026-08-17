@@ -6395,6 +6395,49 @@ elif _page == _NAV_PAGES[3]:
         else:
             _df_tbl["corr_x_eq"] = None
 
+        # ── Detectar Equipo MIX / No MIX por EDS ──────────────────────────
+        # Los equipos MIX son propiedad Occimiano (fabricante = "MIX" en Fracttal,
+        # nombre contiene "MSELF"). Los no-MIX son del cliente (Aquapress, etc.).
+        # Fuente: df_wo_cur (histórico completo del cliente, sin filtro de mes)
+        # para tener el catálogo real de activos aunque no haya OTs en el período.
+        _mix_por_eds = {}
+        _nomix_por_eds = {}
+        _src_activos = df_wo_cur[df_wo_cur["client"] == company] \
+                        if not df_wo_cur.empty and "client" in df_wo_cur.columns \
+                        else pd.DataFrame()
+        if not _src_activos.empty and "equipment_code" in _src_activos.columns \
+                and "equipment" in _src_activos.columns and "eds_occim" in _src_activos.columns:
+            _eq_lav = _src_activos[
+                _src_activos["equipment"].fillna("").astype(str).str.upper()
+                    .str.startswith("LAVADORA ")
+            ][["eds_occim","equipment_code","equipment"]].copy()
+            # Explotar OTs compuestas (activo1 · activo2 · ...) en filas separadas
+            _eq_lav["equipment_code"] = _eq_lav["equipment_code"].fillna("").astype(str)
+            _eq_lav["equipment"]      = _eq_lav["equipment"].fillna("").astype(str)
+            _rows_act = []
+            for _, _r in _eq_lav.iterrows():
+                _eds = str(_r["eds_occim"] or "").strip()
+                _codigos = [c.strip() for c in str(_r["equipment_code"]).split(",") if c.strip()]
+                _nombres = [n.strip() for n in str(_r["equipment"]).split(" · ") if n.strip()]
+                # Emparejamos por índice (Fracttal los devuelve alineados)
+                for _c, _n in zip(_codigos, _nombres):
+                    if not _n.upper().startswith("LAVADORA "):
+                        continue
+                    _rows_act.append({"eds": _eds, "cod": _c, "nom": _n})
+            for _r in _rows_act:
+                _eds = _r["eds"]; _cod = _r["cod"]; _nu = _r["nom"].upper()
+                # Regla MIX: nombre contiene MSELF (marca Occimiano) o MIX literal
+                _es_mix = ("MSELF" in _nu) or (" MIX " in f" {_nu} ")
+                _dic = _mix_por_eds if _es_mix else _nomix_por_eds
+                _dic.setdefault(_eds, set()).add(_cod)
+        # Formatear "EQ-XXXX, EQ-YYYY" (o "—" si no hay)
+        _df_tbl["equipo_mix"] = _df_tbl["eds_occim"].astype(str).map(
+            lambda e: ", ".join(sorted(_mix_por_eds.get(e, []))) or "—"
+        )
+        _df_tbl["equipo_no_mix"] = _df_tbl["eds_occim"].astype(str).map(
+            lambda e: ", ".join(sorted(_nomix_por_eds.get(e, []))) or "—"
+        )
+
         # Columnas finales (quitamos Cód. Fracttal — siempre estaba vacío;
         # 'Dirección' — duplicaba 'Nombre / Dirección'; 'region' — se
         # reemplaza por 'Zona' propia del cliente).
@@ -6412,6 +6455,8 @@ elif _page == _NAV_PAGES[3]:
                 "Última atención":   "Última atención",
                 "Ratio (P/C x10)":   "Ratio (P/C x10)",
                 "ultimo_tecnico":    "Último Técnico",
+                "equipo_mix":        "Equipo MIX",
+                "equipo_no_mix":     "Equipo No MIX",
             }
         elif _is_copec:
             # COPEC: incluye Tipo (Simple/Doble) y Correctivas/equipo, para
@@ -6430,6 +6475,8 @@ elif _page == _NAV_PAGES[3]:
                 "Última atención":   "Última atención",
                 "Ratio (P/C x10)":   "Ratio (P/C x10)",
                 "ultimo_tecnico":    "Último Técnico",
+                "equipo_mix":        "Equipo MIX",
+                "equipo_no_mix":     "Equipo No MIX",
             }
         else:
             _col_map = {
@@ -6444,6 +6491,8 @@ elif _page == _NAV_PAGES[3]:
                 "Última atención":   "Última atención",
                 "Ratio (P/C x10)":   "Ratio (P/C x10)",
                 "ultimo_tecnico":    "Último Técnico",
+                "equipo_mix":        "Equipo MIX",
+                "equipo_no_mix":     "Equipo No MIX",
             }
         _cols_show = [c for c in _col_map if c in _df_tbl.columns]
         _df_display = _df_tbl[_cols_show].rename(columns=_col_map).copy()
