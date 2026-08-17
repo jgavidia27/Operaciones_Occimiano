@@ -4244,7 +4244,7 @@ if _page == _NAV_PAGES[1]:
                 _df_up["_mes_p"]   = _fl_up_norm.dt.to_period("M").astype(str)
                 _df_up["_month_n"] = _fl_up_norm.dt.month.astype("Int64")
 
-                _ff1, _ff2, _ff3 = st.columns([1.2, 1.8, 1.3])
+                _ff1, _ff2 = st.columns([1.2, 1.8])
                 with _ff1:
                     _up_trim = st.selectbox("Período", _trim_opts, key="upsla_trim")
                 with _ff2:
@@ -4256,26 +4256,17 @@ if _page == _NAV_PAGES[1]:
                         _meses_up_disp = _meses_disp_lbl[1:]
                     _up_meses = st.multiselect("Mes", _meses_up_disp, key="upsla_mes",
                                                placeholder="Todos los meses")
-                with _ff3:
-                    _up_prio = st.selectbox(
-                        "Prioridad a contar",
-                        ["Solo P1 (máquina detenida)", "P1 + P2", "Todas"],
-                        key="upsla_prio",
-                        help="Solo las P1 implican máquina detenida en el negocio. "
-                             "Las P2/P3/P4 son fallas donde la máquina sigue operativa."
-                    )
 
                 if _up_trim != "Todos":
                     _df_up = _df_up[_df_up["_month_n"].isin(_TRIMESTRES_DEF[_up_trim])]
                 if _up_meses:
                     _meses_periodo = [_lbl_to_period.get(l) for l in _up_meses if _lbl_to_period.get(l)]
                     _df_up = _df_up[_df_up["_mes_p"].isin(_meses_periodo)]
-                # Filtro de prioridad — para uptime real solo cuentan llamados con máquina detenida
+                # Uptime = tiempo con máquina operativa. Por definicion operativa solo las
+                # P1 (maquina detenida) cuentan como paro. P2 (parcial) / P3 (degradada) /
+                # P4 (no urgente) NO detienen el equipo (ver pancarta de prioridades).
                 _prio_norm = _df_up["prioridad"].astype(str).str.upper().str.strip()
-                if _up_prio == "Solo P1 (máquina detenida)":
-                    _df_up = _df_up[_prio_norm == "P1"]
-                elif _up_prio == "P1 + P2":
-                    _df_up = _df_up[_prio_norm.isin(["P1", "P2"])]
+                _df_up = _df_up[_prio_norm == "P1"]
 
                 # ── Período evaluado dinámico según filtros de fecha ───
                 _hoy_up = pd.Timestamp.today().normalize()
@@ -4402,11 +4393,11 @@ if _page == _NAV_PAGES[1]:
                     unsafe_allow_html=True,
                 )
                 st.caption(
-                    "**Fórmula Uptime General**: 1 − (Σ horas detenidas por CORRECTIVAS + Σ horas detenidas por PREVENTIVAS) ÷ (N EDS × horas del período) · "
-                    "**Correctivas** (cascada por OT): 1) `tiempo_paro_real_seg` si `paro_equipo=SI` y >0 · "
+                    "**Fórmula Uptime General**: 1 − (Σ horas detenidas por CORRECTIVAS P1 + Σ horas detenidas por PREVENTIVAS) ÷ (N EDS × horas del período) · "
+                    "**Correctivas** — solo se cuentan **P1 (máquina detenida)**. P2/P3/P4 no aplican (equipo sigue operativo). "
+                    "Cascada por OT: 1) `tiempo_paro_real_seg` si `paro_equipo=SI` y >0 · "
                     "2) fallback a `duracion_real_seg` (tiempo trabajado en la OT) · "
                     "3) último fallback a `fecha_llamado → cierre` (capado a 24h para no inflar por OTs administrativas). "
-                    "Solo cuentan según el filtro de prioridad (default: P1 = máquina detenida). "
                     "**Preventivas**: paro = `tiempo_paro_real_seg` de OTs con `¿Paro de equipo? = SÍ` y `fecha_finalizacion` dentro del período."
                 )
 
@@ -4548,9 +4539,10 @@ if _page == _NAV_PAGES[1]:
 
                 # ── KPIs ───────────────────────────────────────────────
                 _k1s, _k2s, _k3s, _k4s, _k5s = st.columns(5)
-                _prio_lbl = {"Solo P1 (máquina detenida)": "P1", "P1 + P2": "P1+P2", "Todas": "Todas"}[_up_prio]
-                _k1s.metric("Llamados contados", f"{len(_df_up):,}",
-                            delta=f"prioridad: {_prio_lbl}")
+                _k1s.metric("P1 contados", f"{len(_df_up):,}",
+                            delta="Máquina detenida",
+                            help="Solo se cuentan correctivos P1 — únicos que detienen el equipo. "
+                                 "P2/P3/P4 no aplican para uptime.")
                 _k2s.metric("Tiempo detenido (Correctivas)",
                             f"{int(_paro_corr_seg // 3600):,}h "
                             f"{int((_paro_corr_seg % 3600) // 60):02d}m",
