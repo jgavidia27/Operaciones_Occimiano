@@ -4401,28 +4401,68 @@ if _page == _NAV_PAGES[1]:
                     "**Preventivas**: paro = `tiempo_paro_real_seg` de OTs con `¿Paro de equipo? = SÍ` y `fecha_finalizacion` dentro del período."
                 )
 
-                # ── Clasificación regional por eds_nombre / comuna ────
-                def _region_ll(s):
-                    s = str(s or "").upper()
-                    _NORTE = ["IQUIQUE","ARICA","ANTOFAGASTA","CALAMA","COPIAPÓ","COPIAPO",
+                # ── Zonificación por cliente (mismo criterio que vista Clientes) ──
+                # COPEC   → por prefijo eds_occim (60→Santiago · 40→Centro · 20→Sur)
+                # ARAMCO  → 4 zonas oficiales (Norte / Centro / Santiago / Sur)
+                #           via mapa PBR→EE_S del catalogo
+                # SHELL/otros → 3 zonas geograficas (Centro (Santiago) / Norte / Sur)
+                _NORTE_CIU = ["IQUIQUE","ARICA","ANTOFAGASTA","CALAMA","COPIAPÓ","COPIAPO",
                               "OVALLE","LA SERENA","COQUIMBO","VALLENAR","ILLAPEL","HUASCO",
                               "ALTO HOSPICIO","TOCOPILLA","MEJILLONES"]
-                    _SUR   = ["CONCEPCIÓN","CONCEPCION","OSORNO","TEMUCO","VALDIVIA",
+                _SUR_CIU   = ["CONCEPCIÓN","CONCEPCION","OSORNO","TEMUCO","VALDIVIA",
                               "PUERTO MONTT","CHILLÁN","CHILLAN","LOS ANGELES","LOS ÁNGELES",
                               "LINARES","TALCA","CURICÓ","CURICO","RANCAGUA","FRUTILLAR",
                               "VICTORIA","RENGO","SAN FERNANDO","PUERTO VARAS","ANCUD",
                               "CASTRO","COIHAIQUE","LA UNION","LA UNIÓN"]
-                    if any(c in s for c in _NORTE): return "Norte"
-                    if any(c in s for c in _SUR):   return "Sur"
-                    return "Santiago"
+                def _macrozona_up(nombre, comuna):
+                    s = (str(nombre or "") + " " + str(comuna or "")).upper()
+                    if any(c in s for c in _NORTE_CIU): return "Norte"
+                    if any(c in s for c in _SUR_CIU):   return "Sur"
+                    return "Centro (Santiago)"
+                def _zona_copec_up(eo):
+                    s = str(eo or "").strip()
+                    if s.startswith("20"): return "Sur"
+                    if s.startswith("40"): return "Centro"
+                    if s.startswith("60"): return "Santiago"
+                    return None
+                # Mapa PBR→EE_S del catálogo Aramco (traducir a códigos oficiales)
+                _pbr_to_ees_up = {}
+                try:
+                    _cat_ar_up = df_eds[df_eds["cliente"].astype(str).str.upper().str.contains(
+                        "ARAMCO|ESMAX", na=False, regex=True)]
+                    for _, _r in _cat_ar_up.iterrows():
+                        _eo = str(_r.get("eds_occim") or "").strip()
+                        _er = _r.get("eds_occim_raw") or _r.get("_cod_occim_frac")
+                        _er = str(_er).strip() if _er else ""
+                        if _eo.startswith("PBR") and _er.startswith("EE_S"):
+                            _pbr_to_ees_up[_eo] = _er
+                except Exception:
+                    pass
+                def _zona_row_up(cli, edsocc, edsnom, com):
+                    cu = str(cli or "").strip().upper()
+                    if cu == "COPEC":
+                        z = _zona_copec_up(edsocc)
+                        if z is not None:
+                            return z
+                    if "ARAMCO" in cu or "ESMAX" in cu:
+                        e = str(edsocc or "").strip()
+                        ees = e if e.startswith("EE_S") else _pbr_to_ees_up.get(e)
+                        z = _zona_aramco(ees)
+                        if z is not None:
+                            return z
+                    return _macrozona_up(edsnom, com)
 
-                _src_reg = _df_up.get("eds_nombre",
-                    pd.Series("", index=_df_up.index)).fillna("").astype(str)
-                if "comuna" in _df_up.columns:
-                    _src_reg = _src_reg + " " + _df_up["comuna"].fillna("").astype(str)
-                _df_up["_region"] = _src_reg.apply(_region_ll)
+                # Calcular zona por fila para df_up (correctivos) — despues aplicaremos filtro
+                _eds_up_col = _df_up.get("eds_occim", pd.Series("", index=_df_up.index)).fillna("")
+                _cli_up_col = _df_up.get("cliente",   pd.Series("", index=_df_up.index)).fillna("")
+                _nom_up_col = _df_up.get("eds_nombre",pd.Series("", index=_df_up.index)).fillna("")
+                _com_up_col = _df_up.get("comuna",    pd.Series("", index=_df_up.index)).fillna("")
+                _df_up["_zona"] = [
+                    _zona_row_up(cl, eo, en, co)
+                    for cl, eo, en, co in zip(_cli_up_col, _eds_up_col, _nom_up_col, _com_up_col)
+                ]
 
-                # ── Filtros: Cliente + Región + EDS ────────────────────
+                # ── Filtros: Cliente + Zona + EDS ─────────────────────
                 _fu1s, _fu2s, _fu3s = st.columns(3)
                 with _fu1s:
                     _CLI_PREF = ["COPEC", "Aramco (Esmax)", "SHELL (Enex)"]
@@ -4431,8 +4471,24 @@ if _page == _NAV_PAGES[1]:
                         sorted([c for c in _cli_present if c not in _CLI_PREF])
                     _up_sla_cli = st.selectbox("Cliente", _cli_up_opts, key="upsla_cli")
                 with _fu2s:
-                    _up_sla_reg = st.selectbox("Región",
-                        ["Todas", "Santiago", "Norte", "Sur"], key="upsla_reg")
+                    # Opciones de zona segun cliente (misma logica que vista Clientes)
+                    _cli_up_norm = (_up_sla_cli or "").strip().upper()
+                    if _cli_up_norm == "COPEC":
+                        _zona_opts_up = ["Santiago", "Centro", "Sur"]
+                        _zona_key_up = "copec"
+                    elif "ARAMCO" in _cli_up_norm or "ESMAX" in _cli_up_norm:
+                        _zona_opts_up = ["Norte", "Centro", "Santiago", "Sur"]
+                        _zona_key_up = "aramco"
+                    else:
+                        _zona_opts_up = ["Centro (Santiago)", "Norte", "Sur"]
+                        _zona_key_up = "gen"
+                    _up_sla_zona = st.selectbox(
+                        "Zona", ["Todas"] + _zona_opts_up,
+                        key=f"upsla_zona_{_zona_key_up}",
+                        help="Zonificación cambia según cliente: COPEC por prefijo del código "
+                             "(60→Santiago, 40→Centro, 20→Sur); ARAMCO usa las 4 zonas oficiales; "
+                             "SHELL/otros usa clasificación geográfica.",
+                    )
                 with _fu3s:
                     _eds_pool = sorted(
                         _df_up["eds_nombre"].dropna().unique().tolist()
@@ -4442,8 +4498,8 @@ if _page == _NAV_PAGES[1]:
 
                 if _up_sla_cli != "Todos":
                     _df_up = _df_up[_df_up["cliente"] == _up_sla_cli]
-                if _up_sla_reg != "Todas":
-                    _df_up = _df_up[_df_up["_region"] == _up_sla_reg]
+                if _up_sla_zona != "Todas":
+                    _df_up = _df_up[_df_up["_zona"] == _up_sla_zona]
                 if _up_sla_eds != "Todas":
                     _df_up = _df_up[_df_up["eds_nombre"] == _up_sla_eds]
 
@@ -4514,14 +4570,18 @@ if _page == _NAV_PAGES[1]:
                                     _df_prev_up["codigo_eds"].isin(_cod_eds_sel)
                                 ]
 
-                        # Filtro 4: región (por estacion/ubicacion, misma lógica del uptime MP)
-                        if _up_sla_reg != "Todas" and not _df_prev_up.empty:
-                            _src_reg_prev = (
-                                _df_prev_up["estacion"].fillna(_df_prev_up.get("ubicacion",""))
-                                .fillna("").astype(str)
-                            )
+                        # Filtro 4: zona (misma logica que correctivas — por cliente)
+                        if _up_sla_zona != "Todas" and not _df_prev_up.empty:
+                            _pcli = _df_prev_up.get("cliente", pd.Series("", index=_df_prev_up.index)).fillna("")
+                            _peds = _df_prev_up.get("codigo_eds", pd.Series("", index=_df_prev_up.index)).fillna("")
+                            _pnom = _df_prev_up.get("estacion", pd.Series("", index=_df_prev_up.index)).fillna("")
+                            _pcom = _df_prev_up.get("ubicacion", pd.Series("", index=_df_prev_up.index)).fillna("")
+                            _prev_zona = [
+                                _zona_row_up(cl, eo, en, co)
+                                for cl, eo, en, co in zip(_pcli, _peds, _pnom, _pcom)
+                            ]
                             _df_prev_up = _df_prev_up[
-                                _src_reg_prev.apply(_region_ll) == _up_sla_reg
+                                pd.Series(_prev_zona, index=_df_prev_up.index) == _up_sla_zona
                             ]
 
                         # Suma de paro: real con fallback a estim
