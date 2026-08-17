@@ -4265,7 +4265,14 @@ if _page == _NAV_PAGES[1]:
                 # Uptime = tiempo con máquina operativa. Por definicion operativa solo las
                 # P1 (maquina detenida) cuentan como paro. P2 (parcial) / P3 (degradada) /
                 # P4 (no urgente) NO detienen el equipo (ver pancarta de prioridades).
+                # Guardamos el conteo total ANTES del filtro P1 para mostrar contexto
+                # (para que sea comparable con la vista Estaciones de servicio que muestra
+                # todas las correctivas sin filtrar prioridad).
                 _prio_norm = _df_up["prioridad"].astype(str).str.upper().str.strip()
+                _n_total_corr_pre = int(len(_df_up))
+                _n_p2_pre = int((_prio_norm == "P2").sum())
+                _n_p3_pre = int((_prio_norm == "P3").sum())
+                _n_p4_pre = int((_prio_norm == "P4").sum())
                 _df_up = _df_up[_prio_norm == "P1"]
 
                 # ── Período evaluado dinámico según filtros de fecha ───
@@ -4490,18 +4497,54 @@ if _page == _NAV_PAGES[1]:
                              "SHELL/otros usa clasificación geográfica.",
                     )
                 with _fu3s:
-                    _eds_pool = sorted(
-                        _df_up["eds_nombre"].dropna().unique().tolist()
-                    ) if "eds_nombre" in _df_up.columns else []
-                    _up_sla_eds = st.selectbox("Estación / EDS",
-                        ["Todas"] + _eds_pool, key="upsla_eds")
+                    # Opciones = codigos EDS (permite escribir SH_2, EE_S038, 60011...)
+                    # Mostradas como "COD · Nombre" via format_func.
+                    _eds_code_to_name = {}
+                    if "eds_occim" in _df_up.columns:
+                        for _co, _no in zip(
+                            _df_up["eds_occim"].fillna("").astype(str),
+                            _df_up.get("eds_nombre",
+                                pd.Series("", index=_df_up.index)).fillna("").astype(str),
+                        ):
+                            _co = _co.strip()
+                            if _co and _co not in _eds_code_to_name:
+                                _eds_code_to_name[_co] = _no.strip()
+                    # Sumar tambien codigos que solo tienen preventivas
+                    if not _df_prev_up.empty and "codigo_eds" in _df_prev_up.columns:
+                        for _co, _no in zip(
+                            _df_prev_up["codigo_eds"].fillna("").astype(str),
+                            _df_prev_up.get("estacion",
+                                pd.Series("", index=_df_prev_up.index)).fillna("").astype(str),
+                        ):
+                            _co = _co.strip()
+                            if _co and _co not in _eds_code_to_name:
+                                _eds_code_to_name[_co] = _no.strip()
+                    # Filtrar codigos que NO son EDS reales (PART-, OCCIM-, etc.)
+                    _codigos_no_reales_sel = ("PART-", "OCCIM", "OCCIM-", "AUTEC", "TEST")
+                    _eds_codes = sorted(
+                        c for c in _eds_code_to_name.keys()
+                        if c and not c.upper().startswith(_codigos_no_reales_sel)
+                    )
+                    def _fmt_eds_opt(c):
+                        if c == "Todas":
+                            return "Todas"
+                        _n = _eds_code_to_name.get(c, "")
+                        return f"{c} · {_n}" if _n else c
+                    _up_sla_eds = st.selectbox(
+                        "Estación / EDS",
+                        ["Todas"] + _eds_codes,
+                        format_func=_fmt_eds_opt,
+                        key="upsla_eds",
+                        help="Escribe el código (SH_2, EE_S038, 60011...) para buscar rápido.",
+                    )
 
                 if _up_sla_cli != "Todos":
                     _df_up = _df_up[_df_up["cliente"] == _up_sla_cli]
                 if _up_sla_zona != "Todas":
                     _df_up = _df_up[_df_up["_zona"] == _up_sla_zona]
                 if _up_sla_eds != "Todas":
-                    _df_up = _df_up[_df_up["eds_nombre"] == _up_sla_eds]
+                    # Ahora filtramos por codigo (eds_occim), no por nombre
+                    _df_up = _df_up[_df_up["eds_occim"].astype(str) == _up_sla_eds]
 
                 # ── Cálculo principal: paro por CORRECTIVAS ────────────
                 _paro_corr_seg = _df_up["_paro_seg"].sum()
@@ -4600,9 +4643,11 @@ if _page == _NAV_PAGES[1]:
                 # ── KPIs ───────────────────────────────────────────────
                 _k1s, _k2s, _k3s, _k4s, _k5s = st.columns(5)
                 _k1s.metric("P1 contados", f"{len(_df_up):,}",
-                            delta="Máquina detenida",
+                            delta=f"de {_n_total_corr_pre:,} correctivas · P2:{_n_p2_pre} P3:{_n_p3_pre} P4:{_n_p4_pre}",
                             help="Solo se cuentan correctivos P1 — únicos que detienen el equipo. "
-                                 "P2/P3/P4 no aplican para uptime.")
+                                 f"P2/P3/P4 no aplican para uptime. En la vista Estaciones de servicio "
+                                 f"aparecen las {_n_total_corr_pre:,} correctivas totales (todas las prioridades), "
+                                 f"por eso el número es mayor allá.")
                 _k2s.metric("Tiempo detenido (Correctivas)",
                             f"{int(_paro_corr_seg // 3600):,}h "
                             f"{int((_paro_corr_seg % 3600) // 60):02d}m",
@@ -4693,13 +4738,23 @@ if _page == _NAV_PAGES[1]:
                     _rk["Tiempo detenido (h)"] = (_rk["Tiempo_paro_seg"] / 3600).round(1)
                     _rk["Correctivas (h)"] = (_rk["Paro_corr_seg"] / 3600).round(1)
                     _rk["Preventivas (h)"] = (_rk["Paro_prev_seg"] / 3600).round(1)
+                    # Uptime % por EDS (mismo denominador global: dias × 24h)
+                    _rk["Uptime %"] = (
+                        (1 - _rk["Tiempo_paro_seg"] / _seg_equipo_up).clip(lower=0) * 100
+                    ).round(3)
+                    # Excluir codigos que NO son EDS reales (PART-, OCCIM-, vacios)
+                    _codigos_no_reales = ("PART-", "OCCIM", "OCCIM-", "AUTEC", "TEST")
+                    _mask_real = ~_rk["eds_occim"].fillna("").astype(str).str.upper().str.startswith(
+                        _codigos_no_reales)
+                    _mask_real &= _rk["eds_occim"].fillna("").astype(str).str.strip() != ""
+                    _rk = _rk[_mask_real]
                     _rk = _rk.sort_values("Tiempo_paro_seg", ascending=False).head(5)
                     _rk["#"] = ["🥇","🥈","🥉","4️⃣","5️⃣"][:len(_rk)]
 
                     _rk_show = _rk[[
                         "#", "eds_nombre", "eds_occim", "Llamados", "MPs_con_paro",
                         "Correctivas (h)", "Preventivas (h)",
-                        "Tiempo detenido (h:mm)", "Tiempo detenido (h)"
+                        "Tiempo detenido (h:mm)", "Tiempo detenido (h)", "Uptime %"
                     ]].rename(columns={
                         "eds_nombre":    "Estación",
                         "eds_occim":     "Cód. EDS",
@@ -4721,6 +4776,9 @@ if _page == _NAV_PAGES[1]:
                                 format="%.1f h", min_value=0,
                                 max_value=float(_rk["Tiempo detenido (h)"].max()) if not _rk.empty else 1,
                                 width=180),
+                            "Uptime %":                st.column_config.NumberColumn(
+                                format="%.3f%%", width=95,
+                                help="1 − (tiempo paro / (dias × 24h)) — 100% = siempre operativo"),
                         })
 
                 st.divider()
@@ -4825,6 +4883,12 @@ if _page == _NAV_PAGES[1]:
                     _gpe["Uptime %"] = (
                         (1 - _gpe["Tiempo_paro_seg"] / _seg_equipo_up).clip(lower=0) * 100
                     ).round(3)
+                    # Excluir codigos que NO son EDS reales (PART-, OCCIM-, etc.)
+                    _codigos_no_reales_g = ("PART-", "OCCIM", "OCCIM-", "AUTEC", "TEST")
+                    _mask_real_g = ~_gpe["eds_occim"].fillna("").astype(str).str.upper().str.startswith(
+                        _codigos_no_reales_g)
+                    _mask_real_g &= _gpe["eds_occim"].fillna("").astype(str).str.strip() != ""
+                    _gpe = _gpe[_mask_real_g]
                     _gpe = _gpe.sort_values("Tiempo_paro_seg", ascending=False).head(30)
 
                     _gpe_show = _gpe[[
