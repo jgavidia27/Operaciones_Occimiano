@@ -5307,8 +5307,55 @@ elif _page == _NAV_PAGES[3]:
         df_eds_c = df_eds_activas[df_eds_activas["cliente"].str.contains(
             company.split()[0], case=False, na=False)].copy()
 
+        # ── Zonificación por cliente (mismo criterio que Cumplimiento SLA) ──
+        _NORTE_CIU_ES = {"IQUIQUE","ARICA","ANTOFAGASTA","CALAMA","COPIAPO","COPIAPÓ",
+                         "OVALLE","LA SERENA","COQUIMBO","VALLENAR","ILLAPEL","HUASCO",
+                         "ALTO HOSPICIO","TOCOPILLA","MEJILLONES"}
+        _SUR_CIU_ES   = {"CONCEPCION","CONCEPCIÓN","OSORNO","TEMUCO","VALDIVIA",
+                         "PUERTO MONTT","CHILLAN","CHILLÁN","LOS ANGELES","LOS ÁNGELES",
+                         "LINARES","TALCA","CURICO","CURICÓ","RANCAGUA","FRUTILLAR",
+                         "VICTORIA","RENGO","SAN FERNANDO","PUERTO VARAS","ANCUD",
+                         "CASTRO","COIHAIQUE","LA UNION","LA UNIÓN"}
+        def _macrozona_es(nombre, comuna):
+            s = (str(nombre or "") + " " + str(comuna or "")).upper()
+            if any(c in s for c in _NORTE_CIU_ES): return "Norte"
+            if any(c in s for c in _SUR_CIU_ES):   return "Sur"
+            return "Centro (Santiago)"
+        def _zona_copec_es(eo):
+            s = str(eo or "").strip()
+            if s.startswith("20"): return "Sur"
+            if s.startswith("40"): return "Centro"
+            if s.startswith("60"): return "Santiago"
+            return None
+        # Mapa PBR→EE_S para Aramco
+        _pbr_to_ees_es = {}
+        try:
+            _cat_ar_es = df_eds[df_eds["cliente"].astype(str).str.upper().str.contains(
+                "ARAMCO|ESMAX", na=False, regex=True)]
+            for _, _r in _cat_ar_es.iterrows():
+                _eo = str(_r.get("eds_occim") or "").strip()
+                _er = _r.get("eds_occim_raw") or _r.get("_cod_occim_frac")
+                _er = str(_er).strip() if _er else ""
+                if _eo.startswith("PBR") and _er.startswith("EE_S"):
+                    _pbr_to_ees_es[_eo] = _er
+        except Exception:
+            pass
+        def _zona_row_es(cli, edsocc, edsnom, com):
+            cu = str(cli or "").strip().upper()
+            if cu == "COPEC":
+                z = _zona_copec_es(edsocc)
+                if z is not None:
+                    return z
+            if "ARAMCO" in cu or "ESMAX" in cu:
+                e = str(edsocc or "").strip()
+                ees = e if e.startswith("EE_S") else _pbr_to_ees_es.get(e)
+                z = _zona_aramco(ees)
+                if z is not None:
+                    return z
+            return _macrozona_es(edsnom, com)
+
         # ── Filtros ──────────────────────────────────────────────────────────
-        _frow1, _frow2 = st.columns([2, 3])
+        _frow1, _frow_zn, _frow2 = st.columns([1.6, 1.4, 3])
         with _frow1:
             _mes_sel = st.multiselect(
                 "Mes (dejar vacío = año completo)",
@@ -5317,7 +5364,40 @@ elif _page == _NAV_PAGES[3]:
                 key=f"eds_mes_{_ck}",
                 format_func=lambda m: f"{_MES_ES[int(m.split('-')[1])]} {m.split('-')[0]}",
             )
+        with _frow_zn:
+            # Opciones de zona segun cliente
+            _cu_es = company.upper()
+            if _cu_es == "COPEC":
+                _zn_opts_es = ["Santiago", "Centro", "Sur"]
+                _zn_key_es = "copec"
+            elif "ARAMCO" in _cu_es or "ESMAX" in _cu_es:
+                _zn_opts_es = ["Norte", "Centro", "Santiago", "Sur"]
+                _zn_key_es = "aramco"
+            else:
+                _zn_opts_es = ["Centro (Santiago)", "Norte", "Sur"]
+                _zn_key_es = "gen"
+            _zona_sel_es = st.selectbox(
+                "Zona",
+                ["Todas"] + _zn_opts_es,
+                key=f"eds_zona_{_ck}_{_zn_key_es}",
+                help="Zonificación cambia según cliente: COPEC por prefijo del código "
+                     "(60→Santiago, 40→Centro, 20→Sur); ARAMCO 4 zonas oficiales; "
+                     "SHELL/otros clasificación geográfica.",
+            )
         _meses_activos = _mes_sel if _mes_sel else _MESES_DISP
+
+        # Codigos EDS que quedan tras aplicar la zona seleccionada
+        # (se calcula una sola vez sobre df_ll_c — universo de EDS del cliente)
+        _codes_zona_es = None
+        if _zona_sel_es != "Todas" and not df_ll_c.empty and "eds_occim" in df_ll_c.columns:
+            _df_z = df_ll_c[["eds_occim","eds_nombre","comuna"]].drop_duplicates("eds_occim") \
+                    if "comuna" in df_ll_c.columns else \
+                    df_ll_c[["eds_occim","eds_nombre"]].drop_duplicates("eds_occim").assign(comuna="")
+            _z_series = [
+                _zona_row_es(company, eo, en, co)
+                for eo, en, co in zip(_df_z["eds_occim"], _df_z["eds_nombre"], _df_z.get("comuna", ""))
+            ]
+            _codes_zona_es = set(_df_z["eds_occim"][pd.Series(_z_series) == _zona_sel_es])
 
         # Opciones EDS desde df_llamados (tienen eds_occim y eds_nombre)
         # Construir opciones enriquecidas: "60107 · E/S Vivaceta 715 · CONCHALÍ"
@@ -5376,6 +5456,8 @@ elif _page == _NAV_PAGES[3]:
                 pd.to_datetime(df["fecha_llamado"], errors="coerce").dt.to_period("M").astype(str).isin(_meses_activos)]
             if _eds_sel_code:
                 df = df[df["eds_occim"] == _eds_sel_code]
+            if _codes_zona_es is not None and "eds_occim" in df.columns:
+                df = df[df["eds_occim"].isin(_codes_zona_es)]
             return df
 
         def _filtrar_wo(df):
@@ -5383,6 +5465,8 @@ elif _page == _NAV_PAGES[3]:
             df = df[df["mes_str"].isin(_meses_activos)]
             if _eds_sel_code:
                 df = df[df["eds_occim"] == _eds_sel_code]
+            if _codes_zona_es is not None and "eds_occim" in df.columns:
+                df = df[df["eds_occim"].isin(_codes_zona_es)]
             return df
 
         # Enrich df_ll_c with mes_str if missing
