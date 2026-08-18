@@ -8601,13 +8601,56 @@ elif _page == _NAV_PAGES[4]:
                 _e["km"] = float(_rd.get("km") or 0)
             _df = _p.DataFrame(_rows)
             if _df.empty: return _df
-            # Agregar mapeo patente → técnico
+            # Agregar mapeo patente → técnico (mapeo FIJO base de tecnicos_hhee)
             _rt = _r.get(f"{_u}/rest/v1/tecnicos_hhee?select=patente,nombre_completo,equipo,rut,tipo_vehiculo",
                           headers=_h, timeout=15)
             if _rt.status_code == 200:
                 _tec = _p.DataFrame(_rt.json())
                 if not _tec.empty:
                     _df = _df.merge(_tec, on="patente", how="left")
+
+            # ── Override por VIGENCIA de fecha (asignaciones_vehiculo) ──
+            # Si el encargado registró que la patente P la usó el técnico T
+            # entre fecha_desde y fecha_hasta, atribuimos los viajes de esa
+            # fecha a T (no al mapeo fijo). Si la tabla no existe / está vacía,
+            # se conserva el mapeo fijo (sin regresión).
+            try:
+                _ra = _r.get(
+                    f"{_u}/rest/v1/asignaciones_vehiculo"
+                    f"?select=patente,rut,nombre_tecnico,equipo,fecha_desde,fecha_hasta",
+                    headers=_h, timeout=15)
+                if _ra.status_code == 200:
+                    _asig = _ra.json()
+                    if _asig:
+                        # Pre-parsear fechas de las asignaciones una sola vez
+                        for a in _asig:
+                            a["_fd"] = _p.to_datetime(a["fecha_desde"], errors="coerce").date()
+                            a["_fh"] = (_p.to_datetime(a["fecha_hasta"], errors="coerce").date()
+                                        if a.get("fecha_hasta") else None)
+                        _fecha_ev = _p.to_datetime(_df["fecha"], errors="coerce").dt.date.tolist()
+                        _pats = _df["patente"].tolist()
+                        _nom_new = _df["nombre_completo"].tolist() if "nombre_completo" in _df.columns else [None]*len(_df)
+                        _rut_new = _df["rut"].tolist() if "rut" in _df.columns else [None]*len(_df)
+                        _eq_new  = _df["equipo"].tolist() if "equipo" in _df.columns else [None]*len(_df)
+                        for _i in range(len(_df)):
+                            _f = _fecha_ev[_i]; _pat = _pats[_i]
+                            if _f is None:
+                                continue
+                            for a in _asig:
+                                if a["patente"] != _pat:
+                                    continue
+                                if _f >= a["_fd"] and (a["_fh"] is None or _f <= a["_fh"]):
+                                    _nom_new[_i] = a["nombre_tecnico"]
+                                    _rut_new[_i] = a["rut"]
+                                    if a.get("equipo"):
+                                        _eq_new[_i] = a["equipo"]
+                                    break
+                        _df["nombre_completo"] = _nom_new
+                        _df["rut"] = _rut_new
+                        _df["equipo"] = _eq_new
+            except Exception:
+                pass
+
             # Fallback: si un evento GPS no matchea ningún técnico, usa la
             # patente como nombre. Sin esto el groupby con dropna=True los
             # elimina y desaparecen del ranking de 'Uso vehículos'.

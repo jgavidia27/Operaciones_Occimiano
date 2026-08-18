@@ -234,6 +234,100 @@ def admin_pins():
     return render_template_string(ADMIN_PINS_TEMPLATE, users=all_users, msg=msg)
 
 
+def _roster_para_dropdowns():
+    """Devuelve (patentes, tecnicos) desde tecnicos_hhee para los selects.
+    patentes: lista de str · tecnicos: lista de dicts {rut, nombre, equipo}."""
+    import requests as _req
+    _sb_url = os.getenv("SUPABASE_URL", "")
+    _sb_key = os.getenv("SUPABASE_KEY", "")
+    if not _sb_url or not _sb_key:
+        return [], []
+    try:
+        r = _req.get(
+            f"{_sb_url}/rest/v1/tecnicos_hhee"
+            f"?select=rut,nombre_completo,patente,equipo&order=nombre_completo.asc",
+            headers={"apikey": _sb_key, "Authorization": f"Bearer {_sb_key}"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return [], []
+        rows = r.json()
+    except Exception:
+        return [], []
+    patentes = sorted({str(x.get("patente") or "").strip()
+                       for x in rows if x.get("patente")})
+    tecnicos = [{"rut": x.get("rut"), "nombre": x.get("nombre_completo"),
+                 "equipo": x.get("equipo")} for x in rows if x.get("rut")]
+    return patentes, tecnicos
+
+
+@app.route("/vehiculos", methods=["GET", "POST"])
+@requires_auth
+def vehiculos():
+    u = current_user()
+    if not u or not u.get("is_admin"):
+        return redirect(url_for("index"))
+    import asignaciones_db as _adb
+    from datetime import date as _d
+    msg = ""
+    msg_tipo = "ok"
+
+    if request.method == "POST":
+        accion = request.form.get("accion", "")
+        if accion == "crear":
+            _pat = request.form.get("patente", "").strip()
+            _rut = request.form.get("rut", "").strip()
+            _fd = request.form.get("fecha_desde", "").strip()
+            _fh = request.form.get("fecha_hasta", "").strip() or None
+            _nota = request.form.get("nota", "").strip() or None
+            # Resolver nombre + equipo del rut elegido
+            _patentes, _tecnicos = _roster_para_dropdowns()
+            _t = next((t for t in _tecnicos if t["rut"] == _rut), None)
+            if not _pat or not _rut or not _fd or not _t:
+                msg, msg_tipo = "Faltan datos: patente, técnico y fecha desde son obligatorios.", "err"
+            else:
+                ok, m = _adb.crear(
+                    patente=_pat, rut=_rut, nombre_tecnico=_t["nombre"],
+                    equipo=_t.get("equipo"), fecha_desde=_fd, fecha_hasta=_fh,
+                    nota=_nota, creado_por=u.get("email"),
+                )
+                msg, msg_tipo = m, ("ok" if ok else "err")
+        elif accion == "cerrar":
+            _id = int(request.form.get("id", "0") or 0)
+            _fh = request.form.get("fecha_hasta", "").strip()
+            if _id and _fh:
+                ok, m = _adb.cerrar(_id, _fh)
+                msg, msg_tipo = ("Asignación cerrada." if ok else m), ("ok" if ok else "err")
+            else:
+                msg, msg_tipo = "Falta la fecha de cierre.", "err"
+        elif accion == "eliminar":
+            _id = int(request.form.get("id", "0") or 0)
+            if _id and _adb.eliminar(_id):
+                msg, msg_tipo = "Asignación eliminada.", "ok"
+            else:
+                msg, msg_tipo = "No se pudo eliminar.", "err"
+
+    patentes, tecnicos = _roster_para_dropdowns()
+    # Agrupar asignaciones por patente
+    todas = _adb.list_all()
+    por_patente = {}
+    for a in todas:
+        por_patente.setdefault(a["patente"], []).append(a)
+    # Ordenar cada grupo por fecha_desde desc (ya viene ordenado, reforzamos)
+    grupos = []
+    for pat in sorted(por_patente.keys()):
+        filas = por_patente[pat]
+        grupos.append({"patente": pat, "filas": filas})
+
+    return render_template_string(
+        VEHICULOS_TEMPLATE,
+        user=u, patentes=patentes, tecnicos=tecnicos,
+        grupos=grupos, msg=msg, msg_tipo=msg_tipo,
+        hoy=_d.today().isoformat(),
+        n_total=len(todas),
+    )
+
+
 @app.route("/")
 @requires_auth
 def index():
@@ -878,7 +972,8 @@ HTML_TEMPLATE = r"""
       <h1 style="margin:0;">Indicadores STO</h1>
     </div>
     <div style="display:flex;gap:6px;">
-      {% if user.is_admin %}<a href="/admin/pins" style="background:rgba(59,130,246,.2);color:#93c5fd;border:1px solid rgba(59,130,246,.4);border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Administrar PINs">⚙️ PINs</a>{% endif %}
+      {% if user.is_admin %}<a href="/vehiculos" style="background:rgba(0,168,150,.2);color:#5eead4;border:1px solid rgba(0,168,150,.4);border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Asignación de vehículos">🚐 Vehículos</a>
+      <a href="/admin/pins" style="background:rgba(59,130,246,.2);color:#93c5fd;border:1px solid rgba(59,130,246,.4);border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Administrar PINs">⚙️ PINs</a>{% endif %}
       <a href="javascript:location.reload()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Refrescar datos">🔄</a>
       <a href="/logout" style="background:rgba(239,68,68,.2);color:#fca5a5;border:1px solid rgba(239,68,68,.4);border-radius:8px;padding:6px 10px;font-size:.72rem;text-decoration:none;white-space:nowrap;" title="Cerrar sesión">⏻ Salir</a>
     </div>
@@ -1372,6 +1467,144 @@ ADMIN_PINS_TEMPLATE = r"""
     </tr>
     {% endfor %}
   </table>
+</div>
+</body></html>
+"""
+
+
+VEHICULOS_TEMPLATE = r"""
+<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Asignación de Vehículos · Occimiano</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚐</text></svg>">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:#0F1620;color:#e2e8f0;min-height:100vh;padding:16px 14px 40px;}
+  .wrap{max-width:820px;margin:0 auto;}
+  h1{font-size:1.35rem;color:#fff;margin-bottom:2px;display:flex;align-items:center;gap:8px;}
+  .sub{color:#8A96AB;font-size:.85rem;margin-bottom:16px;line-height:1.45;}
+  .card{background:#1B2432;border:1px solid #2A3648;border-radius:12px;padding:16px;margin-bottom:16px;}
+  .card h2{font-size:.95rem;color:#00A896;margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em;}
+  label{display:block;font-size:.75rem;color:#8A96AB;font-weight:600;margin:10px 0 4px;text-transform:uppercase;letter-spacing:.03em;}
+  select,input[type=date],input[type=text]{width:100%;padding:10px 12px;border-radius:8px;
+    border:1px solid #3A4A63;background:#212C3D;color:#e2e8f0;font-size:15px;}
+  select:focus,input:focus{outline:none;border-color:#00A896;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .btn{padding:11px 20px;border:0;border-radius:8px;font-size:.9rem;font-weight:700;cursor:pointer;width:100%;margin-top:14px;}
+  .btn-primary{background:#00A896;color:#022;} .btn-primary:hover{background:#02c39a;}
+  .btn-back{background:rgba(65,75,90,.4);color:#cbd5e1;text-decoration:none;display:inline-block;
+    padding:8px 16px;border-radius:8px;font-size:.82rem;font-weight:600;}
+  .msg{padding:11px 14px;border-radius:8px;font-size:.85rem;margin-bottom:14px;line-height:1.4;}
+  .msg.ok{background:rgba(0,179,126,.14);border:1px solid rgba(0,179,126,.4);color:#6ee7b7;}
+  .msg.err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;}
+  .pat-group{background:#1B2432;border:1px solid #2A3648;border-radius:12px;margin-bottom:12px;overflow:hidden;}
+  .pat-head{background:#212C3D;padding:10px 14px;font-weight:700;font-size:1rem;color:#fff;
+    display:flex;align-items:center;gap:10px;border-bottom:1px solid #2A3648;}
+  .pat-head .pat-code{font-family:monospace;color:#FFD500;letter-spacing:.05em;}
+  .asig-row{padding:11px 14px;border-bottom:1px solid rgba(42,54,72,.6);font-size:.88rem;}
+  .asig-row:last-child{border-bottom:0;}
+  .asig-tec{font-weight:600;color:#e2e8f0;}
+  .asig-periodo{color:#8A96AB;font-size:.82rem;margin-top:2px;}
+  .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:700;
+    text-transform:uppercase;letter-spacing:.04em;margin-left:6px;}
+  .badge-vig{background:rgba(0,179,126,.2);color:#34d399;}
+  .badge-cerr{background:rgba(148,163,184,.15);color:#94a3b8;}
+  .asig-nota{color:#5C6B82;font-size:.78rem;margin-top:3px;font-style:italic;}
+  .asig-actions{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .asig-actions input[type=date]{width:auto;padding:6px 8px;font-size:13px;}
+  .asig-actions button{padding:6px 12px;border:0;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;}
+  .btn-cerrar{background:#f59e0b;color:#221;} .btn-cerrar:hover{background:#fbbf24;}
+  .btn-del{background:rgba(239,68,68,.2);color:#fca5a5;} .btn-del:hover{background:rgba(239,68,68,.35);}
+  .empty{color:#5C6B82;font-size:.85rem;padding:20px;text-align:center;}
+</style></head><body>
+<div class="wrap">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <h1>🚐 Asignación de Vehículos</h1>
+    <a href="/" class="btn-back">← Dashboard</a>
+  </div>
+  <p class="sub">Registra <b>qué técnico usó cada camioneta y en qué período</b>.
+    Cuando un técnico se cambia de vehículo, crea una nueva asignación con la fecha desde —
+    la anterior se cierra automáticamente. El dashboard usa estas fechas para atribuir
+    correctamente los KM y viajes GPS a quien realmente conducía.</p>
+
+  {% if msg %}<div class="msg {{ msg_tipo }}">{{ msg }}</div>{% endif %}
+
+  <!-- Formulario nueva asignación -->
+  <div class="card">
+    <h2>➕ Registrar cambio / nueva asignación</h2>
+    <form method="post">
+      <input type="hidden" name="accion" value="crear">
+      <label>Patente / Vehículo</label>
+      <select name="patente" required>
+        <option value="">— Selecciona patente —</option>
+        {% for p in patentes %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+      </select>
+      <label>Técnico que la usa</label>
+      <select name="rut" required>
+        <option value="">— Selecciona técnico —</option>
+        {% for t in tecnicos %}<option value="{{ t.rut }}">{{ t.nombre }}{% if t.equipo %} · {{ t.equipo }}{% endif %}</option>{% endfor %}
+      </select>
+      <div class="row2">
+        <div>
+          <label>Desde (fecha)</label>
+          <input type="date" name="fecha_desde" value="{{ hoy }}" required>
+        </div>
+        <div>
+          <label>Hasta (opcional)</label>
+          <input type="date" name="fecha_hasta" placeholder="vigente">
+        </div>
+      </div>
+      <label>Nota (opcional)</label>
+      <input type="text" name="nota" placeholder="Ej: cambió con Juan porque su camioneta está en taller">
+      <button type="submit" class="btn btn-primary">Guardar asignación</button>
+    </form>
+  </div>
+
+  <!-- Histórico por patente -->
+  <h2 style="font-size:1rem;color:#fff;margin:20px 0 10px;">
+    📋 Asignaciones registradas <span style="color:#8A96AB;font-weight:400;font-size:.85rem;">({{ n_total }})</span>
+  </h2>
+  {% if grupos %}
+    {% for g in grupos %}
+    <div class="pat-group">
+      <div class="pat-head"><span class="pat-code">{{ g.patente }}</span></div>
+      {% for a in g.filas %}
+      <div class="asig-row">
+        <div class="asig-tec">{{ a.nombre_tecnico }}
+          {% if a.fecha_hasta %}<span class="badge badge-cerr">cerrada</span>
+          {% else %}<span class="badge badge-vig">vigente</span>{% endif %}
+        </div>
+        <div class="asig-periodo">
+          {{ a.fecha_desde[8:10] }}-{{ a.fecha_desde[5:7] }}-{{ a.fecha_desde[0:4] }}
+          →
+          {% if a.fecha_hasta %}{{ a.fecha_hasta[8:10] }}-{{ a.fecha_hasta[5:7] }}-{{ a.fecha_hasta[0:4] }}
+          {% else %}<b style="color:#34d399;">hoy</b>{% endif %}
+          {% if a.equipo %} · {{ a.equipo }}{% endif %}
+        </div>
+        {% if a.nota %}<div class="asig-nota">{{ a.nota }}</div>{% endif %}
+        <div class="asig-actions">
+          {% if not a.fecha_hasta %}
+          <form method="post" style="display:flex;gap:6px;align-items:center;">
+            <input type="hidden" name="accion" value="cerrar">
+            <input type="hidden" name="id" value="{{ a.id }}">
+            <input type="date" name="fecha_hasta" value="{{ hoy }}" required>
+            <button type="submit" class="btn-cerrar">Cerrar aquí</button>
+          </form>
+          {% endif %}
+          <form method="post" onsubmit="return confirm('¿Eliminar esta asignación?');" style="display:inline;">
+            <input type="hidden" name="accion" value="eliminar">
+            <input type="hidden" name="id" value="{{ a.id }}">
+            <button type="submit" class="btn-del">Eliminar</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty">Aún no hay asignaciones registradas. Crea la primera con el formulario de arriba.</div>
+  {% endif %}
 </div>
 </body></html>
 """
