@@ -2763,15 +2763,24 @@ if _page == _NAV_PAGES[1]:
                              "excepcion_motivo":"Motivo excepción",
                              "n_cotalker":"N° Aviso","reporte":"Reporte de falla"})
                 _buscar_ot = st.text_input(
-                    "Buscar OT", placeholder="Ej: OS-33894",
+                    "Buscar OT / EDS / equipo",
+                    placeholder="Ej: OS-33894 · SH_2 · EE_S038 · EQ-6249 · Panamericana…",
                     key="buscar_ot_sla",
-                    help="Escribe un número de OT (OS-XXXXX) y presiona Enter para filtrar",
+                    help="Busca en OS Fracttal, Cód. EDS, Cód. Esmax, Cód. Equipo o Nombre EDS. "
+                         "Presiona Enter para filtrar.",
                 )
                 if _buscar_ot.strip():
                     _buscar_ot_clean = _buscar_ot.strip().upper()
-                    _df_sla_ot_disp = _df_sla_ot_disp[
-                        _df_sla_ot_disp["OS Fracttal"].str.upper().str.contains(_buscar_ot_clean, na=False)
-                    ]
+                    def _col_str(df, col):
+                        return df[col].astype(str).str.upper() if col in df.columns else pd.Series("", index=df.index)
+                    _mask = (
+                        _col_str(_df_sla_ot_disp, "OS Fracttal").str.contains(_buscar_ot_clean, na=False)
+                        | _col_str(_df_sla_ot_disp, "Cód. EDS").str.contains(_buscar_ot_clean, na=False)
+                        | _col_str(_df_sla_ot_disp, "Cód. Esmax").str.contains(_buscar_ot_clean, na=False)
+                        | _col_str(_df_sla_ot_disp, "Cód. Equipo").str.contains(_buscar_ot_clean, na=False)
+                        | _col_str(_df_sla_ot_disp, "EDS").str.contains(_buscar_ot_clean, na=False)
+                    )
+                    _df_sla_ot_disp = _df_sla_ot_disp[_mask]
                 st.caption(f"**{len(_df_sla_ot_disp):,}** OTs con fechas de apertura y cierre registradas")
                 _show_df(_df_sla_ot_disp, width="stretch", hide_index=True,
                     column_config={
