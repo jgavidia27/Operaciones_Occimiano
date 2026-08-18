@@ -8697,8 +8697,26 @@ elif _page == _NAV_PAGES[4]:
                 ).reset_index()
                 _g = _g[_g["km"] >= _veh_min_km].sort_values("km", ascending=False)
                 _g["km"] = _g["km"].round(1)
-                _g["primer"] = pd.to_datetime(_g["primer"], utc=True).dt.tz_convert("America/Santiago").dt.strftime("%H:%M")
-                _g["ultimo"] = pd.to_datetime(_g["ultimo"], utc=True).dt.tz_convert("America/Santiago").dt.strftime("%H:%M")
+                # Convertir a hora Chile. Si el viaje cruza medianoche (termina en
+                # otro día calendario que la fecha seleccionada), marcar "(+Nd)"
+                # para no confundir — ej. un viaje nocturno que arranca 22:11 y
+                # cierra 04:23 del día siguiente.
+                def _fmt_hora_cruce(ts_series, ref_date):
+                    _ch = pd.to_datetime(ts_series, utc=True).dt.tz_convert("America/Santiago")
+                    _out = []
+                    for _t in _ch:
+                        if pd.isna(_t):
+                            _out.append("—"); continue
+                        _hm = _t.strftime("%H:%M")
+                        _dd = (_t.date() - ref_date).days
+                        if _dd > 0:
+                            _hm += f" (+{_dd}d)"
+                        elif _dd < 0:
+                            _hm += f" ({_dd}d)"
+                        _out.append(_hm)
+                    return _out
+                _g["primer"] = _fmt_hora_cruce(_g["primer"], _fecha_sel)
+                _g["ultimo"] = _fmt_hora_cruce(_g["ultimo"], _fecha_sel)
 
                 # Si es fin de semana, agregar columna "Estado turno"
                 if _es_finde:
@@ -8755,7 +8773,15 @@ elif _page == _NAV_PAGES[4]:
                     st.markdown(f"**{len(_g)} vehículos con actividad** · Total: **{_g['KM'].sum():.1f} km**")
                     _cols_final = ["Patente","Técnico","Equipo","KM","Viajes","Primer viaje","Último viaje"]
 
-                _cfg = {"KM": st.column_config.NumberColumn(format="%.1f km")}
+                _cfg = {
+                    "KM": st.column_config.NumberColumn(format="%.1f km"),
+                    "Último viaje": st.column_config.TextColumn(
+                        help="Hora de término del último viaje del día (hora Chile). "
+                             "'(+1d)' = el viaje cruzó la medianoche y terminó al día siguiente "
+                             "— ej. viaje nocturno que arranca 22:11 y cierra 04:23."),
+                    "Primer viaje": st.column_config.TextColumn(
+                        help="Hora de inicio del primer viaje del día (hora Chile)."),
+                }
                 if _es_finde:
                     _cfg["Estado turno"] = st.column_config.TextColumn(width=115)
                 _show_df(_g[_cols_final].reset_index(drop=True), use_container_width=True,
