@@ -308,23 +308,47 @@ def vehiculos():
                 msg, msg_tipo = "No se pudo eliminar.", "err"
 
     patentes, tecnicos = _roster_para_dropdowns()
+    _hoy_iso = _d.today().isoformat()
     # Agrupar asignaciones por patente
     todas = _adb.list_all()
     por_patente = {}
     for a in todas:
         por_patente.setdefault(a["patente"], []).append(a)
-    # Ordenar cada grupo por fecha_desde desc (ya viene ordenado, reforzamos)
+
+    # ── ESTADO ACTUAL (hoy) — la asignación vigente de cada patente ──
+    def _vigente_hoy(filas):
+        for a in filas:
+            _fd = a["fecha_desde"]
+            _fh = a.get("fecha_hasta")
+            if _fd <= _hoy_iso and (not _fh or _hoy_iso <= _fh):
+                return a
+        return None
+    estado_actual = []
+    for pat in sorted(por_patente.keys()):
+        vig = _vigente_hoy(por_patente[pat])
+        n_cambios = len(por_patente[pat])
+        estado_actual.append({
+            "patente": pat,
+            "tecnico": vig["nombre_tecnico"] if vig else "— sin asignación vigente —",
+            "equipo": (vig.get("equipo") if vig else "") or "",
+            "desde": vig["fecha_desde"] if vig else None,
+            "n_cambios": n_cambios,
+            "sin_vigente": vig is None,
+        })
+
+    # ── HISTORIAL completo agrupado por patente ──
     grupos = []
     for pat in sorted(por_patente.keys()):
-        filas = por_patente[pat]
-        grupos.append({"patente": pat, "filas": filas})
+        grupos.append({"patente": pat, "filas": por_patente[pat],
+                       "cambios": len(por_patente[pat])})
 
     return render_template_string(
         VEHICULOS_TEMPLATE,
         user=u, patentes=patentes, tecnicos=tecnicos,
-        grupos=grupos, msg=msg, msg_tipo=msg_tipo,
-        hoy=_d.today().isoformat(),
-        n_total=len(todas),
+        estado_actual=estado_actual, grupos=grupos,
+        msg=msg, msg_tipo=msg_tipo,
+        hoy=_hoy_iso,
+        n_total=len(todas), n_patentes=len(por_patente),
     )
 
 
@@ -1510,6 +1534,26 @@ VEHICULOS_TEMPLATE = r"""
     text-transform:uppercase;letter-spacing:.04em;margin-left:6px;}
   .badge-vig{background:rgba(0,179,126,.2);color:#34d399;}
   .badge-cerr{background:rgba(148,163,184,.15);color:#94a3b8;}
+  .badge-hist{background:rgba(96,165,250,.18);color:#93c5fd;}
+  .badge-uno{background:rgba(148,163,184,.12);color:#94a3b8;}
+  /* Estado actual tabla */
+  .estado-card{border:1px solid rgba(0,179,126,.35);}
+  .tabla-wrap{overflow-x:auto;border-radius:8px;}
+  .estado-tabla{width:100%;border-collapse:collapse;font-size:.86rem;}
+  .estado-tabla th{text-align:left;padding:8px 10px;color:#8A96AB;font-size:.72rem;
+    text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #2A3648;font-weight:700;}
+  .estado-tabla td{padding:9px 10px;border-bottom:1px solid rgba(42,54,72,.5);vertical-align:middle;}
+  .estado-tabla tr:last-child td{border-bottom:0;}
+  .estado-tabla .pat-code{font-family:monospace;color:#FFD500;letter-spacing:.05em;font-weight:700;}
+  .estado-tabla .td-tec{color:#e2e8f0;font-weight:600;}
+  .estado-tabla .td-eq{color:#8A96AB;font-size:.8rem;}
+  .estado-tabla .td-fecha{color:#8A96AB;font-size:.8rem;font-family:monospace;}
+  .estado-tabla .row-sin td{opacity:.6;}
+  .estado-hint{color:#5C6B82;font-size:.78rem;margin-top:10px;line-height:1.4;}
+  .timeline-row{position:relative;padding-left:26px;}
+  .timeline-row::before{content:"";position:absolute;left:11px;top:16px;width:8px;height:8px;
+    border-radius:50%;background:#3A4658;}
+  .timeline-row:first-of-type::before{background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.18);}
   .asig-nota{color:#5C6B82;font-size:.78rem;margin-top:3px;font-style:italic;}
   .asig-actions{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
   .asig-actions input[type=date]{width:auto;padding:6px 8px;font-size:13px;}
@@ -1529,6 +1573,38 @@ VEHICULOS_TEMPLATE = r"""
     correctamente los KM y viajes GPS a quien realmente conducía.</p>
 
   {% if msg %}<div class="msg {{ msg_tipo }}">{{ msg }}</div>{% endif %}
+
+  <!-- ESTADO ACTUAL (hoy) -->
+  <div class="card estado-card">
+    <h2>📊 Estado actual — hoy ({{ hoy[8:10] }}-{{ hoy[5:7] }}-{{ hoy[0:4] }})</h2>
+    {% if estado_actual %}
+    <div class="tabla-wrap">
+      <table class="estado-tabla">
+        <thead><tr>
+          <th>Patente</th><th>Técnico que la usa hoy</th><th>Equipo</th><th>Desde</th><th>Cambios</th>
+        </tr></thead>
+        <tbody>
+        {% for e in estado_actual %}
+          <tr class="{% if e.sin_vigente %}row-sin{% endif %}">
+            <td><span class="pat-code">{{ e.patente }}</span></td>
+            <td class="td-tec">{{ e.tecnico }}</td>
+            <td class="td-eq">{{ e.equipo or '—' }}</td>
+            <td class="td-fecha">{% if e.desde %}{{ e.desde[8:10] }}-{{ e.desde[5:7] }}-{{ e.desde[0:4] }}{% else %}—{% endif %}</td>
+            <td class="td-cambios">
+              {% if e.n_cambios > 1 %}<span class="badge badge-hist">{{ e.n_cambios }} períodos ↓</span>
+              {% else %}<span class="badge badge-uno">estable</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="estado-hint">{{ n_patentes }} vehículos con asignación · las patentes con
+      "<b>N períodos</b>" han rotado de técnico — mirá el historial abajo para ver cuándo.</p>
+    {% else %}
+    <div class="empty">Aún no hay asignaciones. Registrá la primera abajo.</div>
+    {% endif %}
+  </div>
 
   <!-- Formulario nueva asignación -->
   <div class="card">
@@ -1561,25 +1637,31 @@ VEHICULOS_TEMPLATE = r"""
     </form>
   </div>
 
-  <!-- Histórico por patente -->
+  <!-- Histórico por patente (timeline) -->
   <h2 style="font-size:1rem;color:#fff;margin:20px 0 10px;">
-    📋 Asignaciones registradas <span style="color:#8A96AB;font-weight:400;font-size:.85rem;">({{ n_total }})</span>
+    📜 Historial de cambios <span style="color:#8A96AB;font-weight:400;font-size:.85rem;">({{ n_total }} registros · {{ n_patentes }} vehículos)</span>
   </h2>
+  <p class="sub" style="margin-top:-4px;">Cada patente muestra su línea de tiempo completa, del cambio más reciente
+    (arriba, <b style="color:#34d399;">vigente</b>) al más antiguo. Así ves cómo ha rotado cada camioneta.</p>
   {% if grupos %}
     {% for g in grupos %}
     <div class="pat-group">
-      <div class="pat-head"><span class="pat-code">{{ g.patente }}</span></div>
+      <div class="pat-head">
+        <span class="pat-code">{{ g.patente }}</span>
+        {% if g.cambios > 1 %}<span class="badge badge-hist">{{ g.cambios }} períodos</span>
+        {% else %}<span class="badge badge-uno">sin cambios</span>{% endif %}
+      </div>
       {% for a in g.filas %}
-      <div class="asig-row">
+      <div class="asig-row timeline-row">
         <div class="asig-tec">{{ a.nombre_tecnico }}
-          {% if a.fecha_hasta %}<span class="badge badge-cerr">cerrada</span>
-          {% else %}<span class="badge badge-vig">vigente</span>{% endif %}
+          {% if a.fecha_hasta %}<span class="badge badge-cerr">período cerrado</span>
+          {% else %}<span class="badge badge-vig">vigente hoy</span>{% endif %}
         </div>
         <div class="asig-periodo">
           {{ a.fecha_desde[8:10] }}-{{ a.fecha_desde[5:7] }}-{{ a.fecha_desde[0:4] }}
           →
           {% if a.fecha_hasta %}{{ a.fecha_hasta[8:10] }}-{{ a.fecha_hasta[5:7] }}-{{ a.fecha_hasta[0:4] }}
-          {% else %}<b style="color:#34d399;">hoy</b>{% endif %}
+          {% else %}<b style="color:#34d399;">hoy (vigente)</b>{% endif %}
           {% if a.equipo %} · {{ a.equipo }}{% endif %}
         </div>
         {% if a.nota %}<div class="asig-nota">{{ a.nota }}</div>{% endif %}
