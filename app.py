@@ -2705,12 +2705,31 @@ if _page == _NAV_PAGES[1]:
                     return _pbr_to_ees.get(eo, "—")
                 _df_sla_ot["cod_esmax"] = _df_sla_ot.apply(_cod_esmax, axis=1)
 
+                # Enriquecer con codigo_activo (Cód. Equipo) desde ordenes_trabajo
+                # de Supabase. Match por os_fracttal <-> id_ot. Una OT compuesta
+                # puede tener varios equipos -> los concatenamos con ", ".
+                try:
+                    _raw_corr_sla = load_correctivas_supabase()
+                    if _raw_corr_sla:
+                        _df_corr_sla = pd.DataFrame(_raw_corr_sla)[["id_ot","codigo_activo"]].copy()
+                        _df_corr_sla["codigo_activo"] = _df_corr_sla["codigo_activo"].fillna("").astype(str)
+                        _map_codact = (_df_corr_sla.groupby("id_ot", as_index=False)
+                            .agg(codigo_activo=("codigo_activo",
+                                lambda s: ", ".join(sorted({c.strip() for x in s for c in str(x).split(",") if c.strip()})))))
+                        _df_sla_ot = _df_sla_ot.merge(
+                            _map_codact, how="left",
+                            left_on="os_fracttal", right_on="id_ot",
+                        )
+                        _df_sla_ot["codigo_activo"] = _df_sla_ot["codigo_activo"].fillna("").replace("", "—")
+                except Exception:
+                    _df_sla_ot["codigo_activo"] = "—"
+
                 # Orden solicitado por operaciones:
                 # OS Fracttal | N° Aviso | Fecha llamado | Fecha atención |
-                # Cód. Esmax (solo Aramco) | Cód. EDS | EDS | Cliente | ...
+                # Cód. Esmax (solo Aramco) | Cód. EDS | EDS | Cliente | ... | Zona | Cód. Equipo | ...
                 _sla_ot_base = [c for c in ["os_fracttal","n_cotalker","fecha_llamado","fecha_atencion",
                                             "cod_esmax","eds_occim","eds_nombre","cliente","tecnico",
-                                            "prioridad","ciudad","zona_display"] if c in _df_sla_ot.columns]
+                                            "prioridad","ciudad","zona_display","codigo_activo"] if c in _df_sla_ot.columns]
                 _extra = ["tiempo_res","umbral_lbl","_uso_pct","_exc_pct","estado_sla"]
                 # Reporte de falla ANTES de Motivo excepción (orden pedido)
                 if "reporte" in _df_sla_ot.columns:
@@ -2737,6 +2756,7 @@ if _page == _NAV_PAGES[1]:
                              "eds_occim":"Cód. EDS",
                              "eds_nombre":"EDS","cliente":"Cliente","tecnico":"Técnico",
                              "prioridad":"Prioridad","ciudad":"Ciudad","zona_display":"Zona",
+                             "codigo_activo":"Cód. Equipo",
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
                              "_uso_pct":"Uso SLA","_exc_pct":"Exceso",
                              "estado_sla":"Estado SLA",
@@ -2771,6 +2791,9 @@ if _page == _NAV_PAGES[1]:
                         "Zona":              st.column_config.TextColumn(width=95,
                             help="COPEC: Santiago / Centro / Sur (por prefijo de código EDS 60/40/20). "
                                  "Aramco y Shell: Norte / Centro (Santiago) / Sur (geográfico)."),
+                        "Cód. Equipo":       st.column_config.TextColumn(width=115,
+                            help="Código Fracttal del activo asociado a la OT (EQ-XXXX). "
+                                 "OTs compuestas pueden tener varios códigos separados por coma."),
                         "Tiempo resolución": st.column_config.TextColumn(width=120),
                         "Umbral SLA":        st.column_config.TextColumn(width=85),
                         "Uso SLA":           st.column_config.ProgressColumn(
