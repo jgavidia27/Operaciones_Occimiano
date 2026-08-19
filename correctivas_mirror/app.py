@@ -293,9 +293,13 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     df["n_solicitud"] = df["os_fracttal"].map(n_solicitud_map)
     df["fuente_bd"] = df["os_fracttal"].map(fuente_map)
 
-    # Coalesce del aviso: prioriza n_llamado de v_llamados_sla → n_aviso
-    # de llamados_correctivos → id_solicitud de solicitudes_trabajo.
-    # Sobreescribe n_llamado para que el resto del código lo consuma tal cual.
+    # Coalesce del aviso — PRIORIDAD CORREGIDA:
+    #   1) n_aviso de llamados_correctivos → N° REAL del cliente
+    #      (Copec 8 dig, Shell 4 dig, Aramco/Cotalker 6 dig)
+    #   2) n_solicitud de solicitudes_trabajo → contador interno Occimiano
+    #      (fallback cuando el robot no registró el correo)
+    # NO usamos v_llamados_sla.n_llamado — es un ROW_NUMBER de la vista,
+    # no un identificador del negocio (~4 dígitos incrementales sin sentido).
     def _first_non_null(*vals):
         for v in vals:
             if v is None: continue
@@ -305,9 +309,8 @@ def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
                 return s
         return None
     df["n_llamado"] = [
-        _first_non_null(nl, na, ns)
-        for nl, na, ns in zip(df.get("n_llamado", pd.Series([None]*len(df))),
-                              df["n_aviso"], df["n_solicitud"])
+        _first_non_null(na, ns)
+        for na, ns in zip(df["n_aviso"], df["n_solicitud"])
     ]
 
     # ── Fechas vectorizado (antes: .apply(_ts) x3 = O(N) Python) ─────────────
