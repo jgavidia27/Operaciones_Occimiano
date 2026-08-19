@@ -1969,6 +1969,43 @@ if vista == "🔗 Enlace Copec":
         )
         st.stop()
 
+    # ── ALERTA CRÍTICA: EDS Zona Norte Copec (10xxx) + EDS 20830 ────
+    # Estas EDS tienen regla operativa especial: solo se pueden cerrar
+    # en Enlace el ÚLTIMO día del mes (facturación consolidada Copec).
+    # Antes del último día del mes, mostramos banner rojo distintivo.
+    import calendar as _cal_zn
+    _hoy_zn = datetime.now()
+    _ult_dia_mes_zn = _cal_zn.monthrange(_hoy_zn.year, _hoy_zn.month)[1]
+    _es_ultimo_dia_zn = (_hoy_zn.day == _ult_dia_mes_zn)
+
+    def _es_eds_zona_norte(cod):
+        s = str(cod or "").strip()
+        return s.startswith("10") or s == "20830"
+
+    df["_zona_norte"] = df["eds_codigo"].map(_es_eds_zona_norte)
+    _zn_activas = df[df["_zona_norte"] & (df["estado"] != "CERRADO")]
+
+    if not _zn_activas.empty and not _es_ultimo_dia_zn:
+        _n_zn = len(_zn_activas)
+        _edss_zn = ", ".join(sorted(_zn_activas["eds_codigo"].dropna().unique().tolist())[:10])
+        _more = "…" if _zn_activas["eds_codigo"].nunique() > 10 else ""
+        _dias_faltan = _ult_dia_mes_zn - _hoy_zn.day
+        st.markdown(
+            f'<div style="background:#7f1d1d;color:#fff;'
+            f'padding:14px 18px;border-radius:8px;margin:10px 0;'
+            f'border:2px solid #dc2626;box-shadow:0 2px 8px rgba(220,38,38,0.3)">'
+            f'<div style="font-size:1.05em;font-weight:700">'
+            f'🚨 ATENCIÓN — {_n_zn} avisos abiertos de EDS ZONA NORTE (código 10xxx o 20830)'
+            f'</div>'
+            f'<div style="font-size:0.9em;margin-top:6px;line-height:1.4">'
+            f'Estas EDS <b>NO deben cerrarse hoy</b>. Su cierre se hace en bloque el '
+            f'<b>último día del mes</b> ({_ult_dia_mes_zn:02d}/{_hoy_zn.month:02d} — faltan {_dias_faltan} días). '
+            f'Regla operativa Copec: facturación consolidada zona norte.<br>'
+            f'<b>EDS afectadas:</b> {_edss_zn}{_more}'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+
     # ── Cruce con Fracttal (2 estrategias según tipo_aviso) ─────────
     # Correctivos:
     #   1) Primero llamados_correctivos.n_aviso -> os_fracttal (para activos)
@@ -2471,7 +2508,9 @@ if vista == "🔗 Enlace Copec":
                     "Estado Fracttal": estado_frac,
                     "Descripción":  desc,
                     "Equipo":       _title_smart(plan.get("descripcion_equipo") or ""),
-                    "EDS":          plan.get("eds_codigo") or "",
+                    "EDS":          (f"🚫 {plan.get('eds_codigo')}"
+                                     if _es_eds_zona_norte(plan.get("eds_codigo"))
+                                     else (plan.get("eds_codigo") or "")),
                     "Dirección":    _title_smart(plan.get("descripcion_instalacion") or ""),
                     "Contacto":     _title_smart(plan.get("nombre_contacto") or ""),
                     "Últ. cambio":  pd.to_datetime(plan["fecha_ultimo_cambio"], errors="coerce", utc=True),
@@ -2522,7 +2561,9 @@ if vista == "🔗 Enlace Copec":
                 "Estado Fracttal": estado_frac,
                 "Descripción":  desc,
                 "Equipo":       _title_smart(r.get("descripcion_equipo") or ""),
-                "EDS":          r.get("eds_codigo") or "",
+                "EDS":          (f"🚫 {r.get('eds_codigo')}"
+                                 if _es_eds_zona_norte(r.get("eds_codigo"))
+                                 else (r.get("eds_codigo") or "")),
                 "Dirección":    _title_smart(r.get("descripcion_instalacion") or ""),
                 "Contacto":     _title_smart(r.get("nombre_contacto") or ""),
                 "Últ. cambio":  pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True),
@@ -2556,7 +2597,9 @@ if vista == "🔗 Enlace Copec":
                 "Estado Fracttal": estado_frac,
                 "Descripción":  _title_smart(r.get("descripcion_falla") or ""),
                 "Equipo":       _title_smart(r.get("descripcion_equipo") or ""),
-                "EDS":          r.get("eds_codigo") or "",
+                "EDS":          (f"🚫 {r.get('eds_codigo')}"
+                                 if _es_eds_zona_norte(r.get("eds_codigo"))
+                                 else (r.get("eds_codigo") or "")),
                 "Dirección":    _title_smart(r.get("descripcion_instalacion") or ""),
                 "Contacto":     _title_smart(r.get("nombre_contacto") or ""),
                 "Últ. cambio":  pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True),
@@ -2606,7 +2649,8 @@ if vista == "🔗 Enlace Copec":
                 "Estado Fracttal": st.column_config.TextColumn(width=160),
                 "Descripción": st.column_config.TextColumn(width=240),
                 "Equipo":      st.column_config.TextColumn(width=150),
-                "EDS":         st.column_config.TextColumn(width=70),
+                "EDS":         st.column_config.TextColumn(width=90,
+                    help="🚫 = Zona Norte Copec (10xxx o 20830). NO cerrar en Enlace excepto último día del mes."),
                 "Dirección":   st.column_config.TextColumn(width=240),
                 "Contacto":    st.column_config.TextColumn(width=140),
                 "Últ. cambio": st.column_config.TextColumn(width=100),
