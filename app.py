@@ -5721,10 +5721,30 @@ elif _page == _NAV_PAGES[3]:
                     .sort_values("llamados", ascending=False)
                     .head(5)
                 )
-                # Etiqueta con Cód. EDS + nombre (ej. "SH_2 · Panamericana Norte 3545")
+                # Código a mostrar: para Aramco, eds_occim es PBR-XX, pero el
+                # código operativo es EE_S### (eds_occim_raw). Mapeamos PBR→EE_.
+                # Para Shell (SH_) / Copec (numérico) se conserva eds_occim.
+                _ee_map = {}
+                if not df_eds_c.empty and "eds_occim" in df_eds_c.columns:
+                    _raw_c = ("eds_occim_raw" if "eds_occim_raw" in df_eds_c.columns
+                              else ("_cod_occim_frac" if "_cod_occim_frac" in df_eds_c.columns
+                                    else None))
+                    _raw_vals = (df_eds_c[_raw_c].astype(str) if _raw_c
+                                 else [""] * len(df_eds_c))
+                    for _eo, _rawv in zip(df_eds_c["eds_occim"].astype(str), _raw_vals):
+                        _eo = _eo.strip(); _rawv = str(_rawv or "").strip()
+                        if not _eo:
+                            continue
+                        if _rawv.upper().startswith("EE_S") and not _eo.upper().startswith("EE_S"):
+                            _ee_map[_eo] = _rawv        # PBR-38B → EE_S200
+                        else:
+                            _ee_map[_eo] = _eo
+                _top5_data["_cod_disp"] = _top5_data["eds_occim"].astype(str).str.strip().map(
+                    lambda e: _ee_map.get(e, e))
+                # Etiqueta: "EE_S200 · Esmax Antofagasta ..." / "SH_2 · Panamericana ..."
                 _top5_data["_label"] = _top5_data.apply(
-                    lambda r: (f'{r["eds_occim"]} · {r["eds_nombre"]}'
-                               if str(r.get("eds_occim") or "").strip()
+                    lambda r: (f'{r["_cod_disp"]} · {r["eds_nombre"]}'
+                               if str(r.get("_cod_disp") or "").strip()
                                else str(r["eds_nombre"])), axis=1)
 
                 _col_chart, _col_detail = st.columns([3, 2])
@@ -5769,7 +5789,7 @@ elif _page == _NAV_PAGES[3]:
                         st.markdown(
                             f'<div style="background:{_t["card"]};border:1px solid {_t["border"]};'
                             f'border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:0.80rem;">'
-                            f'<b style="color:{_col["accent"]};">{_r5["eds_occim"]} · {_r5["eds_nombre"]}</b><br>'
+                            f'<b style="color:{_col["accent"]};">{_r5.get("_cod_disp", _r5["eds_occim"])} · {_r5["eds_nombre"]}</b><br>'
                             f'<span style="color:{_t["muted"]};">Llamados: </span><b>{int(_r5["llamados"])}</b> · '
                             f'<span style="color:{_t["muted"]};">Último: </span>{_ult5_str}<br>'
                             f'<span style="color:{_t["muted"]};">Causa frecuente: </span>{_falla_top}'
