@@ -159,6 +159,13 @@ def fetch_subtareas_numeral(folio: str) -> list:
             #   • ¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS…?    → lista (SI/NO/parcial…)
             "flowey_utiliza":         None,
             "flowey_diluido_agua":    None,
+            # Dosificacion FLOWEY (plantilla actualizada 2026-08-03). Reemplazan
+            # a "diluido con agua". Miden si la config porcentual de cada bomba
+            # es correcta:
+            #   • ¿CON SHAMPOO DOSIFICADO AL 20%, SALE EL PRODUCTO CORRECTAMENTE? SI/NO
+            #   • ¿CON CERA DOSIFICADA AL 10%,  SALE EL PRODUCTO CORRECTAMENTE?  SI/NO
+            "flowey_shampoo_20":      None,
+            "flowey_cera_10":         None,
             # Preguntas FICHERO (todos los clientes, planes con equipo
             # FICHERO — Aramco/Copec/Shell — a partir del 2026-07-31):
             #   • ¿EL FICHERO ACEPTA MONEDAS?               → lista (SI/NO/parcial)
@@ -255,6 +262,24 @@ def fetch_subtareas_numeral(folio: str) -> list:
                         idx[kid]["cubre_fichero"] = "NO"
                     else:
                         idx[kid]["cubre_fichero"] = val[:10]
+            elif "SALE EL PRODUCTO" in desc and ("DOSIFICAD" in desc
+                                                 or "SHAMPOO" in desc or "CERA" in desc):
+                # Dosificación FLOWEY (Aramco, plantilla 2026-08-03):
+                #   • "¿CON SHAMPOO DOSIFICADO AL 20%, SALE EL PRODUCTO CORRECTAMENTE?"
+                #   • "¿CON CERA DOSIFICADA AL 10%, SALE EL PRODUCTO CORRECTAMENTE?"
+                # Valor 'true'/'false' → SI/NO. Reemplazan a "diluido con agua".
+                if not val_empty:
+                    _v = val.lower()
+                    if _v in ("true", "si", "sí", "yes", "1"):
+                        _resp = "SI"
+                    elif _v in ("false", "no", "0"):
+                        _resp = "NO"
+                    else:
+                        _resp = val[:20]
+                    if "SHAMPOO" in desc:
+                        idx[kid]["flowey_shampoo_20"] = _resp
+                    elif "CERA" in desc:
+                        idx[kid]["flowey_cera_10"] = _resp
             elif "FLOWEY" in desc:
                 # Preguntas Aramco. Cada plan tiene su propia redacción:
                 #   • "¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?"   → SI/NO
@@ -352,6 +377,8 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "cubre_fichero":         r.get("cubre_fichero"),
             "flowey_utiliza":        r.get("flowey_utiliza"),
             "flowey_diluido_agua":   r.get("flowey_diluido_agua"),
+            "flowey_shampoo_20":     r.get("flowey_shampoo_20"),
+            "flowey_cera_10":        r.get("flowey_cera_10"),
             "fichero_acepta_monedas": r.get("fichero_acepta_monedas"),
             "fichero_cambio":         r.get("fichero_cambio"),
             "task_status":           r.get("task_status"),
@@ -386,6 +413,8 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     rec.pop("cubre_fichero", None)
                     rec.pop("flowey_utiliza", None)
                     rec.pop("flowey_diluido_agua", None)
+                    rec.pop("flowey_shampoo_20", None)
+                    rec.pop("flowey_cera_10", None)
                     rec.pop("fichero_acepta_monedas", None)
                     rec.pop("fichero_cambio", None)
                     rec.pop("task_status", None)

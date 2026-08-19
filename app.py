@@ -16487,11 +16487,14 @@ elif _page == _NAV_PAGES[2]:
                         if "flowey_utiliza" in _grp.columns:
                             _fu = _grp["flowey_utiliza"].dropna().astype(str)
                             _fu = _fu[_fu != ""]
-                            _fd = _grp.get("flowey_diluido_agua", pd.Series(dtype=str)).dropna().astype(str)
-                            _fd = _fd[_fd != ""] if not _fd.empty else _fd
+                            def _primer_no_vacio(_col):
+                                _s = _grp.get(_col, pd.Series(dtype=str)).dropna().astype(str)
+                                _s = _s[_s != ""] if not _s.empty else _s
+                                return _s.iloc[0] if not _s.empty else "—"
                             _flowey_por_ot[_fol] = {
-                                "flowey_utiliza": _fu.iloc[0] if not _fu.empty else "—",
-                                "flowey_diluido": _fd.iloc[0] if not _fd.empty else "—",
+                                "flowey_utiliza":  _fu.iloc[0] if not _fu.empty else "—",
+                                "flowey_shampoo":  _primer_no_vacio("flowey_shampoo_20"),
+                                "flowey_cera":     _primer_no_vacio("flowey_cera_10"),
                             }
 
             # Mapa codigo_eds → nombre/dirección para columna "Estación"
@@ -16505,7 +16508,7 @@ elif _page == _NAV_PAGES[2]:
                     "equipos": "—", "n_total": 0, "n_ok": 0, "pct": 0,
                     "obs": "Sin subtareas en Supabase (aún sin sync)"
                 })
-                _fl  = _flowey_por_ot.get(_fol, {"flowey_utiliza": "—", "flowey_diluido": "—"})
+                _fl  = _flowey_por_ot.get(_fol, {"flowey_utiliza": "—", "flowey_shampoo": "—", "flowey_cera": "—"})
                 _cod_eds = str(_r.get("codigo_eds", "") or _r.get("estacion", "") or "—")
                 _nom_eds = _eds_nombre_map_rea.get(_cod_eds, "") or "—"
                 _row = {
@@ -16530,14 +16533,16 @@ elif _page == _NAV_PAGES[2]:
                 _is_aramco_view = ("ARAMCO" in _sel_up) or ("ESMAX" in _sel_up)
                 _cli_up = str(_r.get("cliente", "")).upper()
                 if _is_aramco_view and ("ARAMCO" in _cli_up or "ESMAX" in _cli_up):
-                    _fu_raw = str(_fl["flowey_utiliza"] or "").strip().upper()
-                    if _fu_raw == "SI":
-                        _row["FLOWEY utiliza"] = "✅"
-                    elif _fu_raw == "NO":
-                        _row["FLOWEY utiliza"] = "❌"
-                    else:
-                        _row["FLOWEY utiliza"] = _fl["flowey_utiliza"]
-                    _row["FLOWEY diluido agua"] = _fl["flowey_diluido"]
+                    def _si_no_icono(_v):
+                        _r = str(_v or "").strip().upper()
+                        if _r == "SI":
+                            return "✅"
+                        if _r == "NO":
+                            return "❌"
+                        return _v if _v else "—"
+                    _row["FLOWEY utiliza"]  = _si_no_icono(_fl["flowey_utiliza"])
+                    _row["Shampoo 20% OK"]  = _si_no_icono(_fl.get("flowey_shampoo"))
+                    _row["Cera 10% OK"]     = _si_no_icono(_fl.get("flowey_cera"))
                 _rows_out.append(_row)
 
             if _buscar_r:
@@ -16556,7 +16561,7 @@ elif _page == _NAV_PAGES[2]:
                 _cols_base = ["Cliente","Fecha finaliz.","N° OT","EDS","Estación","Técnico",
                               "Duración","Dentro plazo","Planes ejecutados",
                               "OK / Total","% Completitud","Observación","Plan"]
-                _cols_flow = [c for c in ("FLOWEY utiliza","FLOWEY diluido agua")
+                _cols_flow = [c for c in ("FLOWEY utiliza","Shampoo 20% OK","Cera 10% OK")
                               if c in _df_out.columns]
                 _df_out = _df_out[[c for c in _cols_base if c in _df_out.columns] + _cols_flow]
 
@@ -16585,15 +16590,21 @@ elif _page == _NAV_PAGES[2]:
                     "Plan":           st.column_config.TextColumn(width=220),
                     "FLOWEY utiliza": st.column_config.TextColumn(width=110,
                         help="Solo Aramco. Respuesta a '¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?'"),
-                    "FLOWEY diluido agua": st.column_config.TextColumn(width=130,
-                        help="Solo Aramco. Respuesta a '¿LOS PRODUCTOS FLOWEY ESTAN DILUIDOS CON AGUA?'"),
+                    "Shampoo 20% OK": st.column_config.TextColumn(width=120,
+                        help="Solo Aramco. '¿Con shampoo dosificado al 20%, sale el producto "
+                             "correctamente?' ✅ Sí / ❌ No. Mide que la bomba de shampoo tenga "
+                             "la configuración porcentual correcta."),
+                    "Cera 10% OK": st.column_config.TextColumn(width=110,
+                        help="Solo Aramco. '¿Con cera dosificada al 10%, sale el producto "
+                             "correctamente?' ✅ Sí / ❌ No. Mide que la bomba de cera tenga "
+                             "la configuración porcentual correcta."),
                 }
                 # Aviso: FLOWEY solo aparece filtrando por Aramco
                 if not _is_aramco_view:
                     st.caption(
-                        "ℹ️ Las columnas **FLOWEY utiliza** / **FLOWEY diluido agua** solo aparecen "
-                        "al filtrar por cliente **Aramco (Esmax)** — es la única marca cuyo checklist "
-                        "contiene esas preguntas."
+                        "ℹ️ Las columnas **FLOWEY utiliza** / **Shampoo 20% OK** / **Cera 10% OK** "
+                        "solo aparecen al filtrar por cliente **Aramco (Esmax)** — es la única marca "
+                        "cuyo checklist contiene esas preguntas de dosificación."
                     )
                 _show_df(_df_out.reset_index(drop=True), hide_index=True,
                          width="stretch", column_config=_cfg)

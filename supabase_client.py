@@ -272,36 +272,52 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
     Carga numerales_subtarea (1 fila por (id_ot, codigo_activo)).
     Es resiliente: si la tabla todavía no se creó, devuelve DataFrame vacío.
     """
+    # 3 niveles de resiliencia ante el orden de despliegue de migraciones:
+    #   1) completo (incluye flowey_shampoo_20/flowey_cera_10 — migración 2026-08)
+    #   2) sin dosificación pero con flowey_utiliza/diluido (estado previo)
+    #   3) mínimo (tabla recién creada, sin columnas nuevas)
+    _sel_full = (
+        "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
+        "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
+        "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
+        "tiempo_fichas_seg,lts_hr_produccion_final,"
+        "consumo_shampoo_pct,consumo_cera_pct,consumo_cepillo_pct,"
+        "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
+        "form_tiene_produccion,cubre_fichero,"
+        "flowey_utiliza,flowey_diluido_agua,"
+        "flowey_shampoo_20,flowey_cera_10,task_status,"
+        "fichero_acepta_monedas,fichero_cambio,"
+        "fecha_inicio_subtarea,fecha_fin_subtarea"
+        "&order=id_ot.desc"
+    )
+    _sel_prev = (
+        "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
+        "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
+        "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
+        "tiempo_fichas_seg,lts_hr_produccion_final,"
+        "consumo_shampoo_pct,consumo_cera_pct,consumo_cepillo_pct,"
+        "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
+        "form_tiene_produccion,cubre_fichero,"
+        "flowey_utiliza,flowey_diluido_agua,task_status,"
+        "fichero_acepta_monedas,fichero_cambio,"
+        "fecha_inicio_subtarea,fecha_fin_subtarea"
+        "&order=id_ot.desc"
+    )
+    _sel_min = (
+        "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
+        "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
+        "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
+        "tiempo_fichas_seg,"
+        "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
+        "fecha_inicio_subtarea,fecha_fin_subtarea"
+        "&order=id_ot.desc"
+    )
     try:
-        rows = _query(
-            "numerales_subtarea",
-            "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
-            "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
-            "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
-            "tiempo_fichas_seg,lts_hr_produccion_final,"
-            "consumo_shampoo_pct,consumo_cera_pct,consumo_cepillo_pct,"
-            "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
-            "form_tiene_produccion,cubre_fichero,"
-            "flowey_utiliza,flowey_diluido_agua,task_status,"
-            "fichero_acepta_monedas,fichero_cambio,"
-            "fecha_inicio_subtarea,fecha_fin_subtarea"
-            "&order=id_ot.desc",
-            limit=20_000,
-        )
-        # Fallback si las nuevas columnas (flowey_*, lts_hr_...) aún no
-        # están aplicadas en Supabase: reintentar sin ellas.
+        rows = _query("numerales_subtarea", _sel_full, limit=20_000)
         if not rows:
-            rows = _query(
-                "numerales_subtarea",
-                "select=id_ot,id_work_order_task,codigo_activo,nombre_activo,"
-                "tipo_activo,numeral_inicial,numeral_final,fichas_periodo,"
-                "numeral_ok,motivo,bomba_dosificadora,consumo_insumos,"
-                "tiempo_fichas_seg,"
-                "form_tiene_bomba,form_tiene_consumo,form_tiene_tiempo,"
-                "fecha_inicio_subtarea,fecha_fin_subtarea"
-                "&order=id_ot.desc",
-                limit=20_000,
-            )
+            rows = _query("numerales_subtarea", _sel_prev, limit=20_000)
+        if not rows:
+            rows = _query("numerales_subtarea", _sel_min, limit=20_000)
     except Exception:
         return pd.DataFrame()
     if not rows:
