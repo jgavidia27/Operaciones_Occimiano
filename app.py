@@ -148,6 +148,71 @@ def _strip_comentario_headers(txt) -> str:
     return _COMENT_HEADER_RE.sub("", s).strip(" |") or "—"
 
 
+# ── Clasificación de la falla REAL desde el comentario del técnico ──────────
+# El campo `failure_cause` de Fracttal es inservible para resumir (la mayoría
+# cae en "OTROS"). El detalle verdadero lo escriben los técnicos en
+# `comentario_tecnico`, con formato "síntoma | acción realizada | observación".
+# Esta taxonomía se construyó leyendo comentarios reales (jun-ago 2026) y se
+# validó contra los 8 correctivos de SH_2 de agosto.
+# El ORDEN es la prioridad: lo más específico/accionable primero. Un comentario
+# se clasifica con el primer tema cuya palabra clave aparezca.
+_TEMAS_FALLA = [
+    ("Llamado innecesario / sin falla", ("SIN FALLA", "INNECESARI", "MAL PASADA",
+        "FUNCIONA CORRECTAMENTE", "NO SE ENCONTRO", "NO SE ENCONTRÓ",
+        "DESCONOCIAN", "DESCONOCÍAN", "EQUIPO CERRADO", "SIN INCIDENCIA")),
+    ("Vandalismo / robo / daño de terceros", ("ROBO", "ROBAD", "HURTO", "VANDAL",
+        "TERCEROS", "PASO A LLEVAR", "CANDADO", "CHAPA", "FORZAD", "RAYAD")),
+    ("Fichero / fichas / crédito", ("FICHERO", "FICHA", "CREDITO", "CRÉDITO", "MONEDA")),
+    ("Dosificación / no sale producto", ("NO SALE", "SIN MOUSSE", "SIN SHAMPOO",
+        "SIN CERA", "SIN PRODUCTO", "NO PERCEPTIBLE", "NO ES NOTORIO",
+        "NO NOTORIO", "SIN ESPUMA", "DOSIFICA", "NO TIRA PRODUCTO")),
+    ("Botonera", ("BOTONERA", "BOTON ", "BOTÓN ")),
+    ("Manguera / lanza / pistola", ("MANGUERA", "LANZA", "PISTOLA", "LATIGUILLO", "BOQUILLA")),
+    ("Electroválvula / bobina", ("ELECTROVALVULA", "ELECTROVÁLVULA", "EV DE", "BOBINA", "SOLENOIDE")),
+    ("Bomba / cebado", ("BOMBA", "CEBAD", "CEBAR")),
+    ("Cepillo", ("CEPILLO",)),
+    ("Vitón / sello / empaque", ("VITON", "VITÓN", "SELLO", "EMPAQUE", "O-RING", "ORING", "RETEN")),
+    ("Filtro / ósmosis / ablandador", ("FILTRO", "OSMOSIS", "ÓSMOSIS", "MEMBRANA",
+        "ABLANDADOR", "RESINA")),
+    ("Eléctrico (térmica/diferencial/inverter)", ("TERMICA", "TÉRMICA", "DIFERENCIAL",
+        "INVERTER", "CAJA ELECTRICA", "ELECTRIC", "CORTOCIRCUITO", "RELE", "RELÉ",
+        "AMPERAJE", "CONTACTOR")),
+    ("Fuga / filtración de agua", ("FUGA", "FILTRACION", "FILTRACIÓN", "GOTEO",
+        "REBALS", "INGRESA AGUA", "PERDIDA DE AGUA", "PÉRDIDA DE AGUA")),
+    ("Programación / tiempos", ("DESPROGRAMAD", "PROGRAMACION", "PROGRAMACIÓN",
+        "TIEMPO DE MAQUINA", "TIEMPO DE MÁQUINA", "DESAJUSTAD", "SETEA", "REGULA")),
+    ("Error de código", ("ERROR 0", "ERROR 1", "ERROR 2", "ERROR 3", "ERROR 4",
+        "ERROR 5", "CODIGO DE ERROR")),
+    ("Equipo detenido / fuera de servicio", ("FUERA DE SERVICIO", "DETENID", "APAGAD",
+        "NO ENCIENDE", "SIN ENERGIA", "SIN ENERGÍA", "NO PARTE")),
+]
+
+
+def _tema_falla(comentario) -> str | None:
+    """Tema de la falla desde el comentario del técnico.
+    None = sin comentario útil (no se puede clasificar) → se cuenta aparte
+    como 'sin detalle' en vez de inflar un cajón 'OTROS' vacío de sentido."""
+    s = str(comentario or "").strip().upper()
+    if not s or s in ("—", "NAN", "NONE", "SIN INFORMACION", "SIN INFORMACIÓN"):
+        return None
+    for _label, _kws in _TEMAS_FALLA:
+        for _kw in _kws:
+            if _kw in s:
+                return _label
+    return "Otros"
+
+
+def _clasif_mix_por_nombre(equipment) -> str:
+    """'MIX' | 'No MIX' | '' según el nombre del activo de la OT.
+    MIX = lavadora propiedad Occimiano (nombre contiene MSELF). Misma regla que
+    usa el listado de EDS. Devuelve '' si la OT no es sobre una lavadora."""
+    _piezas = [p.strip().upper() for p in str(equipment or "").split(" · ") if p.strip()]
+    _lav = [p for p in _piezas if p.startswith("LAVADORA")]
+    if not _lav:
+        return ""
+    return "MIX" if any("MSELF" in p for p in _lav) else "No MIX"
+
+
 # Helper de módulo: semanas domingo→sábado dentro de un mes 'YYYY-MM'.
 # Definido acá (no dentro de un bloque de tab) para que la vista de
 # Evolución SLA lo pueda usar antes que las pestañas MP.
@@ -5768,31 +5833,71 @@ elif _page == _NAV_PAGES[3]:
                     st.plotly_chart(_fig_top5, use_container_width=True, key=f"chart_top5_{_ck}")
 
                 with _col_detail:
+                    # Lookup folio → (comentario del técnico, nombre del activo).
+                    # El comentario es la ÚNICA fuente con el detalle real de la
+                    # falla; failure_cause casi siempre dice "OTROS" y no aporta.
+                    _fol_col_t5 = next((c for c in ("os_fracttal","folio","id_ot","n_ot")
+                                        if c in df_ll_f.columns), None)
+                    _wo_map_t5 = {}
+                    if not df_wo_c.empty and "folio" in df_wo_c.columns:
+                        _cc_t5 = (df_wo_c["comentario_tecnico"]
+                                  if "comentario_tecnico" in df_wo_c.columns
+                                  else pd.Series("", index=df_wo_c.index))
+                        _eq_t5 = (df_wo_c["equipment"]
+                                  if "equipment" in df_wo_c.columns
+                                  else pd.Series("", index=df_wo_c.index))
+                        for _f5, _c5, _e5 in zip(df_wo_c["folio"].astype(str), _cc_t5, _eq_t5):
+                            _f5 = _f5.strip()
+                            if _f5 and _f5 not in _wo_map_t5:
+                                _wo_map_t5[_f5] = (str(_c5 or ""), str(_e5 or ""))
+
+                    from collections import Counter as _Counter_t5
                     for _, _r5 in _top5_data.iterrows():
                         _ult5 = pd.to_datetime(_r5["ultimo_llamado"], errors="coerce")
                         _ult5_str = _ult5.strftime("%d/%m/%Y") if pd.notna(_ult5) else "—"
-                        # Causa más frecuente para esa EDS desde df_wo. Usa
-                        # failure_cause (causa técnica: ERROR ELÉCTRICO, DAÑO
-                        # POR CLIENTE, REPUESTOS/DESGASTE, etc.) — NO failure_type
-                        # (F.N.A.O. / F.A.O. es solo clasificación administrativa
-                        # de imputación, no aporta al diagnóstico técnico).
-                        _causas5 = pd.Series(dtype=str)
-                        if (not df_wo_c.empty and "failure_cause" in df_wo_c.columns
-                                and "eds_occim" in df_wo_c.columns):
-                            _tmp = df_wo_c[
-                                (df_wo_c["eds_occim"] == _r5["eds_occim"]) &
-                                (df_wo_c["failure_cause"].str.strip() != "")
-                            ]["failure_cause"].apply(_limpiar_causa)
-                            _tmp = _tmp[_tmp != ""]   # descarta códigos numéricos / SIN CLASIFICAR
-                            _causas5 = _tmp.value_counts()
-                        _falla_top = _causas5.index[0] if not _causas5.empty else "—"
+                        # Analizar los llamados de esta EDS: tema de falla + MIX
+                        _temas5 = _Counter_t5()
+                        _n_sin5 = _n_mix5 = _n_nomix5 = _n_otro_eq5 = 0
+                        if _fol_col_t5 and "eds_occim" in df_ll_f.columns:
+                            _sub5 = df_ll_f[df_ll_f["eds_occim"].astype(str).str.strip()
+                                            == str(_r5["eds_occim"]).strip()]
+                            for _fol5 in _sub5[_fol_col_t5].astype(str):
+                                _com5, _eqn5 = _wo_map_t5.get(_fol5.strip(), ("", ""))
+                                _tm5 = _tema_falla(_com5)
+                                if _tm5 is None:
+                                    _n_sin5 += 1
+                                else:
+                                    _temas5[_tm5] += 1
+                                _mx5 = _clasif_mix_por_nombre(_eqn5)
+                                if _mx5 == "MIX":      _n_mix5 += 1
+                                elif _mx5 == "No MIX": _n_nomix5 += 1
+                                else:                  _n_otro_eq5 += 1
+                        # Línea MIX / No MIX
+                        _mix_parts = []
+                        if _n_mix5:      _mix_parts.append(f'<b>{_n_mix5}</b> MIX')
+                        if _n_nomix5:    _mix_parts.append(f'<b>{_n_nomix5}</b> No MIX')
+                        if _n_otro_eq5:  _mix_parts.append(f'{_n_otro_eq5} otro equipo')
+                        _mix_txt = " · ".join(_mix_parts) if _mix_parts else "—"
+                        # Top 3 temas de falla, con su conteo
+                        if _temas5:
+                            _tt5 = " · ".join(f'{_lbl} <b>({_n})</b>'
+                                              for _lbl, _n in _temas5.most_common(3))
+                            if _n_sin5:
+                                _tt5 += (f' <span style="color:{_t["muted"]};">'
+                                         f'+{_n_sin5} sin detalle</span>')
+                        elif _n_sin5:
+                            _tt5 = (f'<span style="color:{_t["muted"]};">'
+                                    f'{_n_sin5} llamado(s) sin comentario del técnico</span>')
+                        else:
+                            _tt5 = "—"
                         st.markdown(
                             f'<div style="background:{_t["card"]};border:1px solid {_t["border"]};'
                             f'border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:0.80rem;">'
                             f'<b style="color:{_col["accent"]};">{_r5.get("_cod_disp", _r5["eds_occim"])} · {_r5["eds_nombre"]}</b><br>'
                             f'<span style="color:{_t["muted"]};">Llamados: </span><b>{int(_r5["llamados"])}</b> · '
                             f'<span style="color:{_t["muted"]};">Último: </span>{_ult5_str}<br>'
-                            f'<span style="color:{_t["muted"]};">Causa frecuente: </span>{_falla_top}'
+                            f'<span style="color:{_t["muted"]};">Equipos: </span>{_mix_txt}<br>'
+                            f'<span style="color:{_t["muted"]};">Fallas: </span>{_tt5}'
                             f'</div>',
                             unsafe_allow_html=True,
                         )
