@@ -7194,6 +7194,7 @@ elif _page == _NAV_PAGES[4]:
     if _is_admin:
         _sub_tabs_util.append("⏰ Validación HHEE")
         _sub_tabs_util.append("🚗 Uso de Vehículos")
+        _sub_tabs_util.append("🚐 Base de Vehículos")
     _util_sub_tab = st.radio(
         "",
         _sub_tabs_util,
@@ -9063,6 +9064,174 @@ elif _page == _NAV_PAGES[4]:
                                  "Técnico":       st.column_config.TextColumn(width=220),
                                  "KM recorridos": st.column_config.NumberColumn(width=110, format="%.1f km"),
                              })
+
+        st.stop()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # SUB-TAB: 🚐 Base de Vehículos — asignación patente↔técnico con vigencia.
+    # Muestra la base actualizada HOY (quién tiene cada patente), el historial
+    # de traspasos, y un formulario para registrar cambios. De esta base,
+    # "Uso de Vehículos" atribuye los KM/GPS al técnico correcto por fecha.
+    # ─────────────────────────────────────────────────────────────────────
+    if _util_sub_tab == "🚐 Base de Vehículos":
+        import os as _os_bv
+        from datetime import date as _bv_date
+
+        st.title("🚐 Base de Vehículos — Asignación patente ↔ técnico")
+        st.caption(
+            "Registra **quién tiene asignada cada camioneta y desde cuándo**. "
+            "Cuando un técnico le pasa el vehículo a otro, registrá el cambio con la "
+            "fecha en que aplica — la asignación anterior se cierra sola. "
+            "**Uso de Vehículos** toma esta base para atribuir los KM y viajes GPS a "
+            "quien realmente conducía en cada fecha (así no se acusa al técnico "
+            "equivocado por un uso de fin de semana)."
+        )
+
+        # Credenciales Supabase (Streamlit secrets o env) e inyección en el módulo
+        try:
+            _u_bv = str(st.secrets["SUPABASE_URL"]); _k_bv = str(st.secrets["SUPABASE_KEY"])
+        except Exception:
+            _u_bv = _os_bv.getenv("SUPABASE_URL", ""); _k_bv = _os_bv.getenv("SUPABASE_KEY", "")
+        if not (_u_bv and _k_bv):
+            st.error("No hay credenciales Supabase configuradas.")
+            st.stop()
+        import asignaciones_db as _adb_bv
+        _adb_bv.SUPABASE_URL = _u_bv
+        _adb_bv.SUPABASE_KEY = _k_bv
+
+        # Roster: patentes + técnicos desde tecnicos_hhee
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _bv_roster(_u, _k):
+            import requests as _rq
+            _hh = {"apikey": _k, "Authorization": f"Bearer {_k}"}
+            _rr = _rq.get(f"{_u}/rest/v1/tecnicos_hhee"
+                          f"?select=patente,nombre_completo,equipo,rut&order=nombre_completo",
+                          headers=_hh, timeout=15)
+            _pp, _tt = [], []
+            if _rr.status_code == 200:
+                for _row in _rr.json():
+                    _p = str(_row.get("patente") or "").strip()
+                    if _p and _p not in _pp:
+                        _pp.append(_p)
+                    _rut = str(_row.get("rut") or "").strip()
+                    _nom = str(_row.get("nombre_completo") or "").strip()
+                    if _rut and _nom and not any(t["rut"] == _rut for t in _tt):
+                        _tt.append({"rut": _rut, "nombre": _nom, "equipo": _row.get("equipo")})
+            return sorted(_pp), _tt
+
+        _bv_pats, _bv_tecs = _bv_roster(_u_bv, _k_bv)
+
+        # Todas las asignaciones (fresco en cada render — tabla chica)
+        _bv_all = _adb_bv.list_all()
+        _hoy_bv = _bv_date.today().isoformat()
+        _bv_por_pat = {}
+        for _a in _bv_all:
+            _bv_por_pat.setdefault(_a["patente"], []).append(_a)
+
+        def _bv_fmt(_iso):
+            return f"{_iso[8:10]}-{_iso[5:7]}-{_iso[0:4]}" if _iso else "—"
+
+        # ── 1) BASE ACTUALIZADA (HOY) ──
+        st.subheader(f"📋 Base actualizada — hoy ({_bv_date.today().strftime('%d-%m-%Y')})")
+        _base_rows = []
+        for _pat in sorted(_bv_por_pat):
+            _vig = None
+            for _a in _bv_por_pat[_pat]:
+                _fd = _a["fecha_desde"]; _fh = _a.get("fecha_hasta")
+                if _fd <= _hoy_bv and (not _fh or _hoy_bv <= _fh):
+                    _vig = _a; break
+            _base_rows.append({
+                "Patente": _pat,
+                "Técnico asignado HOY": _vig["nombre_tecnico"] if _vig else "— sin asignación vigente —",
+                "Equipo": (_vig.get("equipo") if _vig else "") or "—",
+                "Desde": _bv_fmt(_vig["fecha_desde"]) if _vig else "—",
+                "Cambios": len(_bv_por_pat[_pat]),
+            })
+        if _base_rows:
+            _show_df(
+                pd.DataFrame(_base_rows), hide_index=True, use_container_width=True,
+                column_config={
+                    "Patente":               st.column_config.TextColumn(width=100),
+                    "Técnico asignado HOY":  st.column_config.TextColumn(width=260),
+                    "Equipo":                st.column_config.TextColumn(width=160),
+                    "Desde":                 st.column_config.TextColumn(width=100),
+                    "Cambios":               st.column_config.NumberColumn(width=90,
+                        help="Cantidad de asignaciones históricas de esta patente. >1 = ha rotado de técnico."),
+                })
+            st.caption(f"{len(_bv_por_pat)} vehículos con asignación. Las patentes con "
+                       "**Cambios > 1** han rotado — mirá el historial abajo para ver cuándo.")
+        else:
+            st.info("Aún no hay asignaciones registradas. Registrá la primera con el formulario de abajo.")
+
+        # ── 2) REGISTRAR CAMBIO / NUEVA ASIGNACIÓN ──
+        st.divider()
+        st.subheader("➕ Registrar cambio / nueva asignación")
+        with st.form("bv_form_asig", clear_on_submit=True):
+            _cc1, _cc2 = st.columns(2)
+            with _cc1:
+                _f_pat = st.selectbox("Patente / vehículo", ["—"] + _bv_pats, key="bv_f_pat")
+            with _cc2:
+                _tec_labels = ["—"] + [f'{t["nombre"]} · {t.get("equipo") or "?"}' for t in _bv_tecs]
+                _f_tec = st.selectbox("Técnico que la usa", _tec_labels, key="bv_f_tec")
+            _cc3, _cc4 = st.columns(2)
+            with _cc3:
+                _f_desde = st.date_input("Desde — fecha en que aplica el cambio",
+                                         value=_bv_date.today(), format="DD/MM/YYYY", key="bv_f_desde")
+            with _cc4:
+                _f_hasta = st.date_input("Hasta (opcional — vacío = vigente)",
+                                         value=None, format="DD/MM/YYYY", key="bv_f_hasta")
+            _f_nota = st.text_input("Nota (opcional)",
+                                    placeholder="Ej: Juan Gallardo le pasó la camioneta a Juan Fco. Toro",
+                                    key="bv_f_nota")
+            _bv_submit = st.form_submit_button("💾 Guardar asignación", use_container_width=True)
+        if _bv_submit:
+            if _f_pat == "—" or _f_tec == "—":
+                st.error("Selecciona una patente y un técnico.")
+            elif _f_hasta and _f_hasta < _f_desde:
+                st.error("La fecha 'hasta' no puede ser anterior a 'desde'.")
+            else:
+                _tsel = _bv_tecs[_tec_labels.index(_f_tec) - 1]
+                _ok, _msg = _adb_bv.crear(
+                    patente=_f_pat, rut=_tsel["rut"], nombre_tecnico=_tsel["nombre"],
+                    equipo=_tsel.get("equipo"), fecha_desde=_f_desde.isoformat(),
+                    fecha_hasta=_f_hasta.isoformat() if _f_hasta else None,
+                    nota=_f_nota or None, creado_por=_auth_email_actual or "dashboard")
+                if _ok:
+                    st.success("✅ " + _msg + " · La base ya está actualizada. "
+                               "Uso de Vehículos lo reflejará al refrescar datos (o en ~5 min).")
+                    st.rerun()
+                else:
+                    st.error("⚠️ " + _msg)
+
+        # ── 3) HISTORIAL DE TRASPASOS (timeline por patente) ──
+        st.divider()
+        st.subheader("📜 Historial de traspasos")
+        if not _bv_por_pat:
+            st.info("Sin historial todavía. Registrá el primer cambio arriba.")
+        else:
+            st.caption("Cada patente muestra su línea de tiempo, del cambio más reciente "
+                       "(vigente) al más antiguo.")
+            for _pat in sorted(_bv_por_pat):
+                _filas = _bv_por_pat[_pat]
+                _n = len(_filas)
+                _tag = f"{_n} períodos" if _n > 1 else "sin cambios"
+                with st.expander(f"🚐 {_pat}  —  {_tag}", expanded=(_n > 1)):
+                    for _a in _filas:
+                        _vig = not _a.get("fecha_hasta")
+                        _rango = (f'{_bv_fmt(_a["fecha_desde"])} → '
+                                  + ("**hoy (vigente)** 🟢" if _vig
+                                     else _bv_fmt(_a.get("fecha_hasta"))))
+                        _cA, _cB = st.columns([6, 1])
+                        with _cA:
+                            _nota_txt = f"  ·  _{_a['nota']}_" if _a.get("nota") else ""
+                            st.markdown(f"**{_a['nombre_tecnico']}** — {_rango}{_nota_txt}")
+                        with _cB:
+                            if st.button("🗑️", key=f"bv_del_{_a['id']}",
+                                         help="Eliminar este registro de asignación"):
+                                if _adb_bv.eliminar(_a["id"]):
+                                    st.success("Registro eliminado."); st.rerun()
+                                else:
+                                    st.error("No se pudo eliminar.")
 
         st.stop()
 
