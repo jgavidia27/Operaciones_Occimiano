@@ -5721,12 +5721,17 @@ elif _page == _NAV_PAGES[3]:
                     .sort_values("llamados", ascending=False)
                     .head(5)
                 )
+                # Etiqueta con Cód. EDS + nombre (ej. "SH_2 · Panamericana Norte 3545")
+                _top5_data["_label"] = _top5_data.apply(
+                    lambda r: (f'{r["eds_occim"]} · {r["eds_nombre"]}'
+                               if str(r.get("eds_occim") or "").strip()
+                               else str(r["eds_nombre"])), axis=1)
 
                 _col_chart, _col_detail = st.columns([3, 2])
                 with _col_chart:
                     _fig_top5 = go.Figure(go.Bar(
                         x=_top5_data["llamados"],
-                        y=_top5_data["eds_nombre"],
+                        y=_top5_data["_label"],
                         orientation="h",
                         marker_color=_col["accent"],
                         text=_top5_data["llamados"],
@@ -5764,7 +5769,7 @@ elif _page == _NAV_PAGES[3]:
                         st.markdown(
                             f'<div style="background:{_t["card"]};border:1px solid {_t["border"]};'
                             f'border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:0.80rem;">'
-                            f'<b style="color:{_col["accent"]};">{_r5["eds_nombre"]}</b><br>'
+                            f'<b style="color:{_col["accent"]};">{_r5["eds_occim"]} · {_r5["eds_nombre"]}</b><br>'
                             f'<span style="color:{_t["muted"]};">Llamados: </span><b>{int(_r5["llamados"])}</b> · '
                             f'<span style="color:{_t["muted"]};">Último: </span>{_ult5_str}<br>'
                             f'<span style="color:{_t["muted"]};">Causa frecuente: </span>{_falla_top}'
