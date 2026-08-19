@@ -5707,10 +5707,14 @@ elif _page == _NAV_PAGES[3]:
                 unsafe_allow_html=True,
             )
             if not df_ll_f.empty and "eds_occim" in df_ll_f.columns:
+                # Contar TODAS las correctivas por EDS (size), igual que el
+                # listado de estaciones. Antes se usaba count("n_llamado"), que
+                # ignora correctivas sin nº de aviso → el gráfico mostraba menos
+                # que el listado (ej. Panamericana 7 vs 8). Ahora coinciden.
                 _top5_data = (
                     df_ll_f.groupby(["eds_occim","eds_nombre"], dropna=True)
                     .agg(
-                        llamados=("n_llamado","count"),
+                        llamados=("eds_occim","size"),
                         ultimo_llamado=("fecha_llamado","max"),
                     )
                     .reset_index()
@@ -6563,10 +6567,18 @@ elif _page == _NAV_PAGES[3]:
         _cols_show = [c for c in _col_map if c in _df_tbl.columns]
         _df_display = _df_tbl[_cols_show].rename(columns=_col_map).copy()
 
-        # Ordenar por Órdenes atendidas desc (donde más pasa antes)
-        _sort_col = ("Órdenes atendidas" if "Órdenes atendidas" in _df_display.columns
-                     else _df_display.columns[0])
-        _df_display = _df_display.sort_values(_sort_col, ascending=False, na_position="last")
+        # Ordenar por CORRECTIVAS desc (la EDS con más fallas correctivas va
+        # primero — es lo operativamente relevante). Desempate por Órdenes
+        # atendidas. Antes se ordenaba por Órdenes atendidas (corr+prev), lo que
+        # ponía arriba estaciones con muchas preventivas pero pocas correctivas.
+        _sort_keys = [c for c in ("Correctivas", "Órdenes atendidas")
+                      if c in _df_display.columns]
+        if _sort_keys:
+            _df_display = _df_display.sort_values(
+                _sort_keys, ascending=False, na_position="last")
+        else:
+            _df_display = _df_display.sort_values(
+                _df_display.columns[0], ascending=False, na_position="last")
         _df_display = _df_display.fillna("—")
 
         # Normalizar Comuna a formato tipo título ("Alto Hospicio" en vez de "ALTO HOSPICIO")
