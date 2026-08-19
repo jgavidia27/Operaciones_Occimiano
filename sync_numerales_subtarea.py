@@ -398,9 +398,19 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             if r.status_code in (200, 201, 204):
                 return len(payload), 0
             # Fallback: si aún no se aplicó la migración form_tiene_*, quitar
-            # esas 3 columnas del payload y reintentar sin ellas (backward
-            # compat). Detectamos por el mensaje PGRST204 "column ... does
-            # not exist".
+            # esas columnas del payload y reintentar sin ellas (backward compat).
+            # Detectamos por el mensaje PGRST204 "column ... does not exist".
+            # IMPORTANTE: un 400 puede ser TRANSITORIO (PostgREST recargando su
+            # caché de esquema justo tras un ALTER) y NO significa que la columna
+            # falte de verdad. Si aún quedan intentos, reintentamos el payload
+            # COMPLETO antes de descartar columnas — así no perdemos flowey_* por
+            # una recarga momentánea (bug real detectado: OS-39466 perdió su dato).
+            if (r.status_code == 400 and intento < 2
+                    and ("form_tiene_" in r.text or "lts_hr_" in r.text
+                         or "cubre_fichero" in r.text or "flowey_" in r.text
+                         or "task_status" in r.text or "fichero_" in r.text)):
+                time.sleep(1.5 * (intento + 1))
+                continue  # reintentar payload completo
             if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text
                                          or "cubre_fichero" in r.text or "flowey_" in r.text
                                          or "task_status" in r.text or "fichero_" in r.text):
