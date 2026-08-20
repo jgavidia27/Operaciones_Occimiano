@@ -5312,15 +5312,19 @@ elif _page == _NAV_PAGES[3]:
             marker=dict(color=_FALLA_PAL[0], line=dict(color="rgba(0,0,0,0.08)", width=1)),
             text=[f"{v} · {v/_total_all*100:.0f}%" for v in _causas_cnt.values],
             textposition="outside",
+            cliponaxis=False,     # no recortar el label que sobresale a la derecha
             hovertemplate="<b>%{y}</b><br>%{x} OTs<extra></extra>",
         ))
+        # Holgura a la derecha: el label "12 · 34%" es más ancho que un número
+        # suelto, así que reservamos ~30% sobre el máximo.
+        _max_cau = int(max(_causas_cnt.values)) if len(_causas_cnt) else 0
         _fig.update_layout(
             height=max(220, 32 * len(_causas_cnt) + 60),
-            margin=dict(l=0, r=40, t=10, b=10),
+            margin=dict(l=0, r=70, t=10, b=10),
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             font=dict(color=_t["text"], size=12),
             xaxis=dict(showgrid=True, gridcolor=_t["border"], zeroline=False,
-                       title=None),
+                       title=None, range=[0, max(_max_cau + 1, _max_cau * 1.30)]),
             yaxis=dict(autorange="reversed", title=None,
                        tickfont=dict(size=11)),
             showlegend=False,
@@ -5859,17 +5863,28 @@ elif _page == _NAV_PAGES[3]:
                         marker_color=_col["accent"],
                         text=_top_data["llamados"],
                         textposition="outside",
+                        textfont=dict(size=12),
+                        # Sin esto Plotly recorta el texto 'outside' que sobresale
+                        # del área de ploteo (el número de la barra más larga se
+                        # cortaba a la derecha).
+                        cliponaxis=False,
                     ))
+                    # Holgura a la derecha para que el número quepa completo:
+                    # el eje llega ~18% más allá del máximo (mínimo +1 llamado).
+                    _max_ll = int(_top_data["llamados"].max()) if not _top_data.empty else 0
+                    _x_top = max(_max_ll + 1, _max_ll * 1.18)
                     # Altura proporcional al nº de barras (≈42px por barra) para
                     # que 10 estaciones no queden apretadas.
                     _fig_top5.update_layout(
                         height=max(280, 42 * len(_top_data) + 50),
-                        margin=dict(l=0,r=40,t=10,b=0),
+                        margin=dict(l=0, r=55, t=10, b=0),
                         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                         font_color=_t["text"],
-                        xaxis=dict(gridcolor=_t["border"]),
+                        xaxis=dict(gridcolor=_t["border"], range=[0, _x_top],
+                                   dtick=1 if _max_ll <= 12 else None),
                         yaxis=dict(autorange="reversed",
-                                   tickfont=dict(size=13, family="Arial Black, Arial Bold, sans-serif")),
+                                   tickfont=dict(size=12, family="Arial Black, Arial Bold, sans-serif")),
+                        uniformtext=dict(mode="show", minsize=10),
                     )
                     st.plotly_chart(_fig_top5, use_container_width=True, key=f"chart_top5_{_ck}")
 
