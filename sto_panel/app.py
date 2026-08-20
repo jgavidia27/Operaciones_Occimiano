@@ -265,6 +265,12 @@ with st.sidebar:
     _clientes = ["Todos"] + clientes_en_rango(rango_sel)
     cliente_sel = st.selectbox("Cliente", options=_clientes, index=0)
 
+    filtro_eds = st.text_input(
+        "Buscar EDS",
+        value="",
+        placeholder="Ej. 40051, SH_216…",
+    ).strip()
+
     st.divider()
     _nav = st.radio(
         "Vista",
@@ -421,10 +427,11 @@ if _nav == "Últimos 30 días":
 # HOME — Reincidencias detectadas por ventana móvil
 # ═══════════════════════════════════════════════════════════════════════════
 
-def render_home(rango_dias: int, cliente: str):
+def render_home(rango_dias: int, cliente: str, filtro_eds: str = ""):
     st.title("☑️ Panel de validación STO - Occim")
     st.caption(f"{RANGOS_LABEL[rango_dias]} · Ventana de {DEFAULT_VENTANA_DIAS} días para detectar reincidencia"
-               + (f" · {cliente}" if cliente != "Todos" else ""))
+               + (f" · {cliente}" if cliente != "Todos" else "")
+               + (f" · filtro: {filtro_eds}" if filtro_eds else ""))
 
     # Primera pasada: obtener candidatos de EDS para pedir sus firmas
     _preview = eds_con_reincidencia(rango_dias=rango_dias, cliente=cliente,
@@ -441,10 +448,16 @@ def render_home(rango_dias: int, cliente: str):
 
     df = df.copy()
     df["_ya_validada"] = df["cerrado"]
-    # "Crítica" ahora viene directo de la lógica (caso nuevo tras uno cerrado)
     df["_critica"] = df["critico"] & ~df["_ya_validada"]
+
+    # Filtro por código EDS (case-insensitive, substring)
+    if filtro_eds:
+        df = df[df["codigo_eds"].str.contains(filtro_eds, case=False, na=False)]
+
+    # Orden: críticas arriba, luego por N° llamados desc, luego fecha_disparo desc
     df = df.sort_values(
-        by=["_critica", "fecha_disparo"], ascending=[False, False]
+        by=["_critica", "n_llamados", "fecha_disparo"],
+        ascending=[False, False, False],
     ).reset_index(drop=True)
 
     total = len(df)
@@ -463,7 +476,7 @@ def render_home(rango_dias: int, cliente: str):
         return
 
     st.markdown("### EDS con reincidencia")
-    st.caption("🔴 reincidentes con validación previa primero, luego por fecha de disparo. Click para revisar y clasificar.")
+    st.caption("Ordenadas: 🔴 reincidentes primero, luego por N° de llamados sin cerrar. Click para revisar y clasificar.")
 
     hdr = st.columns([1, 3, 2, 2, 1, 2, 2, 1])
     hdr[0].markdown("**EDS**")
@@ -825,6 +838,6 @@ if "eds_detalle" in st.session_state and "fecha_disparo" in st.session_state:
         render_detalle(st.session_state["eds_detalle"], _fd)
     else:
         _volver_a_home()
-        render_home(rango_sel, cliente_sel)
+        render_home(rango_sel, cliente_sel, filtro_eds)
 else:
-    render_home(rango_sel, cliente_sel)
+    render_home(rango_sel, cliente_sel, filtro_eds)
