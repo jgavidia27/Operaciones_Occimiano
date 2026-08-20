@@ -521,7 +521,20 @@ def main():
     ok = 0
     fail = 0
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=args.headless)
+        # Flags para que Chromium NO haga throttling cuando la ventana está
+        # minimizada, oculta u ocluida por otra ventana. Sin estos flags, el
+        # navegador reduce timers/requests/renders al fondo → los clicks de
+        # Playwright dejan de funcionar y las OTs fallan cuando el usuario
+        # cambia de ventana. Con estos flags, el bot corre igual sin importar
+        # si su ventana está visible o no.
+        _chromium_args = [
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-background-networking",
+            "--disable-features=CalculateNativeWinOcclusion",
+        ]
+        browser = p.chromium.launch(headless=args.headless, args=_chromium_args)
         ctx = browser.new_context()
         page = ctx.new_page()
 
