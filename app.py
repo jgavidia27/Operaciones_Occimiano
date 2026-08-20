@@ -2080,18 +2080,75 @@ if _page == _NAV_PAGES[1]:
             if sel_cu_c != "Todos":  df_ll = df_ll[df_ll["cumplimiento"] == sel_cu_c]
             if sel_zona_c: df_ll = df_ll[df_ll["_macrozona"].isin(sel_zona_c)]
 
-            # ── KPIs ──────────────────────────────────────────────────────────
+            # ── KPIs Ejecutivos ───────────────────────────────────────────────
             _mes_lbl_tit = f" — {', '.join(sel_mes_c)}" if sel_mes_c else ""
-            _cumple_c    = (df_ll["cumplimiento"] == "CUMPLE").sum()
-            _nocumple_c  = (df_ll["cumplimiento"] == "NO CUMPLE").sum()
-            _pct_c       = round(_cumple_c/(_cumple_c+_nocumple_c)*100,1) if (_cumple_c+_nocumple_c)>0 else 0
+            _cumple_c    = int((df_ll["cumplimiento"] == "CUMPLE").sum())
+            _nocumple_c  = int((df_ll["cumplimiento"] == "NO CUMPLE").sum())
+            _pendientes  = int((df_ll["cumplimiento"] == "PENDIENTE").sum())
+            _total_ll    = len(df_ll)
+            # Base de evaluación SLA: solo los ya cerrados (CUMPLE + NO CUMPLE).
+            _base_sla    = _cumple_c + _nocumple_c
+            _pct_c       = round(_cumple_c / _base_sla * 100, 1) if _base_sla > 0 else 0.0
+            _n_p1        = int((df_ll["prioridad"].str.upper() == "P1").sum())
+            # "Otros" = duplicados / errores / cancelados (no evaluables)
+            _otros       = _total_ll - _cumple_c - _nocumple_c - _pendientes
+
+            # Card grande con el % de cumplimiento como métrica principal
+            _pct_color = ("#16a34a" if _pct_c >= 85 else
+                          "#eab308" if _pct_c >= 70 else
+                          "#dc2626")
+            _pct_bg    = ("#dcfce7" if _pct_c >= 85 else
+                          "#fef9c3" if _pct_c >= 70 else
+                          "#fee2e2")
+            _mes_titulo = (", ".join(sel_mes_c) if sel_mes_c else "período completo")
+
+            _hdr_html = f"""
+<div style="background:linear-gradient(135deg,{_pct_bg} 0%,#ffffff 60%);
+     border:1px solid #e2e8f0;border-radius:14px;padding:22px 26px;
+     margin:8px 0 18px 0;box-shadow:0 1px 4px rgba(0,0,0,.04)">
+  <div style="display:flex;align-items:center;justify-content:space-between;
+       flex-wrap:wrap;gap:20px">
+    <div>
+      <div style="font-size:0.78rem;letter-spacing:.08em;text-transform:uppercase;
+           color:#64748b;font-weight:600">
+        Cumplimiento SLA · {_mes_titulo}
+      </div>
+      <div style="font-size:3.4rem;line-height:1;font-weight:800;
+           color:{_pct_color};margin-top:6px">
+        {_pct_c}%
+      </div>
+      <div style="font-size:0.85rem;color:#475569;margin-top:6px">
+        {_cumple_c:,} cumplen · {_nocumple_c:,} incumplen · <b>{_base_sla:,}</b> evaluados
+      </div>
+    </div>
+    <div style="text-align:right;min-width:180px">
+      <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;
+           letter-spacing:.06em;font-weight:600">Total llamados</div>
+      <div style="font-size:2.4rem;font-weight:700;color:#0f172a;line-height:1">
+        {_total_ll:,}
+      </div>
+      <div style="font-size:0.78rem;color:#94a3b8;margin-top:4px">
+        {_n_p1:,} P1 · máquina detenida
+      </div>
+    </div>
+  </div>
+</div>
+"""
+            st.markdown(_hdr_html, unsafe_allow_html=True)
+
+            # Fila de desglose: 4 mini-cards que suman al Total
             lk1, lk2, lk3, lk4, lk5 = st.columns(5)
-            lk1.metric(f"Total llamados{_mes_lbl_tit}", f"{len(df_ll):,}")
-            lk2.metric("P1 (máquina detenida)", f"{(df_ll['prioridad'].str.upper()=='P1').sum():,}")
-            lk3.metric("Cumple SLA", f"{_cumple_c:,}", delta=f"{_pct_c}%")
-            lk4.metric("No cumple SLA", f"{_nocumple_c:,}",
-                       delta=f"-{100-_pct_c:.1f}%" if (_cumple_c+_nocumple_c)>0 else None,
-                       delta_color="inverse")
+            lk1.metric("✅ Cumple SLA", f"{_cumple_c:,}",
+                       delta=f"{_pct_c}%" if _base_sla else None, delta_color="off",
+                       help="Llamados cerrados dentro del umbral SLA")
+            lk2.metric("❌ No cumple SLA", f"{_nocumple_c:,}",
+                       delta=(f"{round(_nocumple_c/_base_sla*100,1)}%" if _base_sla else None),
+                       delta_color="off",
+                       help="Llamados cerrados por fuera del umbral SLA")
+            lk3.metric("⏳ Pendientes", f"{_pendientes:,}",
+                       help="Aún abiertos — SLA sin evaluar hasta que se cierre")
+            lk4.metric("🚫 Otros", f"{_otros:,}",
+                       help="Duplicados, error de ingreso, cancelados — no evaluables")
             # ── KPI semana actual (Domingo→Sábado, renovación automática) ─────
             _ts_hoy     = pd.Timestamp.now().normalize()
             _dow_s      = (_ts_hoy.dayofweek + 1) % 7          # 0=Dom … 6=Sáb
