@@ -202,15 +202,34 @@ def _tema_falla(comentario) -> str | None:
     return "Otros"
 
 
-def _clasif_mix_por_nombre(equipment) -> str:
-    """'MIX' | 'No MIX' | '' según el nombre del activo de la OT.
-    MIX = lavadora propiedad Occimiano (nombre contiene MSELF). Misma regla que
-    usa el listado de EDS. Devuelve '' si la OT no es sobre una lavadora."""
+def _tipo_y_mix_activo(equipment) -> tuple:
+    """('Lavadora'|'Aspiradora'|'Otro', 'MIX'|'No MIX'|'') desde el nombre del
+    activo de la OT. Reglas de propiedad (confirmadas por operaciones):
+      • Lavadora   → MIX si el modelo es MSELF (propiedad Occimiano);
+                     No MIX si es del cliente (Aquapress, etc.).
+      • Aspiradora → MIX si es TWISTER / Twister multifunción (Occimiano);
+                     No MIX el resto (las Shell descriptivas: FILTRO TIPO
+                     MANGA, MOTOR TURBINA, TAMBOR, S/I…).
+      • Otro equipo → sin MIX. Incluye a propósito LAVAINTERIORES,
+        LAVABICICLETAS, LAVATAPIZ/LAVATAPETE (NO son lavadoras de auto y no
+        deben incidir en el desglose), además de fichero, bomba, ablandador,
+        termo, compresor, etc. Se logra exigiendo que la pieza EMPIECE con
+        'LAVADORA'/'HIDROLAV': 'LAVAINTERIORES …' y 'FICHERO LAVADORA RM5 …'
+        no matchean. Validado contra las 5 variantes LAVA* reales en Fracttal.
+    En OTs compuestas (activo1 · activo2) manda la lavadora, luego la aspiradora."""
     _piezas = [p.strip().upper() for p in str(equipment or "").split(" · ") if p.strip()]
-    _lav = [p for p in _piezas if p.startswith("LAVADORA")]
-    if not _lav:
-        return ""
-    return "MIX" if any("MSELF" in p for p in _lav) else "No MIX"
+    _lav = [p for p in _piezas if p.startswith("LAVADORA") or p.startswith("HIDROLAV")]
+    if _lav:
+        return "Lavadora", ("MIX" if any("MSELF" in p for p in _lav) else "No MIX")
+    _asp = [p for p in _piezas if p.startswith("ASPIRA")]
+    if _asp:
+        return "Aspiradora", ("MIX" if any("TWIST" in p for p in _asp) else "No MIX")
+    return "Otro", ""
+
+
+def _clasif_mix_por_nombre(equipment) -> str:
+    """'MIX' | 'No MIX' | '' — solo la parte MIX de _tipo_y_mix_activo()."""
+    return _tipo_y_mix_activo(equipment)[1]
 
 
 # Helper de módulo: semanas domingo→sábado dentro de un mes 'YYYY-MM'.
@@ -6837,6 +6856,7 @@ elif _page == _NAV_PAGES[3]:
                     _wo_lookup = df_wo_c[_cols_wo].drop_duplicates(subset="folio")
 
             _det_corr_disp = pd.DataFrame()
+            _bd_src = pd.DataFrame()
             if not _det_corr.empty:
                 # Detectar columna de folio en llamados
                 _fol_col = None
@@ -6903,9 +6923,16 @@ elif _page == _NAV_PAGES[3]:
                     if first == "DISPENSADOR":
                         return "🧴 Dispensador"
                     return f"⚫ {first.title()}"
-                _det_corr_disp["Equipo"] = _det_corr_disp.get(
-                    "equipment", pd.Series("", index=_det_corr_disp.index)
-                ).apply(_clasif_equipo)
+                _eq_nombre_det = _det_corr_disp.get(
+                    "equipment", pd.Series("", index=_det_corr_disp.index))
+                _det_corr_disp["Equipo"] = _eq_nombre_det.apply(_clasif_equipo)
+                # Tipo de activo + MIX/No MIX desde el NOMBRE del activo — cubre
+                # lavadoras (MSELF) y aspiradoras (TWISTER), así el desglose suma
+                # el total de correctivos. Antes solo se clasificaban lavadoras
+                # vía los sets por EDS, y la aspiradora quedaba fuera (1+6≠8).
+                _tm_det = _eq_nombre_det.apply(_tipo_y_mix_activo)
+                _det_corr_disp["_tipo_eq"] = [t for t, _ in _tm_det]
+                _det_corr_disp["MIX"]      = [m if m else "—" for _, m in _tm_det]
                 _det_corr_disp = _det_corr_disp.rename(columns={
                     _fol_col: "N° OT" if _fol_col else "N° OT",
                     "prioridad":       "Prioridad",
@@ -6925,6 +6952,8 @@ elif _page == _NAV_PAGES[3]:
                                                 "Tipo falla","Cód. Equipo","Equipo","MIX",
                                                 "Causa raíz","Comentario técnico"]
                                     if c in _det_corr_disp.columns]
+                # Guardar tipo+MIX para el desglose (se pierde al recortar cols)
+                _bd_src = _det_corr_disp[["_tipo_eq", "MIX"]].copy()
                 _det_corr_disp = _det_corr_disp[_cols_show_corr]
 
             _det_prev_disp = pd.DataFrame()
@@ -6962,36 +6991,68 @@ elif _page == _NAV_PAGES[3]:
             _n_corr = len(_det_corr_disp)
             _n_prev = len(_det_prev_disp)
 
-            # Desglose MIX / No MIX por codigo_activo — usar los diccionarios
-            # ya construidos en el listado superior (_mix_por_eds / _nomix_por_eds).
-            _mix_set_eds  = _mix_por_eds.get(_sel_eds_det, set())
-            _nomix_set_eds = _nomix_por_eds.get(_sel_eds_det, set())
-            def _clasif_mix(cod):
-                """Devuelve 'MIX', 'No MIX' o '—' (no lavadora / no clasificable)."""
-                if not cod or str(cod).strip() in ("", "—", "nan", "None"):
-                    return "—"
-                # Un codigo compuesto (EQ-6249, EQ-7847) → mirar cada uno
-                _pieces = [c.strip() for c in str(cod).split(",") if c.strip()]
-                _hits_mix = any(p in _mix_set_eds for p in _pieces)
-                _hits_nomix = any(p in _nomix_set_eds for p in _pieces)
-                if _hits_mix and not _hits_nomix: return "MIX"
-                if _hits_nomix and not _hits_mix: return "No MIX"
-                if _hits_mix and _hits_nomix:    return "Ambos"
-                return "—"
-            # Contadores en correctivos
-            if _n_corr > 0 and "Cód. Equipo" in _det_corr_disp.columns:
-                _det_corr_disp["MIX"] = _det_corr_disp["Cód. Equipo"].apply(_clasif_mix)
-                _n_corr_mix   = int((_det_corr_disp["MIX"] == "MIX").sum())
-                _n_corr_nomix = int((_det_corr_disp["MIX"] == "No MIX").sum())
+            # Totales MIX / No MIX (ya clasificados por nombre de activo arriba)
+            if not _bd_src.empty:
+                _n_corr_mix   = int((_bd_src["MIX"] == "MIX").sum())
+                _n_corr_nomix = int((_bd_src["MIX"] == "No MIX").sum())
             else:
                 _n_corr_mix = _n_corr_nomix = 0
             _mk_a, _mk_b, _mk_c, _mk_d = st.columns(4)
             _mk_a.metric("Correctivos en período", f"{_n_corr}")
             _mk_b.metric("↳ En equipos MIX", f"{_n_corr_mix}",
-                         help="Correctivos sobre lavadoras MIX (propiedad Occimiano — mayor peso).")
+                         help="Correctivos sobre equipos MIX — propiedad Occimiano "
+                              "(lavadoras MSELF y aspiradoras Twister).")
             _mk_c.metric("↳ En equipos No MIX", f"{_n_corr_nomix}",
-                         help="Correctivos sobre lavadoras del cliente (Aquapress u otras).")
+                         help="Correctivos sobre equipos del cliente "
+                              "(lavadoras Aquapress u otras, aspiradoras no Twister).")
             _mk_d.metric("Preventivas en período", f"{_n_prev}")
+
+            # ── Desglose por tipo de equipo × MIX / No MIX ──────────────────
+            # Suma exacta al total de correctivos: antes solo se clasificaban
+            # lavadoras y la aspiradora quedaba afuera (1 MIX + 6 No MIX ≠ 8).
+            if _n_corr > 0 and not _bd_src.empty:
+                _ORDEN_EQ = [("Lavadora", "🚿 Lavadora"),
+                             ("Aspiradora", "🌀 Aspiradora"),
+                             ("Otro", "⚫ Otros equipos")]
+                _rows_bd, _tot_mix, _tot_nomix, _tot_sin = [], 0, 0, 0
+                for _k_eq, _lbl_eq in _ORDEN_EQ:
+                    _sb = _bd_src[_bd_src["_tipo_eq"] == _k_eq]
+                    if _sb.empty:
+                        continue
+                    _m  = int((_sb["MIX"] == "MIX").sum())
+                    _nm = int((_sb["MIX"] == "No MIX").sum())
+                    _sn = int(len(_sb) - _m - _nm)
+                    _tot_mix += _m; _tot_nomix += _nm; _tot_sin += _sn
+                    _rows_bd.append({
+                        "Equipo":  _lbl_eq,
+                        "MIX":     _m,
+                        "No MIX":  _nm,
+                        "Sin clasif.": _sn,
+                        "Total":   int(len(_sb)),
+                    })
+                _rows_bd.append({
+                    "Equipo": "TOTAL", "MIX": _tot_mix, "No MIX": _tot_nomix,
+                    "Sin clasif.": _tot_sin, "Total": _n_corr,
+                })
+                st.markdown(
+                    f'<div style="font-weight:700;font-size:0.85rem;margin:10px 0 4px 0;'
+                    f'color:{_t["text"]};">🧩 Desglose de los {_n_corr} correctivos '
+                    f'por tipo de equipo</div>',
+                    unsafe_allow_html=True,
+                )
+                _show_df(
+                    pd.DataFrame(_rows_bd), hide_index=True, use_container_width=True,
+                    column_config={
+                        "Equipo": st.column_config.TextColumn(width=170),
+                        "MIX":    st.column_config.NumberColumn(width=90,
+                            help="Equipo propiedad Occimiano — lavadora MSELF / aspiradora Twister."),
+                        "No MIX": st.column_config.NumberColumn(width=90,
+                            help="Equipo del cliente — lavadora Aquapress u otra / aspiradora no Twister."),
+                        "Sin clasif.": st.column_config.NumberColumn(width=100,
+                            help="Correctivos sobre equipos que no son lavadora ni aspiradora "
+                                 "(fichero, bomba, ablandador, termo…), donde no aplica MIX."),
+                        "Total":  st.column_config.NumberColumn(width=90),
+                    })
 
             if _n_corr == 0 and _n_prev == 0:
                 st.info(f"La estación **{_sel_eds_det}** no tiene atenciones registradas "
