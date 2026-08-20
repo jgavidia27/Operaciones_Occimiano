@@ -3434,12 +3434,17 @@ if vista == "🔍 Cierre Fracttal":
             )
 
             # Generar contenido del .bat
+            # Usamos --headless: Chrome corre SIN ventana visible, no puede
+            # ser minimizado ni ocluido → el usuario puede seguir trabajando
+            # en otras apps sin afectar el bot.
             _folios_arg = " ".join(_folios_seleccionados)
             _bat_content = (
                 "@echo off\r\n"
                 f"REM Cierre automatico de {len(_folios_seleccionados)} OTs generado desde el panel\r\n"
+                "REM Modo headless: Chrome sin ventana (mas estable, no le afecta"
+                " que trabajes en otras apps).\r\n"
                 "cd /d C:\\Users\\jgavi\\Documents\\occimiano_dashboard\r\n"
-                f"python cierre_ots_playwright.py {_folios_arg}\r\n"
+                f"python cierre_ots_playwright.py --headless {_folios_arg}\r\n"
                 "echo.\r\n"
                 "echo === Presiona ENTER para cerrar esta ventana ===\r\n"
                 "pause > nul\r\n"
@@ -3460,8 +3465,10 @@ if vista == "🔍 Cierre Fracttal":
                 st.markdown(
                     f"👉 **Pasos:** 1) Click en el botón azul de la izquierda "
                     f"para descargar el archivo · 2) **Doble click** al archivo "
-                    f"descargado · Chrome se abre solo, hace login, cierra las "
-                    f"**{len(_folios_seleccionados)}** OTs y reporta al final."
+                    f"descargado · Se abre una consola negra que muestra el "
+                    f"progreso; Chrome corre **oculto (headless)** en segundo "
+                    f"plano cerrando las **{len(_folios_seleccionados)}** OTs. "
+                    f"Podés seguir trabajando en otras ventanas sin afectar el bot."
                 )
 
         # ══════ Historial de cierres (auditoría) ══════
