@@ -3012,6 +3012,44 @@ if vista == "🔍 Cierre Fracttal":
         _k6.metric("⚠️ >30 días", f"{_n_old}",
                    help="OTs con 30 días o más — priorizar cierre urgente")
 
+        # ── SLA Shell: deben estar cerradas TODAS al día 20 de cada mes ──
+        # Regla operativa: facturación mensual Shell se cierra el día 20.
+        # Cualquier OT Shell abierta después del día 20 es un incumplimiento.
+        _shell_open = _dfr[_dfr["cliente"].astype(str).str.upper().str.contains(
+            "SHELL", na=False)] if "cliente" in _dfr.columns else pd.DataFrame()
+        if not _shell_open.empty:
+            _hoy_s = datetime.now()
+            _dia_hoy = _hoy_s.day
+            if _dia_hoy <= 20:
+                _dias_al_20 = 20 - _dia_hoy
+                # Semáforo por urgencia
+                if _dias_al_20 == 0:
+                    _emo, _color_bg, _color_bd, _color_tx = "🔴", "#7f1d1d", "#dc2626", "#fff"
+                    _msg = f"HOY es el día 20 — deben cerrarse HOY"
+                elif _dias_al_20 <= 3:
+                    _emo, _color_bg, _color_bd, _color_tx = "🔴", "#fef2f2", "#dc2626", "#991b1b"
+                    _msg = f"faltan {_dias_al_20} día(s) para el cierre mensual Shell (día 20)"
+                elif _dias_al_20 <= 7:
+                    _emo, _color_bg, _color_bd, _color_tx = "🟠", "#fff7ed", "#ea580c", "#9a3412"
+                    _msg = f"faltan {_dias_al_20} día(s) para el cierre mensual Shell (día 20)"
+                else:
+                    _emo, _color_bg, _color_bd, _color_tx = "🟡", "#fefce8", "#ca8a04", "#713f12"
+                    _msg = f"faltan {_dias_al_20} días para el cierre mensual Shell (día 20)"
+            else:
+                # Ya pasó el día 20 → vencido
+                _dias_venc = _dia_hoy - 20
+                _emo, _color_bg, _color_bd, _color_tx = "🚨", "#7f1d1d", "#dc2626", "#fff"
+                _msg = (f"SLA VENCIDO — hace {_dias_venc} día(s) que Shell debió estar cerrado "
+                        f"(fecha límite: día 20 de cada mes)")
+            st.markdown(
+                f'<div style="background:{_color_bg};color:{_color_tx};'
+                f'padding:12px 16px;border-radius:6px;margin:10px 0;'
+                f'border-left:4px solid {_color_bd}">'
+                f'<b>{_emo} Shell · {len(_shell_open)} OTs pendientes de cerrar</b> — {_msg}.'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
         # Filtros
         st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
         _f1, _f2, _f3, _f4, _f5 = st.columns([1.2, 1.4, 1.2, 1, 1.5])
