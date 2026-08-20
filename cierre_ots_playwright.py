@@ -535,7 +535,16 @@ def main():
             "--disable-features=CalculateNativeWinOcclusion",
         ]
         browser = p.chromium.launch(headless=args.headless, args=_chromium_args)
-        ctx = browser.new_context()
+        # Viewport grande + user agent desktop. En modo headless, Chromium
+        # arranca con viewport 800x600 por defecto → Fracttal renderiza como
+        # mobile y el buscador de OTs queda oculto/en menu hamburguesa.
+        # Forzamos 1920x1080 para que la UI se comporte igual que headed.
+        ctx = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"),
+        )
         page = ctx.new_page()
 
         try:
