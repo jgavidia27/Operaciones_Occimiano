@@ -5783,11 +5783,12 @@ elif _page == _NAV_PAGES[3]:
 
         # ── SECCIÓN CONDICIONAL ──────────────────────────────────────────────
         if _eds_sel_nombre == "Todas":
-            # ── TOP 5 EDS con más llamados ───────────────────────────────────
+            # ── TOP 10 EDS con más llamados (gráfico) · detalle solo top 5 ────
+            _N_GRAF_EDS, _N_DETALLE_EDS = 10, 5
             st.markdown(
                 f'<div style="font-size:1.0rem;font-weight:700;color:{_t["text"]};'
                 f'margin:12px 0 8px 0;border-bottom:2px solid {_col["accent"]};'
-                f'padding-bottom:4px;">📊 Top 5 EDS · Más llamados correctivos ({", ".join([_MES_ES[int(m.split("-")[1])] for m in _meses_activos])})</div>',
+                f'padding-bottom:4px;">📊 Top {_N_GRAF_EDS} EDS · Más llamados correctivos ({", ".join([_MES_ES[int(m.split("-")[1])] for m in _meses_activos])})</div>',
                 unsafe_allow_html=True,
             )
             if not df_ll_f.empty and "eds_occim" in df_ll_f.columns:
@@ -5795,7 +5796,7 @@ elif _page == _NAV_PAGES[3]:
                 # listado de estaciones. Antes se usaba count("n_llamado"), que
                 # ignora correctivas sin nº de aviso → el gráfico mostraba menos
                 # que el listado (ej. Panamericana 7 vs 8). Ahora coinciden.
-                _top5_data = (
+                _top_data = (
                     df_ll_f.groupby(["eds_occim","eds_nombre"], dropna=True)
                     .agg(
                         llamados=("eds_occim","size"),
@@ -5803,7 +5804,7 @@ elif _page == _NAV_PAGES[3]:
                     )
                     .reset_index()
                     .sort_values("llamados", ascending=False)
-                    .head(5)
+                    .head(_N_GRAF_EDS)
                 )
                 # Código a mostrar: para Aramco, eds_occim es PBR-XX, pero el
                 # código operativo es EE_S### (eds_occim_raw). Mapeamos PBR→EE_.
@@ -5823,35 +5824,48 @@ elif _page == _NAV_PAGES[3]:
                             _ee_map[_eo] = _rawv        # PBR-38B → EE_S200
                         else:
                             _ee_map[_eo] = _eo
-                _top5_data["_cod_disp"] = _top5_data["eds_occim"].astype(str).str.strip().map(
+                _top_data["_cod_disp"] = _top_data["eds_occim"].astype(str).str.strip().map(
                     lambda e: _ee_map.get(e, e))
                 # Etiqueta: "EE_S200 · Esmax Antofagasta ..." / "SH_2 · Panamericana ..."
-                _top5_data["_label"] = _top5_data.apply(
+                _top_data["_label"] = _top_data.apply(
                     lambda r: (f'{r["_cod_disp"]} · {r["eds_nombre"]}'
                                if str(r.get("_cod_disp") or "").strip()
                                else str(r["eds_nombre"])), axis=1)
+                # El gráfico muestra las 10; el detalle de la derecha solo las 5
+                # primeras (con 10 tarjetas el panel se alarga demasiado).
+                _top5_data = _top_data.head(_N_DETALLE_EDS)
 
                 _col_chart, _col_detail = st.columns([3, 2])
                 with _col_chart:
                     _fig_top5 = go.Figure(go.Bar(
-                        x=_top5_data["llamados"],
-                        y=_top5_data["_label"],
+                        x=_top_data["llamados"],
+                        y=_top_data["_label"],
                         orientation="h",
                         marker_color=_col["accent"],
-                        text=_top5_data["llamados"],
+                        text=_top_data["llamados"],
                         textposition="outside",
                     ))
+                    # Altura proporcional al nº de barras (≈42px por barra) para
+                    # que 10 estaciones no queden apretadas.
                     _fig_top5.update_layout(
-                        height=280, margin=dict(l=0,r=40,t=10,b=0),
+                        height=max(280, 42 * len(_top_data) + 50),
+                        margin=dict(l=0,r=40,t=10,b=0),
                         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                         font_color=_t["text"],
                         xaxis=dict(gridcolor=_t["border"]),
                         yaxis=dict(autorange="reversed",
-                                   tickfont=dict(size=14, family="Arial Black, Arial Bold, sans-serif")),
+                                   tickfont=dict(size=13, family="Arial Black, Arial Bold, sans-serif")),
                     )
                     st.plotly_chart(_fig_top5, use_container_width=True, key=f"chart_top5_{_ck}")
 
                 with _col_detail:
+                    if len(_top_data) > _N_DETALLE_EDS:
+                        st.markdown(
+                            f'<div style="font-size:0.72rem;color:{_t["muted"]};'
+                            f'margin:0 0 6px 2px;">Detalle de las <b>{_N_DETALLE_EDS}</b> '
+                            f'con más llamados (el gráfico muestra {len(_top_data)}).</div>',
+                            unsafe_allow_html=True,
+                        )
                     # Lookup folio → (comentario del técnico, nombre del activo).
                     # El comentario es la ÚNICA fuente con el detalle real de la
                     # falla; failure_cause casi siempre dice "OTROS" y no aporta.
