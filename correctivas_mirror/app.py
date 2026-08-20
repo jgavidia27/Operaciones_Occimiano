@@ -3014,19 +3014,24 @@ if vista == "🔍 Cierre Fracttal":
 
         # Filtros
         st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
-        _f1, _f2, _f3, _f4 = st.columns([1.2, 1.2, 1, 1.5])
+        _f1, _f2, _f3, _f4, _f5 = st.columns([1.2, 1.4, 1.2, 1, 1.5])
         with _f1:
             _f_color = st.multiselect("Semáforo",
                 ["VERDE", "AMARILLO", "ROJO"],
                 default=["VERDE", "AMARILLO", "ROJO"],
                 format_func=lambda x: x.capitalize())
         with _f2:
+            _clientes_disp = sorted(c for c in _dfr["cliente"].dropna().unique() if c) \
+                if "cliente" in _dfr.columns else []
+            _f_cli = st.multiselect("Cliente", _clientes_disp, default=[],
+                placeholder="Todos los clientes")
+        with _f3:
             _tecnicos_disp = sorted(t for t in _dfr["personnel"].dropna().unique() if t)
             _f_tec = st.multiselect("Técnico", _tecnicos_disp, default=[])
-        with _f3:
+        with _f4:
             _tipos_disp = sorted(t for t in _dfr["tipo"].dropna().unique() if t)
             _f_tipo = st.multiselect("Tipo", _tipos_disp, default=[])
-        with _f4:
+        with _f5:
             _f_buscar = st.text_input("Buscar (folio / activo / EDS)", "")
 
         # Segunda fila de filtros: rango de fechas "pasó a revisión"
@@ -3057,6 +3062,8 @@ if vista == "🔍 Cierre Fracttal":
         _dff = _dfr.copy()
         if _f_color:
             _dff = _dff[_dff["color_semaforo"].isin(_f_color)]
+        if _f_cli and "cliente" in _dff.columns:
+            _dff = _dff[_dff["cliente"].isin(_f_cli)]
         if _f_tec:
             _dff = _dff[_dff["personnel"].isin(_f_tec)]
         if _f_tipo:
