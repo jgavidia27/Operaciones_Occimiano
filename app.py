@@ -5700,6 +5700,11 @@ elif _page == _NAV_PAGES[3]:
                 if df.empty or date_col not in df.columns:
                     return [0] * len(_weeks)
                 _d = pd.to_datetime(df[date_col], errors="coerce")
+                # Normalizar zona horaria: creation_date llega tz-aware (UTC) y
+                # los límites de semana son naive — comparar directo lanza
+                # TypeError y tumbaría la serie completa.
+                if getattr(_d.dt, "tz", None) is not None:
+                    _d = _d.dt.tz_convert("America/Santiago").dt.tz_localize(None)
                 out = []
                 for _ini, _fin in _weeks:
                     _mask = (_d >= _ini) & (_d <= _fin + pd.Timedelta(hours=23, minutes=59))
@@ -5707,9 +5712,19 @@ elif _page == _NAV_PAGES[3]:
                     out.append(_sub[id_col].nunique() if uniq else len(_sub))
                 return out
 
-            _pm_vals = _count_by_week(_pm_chart_src, "cal_date_maintenance"
-                                       if "cal_date_maintenance" in _pm_chart_src.columns
-                                       else "fecha_programada", "folio", True)
+            # Preventivas: agrupar por creation_date — el MISMO campo del que se
+            # derivan mes_str/mes_num (el filtro de mes) y el KPI "PMs realizados",
+            # así el total semanal cuadra con el mensual y con la tarjeta.
+            # BUG que corrige: antes se pedía "cal_date_maintenance" o
+            # "fecha_programada", columnas que NO existen en el DataFrame de OTs
+            # (el mapeo de Supabase solo trae creation_date/final_date/initial_date).
+            # Al no existir la columna, _count_by_week devolvía [0,0,…] y la serie
+            # preventiva desaparecía al filtrar por un solo mes (vista semanal),
+            # mientras en la vista mensual sí aparecía (agrupa por mes_num).
+            _pm_date_col = next((c for c in ("creation_date", "cal_date_maintenance",
+                                             "fecha_programada")
+                                 if c in _pm_chart_src.columns), "creation_date")
+            _pm_vals = _count_by_week(_pm_chart_src, _pm_date_col, "folio", True)
             # correctivas: cuenta por fecha_llamado
             _cm_vals = _count_by_week(_cm_chart_src, "fecha_llamado", "n_llamado", False)
 
