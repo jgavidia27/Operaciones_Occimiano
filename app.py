@@ -2082,16 +2082,24 @@ if _page == _NAV_PAGES[1]:
 
             # ── KPIs Ejecutivos ───────────────────────────────────────────────
             _mes_lbl_tit = f" — {', '.join(sel_mes_c)}" if sel_mes_c else ""
-            _cumple_c    = int((df_ll["cumplimiento"] == "CUMPLE").sum())
-            _nocumple_c  = int((df_ll["cumplimiento"] == "NO CUMPLE").sum())
-            _pendientes  = int((df_ll["cumplimiento"] == "PENDIENTE").sum())
             _total_ll    = len(df_ll)
+
+            # Clasificación por prioridad: estados basura ganan sobre cumplimiento.
+            # v_llamados_sla marca cumplimiento='PENDIENTE' para ERROR/DUPLIC/CANCEL,
+            # aunque estén cerrados hace meses. Los reclasificamos como 'Otros'.
+            _est_up = df_ll["estado_atencion"].astype(str).str.upper()
+            _basura_mask = _est_up.str.contains(
+                "ERROR|DUPLIC|CANCEL|RECHAZ|PRUEBA|ANULA", na=False, regex=True)
+            _otros_c     = int(_basura_mask.sum())
+            _df_valid    = df_ll[~_basura_mask]
+            _cumple_c    = int((_df_valid["cumplimiento"] == "CUMPLE").sum())
+            _nocumple_c  = int((_df_valid["cumplimiento"] == "NO CUMPLE").sum())
+            _pendientes  = int((_df_valid["cumplimiento"] == "PENDIENTE").sum())
             # Base de evaluación SLA: solo los ya cerrados (CUMPLE + NO CUMPLE).
             _base_sla    = _cumple_c + _nocumple_c
             _pct_c       = round(_cumple_c / _base_sla * 100, 1) if _base_sla > 0 else 0.0
             _n_p1        = int((df_ll["prioridad"].str.upper() == "P1").sum())
-            # "Otros" = duplicados / errores / cancelados (no evaluables)
-            _otros       = _total_ll - _cumple_c - _nocumple_c - _pendientes
+            _otros       = _otros_c
 
             # Card grande con el % de cumplimiento como métrica principal
             _pct_color = ("#16a34a" if _pct_c >= 85 else
