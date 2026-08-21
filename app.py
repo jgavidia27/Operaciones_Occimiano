@@ -15665,10 +15665,15 @@ elif _page == _NAV_PAGES[0]:
                 _MAX_EQ_PREC  = int(_pp_eq  * 0.30)
                 # Callcenter: $100K/sem × semanas de turno del equipo (rotación stgo)
                 # Norte/Sur no participan → 0 semanas
+                # FACTOR 60%: mientras la plataforma de callcenter no esté en uso
+                # debido, la empresa paga el 60% del bono (ni 0% castigando al STO,
+                # ni 100% premiando algo que aún no se cumple). Subir a 1.0 cuando
+                # la plataforma esté operativa.
+                _FACTOR_CC = 0.60
                 _BONO_CC_SEMANAL = 100_000
                 _n_semanas_cc = _semanas_cc_por_equipo.get(_grp_key, 0)
-                _BONO_CC = int(_BONO_CC_SEMANAL * _n_semanas_cc / _n_equipo_real) if _n_equipo_real > 0 else 0
-                _BONO_CC_EQ = _BONO_CC_SEMANAL * _n_semanas_cc  # total equipo por período
+                _BONO_CC = int(_BONO_CC_SEMANAL * _n_semanas_cc / _n_equipo_real * _FACTOR_CC) if _n_equipo_real > 0 else 0
+                _BONO_CC_EQ = int(_BONO_CC_SEMANAL * _n_semanas_cc * _FACTOR_CC)  # total equipo por período
 
                 # ── Construir tabla HTML ──────────────────────────────────────
                 _hdr_teal = "#01798A"
@@ -15884,7 +15889,8 @@ elif _page == _NAV_PAGES[0]:
                     _cc_cell    = f'<span style="font-weight:700;">{_clp_fmt(_BONO_CC)}</span>'
                     _cc_eq_cell = f'<span style="font-weight:700;font-style:italic;">{_clp_fmt(_BONO_CC_EQ)}</span>'
                     _cc_lbl     = (f'$100K/sem &times; {_n_semanas_cc} sem de turno'
-                                   f' &divide; {_n_equipo_real} pers')
+                                   f' &divide; {_n_equipo_real} pers &times; '
+                                   f'{int(_FACTOR_CC*100)}% (plataforma en implementación)')
                 else:
                     _cc_cell    = f'<span style="color:{_t["muted"]};font-size:0.82rem;">—</span>'
                     _cc_eq_cell = f'<span style="color:{_t["muted"]};font-size:0.82rem;">—</span>'
@@ -16201,7 +16207,9 @@ elif _page == _NAV_PAGES[0]:
                     if epp is not None: _eit.append((0.30,enp))
                     ec = round(sum(w*l for w,l in _eit)/sum(w for w,_ in _eit),1) if _eit else 0
                     ppi = int(int(_BONO_TOTAL/_n)*.50); ppe = ppi
-                    ncc = _cc_w.get(_gk,0); bcc = int(100000*ncc/_n) if _n else 0
+                    # Factor 60% callcenter (plataforma aún no en uso debido)
+                    _FACTOR_CC = 0.60
+                    ncc = _cc_w.get(_gk,0); bcc = int(100000*ncc/_n*_FACTOR_CC) if _n else 0
                     be = int(ppe*ec/100)
                     _trs = []
                     for tf in _mfl:
@@ -16235,7 +16243,7 @@ elif _page == _NAV_PAGES[0]:
                             "total_trim":tot,"prom_mensual":tot//3})
                     _bt.append({"key":_gk,"label":_EQUIPO_LABEL.get(_gk,_gk),
                         "senior":_gv.get("senior",""),"n_eq":_n,
-                        "pp_ind":ppi,"pp_eq":ppe,"n_semanas_cc":ncc,"bono_cc_eq":100000*ncc,
+                        "pp_ind":ppi,"pp_eq":ppe,"n_semanas_cc":ncc,"bono_cc_eq":int(100000*ncc*_FACTOR_CC),
                         "bono_eq_equipo":be,  # Bono colectivo por equipo — usable aunque tecs quede vacio por filtro mobile
                         "tecs":_trs,
                         "eq":{"sla_pct":esp,"sla_ok":eso,"sla_tot":est,"sla_niv":ens,
