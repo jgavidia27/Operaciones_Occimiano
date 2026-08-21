@@ -15645,9 +15645,9 @@ elif _page == _NAV_PAGES[0]:
                 # Columnas: el senior muestra el TOTAL del equipo (lo suyo + su
                 # equipo); cada técnico muestra su individual.
                 _tec_kpis = {}
-                for _t in _miembros_full:
-                    _sh_t = next((k for k, v in TECH_NAME_MAP.items() if v == _t), _t)
-                    _tec_kpis[_t] = _eq_kpi if _sh_t in SENIORS else _indiv_kpis[_t]
+                for _mtf in _miembros_full:
+                    _sh_t = next((k for k, v in TECH_NAME_MAP.items() if v == _mtf), _mtf)
+                    _tec_kpis[_mtf] = _eq_kpi if _sh_t in SENIORS else _indiv_kpis[_mtf]
 
                 # ── Bono por persona: pool / n_integrantes (seniors incluidos) ──
                 # 50 % individual (KPIs propios) · 50 % equipo (KPIs agregados)
