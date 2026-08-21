@@ -15372,15 +15372,16 @@ elif _page == _NAV_PAGES[0]:
             )
 
         # ── Función helper: calcular KPIs para un técnico específico ────────
-        def _kpi_para_tecnico(tech_full: str, equipo_key: str):
+        def _kpi_para_tecnico(tech_full: str, equipo_key: str, force_individual: bool = False):
             """
             Retorna dict con SLA, MP y Prec para un técnico dado.
             tech_full: nombre completo (API)
-            Para seniors, retorna el agregado del equipo completo en lugar de datos individuales.
+            Para seniors, retorna el agregado del equipo completo en lugar de datos individuales,
+            salvo que force_individual=True (para poder sumar por nombre miembro a miembro).
             """
             # Seniors: su KPI = promedio del equipo (igual que ranking y tabla SLA)
             _short_snr = next((k for k, v in TECH_NAME_MAP.items() if v == tech_full), None)
-            if _short_snr in SENIORS:
+            if _short_snr in SENIORS and not force_individual:
                 _mt = SENIOR_MULTI_TEAMS.get(_short_snr)
                 if _mt:
                     _combined = [_kpi_para_equipo(ek) for ek in _mt]
@@ -15491,6 +15492,27 @@ elif _page == _NAV_PAGES[0]:
                 "n_sla_ok": _n_sla_ok, "n_sla_total": _n_sla_total, "pct_sla": _pct_sla,
                 "n_fallas": _n_fallas_e, "n_pm": _n_pm_e,
                 "pct_prec": _pct_prec, "n_ots_prec": _n_ots_e, "n_correctas_prec": _n_correctas_e,
+            }
+
+        def _sumar_kpis(kpis):
+            """EQUIPO = suma exacta de los KPIs individuales (por nombre) de los
+            miembros mostrados. Suma los conteos y recalcula los porcentajes.
+            Así el total del equipo = lo del senior + lo de cada técnico, sin
+            depender del campo 'equipo' (que se desalinea con transferencias e
+            inactivos)."""
+            _lst = list(kpis)
+            _sla_ok = sum(k.get("n_sla_ok", 0) for k in _lst)
+            _sla_tot = sum(k.get("n_sla_total", 0) for k in _lst)
+            _fallas = sum(k.get("n_fallas", 0) for k in _lst)
+            _pm = sum(k.get("n_pm", 0) for k in _lst)
+            _prec_ok = sum(k.get("n_correctas_prec", 0) for k in _lst)
+            _prec_tot = sum(k.get("n_ots_prec", 0) for k in _lst)
+            return {
+                "n_sla_ok": _sla_ok, "n_sla_total": _sla_tot,
+                "pct_sla": (_sla_ok / _sla_tot * 100) if _sla_tot > 0 else None,
+                "n_fallas": _fallas, "n_pm": _pm,
+                "pct_prec": (_prec_ok / _prec_tot * 100) if _prec_tot > 0 else None,
+                "n_ots_prec": _prec_tot, "n_correctas_prec": _prec_ok,
             }
 
         # ── Helpers de formato HTML para celdas ──────────────────────────────
@@ -15613,8 +15635,19 @@ elif _page == _NAV_PAGES[0]:
                 )
 
                 # Calcular KPIs por técnico y para el equipo
-                _tec_kpis = {t: _kpi_para_tecnico(t, _grp_key) for t in _miembros_full}
-                _eq_kpi = _kpi_para_equipo(_grp_key)
+                # Individual real (por nombre) de CADA miembro, incluido el senior.
+                _indiv_kpis = {
+                    t: _kpi_para_tecnico(t, _grp_key, force_individual=True)
+                    for t in _miembros_full
+                }
+                # EQUIPO = suma exacta de lo que hizo el senior + cada técnico.
+                _eq_kpi = _sumar_kpis(_indiv_kpis.values())
+                # Columnas: el senior muestra el TOTAL del equipo (lo suyo + su
+                # equipo); cada técnico muestra su individual.
+                _tec_kpis = {}
+                for _t in _miembros_full:
+                    _sh_t = next((k for k, v in TECH_NAME_MAP.items() if v == _t), _t)
+                    _tec_kpis[_t] = _eq_kpi if _sh_t in SENIORS else _indiv_kpis[_t]
 
                 # ── Bono por persona: pool / n_integrantes (seniors incluidos) ──
                 # 50 % individual (KPIs propios) · 50 % equipo (KPIs agregados)
@@ -16144,12 +16177,22 @@ elif _page == _NAV_PAGES[0]:
                     _ms = [m for m in _gv.get("miembros",[]) if not _es_excluido(TECH_NAME_MAP.get(m,m))]
                     _mfl = [TECH_NAME_MAP.get(m,m) for m in _ms]; _n = len(_mfl)
                     if not _n: continue
-                    eso = sum(r.get("cumple",0) for r in _sf if r.get("equipo")==_gk)
-                    est = sum(r.get("total",0) for r in _sf if r.get("equipo")==_gk)
-                    epb = sum(r.get("buenas",0) for r in _pf if r.get("equipo")==_gk)
-                    ept = sum(r.get("total",0) for r in _pf if r.get("equipo")==_gk)
-                    epm = sum(r.get("pms",0) for r in _mfr if r.get("equipo")==_gk)
-                    efl = sum(r.get("fallas",0) for r in _rfr if r.get("equipo")==_gk)
+                    # Individual por NOMBRE de cada miembro mostrado (senior incluido)
+                    _ind = {}
+                    for tf in _mfl:
+                        tsx = next((k for k,v in TECH_NAME_MAP.items() if v==tf),tf)
+                        _ind[tf] = {
+                            "so": sum(r.get("cumple",0) for r in _sf if r.get("tecnico")==tf),
+                            "st": sum(r.get("total",0) for r in _sf if r.get("tecnico")==tf),
+                            "pb": sum(r.get("buenas",0) for r in _pf if r.get("tecnico")==tf),
+                            "pt": sum(r.get("total",0) for r in _pf if r.get("tecnico")==tf),
+                            "pm": sum(r.get("pms",0) for r in _mfr if r.get("tecnico")==tf),
+                            "fl": sum(r.get("fallas",0) for r in _rfr if r.get("tecnico_short")==tsx),
+                        }
+                    # EQUIPO = suma exacta de lo que hizo el senior + cada técnico
+                    eso = sum(v["so"] for v in _ind.values()); est = sum(v["st"] for v in _ind.values())
+                    epb = sum(v["pb"] for v in _ind.values()); ept = sum(v["pt"] for v in _ind.values())
+                    epm = sum(v["pm"] for v in _ind.values()); efl = sum(v["fl"] for v in _ind.values())
                     esp = round(eso/est*100,1) if est else None
                     emp = round((1-efl/epm)*100,1) if epm else None
                     epp = round(epb/ept*100,1) if ept else None
@@ -16165,23 +16208,11 @@ elif _page == _NAV_PAGES[0]:
                         ts = next((k for k,v in TECH_NAME_MAP.items() if v==tf),tf)
                         iss = ts in SENIORS
                         if iss:
-                            _mt = SENIOR_MULTI_TEAMS.get(ts)
-                            if _mt:
-                                so = sum(r.get("cumple",0) for r in _sf if r.get("equipo") in _mt)
-                                st2 = sum(r.get("total",0) for r in _sf if r.get("equipo") in _mt)
-                                pb = sum(r.get("buenas",0) for r in _pf if r.get("equipo") in _mt)
-                                pt = sum(r.get("total",0) for r in _pf if r.get("equipo") in _mt)
-                                pm = sum(r.get("pms",0) for r in _mfr if r.get("equipo") in _mt)
-                                fl = sum(r.get("fallas",0) for r in _rfr if r.get("equipo") in _mt)
-                            else:
-                                so,st2,pb,pt,fl,pm = eso,est,epb,ept,efl,epm
+                            # senior = total del equipo (lo suyo + su equipo)
+                            so,st2,pb,pt,fl,pm = eso,est,epb,ept,efl,epm
                         else:
-                            so = sum(r.get("cumple",0) for r in _sf if r.get("tecnico")==tf)
-                            st2 = sum(r.get("total",0) for r in _sf if r.get("tecnico")==tf)
-                            pb = sum(r.get("buenas",0) for r in _pf if r.get("tecnico")==tf)
-                            pt = sum(r.get("total",0) for r in _pf if r.get("tecnico")==tf)
-                            pm = sum(r.get("pms",0) for r in _mfr if r.get("tecnico")==tf)
-                            fl = sum(r.get("fallas",0) for r in _rfr if r.get("tecnico_short")==ts)
+                            d=_ind[tf]
+                            so,st2,pb,pt,fl,pm = d["so"],d["st"],d["pb"],d["pt"],d["fl"],d["pm"]
                         sp = round(so/st2*100,1) if st2 else None
                         mp2 = round((1-fl/pm)*100,1) if pm else None
                         pp2 = round(pb/pt*100,1) if pt else None
