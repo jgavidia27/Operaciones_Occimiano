@@ -6232,10 +6232,9 @@ elif _page == _NAV_PAGES[3]:
                 unsafe_allow_html=True,
             )
 
-            # 2026-06-08: primera OT con los campos bomba/consumo/tiempo
-            # rellenos (OS-37958). Antes de esta fecha la plantilla Shell
-            # no tenía esos campos, así que no tiene sentido mostrar
-            # históricos que van a salir todos vacíos.
+            # Piso del histórico: 2026-07-01 en adelante (decisión operativa).
+            # Los campos bomba/consumo/tiempo existen en la plantilla Shell
+            # desde el 2026-06-08 (OS-37958); antes salen vacíos.
             #
             # ADEMÁS: solo mostramos OTs cuyo técnico realmente HAYA
             # TRABAJADO (existe al menos 1 fila en numerales_subtarea con
@@ -6243,7 +6242,7 @@ elif _page == _NAV_PAGES[3]:
             # ha ido a la EDS) no aparecen porque no tiene sentido mostrar
             # datos que aún no existen. El sync ya excluye task_status
             # NO_STARTED, así que basta con filtrar por folios presentes.
-            _shell_min_date = pd.Timestamp("2026-06-08", tz="UTC")
+            _shell_min_date = pd.Timestamp("2026-07-01", tz="UTC")
             # Solo OTs que tengan al menos una subtarea en lavadora o aspiradora.
             # Excluye planes lavatapiz / lavabike / lavainterior / termos / etc.
             # cuyo formulario no incluye los parámetros que muestra esta tabla
@@ -6446,7 +6445,11 @@ elif _page == _NAV_PAGES[3]:
                     return "—"
 
                 _reg_rows = []
-                for _, _ot in _df_prev_all.head(100).iterrows():
+                # Sin head(N): un límite fijo cortaba silenciosamente las OTs
+                # más antiguas (la tabla va ordenada por fecha desc, así que el
+                # recorte se comía justo el inicio del período). Los filtros de
+                # EDS/estación/OT de arriba ya acotan, y st.dataframe pagina.
+                for _, _ot in _df_prev_all.iterrows():
                     _fol = _ot["folio"]
                     _sub = df_num_sub_eds[df_num_sub_eds["id_ot"] == _fol]
                     _lav = _sub[_sub["tipo_activo"] == "lavadora"]
