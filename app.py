@@ -15773,17 +15773,35 @@ elif _page == _NAV_PAGES[0]:
                     f'Cumplimiento ponderado</td>'
                 )
 
-                def _pond_pct(kpis: dict) -> tuple:
+                def _niv_pond(kpis: dict):
+                    """Cumplimiento ponderado (0..100) contando SOLO los KPIs con
+                    datos. Si un KPI no aplica (ej. 'Sin PMs' → sin Efectividad MP),
+                    su peso se redistribuye entre los que sí se realizaron; no se
+                    castiga por lo que no se hizo. Devuelve None si no hay ningún
+                    KPI con datos."""
+                    _items = []
                     _p = kpis.get("pct_sla")
-                    _m_pct = ((1 - kpis["n_fallas"] / kpis["n_pm"]) * 100) if kpis["n_pm"] > 0 else None
+                    if _p is not None:
+                        _items.append((0.40, _bono_sla(_p)[0]))
+                    if kpis.get("n_pm", 0) > 0:
+                        _items.append((0.30, _bono_calidad(kpis["n_fallas"], kpis["n_pm"])[0]))
                     _r = kpis.get("pct_prec")
-                    _niv_sla  = _bono_sla(_p)[0]  if _p  is not None else 0
-                    _niv_mp   = _bono_calidad(kpis["n_fallas"], kpis["n_pm"])[0] if kpis["n_pm"] > 0 else 0
-                    _niv_prec = _bono_prec(_r)[0] if _r is not None else 0
-                    _has_data = (_p is not None) or (kpis["n_pm"] > 0) or (_r is not None)
-                    if not _has_data:
+                    if _r is not None:
+                        _items.append((0.30, _bono_prec(_r)[0]))
+                    if not _items:
+                        return None
+                    _wsum = sum(w for w, _ in _items)
+                    return sum(w * l for w, l in _items) / _wsum
+
+                def _terreno(kpis: dict, pool: int) -> int:
+                    """Monto de terreno = pool × cumplimiento renormalizado."""
+                    _cp = _niv_pond(kpis)
+                    return int(pool * _cp / 100) if _cp is not None else 0
+
+                def _pond_pct(kpis: dict) -> tuple:
+                    _w = _niv_pond(kpis)
+                    if _w is None:
                         return None, "#888"
-                    _w = 0.40 * _niv_sla + 0.30 * _niv_mp + 0.30 * _niv_prec
                     return _w, _nivel_color(int(_w))
 
                 for _tf in _miembros_full:
@@ -15816,19 +15834,12 @@ elif _page == _NAV_PAGES[0]:
                 )
                 for _tf in _miembros_full:
                     _k = _tec_kpis[_tf]
-                    _niv_sla_i  = _bono_sla(_k["pct_sla"])[0] if _k["pct_sla"] is not None else 0
-                    _niv_mp_i   = _bono_calidad(_k["n_fallas"], _k["n_pm"])[0] if _k["n_pm"] > 0 else 0
-                    _niv_prec_i = _bono_prec(_k["pct_prec"])[0] if _k["pct_prec"] is not None else 0
-                    _bono_ind = int(
-                        _MAX_IND_SLA  * _niv_sla_i  / 100 +
-                        _MAX_IND_MP   * _niv_mp_i   / 100 +
-                        _MAX_IND_PREC * _niv_prec_i / 100
-                    )
-                    _has_any = _k["pct_sla"] is not None or _k["n_pm"] > 0 or _k["pct_prec"] is not None
-                    if not _has_any:
+                    _cp_i = _niv_pond(_k)
+                    _bono_ind = _terreno(_k, _pp_ind)
+                    if _cp_i is None:
                         _bi_cell = f'<span style="color:{_t["muted"]};font-size:0.78rem;">Sin datos</span>'
                     else:
-                        _bc = _nivel_color(int(0.40 * _niv_sla_i + 0.30 * _niv_mp_i + 0.30 * _niv_prec_i))
+                        _bc = _nivel_color(int(_cp_i))
                         _bi_cell = f'<span style="color:{_bc};font-weight:700;">{_clp_fmt(_bono_ind)}</span>'
                     _html += (
                         f'<td style="padding:8px 10px;text-align:center;'
@@ -15841,19 +15852,13 @@ elif _page == _NAV_PAGES[0]:
                 )
 
                 # Fila 6: Bono equipo estimado (igual para todos)
-                _eq_niv_sla  = _bono_sla(_eq_kpi["pct_sla"])[0] if _eq_kpi["pct_sla"] is not None else 0
-                _eq_niv_mp   = _bono_calidad(_eq_kpi["n_fallas"], _eq_kpi["n_pm"])[0] if _eq_kpi["n_pm"] > 0 else 0
-                _eq_niv_prec = _bono_prec(_eq_kpi.get("pct_prec"))[0] if _eq_kpi.get("pct_prec") is not None else 0
-                _bono_eq_est = int(
-                    _MAX_EQ_SLA  * _eq_niv_sla  / 100 +
-                    _MAX_EQ_MP   * _eq_niv_mp   / 100 +
-                    _MAX_EQ_PREC * _eq_niv_prec / 100
-                )
-                _eq_has_any = _eq_kpi["pct_sla"] is not None or _eq_kpi["n_pm"] > 0 or _eq_kpi.get("pct_prec") is not None
+                _eq_cp = _niv_pond(_eq_kpi)
+                _bono_eq_est = _terreno(_eq_kpi, _pp_eq)
+                _eq_has_any = _eq_cp is not None
                 if not _eq_has_any:
                     _be_val_cell = f'<span style="color:{_t["muted"]};font-size:0.78rem;">Sin datos</span>'
                 else:
-                    _eq_bc = _nivel_color(int(0.40 * _eq_niv_sla + 0.30 * _eq_niv_mp + 0.30 * _eq_niv_prec))
+                    _eq_bc = _nivel_color(int(_eq_cp))
                     _be_val_cell = f'<span style="color:{_eq_bc};font-weight:700;">{_clp_fmt(_bono_eq_est)}</span>'
 
                 _eq_pond_lbl = f'{_eq_pond:.0f}% eq.' if _eq_pond is not None else '% eq.'
@@ -15910,25 +15915,15 @@ elif _page == _NAV_PAGES[0]:
                 )
                 for _tf in _miembros_full:
                     _k = _tec_kpis[_tf]
-                    _niv_sla_i  = _bono_sla(_k["pct_sla"])[0] if _k["pct_sla"] is not None else 0
-                    _niv_mp_i   = _bono_calidad(_k["n_fallas"], _k["n_pm"])[0] if _k["n_pm"] > 0 else 0
-                    _niv_prec_i = _bono_prec(_k["pct_prec"])[0] if _k["pct_prec"] is not None else 0
-                    _bono_ind_t = int(
-                        _MAX_IND_SLA  * _niv_sla_i  / 100 +
-                        _MAX_IND_MP   * _niv_mp_i   / 100 +
-                        _MAX_IND_PREC * _niv_prec_i / 100
-                    )
+                    _cp_t = _niv_pond(_k)
+                    _bono_ind_t = _terreno(_k, _pp_ind)
                     _total_t = _bono_ind_t + _bono_eq_est + _BONO_CC
-                    _has_any_t = _k["pct_sla"] is not None or _k["n_pm"] > 0 or _k["pct_prec"] is not None
+                    _has_any_t = _cp_t is not None
                     _totales_trim[_tf] = (_total_t, _has_any_t)
                     if not _has_any_t and not _eq_has_any:
                         _tot_cell = f'<span style="color:{_t["muted"]};font-size:0.78rem;">Sin datos</span>'
                     else:
-                        _pond_tot = (
-                            0.40 * _niv_sla_i + 0.30 * _niv_mp_i + 0.30 * _niv_prec_i
-                            if _has_any_t else
-                            0.40 * _eq_niv_sla + 0.30 * _eq_niv_mp + 0.30 * _eq_niv_prec
-                        )
+                        _pond_tot = _cp_t if _has_any_t else (_eq_cp or 0)
                         _tc = _nivel_color(int(_pond_tot))
                         _tot_cell = (
                             f'<span style="color:{_tc};font-weight:800;font-size:1.0rem;">'
@@ -16199,10 +16194,15 @@ elif _page == _NAV_PAGES[0]:
                     ens = _bono_sla(esp)[0] if esp is not None else 0
                     enm = _bono_calidad(efl,epm)[0] if epm else 0
                     enp = _bono_prec(epp)[0] if epp is not None else 0
-                    ec = round(.40*ens+.30*enm+.30*enp,1)
+                    # cumplimiento renormalizado: solo KPIs con datos (no castiga lo no realizado)
+                    _eit=[]
+                    if esp is not None: _eit.append((0.40,ens))
+                    if epm: _eit.append((0.30,enm))
+                    if epp is not None: _eit.append((0.30,enp))
+                    ec = round(sum(w*l for w,l in _eit)/sum(w for w,_ in _eit),1) if _eit else 0
                     ppi = int(int(_BONO_TOTAL/_n)*.50); ppe = ppi
                     ncc = _cc_w.get(_gk,0); bcc = int(100000*ncc/_n) if _n else 0
-                    be = int(ppe*.40*ens/100+ppe*.30*enm/100+ppe*.30*enp/100)
+                    be = int(ppe*ec/100)
                     _trs = []
                     for tf in _mfl:
                         ts = next((k for k,v in TECH_NAME_MAP.items() if v==tf),tf)
@@ -16219,8 +16219,13 @@ elif _page == _NAV_PAGES[0]:
                         ns = _bono_sla(sp)[0] if sp is not None else 0
                         nm = _bono_calidad(fl,pm)[0] if pm else 0
                         np2 = _bono_prec(pp2)[0] if pp2 is not None else 0
-                        c = round(.40*ns+.30*nm+.30*np2,1)
-                        bi = int(ppi*.40*ns/100+ppi*.30*nm/100+ppi*.30*np2/100)
+                        # cumplimiento renormalizado: solo KPIs con datos
+                        _cit=[]
+                        if sp is not None: _cit.append((0.40,ns))
+                        if pm: _cit.append((0.30,nm))
+                        if pp2 is not None: _cit.append((0.30,np2))
+                        c = round(sum(w*l for w,l in _cit)/sum(w for w,_ in _cit),1) if _cit else 0
+                        bi = int(ppi*c/100)
                         tot = bi+be+bcc
                         _trs.append({"short":ts,"is_senior":iss,
                             "sla_pct":sp,"sla_ok":so,"sla_tot":st2,"sla_niv":ns,
