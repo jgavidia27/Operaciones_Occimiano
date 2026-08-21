@@ -15093,14 +15093,65 @@ elif _page == _NAV_PAGES[0]:
                 )
             )
         )
+        # ── Base de cálculo del trimestre (excepción inicial 2026) ────────────
+        # Las mediciones internas partieron en JUNIO 2026: abril y mayo no
+        # exigieron números reales, así que promediar los tres meses castiga
+        # a los técnicos. Para el T2 (Abr–Jun) se ofrece un segundo modo donde
+        # JUNIO define todo el trimestre: se paga el bono trimestral completo
+        # (pool de terreno full + semanas de callcenter de TODO el trimestre),
+        # pero evaluado con los KPIs de junio.
+        _MODO_TRIM_FULL = "Trimestre completo (Abr–Jun)"
+        _MODO_SOLO_JUN  = "Solo Junio (excepción inicial)"
+        _es_trim_excepcion = _trim_bono == "T2 · Abr–Jun"
+        _modo_bono = _MODO_TRIM_FULL
+        if _es_trim_excepcion:
+            _modo_bono = st.radio(
+                "Base de cálculo del trimestre",
+                [_MODO_TRIM_FULL, _MODO_SOLO_JUN],
+                horizontal=True,
+                key="bono_modo_calculo",
+                help=(
+                    "Trimestre completo: promedia abril + mayo + junio.  "
+                    "Solo Junio: junio marca todo el trimestre — se paga el bono "
+                    "trimestral completo (pool de terreno íntegro + semanas de "
+                    "callcenter de todo el trimestre) evaluado con los KPIs de "
+                    "junio. Abril y mayo no tuvieron medición real."
+                ),
+            )
+        _solo_junio = _modo_bono == _MODO_SOLO_JUN
+
         with _bf1:
             _meses_bono_sel = st.multiselect(
                 "Mes específico (dejar vacío = todo el trimestre)",
                 options=_all_meses_bono,
                 default=[],
                 key="bono_mes_drill",
+                disabled=_solo_junio,
+                help=("Deshabilitado en modo 'Solo Junio': el período queda fijado "
+                      "a junio como referencia del trimestre completo."
+                      if _solo_junio else None),
             )
         _meses_bono_activos = _meses_bono_sel if _meses_bono_sel else _all_meses_bono
+
+        # Meses efectivos: KPIs vs. semanas de callcenter.
+        # En modo 'Solo Junio' los KPIs se miden SOLO con junio, pero el
+        # callcenter cuenta las semanas reales de turno de TODO el trimestre
+        # (se trabajaron de verdad en abril/mayo/junio).
+        if _solo_junio:
+            _meses_bono_kpi = ["2026-06"]
+            _meses_bono_cc  = _all_meses_bono
+            _kpi_subset     = True
+        else:
+            _meses_bono_kpi = _meses_bono_activos
+            _meses_bono_cc  = _meses_bono_activos
+            _kpi_subset     = bool(_meses_bono_sel)
+
+        if _solo_junio:
+            st.caption(
+                "🔎 **Modo excepción inicial** — Junio define todo el trimestre "
+                "Abr–Jun: KPIs medidos solo con junio, pero se paga el bono "
+                "trimestral completo (terreno + callcenter de las 13 semanas)."
+            )
 
         # ── Filtros equipo / técnico ──────────────────────────────────────────
         _eq_opts_bono = ["Todos"] + [_EQUIPO_LABEL.get(k, k) for k in GRUPOS_TERRENO]
@@ -15193,7 +15244,7 @@ elif _page == _NAV_PAGES[0]:
                 st.session_state[_sla_key_bono] = _df_sla_bono.copy()
         if not _df_sla_bono.empty and "mes" in _df_sla_bono.columns:
             _df_sla_bono = _df_sla_bono[
-                _df_sla_bono["mes"].astype(str).isin(_meses_bono_activos)
+                _df_sla_bono["mes"].astype(str).isin(_meses_bono_kpi)
             ].copy()
         # Columna normalizada para matching robusto (igual que MP) — evita fallos por tildes
         if not _df_sla_bono.empty and "_tech_norm" not in _df_sla_bono.columns:
@@ -15240,7 +15291,7 @@ elif _page == _NAV_PAGES[0]:
                 )
         if not _df_ot_bono.empty and "mes" in _df_ot_bono.columns:
             _df_ot_bono_filt = _df_ot_bono[
-                _df_ot_bono["mes"].astype(str).isin(_meses_bono_activos)
+                _df_ot_bono["mes"].astype(str).isin(_meses_bono_kpi)
             ].copy()
         else:
             _df_ot_bono_filt = pd.DataFrame()
@@ -15282,14 +15333,14 @@ elif _page == _NAV_PAGES[0]:
             _df_reinc_bono = _df_reinc_bono[
                 _reinc_fecha.dt.month.isin(_trim_months_bono)
             ].copy()
-            if _meses_bono_sel:
+            if _kpi_subset:
                 if "mes" not in _df_reinc_bono.columns:
                     _df_reinc_bono["mes"] = (
                         pd.to_datetime(_df_reinc_bono["fecha_cm"], errors="coerce")
                         .dt.to_period("M").astype(str)
                     )
                 _df_reinc_bono = _df_reinc_bono[
-                    _df_reinc_bono["mes"].astype(str).isin(_meses_bono_activos)
+                    _df_reinc_bono["mes"].astype(str).isin(_meses_bono_kpi)
                 ].copy()
 
         # PMs del período para denominador (solo clientes SLA — mismos que el numerador)
@@ -15307,14 +15358,14 @@ elif _page == _NAV_PAGES[0]:
                 else _df_pm_bono["creation_date"]
             )
             _df_pm_bono = _df_pm_bono[_pm_dates_bono.dt.month.isin(_trim_months_bono)].copy()
-            if _meses_bono_sel:
+            if _kpi_subset:
                 _pm_mes = (
                     _df_pm_bono["creation_date"].dt.tz_convert(None)
                     if _df_pm_bono["creation_date"].dt.tz is not None
                     else _df_pm_bono["creation_date"]
                 )
                 _df_pm_bono = _df_pm_bono[
-                    _pm_mes.dt.to_period("M").astype(str).isin(_meses_bono_activos)
+                    _pm_mes.dt.to_period("M").astype(str).isin(_meses_bono_kpi)
                 ].copy()
             _df_pm_bono["_tech_norm"] = _df_pm_bono["technician"].fillna("").apply(
                 lambda s: " ".join(_norm_n(s).split())
@@ -15513,7 +15564,7 @@ elif _page == _NAV_PAGES[0]:
             _CC_STGO   = ["Juan Gallardo", "Luis Pinto", "Victor Bahamonde"]
             _CC_REF    = _date_cc(2026, 3, 16)  # lunes de referencia
             _semanas_cc_por_equipo: dict = {}
-            for _ms_cc in _meses_bono_activos:
+            for _ms_cc in _meses_bono_cc:
                 for _lun_cc in pd.date_range(
                     start=pd.Period(_ms_cc, "M").start_time,
                     end=pd.Period(_ms_cc, "M").end_time,
