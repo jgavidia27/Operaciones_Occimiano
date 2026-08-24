@@ -8517,6 +8517,44 @@ elif _page == _NAV_PAGES[4]:
             st.info("Sin datos de turnos disponibles.")
             st.stop()
 
+        # ── Proyección cíclica hacia ATRÁS ──────────────────────────────────
+        # La rotación es cíclica: Centro rota cada 3 semanas
+        # (Gallardo → Pinto → Bahamonde) y dentro de cada equipo los técnicos
+        # rotan (Gallardo/Bahamonde alternan en 2, Pinto en 3). Las 10 semanas
+        # reales contienen el ciclo completo observado, así que proyectamos las
+        # semanas anteriores (marcadas "estimado"). Norte/Sur son fijos.
+        # OJO: la proyección NO refleja cambios de dotación (altas/bajas/
+        # traslados) ni excepciones puntuales — es la rotación teórica.
+        try:
+            import copy as _copy_turnos
+            from datetime import timedelta as _td_turnos
+            if len(_weeks[0].get("dates", [])) >= 7:
+                _w0_lun = _date_turnos.fromisoformat(_weeks[0]["dates"][0])
+                _FLOOR_TURNOS = _date_turnos(2026, 3, 16)   # hasta dónde proyectar
+                _gen_atras = []
+                _k = -1
+                while True:
+                    _lun = _w0_lun + _td_turnos(weeks=_k)
+                    if _lun < _FLOOR_TURNOS:
+                        break
+                    _pos = _k % 3   # 0=Gallardo, 1=Pinto, 2=Bahamonde
+                    if _pos == 0:
+                        _src = 0 if ((_k // 3) % 2 == 0) else 3
+                    elif _pos == 1:
+                        _src = [1, 4, 7][((_k - 1) // 3) % 3]
+                    else:
+                        _src = [2, 5][((_k - 2) // 3) % 2]
+                    if _src >= len(_weeks):
+                        break
+                    _zn = _copy_turnos.deepcopy(_weeks[_src].get("zones", {}))
+                    _dts = [(_lun + _td_turnos(days=_dd)).isoformat() for _dd in range(7)]
+                    _gen_atras.append({"dates": _dts, "zones": _zn, "_estimado": True})
+                    _k -= 1
+                if _gen_atras:
+                    _weeks = list(reversed(_gen_atras)) + _weeks
+        except Exception:
+            pass
+
         _hoy = _date_turnos.today()
         _hoy_iso = _hoy.isoformat()
         _DIA_NOMBRE = {0: "LUN", 1: "MAR", 2: "MIÉ", 3: "JUE", 4: "VIE", 5: "SÁB", 6: "DOM"}
@@ -8540,6 +8578,8 @@ elif _page == _NAV_PAGES[4]:
                 _lbl = f"{_d0.day} {_MES_LABEL_T[_d0.month]} - {_d6.day} {_MES_LABEL_T[_d6.month]}"
                 if _hoy_iso in _ds:
                     _lbl = f">>> {_lbl} (actual)"
+                elif _w.get("_estimado"):
+                    _lbl = f"{_lbl}  · estimado ⓘ"
                 _sem_labels.append(_lbl)
             else:
                 _sem_labels.append(f"Semana {_wi+1}")
@@ -8551,6 +8591,14 @@ elif _page == _NAV_PAGES[4]:
         _w_data = _weeks[_sel_idx]
         _w_dates = _w_data.get("dates", [])
         _w_zones = _w_data.get("zones", {})
+        if _w_data.get("_estimado"):
+            st.warning(
+                "📅 **Semana estimada (proyección cíclica).** Esta semana es anterior "
+                "a los datos cargados; se reconstruyó siguiendo la rotación cíclica "
+                "(Centro: Gallardo → Pinto → Bahamonde cada 3 semanas + rotación de "
+                "técnicos). **No refleja** cambios de dotación (altas/bajas/traslados) "
+                "ni excepciones puntuales de ese período."
+            )
 
         _is_dark = _current_theme == "dark"
         _tcard   = "#1e293b" if _is_dark else "#ffffff"
