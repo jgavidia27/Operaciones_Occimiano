@@ -177,18 +177,37 @@ def fetch_subtareas_numeral(folio: str) -> list:
             # percibido en la máquina, ej. "Sin sal en Ablandador",
             # "Estanque sucio", o "Sin incidencias que reportar".
             "incidencia_reportar":    None,
+            # PRIORIDAD ENCONTRADA STO (correctivos): lista desplegable donde el
+            # técnico registra la prioridad REAL que dedujo en terreno (P1/P2/
+            # P3/P4). Permite contrastar la prioridad que pidió el cliente vs la
+            # que el STO encontró. Ej. "P1 Detenida", "P4 Planificable...".
+            "prioridad_encontrada_sto": None,
             "fecha_inicio_subtarea":  s.get("initial_date"),
             "fecha_fin_subtarea":     s.get("final_date"),
         }
 
-    # 2) Items del formulario (NUMERAL INICIAL/FINAL) — limit alto para no truncar
-    try:
-        r2 = requests.get(FRACTTAL_SUBTASKS, headers=h,
-                          params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 500},
-                          timeout=30)
-        items = r2.json().get("data", []) or []
-    except Exception:
-        items = []
+    # 2) Items del formulario (NUMERAL INICIAL/FINAL) — limit alto para no truncar.
+    #    CON REINTENTOS: en backfills masivos (16 workers) Fracttal aplica
+    #    rate-limit (429) o timeouts. Antes eso dejaba items=[] y la OT se
+    #    guardaba SIN los campos del formulario (incidencia/flowey/consumo en
+    #    None), aunque en Fracttal sí estaban llenos. Ahora reintentamos con
+    #    backoff (y refrescamos token en 429) para no perder datos.
+    items = []
+    for _intf in range(4):
+        try:
+            r2 = requests.get(FRACTTAL_SUBTASKS, headers=h,
+                              params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 500},
+                              timeout=45)
+            if r2.status_code == 200:
+                items = r2.json().get("data", []) or []
+                break
+            if r2.status_code == 429:
+                time.sleep(2 * (_intf + 1))
+                h["Authorization"] = f"Bearer {get_token()}"
+                continue
+            time.sleep(1.5 * (_intf + 1))
+        except Exception:
+            time.sleep(1.5 * (_intf + 1))
 
     for it in items:
         desc = (it.get("description") or "").upper()
@@ -333,6 +352,11 @@ def fetch_subtareas_numeral(folio: str) -> list:
                 # reportar" es la opción por defecto (sin problema).
                 if not val_empty:
                     idx[kid]["incidencia_reportar"] = val[:120]
+            elif "PRIORIDAD ENCONTRADA" in desc:
+                # "PRIORIDAD ENCONTRADA STO" — lista desplegable en correctivos:
+                # la prioridad real que el técnico dedujo en terreno (P1..P4).
+                if not val_empty:
+                    idx[kid]["prioridad_encontrada_sto"] = val[:60]
 
     # 3) Persistimos TODAS las subtareas ejecutadas (task_status != NO_STARTED,
     #    ya filtrado arriba). Antes solo guardábamos las que tenían campos
@@ -394,6 +418,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "fichero_acepta_monedas": r.get("fichero_acepta_monedas"),
             "fichero_cambio":         r.get("fichero_cambio"),
             "incidencia_reportar":   r.get("incidencia_reportar"),
+            "prioridad_encontrada_sto": r.get("prioridad_encontrada_sto"),
             "task_status":           r.get("task_status"),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
             "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
@@ -422,13 +447,13 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     and ("form_tiene_" in r.text or "lts_hr_" in r.text
                          or "cubre_fichero" in r.text or "flowey_" in r.text
                          or "task_status" in r.text or "fichero_" in r.text
-                         or "incidencia_reportar" in r.text)):
+                         or "incidencia_reportar" in r.text or "prioridad_encontrada" in r.text)):
                 time.sleep(1.5 * (intento + 1))
                 continue  # reintentar payload completo
             if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text
                                          or "cubre_fichero" in r.text or "flowey_" in r.text
                                          or "task_status" in r.text or "fichero_" in r.text
-                                         or "incidencia_reportar" in r.text):
+                                         or "incidencia_reportar" in r.text or "prioridad_encontrada" in r.text):
                 for rec in payload:
                     rec.pop("form_tiene_bomba", None)
                     rec.pop("form_tiene_consumo", None)
@@ -443,6 +468,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     rec.pop("fichero_acepta_monedas", None)
                     rec.pop("fichero_cambio", None)
                     rec.pop("incidencia_reportar", None)
+                    rec.pop("prioridad_encontrada_sto", None)
                     rec.pop("task_status", None)
                 r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
                 if r2.status_code in (200, 201, 204):

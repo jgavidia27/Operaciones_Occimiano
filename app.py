@@ -2798,6 +2798,28 @@ if _page == _NAV_PAGES[1]:
                     except Exception:
                         pass
 
+                # ── P encontrada STO ────────────────────────────────────────
+                # Prioridad real que el técnico dedujo en terreno (P1..P4),
+                # desde numerales_subtarea (form "PRIORIDAD ENCONTRADA STO").
+                # Reemplaza a "Motivo excepción". Permite contrastar la
+                # prioridad que pidió el cliente vs la que el STO encontró.
+                _df_sla_ot["prio_sto"] = ""
+                try:
+                    _ns_prio = load_numerales_subtarea_supabase()
+                    if (_ns_prio is not None and not _ns_prio.empty
+                            and "prioridad_encontrada_sto" in _ns_prio.columns
+                            and "os_fracttal" in _df_sla_ot.columns):
+                        _mp_prio = {}
+                        for _oid, _g in _ns_prio.groupby("id_ot"):
+                            _vp = _g["prioridad_encontrada_sto"].dropna().astype(str).str.strip()
+                            _vp = _vp[(_vp != "") & (~_vp.str.lower().isin(("none", "nan", "null")))]
+                            if not _vp.empty:
+                                _mp_prio[str(_oid)] = _vp.iloc[0]
+                        _df_sla_ot["prio_sto"] = (
+                            _df_sla_ot["os_fracttal"].astype(str).map(_mp_prio).fillna(""))
+                except Exception:
+                    pass
+
                 # Barra dividida: '% Uso SLA' se muestra como DOS columnas paralelas:
                 #   - "Uso SLA" (barra hasta 100%): tiempo consumido dentro del umbral.
                 #     Si la OT excede, esta barra queda LLENA (100%) — señal de tope.
@@ -2864,16 +2886,13 @@ if _page == _NAV_PAGES[1]:
                                             "cod_esmax","eds_occim","eds_nombre","cliente","tecnico",
                                             "prioridad","ciudad","zona_display","codigo_activo"] if c in _df_sla_ot.columns]
                 _extra = ["tiempo_res","umbral_lbl","_uso_pct","_exc_pct","estado_sla"]
-                # Reporte de falla ANTES de Motivo excepción (orden pedido)
+                # Reporte de falla ANTES de P encontrada STO (orden pedido)
                 if "reporte" in _df_sla_ot.columns:
                     _extra.append("reporte")
-                _hay_exc = ("excepcion_motivo" in _df_sla_ot.columns and
-                            _df_sla_ot["excepcion_motivo"].notna().any())
-                if _hay_exc:
-                    _extra.append("excepcion_motivo")
+                # P encontrada STO reemplaza a "Motivo excepción" en la última columna
+                if "prio_sto" in _df_sla_ot.columns:
+                    _extra.append("prio_sto")
                 _df_sla_ot_disp = _df_sla_ot[_sla_ot_base + _extra].copy()
-                if _hay_exc:
-                    _df_sla_ot_disp["excepcion_motivo"] = _df_sla_ot_disp["excepcion_motivo"].fillna("")
                 _df_sla_ot_disp["fecha_llamado"]  = pd.to_datetime(_df_sla_ot_disp["fecha_llamado"],  errors="coerce").dt.strftime("%d/%m/%Y")
                 _df_sla_ot_disp["fecha_atencion"] = pd.to_datetime(_df_sla_ot_disp["fecha_atencion"], errors="coerce").dt.strftime("%d/%m/%Y")
                 # Title Case para columnas de texto que vienen en MAYÚSCULAS de Fracttal.
@@ -2893,7 +2912,7 @@ if _page == _NAV_PAGES[1]:
                              "tiempo_res":"Tiempo resolución","umbral_lbl":"Umbral SLA",
                              "_uso_pct":"Uso SLA","_exc_pct":"Exceso",
                              "estado_sla":"Estado SLA",
-                             "excepcion_motivo":"Motivo excepción",
+                             "prio_sto":"P encontrada STO",
                              "n_cotalker":"N° Aviso","reporte":"Reporte de falla"})
                 _buscar_ot = st.text_input(
                     "Buscar OT / EDS / equipo",
@@ -2952,13 +2971,16 @@ if _page == _NAV_PAGES[1]:
                                  "Tope visual 100%; en el tooltip está el valor real."),
                         "Estado SLA":        st.column_config.TextColumn(width=110,
                             help="✅ Cumple = dentro del umbral SLA · ❌ No cumple = excedió el umbral · ℹ️ Excepción = excedió el umbral pero está validado por operaciones como caso ajeno a Occimiano (cuenta como cumple en los %)"),
-                        "Motivo excepción":  st.column_config.TextColumn(
-                            width=300,
-                            help="Razón por la que la OT fue marcada como Excepción (registrada en sla_excepciones por operaciones).",
-                        ),
                         "Reporte de falla":  st.column_config.TextColumn(
                             width=320,
                             help="Descripción del problema reportado por el cliente (extraído de nota_tarea Fracttal / 'Detalles del incidente' de Cotalker)",
+                        ),
+                        "P encontrada STO":  st.column_config.TextColumn(
+                            width=220,
+                            help="Prioridad REAL que el técnico dedujo en terreno (P1..P4), desde la lista "
+                                 "'PRIORIDAD ENCONTRADA STO' del formulario correctivo. Permite contrastar la "
+                                 "prioridad que declaró el cliente vs la que encontró el STO. Vacío = OT sin "
+                                 "sincronizar o formulario sin la pregunta.",
                         ),
                     })
             else:
