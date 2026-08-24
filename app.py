@@ -2114,8 +2114,10 @@ if _page == _NAV_PAGES[1]:
             #  muestra el Cumplimiento SLA. El Total llamados se muestra junto
             #  al velocímetro.)
 
-            # Fila de desglose: 4 mini-cards que suman al Total
-            lk1, lk2, lk3, lk4, lk5 = st.columns(5)
+            # Fila de desglose: Total (Cumple+No cumple) + mini-cards
+            lk0, lk1, lk2, lk3, lk4, lk5 = st.columns(6)
+            lk0.metric("📞 Total llamados", f"{_base_sla:,}",
+                       help="Suma de Cumple + No cumple (llamados evaluados para SLA)")
             lk1.metric("✅ Cumple SLA", f"{_cumple_c:,}",
                        delta=f"{_pct_c}%" if _base_sla else None, delta_color="off",
                        help="Llamados cerrados dentro del umbral SLA")
@@ -2200,7 +2202,7 @@ if _page == _NAV_PAGES[1]:
                     f'text-transform:uppercase;letter-spacing:.06em;font-weight:600">'
                     f'Total llamados</span> &nbsp;'
                     f'<span style="font-size:1.5rem;font-weight:800;color:{_t["text"]};">'
-                    f'{_total_ll:,}</span> '
+                    f'{_base_sla:,}</span> '
                     f'<span style="font-size:0.72rem;color:{_t["muted"]};">'
                     f'· {_n_p1:,} P1 máquina detenida</span></div>',
                     unsafe_allow_html=True,
