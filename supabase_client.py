@@ -286,7 +286,7 @@ def load_numerales_subtarea_supabase() -> pd.DataFrame:
         "form_tiene_produccion,cubre_fichero,"
         "flowey_utiliza,flowey_diluido_agua,"
         "flowey_shampoo_20,flowey_cera_10,task_status,"
-        "fichero_acepta_monedas,fichero_cambio,"
+        "fichero_acepta_monedas,fichero_cambio,incidencia_reportar,"
         "fecha_inicio_subtarea,fecha_fin_subtarea"
         "&order=id_ot.desc"
     )

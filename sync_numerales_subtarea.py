@@ -172,6 +172,11 @@ def fetch_subtareas_numeral(folio: str) -> list:
             #   • SI EL FICHERO FALLÓ, ¿SE REALIZÓ CAMBIO?  → lista (SI/NO/N/A)
             "fichero_acepta_monedas": None,
             "fichero_cambio":         None,
+            # INCIDENCIA A REPORTAR (lista desplegable al final del registro de
+            # cada mantención preventiva). El técnico reporta un problema
+            # percibido en la máquina, ej. "Sin sal en Ablandador",
+            # "Estanque sucio", o "Sin incidencias que reportar".
+            "incidencia_reportar":    None,
             "fecha_inicio_subtarea":  s.get("initial_date"),
             "fecha_fin_subtarea":     s.get("final_date"),
         }
@@ -321,6 +326,13 @@ def fetch_subtareas_numeral(folio: str) -> list:
                         idx[kid]["fichero_cambio"] = "NO"
                     else:
                         idx[kid]["fichero_cambio"] = val[:30]
+            elif "INCIDENCIA" in desc and "REPORTAR" in desc:
+                # "INCIDENCIA A REPORTAR" — lista desplegable al final de cada
+                # mantención preventiva (todos los clientes). El técnico reporta
+                # el problema percibido en la máquina. "Sin incidencias que
+                # reportar" es la opción por defecto (sin problema).
+                if not val_empty:
+                    idx[kid]["incidencia_reportar"] = val[:120]
 
     # 3) Persistimos TODAS las subtareas ejecutadas (task_status != NO_STARTED,
     #    ya filtrado arriba). Antes solo guardábamos las que tenían campos
@@ -381,6 +393,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "flowey_cera_10":        r.get("flowey_cera_10"),
             "fichero_acepta_monedas": r.get("fichero_acepta_monedas"),
             "fichero_cambio":         r.get("fichero_cambio"),
+            "incidencia_reportar":   r.get("incidencia_reportar"),
             "task_status":           r.get("task_status"),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
             "fecha_fin_subtarea":    r.get("fecha_fin_subtarea"),
@@ -408,12 +421,14 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             if (r.status_code == 400 and intento < 2
                     and ("form_tiene_" in r.text or "lts_hr_" in r.text
                          or "cubre_fichero" in r.text or "flowey_" in r.text
-                         or "task_status" in r.text or "fichero_" in r.text)):
+                         or "task_status" in r.text or "fichero_" in r.text
+                         or "incidencia_reportar" in r.text)):
                 time.sleep(1.5 * (intento + 1))
                 continue  # reintentar payload completo
             if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text
                                          or "cubre_fichero" in r.text or "flowey_" in r.text
-                                         or "task_status" in r.text or "fichero_" in r.text):
+                                         or "task_status" in r.text or "fichero_" in r.text
+                                         or "incidencia_reportar" in r.text):
                 for rec in payload:
                     rec.pop("form_tiene_bomba", None)
                     rec.pop("form_tiene_consumo", None)
@@ -427,6 +442,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     rec.pop("flowey_cera_10", None)
                     rec.pop("fichero_acepta_monedas", None)
                     rec.pop("fichero_cambio", None)
+                    rec.pop("incidencia_reportar", None)
                     rec.pop("task_status", None)
                 r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)
                 if r2.status_code in (200, 201, 204):

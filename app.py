@@ -17034,11 +17034,25 @@ elif _page == _NAV_PAGES[2]:
                         if len(set(_equipos)) > 4:
                             _equipos_short += f" +{len(set(_equipos))-4}"
                         _pct = round(_n_ok / _n_total * 100) if _n_total else 0
+                        # ── Incidencia a reportar (pregunta del formulario) ──
+                        # Se prioriza una incidencia real sobre "Sin incidencias
+                        # que reportar" (opción por defecto).
+                        _incid = "—"
+                        if "incidencia_reportar" in _grp.columns:
+                            _iv = _grp["incidencia_reportar"].dropna().astype(str).str.strip()
+                            _iv = _iv[(_iv != "") & (~_iv.str.lower().isin(("none", "nan", "null")))]
+                            if not _iv.empty:
+                                _reales = _iv[~_iv.str.contains("sin incidencia", case=False, na=False)]
+                                if not _reales.empty:
+                                    _incid = " · ".join(sorted(set(_reales)))
+                                else:
+                                    _incid = "Sin incidencias"
                         _resumen_por_ot[_fol] = {
                             "equipos":       _equipos_short or "—",
                             "n_total":       _n_total,
                             "n_ok":          _n_ok,
                             "pct":           _pct,
+                            "incidencia":    _incid,
                         }
                         # Observación derivada
                         if _n_total == _n_ok:
@@ -17069,7 +17083,8 @@ elif _page == _NAV_PAGES[2]:
                 _fol = str(_r.get("id_ot", ""))
                 _res = _resumen_por_ot.get(_fol, {
                     "equipos": "—", "n_total": 0, "n_ok": 0, "pct": 0,
-                    "obs": "Sin subtareas en Supabase (aún sin sync)"
+                    "obs": "Sin subtareas en Supabase (aún sin sync)",
+                    "incidencia": "—",
                 })
                 _fl  = _flowey_por_ot.get(_fol, {"flowey_utiliza": "—", "flowey_shampoo": "—", "flowey_cera": "—"})
                 _cod_eds = str(_r.get("codigo_eds", "") or _r.get("estacion", "") or "—")
@@ -17088,6 +17103,7 @@ elif _page == _NAV_PAGES[2]:
                     "% Completitud": _res["pct"],
                     "Observación":   _res["obs"],
                     "Plan":          str(_r.get("plan_tareas", "") or "—")[:40],
+                    "Incidencia reportada": _res.get("incidencia", "—"),
                 }
                 # Columnas FLOWEY solo cuando el usuario filtra por Aramco
                 # (evita ruido — el resto de clientes no tienen esa pregunta
@@ -17123,7 +17139,8 @@ elif _page == _NAV_PAGES[2]:
                 # Reordenar: si hay col FLOWEY, dejarlas al final
                 _cols_base = ["Cliente","Fecha finaliz.","N° OT","EDS","Estación","Técnico",
                               "Duración","Dentro plazo","Planes ejecutados",
-                              "OK / Total","% Completitud","Observación","Plan"]
+                              "OK / Total","% Completitud","Observación","Plan",
+                              "Incidencia reportada"]
                 _cols_flow = [c for c in ("FLOWEY utiliza","Shampoo 20% OK","Cera 10% OK")
                               if c in _df_out.columns]
                 _df_out = _df_out[[c for c in _cols_base if c in _df_out.columns] + _cols_flow]
@@ -17151,6 +17168,11 @@ elif _page == _NAV_PAGES[2]:
                         help="% de planes ejecutados que quedaron OK. Ej: 3/4 = 75%"),
                     "Observación":    st.column_config.TextColumn(width=210),
                     "Plan":           st.column_config.TextColumn(width=220),
+                    "Incidencia reportada": st.column_config.TextColumn(width=220,
+                        help="Respuesta del técnico a 'INCIDENCIA A REPORTAR' al final de la "
+                             "mantención preventiva. Muestra la incidencia real percibida en la "
+                             "máquina; 'Sin incidencias' cuando no reportó problema; '—' si el "
+                             "plan aún no está sincronizado o el formulario no incluía la pregunta."),
                     "FLOWEY utiliza": st.column_config.TextColumn(width=110,
                         help="Solo Aramco. Respuesta a '¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?'"),
                     "Shampoo 20% OK": st.column_config.TextColumn(width=120,
