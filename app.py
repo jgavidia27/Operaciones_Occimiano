@@ -17114,7 +17114,10 @@ elif _page == _NAV_PAGES[2]:
                             if not _iv.empty:
                                 _reales = _iv[~_iv.str.contains("sin incidencia", case=False, na=False)]
                                 if not _reales.empty:
-                                    _incid = " · ".join(sorted(set(_reales)))
+                                    # Varias incidencias (una por equipo) → apiladas
+                                    # en líneas separadas, NO unidas con ' · ' (evita
+                                    # que se vean/cuenten como una categoría combinada).
+                                    _incid = "\n".join(sorted(set(_reales)))
                                 else:
                                     _incid = "Sin incidencias"
                         _resumen_por_ot[_fol] = {
