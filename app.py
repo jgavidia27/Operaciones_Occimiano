@@ -2110,39 +2110,9 @@ if _page == _NAV_PAGES[1]:
                           "#fee2e2")
             _mes_titulo = (", ".join(sel_mes_c) if sel_mes_c else "período completo")
 
-            _hdr_html = f"""
-<div style="background:linear-gradient(135deg,{_pct_bg} 0%,#ffffff 60%);
-     border:1px solid #e2e8f0;border-radius:14px;padding:22px 26px;
-     margin:8px 0 18px 0;box-shadow:0 1px 4px rgba(0,0,0,.04)">
-  <div style="display:flex;align-items:center;justify-content:space-between;
-       flex-wrap:wrap;gap:20px">
-    <div>
-      <div style="font-size:0.78rem;letter-spacing:.08em;text-transform:uppercase;
-           color:#64748b;font-weight:600">
-        Cumplimiento SLA · {_mes_titulo}
-      </div>
-      <div style="font-size:3.4rem;line-height:1;font-weight:800;
-           color:{_pct_color};margin-top:6px">
-        {_pct_c}%
-      </div>
-      <div style="font-size:0.85rem;color:#475569;margin-top:6px">
-        {_cumple_c:,} cumplen · {_nocumple_c:,} incumplen · <b>{_base_sla:,}</b> evaluados
-      </div>
-    </div>
-    <div style="text-align:right;min-width:180px">
-      <div style="font-size:0.75rem;color:#64748b;text-transform:uppercase;
-           letter-spacing:.06em;font-weight:600">Total llamados</div>
-      <div style="font-size:2.4rem;font-weight:700;color:#0f172a;line-height:1">
-        {_total_ll:,}
-      </div>
-      <div style="font-size:0.78rem;color:#94a3b8;margin-top:4px">
-        {_n_p1:,} P1 · máquina detenida
-      </div>
-    </div>
-  </div>
-</div>
-"""
-            st.markdown(_hdr_html, unsafe_allow_html=True)
+            # (Banner grande de % SLA eliminado: el velocímetro de abajo ya
+            #  muestra el Cumplimiento SLA. El Total llamados se muestra junto
+            #  al velocímetro.)
 
             # Fila de desglose: 4 mini-cards que suman al Total
             lk1, lk2, lk3, lk4, lk5 = st.columns(5)
@@ -2223,6 +2193,18 @@ if _page == _NAV_PAGES[1]:
                 st.plotly_chart(st.session_state[_k], width="stretch")
 
             with gc3:
+                # Total llamados junto al velocímetro de Cumplimiento SLA
+                st.markdown(
+                    f'<div style="text-align:center;margin:2px 0 -6px 0">'
+                    f'<span style="font-size:0.72rem;color:{_t["muted"]};'
+                    f'text-transform:uppercase;letter-spacing:.06em;font-weight:600">'
+                    f'Total llamados</span> &nbsp;'
+                    f'<span style="font-size:1.5rem;font-weight:800;color:{_t["text"]};">'
+                    f'{_total_ll:,}</span> '
+                    f'<span style="font-size:0.72rem;color:{_t["muted"]};">'
+                    f'· {_n_p1:,} P1 máquina detenida</span></div>',
+                    unsafe_allow_html=True,
+                )
                 _k = f"_fig_ll_gauge_{_current_theme}_{_ll_sig_c}"
                 if _k not in st.session_state:
                     import math as _math
