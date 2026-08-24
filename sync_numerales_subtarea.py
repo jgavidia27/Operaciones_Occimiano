@@ -104,14 +104,26 @@ def fetch_subtareas_numeral(folio: str) -> list:
        Solo incluye subtareas que en el formulario tenían el par NUMERAL.
     """
     h = {"Authorization": f"Bearer {get_token()}"}
-    # 1) Subtareas de la OT
-    try:
-        r = requests.get(FRACTTAL_WO, headers=h,
-                         params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 50},
-                         timeout=30)
-        subtareas = r.json().get("data", []) or []
-    except Exception:
-        return []
+    # 1) Subtareas de la OT — CON REINTENTOS. Si esta petición falla por
+    #    rate-limit/timeout (backfills masivos), antes se devolvía [] y la OT
+    #    quedaba SIN filas en numerales_subtarea (aparecía como "—" / "sin sync"
+    #    aunque en Fracttal sí tenía subtareas). Reintentamos con backoff.
+    subtareas = []
+    for _ints in range(4):
+        try:
+            r = requests.get(FRACTTAL_WO, headers=h,
+                             params={"wo_folio": folio, "id_company": ID_COMPANY, "limit": 50},
+                             timeout=45)
+            if r.status_code == 200:
+                subtareas = r.json().get("data", []) or []
+                break
+            if r.status_code == 429:
+                time.sleep(2 * (_ints + 1))
+                h["Authorization"] = f"Bearer {get_token()}"
+                continue
+            time.sleep(1.5 * (_ints + 1))
+        except Exception:
+            time.sleep(1.5 * (_ints + 1))
     if not subtareas:
         return []
     # Indexar por id_work_orders_tasks (clave del join con items)
