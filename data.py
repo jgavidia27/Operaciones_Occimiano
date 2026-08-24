@@ -1370,24 +1370,31 @@ def score_llenado_por_ot(df_kpi: pd.DataFrame) -> pd.DataFrame:
     #       no llenó tasks_duration (= 0) pero tuvo el OT abierto 100 min, ese
     #       tiempo real debe contar. La función max() toma el mayor valor disponible.
     def _score_tiempo(row) -> tuple:
-        """Retorna (puntaje, sobretiempo_bool) — sobretiempo NO penaliza."""
+        """Retorna (puntaje, sobretiempo_bool) — sobretiempo NO penaliza.
+
+        Tiempo evaluado SOLO con la lavadora: exec_sec_sum y estim_sec_sum
+        vienen de sync_estim_neta (suma únicamente subtareas de lavadora
+        preventiva). NO se usa max_elapsed (tiempo de reloj de toda la OT)
+        porque incluiría equipos que no medimos (ablandador, bomba, etc.) y
+        podría 'rescatar' a una lavadora que no alcanzó el mínimo.
+        """
         if row["es_correctiva"]:
             return 25, False  # Tiempo no se evalúa en correctivas → 25 pts auto
-        elapsed = row["max_elapsed"]
-        estim = row.get("estim_sec_sum", 0) or 0
+        exec_r = row.get("exec_sec_sum", 0) or 0   # tiempo REAL de la lavadora (neta)
+        estim  = row.get("estim_sec_sum", 0) or 0  # estimado de la lavadora (neta)
         _piso = 0.50 if row.get("client") == "SHELL (Enex)" else 0.70
         if estim > 60:
-            exec_r = row.get("exec_sec_sum", 0) or 0
-            effective = max(exec_r, elapsed)
-            ratio = effective / estim
+            ratio = exec_r / estim
             if ratio > 1.50:
                 return 25, True
             if ratio >= _piso: return 25, False
             if ratio >= 0.35: return 12, False
             return 0, False
         else:
-            if elapsed > 1800: return 25, False
-            if elapsed > 900:  return 12, False
+            # Sin estimado de lavadora sincronizado → usar el tiempo real de
+            # la lavadora (nunca el de toda la OT).
+            if exec_r > 1800: return 25, False
+            if exec_r > 900:  return 12, False
             return 0, False
 
     _scores_time = ot.apply(_score_tiempo, axis=1)
