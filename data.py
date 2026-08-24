@@ -610,7 +610,21 @@ def aplicar_numerales_subtarea(ot: pd.DataFrame, df_sub: pd.DataFrame) -> pd.Dat
     sub = sub[sub["tipo_activo"].isin(("lavadora","aspiradora","lavainterior"))]
     if sub.empty:
         return ot
-    # Agregado por OT: la OT pasa solo si TODAS las subtareas-numeral pasan;
+    # ── Dedup por activo (codigo_activo) ──────────────────────────────────
+    # Fracttal a veces registra el MISMO equipo dos veces en una OT: una con
+    # su lectura de numeral y otra entrada DUPLICADA vacía. Si CUALQUIER
+    # lectura de ese activo es válida, el activo pasa — no se reprueba la OT
+    # por un duplicado vacío cuando el numeral sí se registró.
+    # (Ej. OS-39426: aspiradora EQ-5747 con lectura válida 21342→21343 + una
+    #  entrada duplicada sin numeral que reprobaba la OT entera.)
+    if "codigo_activo" in sub.columns:
+        sub = (sub.sort_values("numeral_ok", ascending=False)   # válidas primero
+                  .groupby(["id_ot", "codigo_activo"], as_index=False)
+                  .agg(numeral_ok=("numeral_ok", "max"),         # activo pasa si alguna válida
+                       motivo=("motivo", "first")))              # de la mejor lectura
+        sub["motivo"] = sub.apply(
+            lambda r: "ok" if r["numeral_ok"] else r["motivo"], axis=1)
+    # Agregado por OT: la OT pasa solo si TODOS sus activos-numeral pasan;
     # tomamos el motivo más severo presente.
     sub["_sev"] = sub["motivo"].map(_MOTIVO_SEVERIDAD).fillna(0)
     agg = (sub.groupby("id_ot")
