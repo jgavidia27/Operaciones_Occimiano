@@ -1,0 +1,15 @@
+{
+  "_doc": "Correcciones de turnos que se aplican ENCIMA del plan (turnos_data.json). El plan sale de un Excel que se desactualiza; aquí se registran los turnos REALES cuando difieren (permisos, swaps de fin de semana, etc.). Cada corrección: semana = lunes de la semana (YYYY-MM-DD), zona = centro|norte|sur, turnos = {nombre técnico exacto: [Lun, Mar, Mié, Jue, Vie, Sáb, Dom]}. Usar 'Libre' para día no trabajado.",
+  "correcciones": [
+    {
+      "semana": "2026-08-17",
+      "zona": "norte",
+      "nota": "Real: Edson trabajó Lun-Vie y libró fin de semana; Erwin libró Vie y trabajó Sáb/Dom; Carlos libró Vie/Sáb/Dom.",
+      "turnos": {
+        "Edson José Pérez Henríquez":         ["09:00 A 18:30", "09:00 A 18:30", "09:00 A 18:30", "09:00 A 18:30", "09:00 A 18:30", "Libre", "Libre"],
+        "Erwin Maximiliano Rivera Talamilla": ["09:00 A 18:30", "09:00 A 18:30", "09:00 A 18:30", "09:00 A 18:30", "Libre", "09:00 A 14:00", "09:00 A 14:00"],
+        "Carlos Alberto Avila Palacios":      ["09:00 A 18:30", "09:00 A 18:30", "09:00 A 18:30", "09:00 A 18:30", "Libre", "Libre", "Libre"]
+      }
+    }
+  ]
+}

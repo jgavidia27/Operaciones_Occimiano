@@ -132,6 +132,50 @@ _ARAMCO_ZONAS = {
     "EE_S179": "Sur", "EE_S185": "Sur", "EE_S293": "Sur",
 }
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _correcciones_turnos_idx() -> dict:
+    """Correcciones de turnos (turnos_correcciones.json) — se aplican ENCIMA
+    del plan (turnos_data.json), porque el plan se desactualiza con cambios
+    reales (permisos, swaps de fin de semana, etc.). Devuelve
+    {(semana_inicio_iso, zona): {tecnico: [7 horarios Lun..Dom]}}."""
+    import os as _o, json as _j
+    _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),
+                      "turnos_correcciones.json")
+    if not _o.path.exists(_p):
+        return {}
+    try:
+        with open(_p, encoding="utf-8") as _f:
+            _data = _j.load(_f)
+    except Exception:
+        return {}
+    _idx = {}
+    for _c in _data.get("correcciones", []):
+        _idx[(_c.get("semana"), _c.get("zona"))] = _c.get("turnos", {}) or {}
+    return _idx
+
+
+def _aplicar_correcciones_turnos(weeks):
+    """Sobrescribe (en sitio) los horarios de las semanas con las correcciones
+    reportadas. Empareja por (semana_inicio, zona, nombre del técnico)."""
+    _idx = _correcciones_turnos_idx()
+    if not _idx or not weeks:
+        return weeks
+    for _w in weeks:
+        _ds = _w.get("dates", [])
+        if not _ds:
+            continue
+        for _zk, _zd in (_w.get("zones", {}) or {}).items():
+            _fix = _idx.get((_ds[0], _zk))
+            if not _fix:
+                continue
+            for _t in _zd.get("turnos", []):
+                _nm = str(_t.get("tecnico", "")).strip()
+                if _nm in _fix:
+                    _t["horarios"]  = list(_fix[_nm])
+                    _t["_corregido"] = True
+    return weeks
+
+
 def _zona_aramco(codigo) -> str | None:
     """Devuelve la zona Aramco (Norte/Centro/Santiago/Sur) o None si el
     código no está en el mapa. Acepta EE_S### directo o busca en catálogo."""
@@ -7767,6 +7811,7 @@ elif _page == _NAV_PAGES[4]:
                         _tdata = _js_t.load(_f)
                 except Exception:
                     return {}
+                _aplicar_correcciones_turnos(_tdata.get("weeks", []))
                 for _wk in _tdata.get("weeks", []):
                     _dts = _wk.get("dates", [])
                     for _zk, _zv in _wk.get("zones", {}).items():
@@ -8555,6 +8600,9 @@ elif _page == _NAV_PAGES[4]:
         except Exception:
             pass
 
+        # Aplicar correcciones reportadas (sobre el plan)
+        _weeks = _aplicar_correcciones_turnos(_weeks)
+
         _hoy = _date_turnos.today()
         _hoy_iso = _hoy.isoformat()
         _DIA_NOMBRE = {0: "LUN", 1: "MAR", 2: "MIÉ", 3: "JUE", 4: "VIE", 5: "SÁB", 6: "DOM"}
@@ -9047,6 +9095,7 @@ elif _page == _NAV_PAGES[4]:
                 _data = _j.loads(open(_path, "r", encoding="utf-8").read())
             except Exception:
                 return set()
+            _aplicar_correcciones_turnos(_data.get("weeks", []))
             _turnos_finde: set = set()
             for _w in _data.get("weeks", []):
                 _dates = _w.get("dates", [])
