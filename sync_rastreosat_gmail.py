@@ -59,7 +59,10 @@ GMAIL_LABEL_OK  = os.getenv("RASTREOSAT_LABEL", "Rastreosat/Procesado")
 # que aplicaste). Fallback a INBOX si no existe.
 GMAIL_FOLDER    = os.getenv("RASTREOSAT_FOLDER", "GPS - Reportes")
 FROM_ADDR       = "noreply@reddsystem.com"
-SUBJECT_MATCH   = "Reporte_viajes"
+# 2026-08: se reemplazó el reporte viejo "Reporte_viajes" (11:00, quedó
+# arrojando datos antiguos/faltantes) por "Automatizacion_reporte_viaje"
+# (09:00 diario, período Mes Actual). El asunto del correo = nombre del reporte.
+SUBJECT_MATCH   = "Automatizacion_reporte_viaje"
 
 
 def log(msg: str, tag: str = ""):
