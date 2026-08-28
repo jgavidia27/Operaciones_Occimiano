@@ -367,7 +367,7 @@ def main():
     yr = datetime.now().year
     TRIMS = {"T1": [1, 2, 3], "T2": [4, 5, 6], "T3": [7, 8, 9], "T4": [10, 11, 12]}
     CC_STGO = ["Juan Gallardo", "Luis Pinto", "Victor Bahamonde"]
-    CC_REF = date(2026, 3, 16)
+    CC_REF = date(2026, 3, 9)   # ref corregida (turno real verificado con Jesús 2026-08-28)
 
     bono_tbl = {}
     for tk, tm in TRIMS.items():

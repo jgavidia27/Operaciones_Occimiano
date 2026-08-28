@@ -15821,11 +15821,14 @@ elif _page == _NAV_PAGES[0]:
         else:
             # ── Rotación callcenter Santiago ──────────────────────────────────
             # Ciclo fijo: Juan Gallardo → Luis Pinto → Victor Bahamonde → ...
-            # Referencia: lunes 16/03/2026 → Juan Gallardo (índice 0)
-            # Con esta referencia Q2 (Abr-Jun 2026) queda: Gallardo=5 sem, resto=4 sem
+            # Referencia CORREGIDA (Jesús, 2026-08-28): lunes 09/03/2026 →
+            # Juan Gallardo (índice 0). La ref anterior (16-03) estaba corrida
+            # UNA semana y asignaba mal TODAS las semanas de turno. El calendario
+            # real: 13-jul, 3-ago, 24-ago = Gallardo; 20-jul, 10-ago = Pinto;
+            # 6-jul, 27-jul, 17-ago = Bahamonde (verificado 100% con el turno real).
             from datetime import date as _date_cc
             _CC_STGO   = ["Juan Gallardo", "Luis Pinto", "Victor Bahamonde"]
-            _CC_REF    = _date_cc(2026, 3, 16)  # lunes de referencia
+            _CC_REF    = _date_cc(2026, 3, 9)   # lunes de referencia (corregido)
             _semanas_cc_por_equipo: dict = {}
             for _ms_cc in _meses_bono_cc:
                 for _lun_cc in pd.date_range(
@@ -16418,7 +16421,7 @@ elif _page == _NAV_PAGES[0]:
             _yr = datetime.now().year
             _TRIMS_E = {"T1":[1,2,3],"T2":[4,5,6],"T3":[7,8,9],"T4":[10,11,12]}
             _CC_STGO_E = ["Juan Gallardo","Luis Pinto","Victor Bahamonde"]
-            _CC_REF_E = _dt_cc(2026,3,16)
+            _CC_REF_E = _dt_cc(2026,3,9)   # ref corregida (ver rotación bono terreno)
             _bono_tbl = {}
             for _tk,_tm in _TRIMS_E.items():
                 _cc_w = {}
