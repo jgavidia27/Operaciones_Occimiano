@@ -3078,27 +3078,48 @@ if vista == "🔍 Cierre Fracttal":
     if _dfr.empty:
         st.info("No hay OTs En Revisión en este momento. Todo al día. 🎉")
     else:
+        # ── Ventana de 24h desde revisión (regla Jesús, 2026-08-28) ───────
+        # Una OT no debería cerrarse hasta que pasen ≥24h desde que pasó a
+        # revisión. Las que aún no cumplen se muestran en AZUL ("faltan Xh"),
+        # orientativo: no bloquea, se pueden seleccionar y cerrar igual. Se
+        # calcula en vivo (depende de la hora actual), no en el sync.
+        _MIN_HORAS_CIERRE = 24
+        _now_utc = pd.Timestamp.now(tz="UTC")
+        _anchor = _dfr["review_date"] if "review_date" in _dfr.columns else None
+        if _anchor is not None and "final_date" in _dfr.columns:
+            _anchor = _anchor.fillna(_dfr["final_date"])
+        _rev_dt = pd.to_datetime(_anchor, errors="coerce", utc=True) \
+            if _anchor is not None else pd.Series(pd.NaT, index=_dfr.index)
+        _dfr["_horas_rev"] = (_now_utc - _rev_dt).dt.total_seconds() / 3600.0
+        _dfr["_azul"] = (_dfr["color_semaforo"] == "VERDE") & \
+                        _dfr["_horas_rev"].notna() & (_dfr["_horas_rev"] < _MIN_HORAS_CIERRE)
+
         # KPIs arriba
         _n_total = len(_dfr)
         _n_verde = int((_dfr["color_semaforo"] == "VERDE").sum())
+        _n_azul  = int(_dfr["_azul"].sum())
+        _n_verde_ready = _n_verde - _n_azul   # verdes que YA cumplen 24h
         _n_amar  = int((_dfr["color_semaforo"] == "AMARILLO").sum())
         _n_rojo  = int((_dfr["color_semaforo"] == "ROJO").sum())
         _n_15    = int((_dfr["dias_en_revision"] >= 15).sum())
         _n_old   = int((_dfr["dias_en_revision"] >= 30).sum())
         _cost_num = pd.to_numeric(_dfr["total_cost"], errors="coerce").fillna(0)
-        _monto_v = _cost_num[_dfr["color_semaforo"] == "VERDE"].sum()
+        _monto_v = _cost_num[(_dfr["color_semaforo"] == "VERDE") & (~_dfr["_azul"])].sum()
         _monto_r = _cost_num[_dfr["color_semaforo"] == "ROJO"].sum()
 
         _k1, _k2, _k3, _k4, _k5, _k6 = st.columns(6)
         _k1.metric("Total pendientes", f"{_n_total}")
-        _k2.metric("🟢 Cerrar hoy", f"{_n_verde}", f"${int(_monto_v):,}".replace(",", "."))
-        _k3.metric("🟡 Revisar", f"{_n_amar}")
+        _k2.metric("🟢 Cerrar hoy", f"{_n_verde_ready}",
+                   f"${int(_monto_v):,}".replace(",", "."),
+                   help="Verdes que ya cumplieron 24h desde revisión (listas para cerrar).")
+        _k3.metric("🔵 Esperan 24h", f"{_n_azul}",
+                   help="Verdes del mismo día: aún no cumplen 24h desde revisión. "
+                        "Orientativo — igual se pueden cerrar si es necesario.")
         _k4.metric("🔴 Devolver", f"{_n_rojo}",
                    f"${int(_monto_r):,} en riesgo".replace(",", "."),
                    delta_color="inverse",
                    help="Monto de las OTs rojas: facturación bloqueada hasta corregirlas.")
-        _k5.metric("⏳ >15 días", f"{_n_15}",
-                   help="OTs con 15 días o más esperando validación")
+        _k5.metric("🟡 Revisar", f"{_n_amar}")
         _k6.metric("⚠️ >30 días", f"{_n_old}",
                    help="OTs con 30 días o más — priorizar cierre urgente")
 
@@ -3476,6 +3497,15 @@ if vista == "🔍 Cierre Fracttal":
 
         _dff = _dff.copy()
         _dff["_resolucion"] = _dff.apply(_resolucion, axis=1)
+        # OTs azules (verde pero <24h desde revisión): sobrescribir resolución
+        # con el aviso orientativo de "faltan Xh".
+        if "_azul" in _dff.columns and _dff["_azul"].any():
+            def _azul_txt(r):
+                h = r.get("_horas_rev")
+                falta = int(round(max(0, _MIN_HORAS_CIERRE - h))) if pd.notna(h) else _MIN_HORAS_CIERRE
+                return (f"🔵 Lista, pero faltan ~{falta}h para cumplir 24h desde que pasó a "
+                        f"revisión. Orientativo: puedes cerrarla igual si es necesario.")
+            _dff.loc[_dff["_azul"], "_resolucion"] = _dff[_dff["_azul"]].apply(_azul_txt, axis=1)
 
         # ── Método de atención simplificado ──────────────────────────────
         # Preventivas → siempre Presencial MP (nunca remotas).
@@ -3544,15 +3574,17 @@ if vista == "🔍 Cierre Fracttal":
         # Acciones
         _a1, _a2, _a3 = st.columns([1, 1, 3])
         with _a1:
+            # Solo las verdes que YA cumplen 24h desde revisión (excluye azules).
             _folios_verdes = _dfr.loc[
-                _dfr["color_semaforo"] == "VERDE", "folio"].tolist()
+                (_dfr["color_semaforo"] == "VERDE") & (~_dfr["_azul"]), "folio"].tolist()
             if _folios_verdes:
                 st.download_button(
-                    f"📋 Copiar {_n_verde} folios verdes (TXT)",
+                    f"📋 Copiar {len(_folios_verdes)} folios verdes (TXT)",
                     "\n".join(_folios_verdes),
                     file_name=f"folios_verdes_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
                     mime="text/plain",
-                    help="Descarga la lista de folios listos para cerrar. Copiar y pegar en Fracttal.",
+                    help="Folios verdes que ya cumplieron 24h desde revisión (listos para "
+                         "cerrar). Las azules (<24h) no se incluyen. Copiar y pegar en Fracttal.",
                 )
         with _a2:
             _csv = _dff.to_csv(index=False).encode("utf-8-sig")
@@ -3638,9 +3670,15 @@ if vista == "🔍 Cierre Fracttal":
         _cols_out = [c for c in _COL_MAP if c in _dff.columns]
         _tbl = _dff[_cols_out].rename(columns=_COL_MAP).copy()
 
-        # Emoji en semaforo (solo icono) + emoji en entrega repuestos
+        # Emoji en semaforo (solo icono) + emoji en entrega repuestos.
+        # Verde con <24h desde revisión → 🔵 (azul, orientativo).
         _emoji = {"VERDE": "🟢", "AMARILLO": "🟡", "ROJO": "🔴"}
-        _tbl["Semáforo"] = _tbl["Semáforo"].map(lambda x: _emoji.get(x, x or ""))
+        if "_azul" in _dff.columns:
+            _tbl["Semáforo"] = [
+                "🔵" if az else _emoji.get(c, c or "")
+                for c, az in zip(_dff["color_semaforo"].values, _dff["_azul"].values)]
+        else:
+            _tbl["Semáforo"] = _tbl["Semáforo"].map(lambda x: _emoji.get(x, x or ""))
         if "¿Entregó rep.?" in _tbl.columns:
             _emoji_rep = {"SI": "✅ SI", "NO": "❌ NO", "N/A": "➖ N/A"}
             _tbl["¿Entregó rep.?"] = _tbl["¿Entregó rep.?"].map(
@@ -3657,7 +3695,8 @@ if vista == "🔍 Cierre Fracttal":
         _sel1, _sel2, _sel3 = st.columns([1, 1, 4])
         with _sel1:
             _marcar_verdes = st.button("✅ Marcar todas VERDES",
-                help="Selecciona automáticamente todas las OTs con semáforo verde")
+                help="Selecciona las OTs verdes 🟢 (que ya cumplen 24h). Las azules 🔵 "
+                     "(<24h desde revisión) quedan fuera; márcalas a mano si es necesario.")
         with _sel2:
             _desmarcar = st.button("⬜ Desmarcar todo")
 
@@ -3706,7 +3745,8 @@ if vista == "🔍 Cierre Fracttal":
                 "Costo $":          st.column_config.NumberColumn(
                     width=100, format="$%d"),
                 "Semáforo":         st.column_config.TextColumn(width=60,
-                    help="🟢 listo para cerrar · 🟡 revisar · 🔴 no cerrar"),
+                    help="🟢 listo para cerrar · 🔵 verde pero <24h desde revisión "
+                         "(orientativo, se puede cerrar igual) · 🟡 revisar · 🔴 no cerrar"),
                 "Trabajo realizado (técnico)": st.column_config.TextColumn(
                     width=280,
                     help="Comentario del técnico en 'TRABAJO REALIZADO PARA CORRECCIÓN'"),
