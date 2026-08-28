@@ -15497,6 +15497,14 @@ elif _page == _NAV_PAGES[0]:
                 _kpi_bn = _cached_build_kpi_llenado(raw_wo)
                 if not _kpi_bn.empty:
                     _kpi_bn = _kpi_bn[~_kpi_bn["tecnico"].apply(_es_excluido)].copy()
+                    # Excluir EDS internas (OCCIM-01, etc.) de Precisión — igual que
+                    # la pestaña Precisión Fracttal (línea ~12649) y sync_sto_export.
+                    # Sin esto, el fallback contaba OTs de EDS internas y bajaba la
+                    # Precisión de algunos técnicos (ej. Carrasco: 2 OTs OCCIM-01
+                    # → nivel 80 en vez de 90).
+                    from data import _es_eds_excluida as _es_eds_excl_bn
+                    if "eds_occim" in _kpi_bn.columns:
+                        _kpi_bn = _kpi_bn[~_kpi_bn["eds_occim"].apply(_es_eds_excl_bn)].copy()
                     _tub = _kpi_bn["maint_type"].str.upper()
                     _kpi_bn = _kpi_bn[_tub.str.contains("CORRECTIVA", na=False) | _tub.str.contains("PREVENTIVA", na=False)].copy()
                     _kpi_bn = _kpi_bn[_kpi_bn["creation_date"].dt.tz_convert(None).dt.year >= 2026].copy()
