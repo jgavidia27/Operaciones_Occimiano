@@ -3586,6 +3586,10 @@ if vista == "🔍 Cierre Fracttal":
                     help="Folios verdes que ya cumplieron 24h desde revisión (listos para "
                          "cerrar). Las azules (<24h) no se incluyen. Copiar y pegar en Fracttal.",
                 )
+            # Placeholder para el botón "Descargar cerrar_N_ots.bat": se rellena
+            # más abajo (tras calcular la selección de la tabla) pero se muestra
+            # aquí, justo debajo de "Copiar folios verdes".
+            _dl_cerrar_ph = st.empty()
         with _a2:
             _csv = _dff.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
@@ -3875,19 +3879,22 @@ if vista == "🔍 Cierre Fracttal":
             )
             _bat_name = f"cerrar_{len(_folios_seleccionados)}_ots_{datetime.now().strftime('%Y%m%d_%H%M')}.bat"
 
-            _b1, _b2 = st.columns([1.5, 4])
-            with _b1:
-                st.download_button(
-                    label=f"⬇️ Descargar cerrar_{len(_folios_seleccionados)}_ots.bat",
-                    data=_bat_content.encode("utf-8"),
-                    file_name=_bat_name,
-                    mime="application/x-bat",
-                    type="primary",
-                    help=f"Descarga un archivo .bat que ejecuta el cierre automático de las {len(_folios_seleccionados)} OTs seleccionadas",
-                )
+            # Botón renderizado en el placeholder de arriba (debajo de "Copiar
+            # folios verdes"), no aquí abajo.
+            _dl_cerrar_ph.download_button(
+                label=f"⬇️ Descargar cerrar_{len(_folios_seleccionados)}_ots.bat",
+                data=_bat_content.encode("utf-8"),
+                file_name=_bat_name,
+                mime="application/x-bat",
+                type="primary",
+                key="dl_cerrar_bat",
+                help=f"Descarga un archivo .bat que ejecuta el cierre automático de las {len(_folios_seleccionados)} OTs seleccionadas",
+            )
+            _b2, = st.columns([1])
             with _b2:
                 st.markdown(
-                    f"👉 **Pasos:** 1) Click en el botón azul de la izquierda "
+                    f"👉 **Pasos:** 1) Click en el botón azul de arriba "
+                    f"(**⬇️ Descargar cerrar…**, debajo de *Copiar folios verdes*) "
                     f"para descargar el archivo · 2) **Doble click** al archivo "
                     f"descargado · Chrome se abre solo, hace login y cierra las "
                     f"**{len(_folios_seleccionados)}** OTs. "
