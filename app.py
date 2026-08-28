@@ -15169,10 +15169,13 @@ elif _page == _NAV_PAGES[0]:
             "T1 · Ene–Mar": [1, 2, 3], "T2 · Abr–Jun": [4, 5, 6],
             "T3 · Jul–Sep": [7, 8, 9], "T4 · Oct–Dic": [10, 11, 12],
         }
-        _current_month = 6   # Junio 2026
+        # Mes actual real → abre por defecto en el TRIMESTRE EN CURSO, para que
+        # el selector "Alcance del corte" (hasta hoy / meses cerrados) sea
+        # visible de inmediato (solo aparece en el trimestre vigente).
+        _current_month = pd.Timestamp.now().month
         _default_trim_bono = next(
             (k for k, v in _TRIM_DICT_BONO.items() if _current_month in v),
-            "T2 · Abr–Jun",
+            "T3 · Jul–Sep",
         )
         _bf0, _bf1, _bf2, _bf3 = st.columns([2, 3, 2, 2])
         with _bf0:
