@@ -15245,13 +15245,13 @@ elif _page == _NAV_PAGES[0]:
         _hoy_bono = _now_real
         if _trim_contiene_hoy and not _solo_junio:
             _scope_bono = st.radio(
-                "Alcance del corte (para pagos / desvinculaciones)",
+                "Alcance del corte",
                 [_SCOPE_FULL, _SCOPE_HOY, _SCOPE_CERR],
                 horizontal=True,
                 key="bono_scope",
                 help=(
                     "Trimestre completo: paga los 3 meses (pool íntegro).  "
-                    "Hasta fecha de corte: cuánto se le debe a alguien si se va en esa "
+                    "Hasta fecha de corte: el % del trimestre transcurrido hasta esa "
                     "fecha — incluye el mes en curso a prorrata de días; el pool de "
                     "terreno y las semanas de callcenter se prorratean al corte.  "
                     "Meses cerrados: solo meses ya terminados a esa fecha."
@@ -15265,8 +15265,8 @@ elif _page == _NAV_PAGES[0]:
                     value=min(_now_real.date(), _trim_fin),
                     min_value=_trim_ini, max_value=_trim_fin,
                     format="DD/MM/YYYY", key="bono_fecha_corte",
-                    help="Simula un corte a esta fecha (ej. fecha de desvinculación). "
-                         "Por defecto hoy. El cálculo se recorta a esta fecha.",
+                    help="Calcula el bono a esta fecha de corte. Por defecto hoy. "
+                         "El cálculo (pool y KPIs) se recorta a esta fecha.",
                 )
                 _hoy_bono = pd.Timestamp(_fecha_corte)
         _meses_cerr = [p for p in _periods_bono if p.end_time < _hoy_bono]
@@ -15346,12 +15346,11 @@ elif _page == _NAV_PAGES[0]:
             _pct_pool = _frac_pool * 100
             _es_hoy = _hoy_bono.normalize() == _now_real
             st.caption(
-                f"✂️ **Corte al {_hoy_bono:%d-%m-%Y}{' (hoy)' if _es_hoy else ''}** — es lo que "
-                f"se le debería pagar a cada técnico si el corte cerrara en esa fecha "
-                f"(útil para desvinculaciones). Se paga el **{_pct_pool:.0f}%** del pool de "
-                f"terreno ({len(_meses_cerr)} mes(es) cerrado(s) + {_frac_mes_act*100:.0f}% "
-                f"del mes en curso) y el callcenter de las semanas hasta el corte. KPIs "
-                f"medidos con los datos existentes al corte."
+                f"✂️ **Corte al {_hoy_bono:%d-%m-%Y}{' (hoy)' if _es_hoy else ''}** — equivale "
+                f"al **{_pct_pool:.1f}% del trimestre** ({len(_meses_cerr)} mes(es) cerrado(s) "
+                f"+ {_frac_mes_act*100:.0f}% del mes en curso). Se paga esa misma fracción del "
+                f"pool de terreno y el callcenter de las semanas hasta el corte. KPIs medidos "
+                f"con los datos existentes al corte."
             )
         elif _scope_bono == _SCOPE_CERR:
             _pct_pool = _frac_pool * 100
@@ -15364,8 +15363,9 @@ elif _page == _NAV_PAGES[0]:
             else:
                 _lbl_cerr = ", ".join(p.strftime("%b").capitalize() for p in _meses_cerr)
                 st.caption(
-                    f"📅 **Meses cerrados ({_lbl_cerr})** — se paga el **{_pct_pool:.0f}%** "
-                    f"del pool de terreno ({len(_meses_cerr)}/3 meses) y el callcenter de esos meses."
+                    f"📅 **Meses cerrados ({_lbl_cerr})** — equivale al **{_pct_pool:.1f}% del "
+                    f"trimestre** ({len(_meses_cerr)}/3 meses). Se paga esa fracción del pool "
+                    f"de terreno y el callcenter de esos meses."
                 )
 
         # ── Aviso REAL vs ESTIMATIVO ──────────────────────────────────────
