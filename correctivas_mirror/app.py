@@ -3594,6 +3594,31 @@ if vista == "🔍 Cierre Fracttal":
                 file_name=f"ots_en_revision_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv",
             )
+        with _a3:
+            # Mini-gráfico referencial: distribución por semáforo de la vista
+            # actual (verde ya-listo / azul <24h / amarillo / rojo).
+            _az = _dff["_azul"] if "_azul" in _dff.columns else pd.Series(False, index=_dff.index)
+            _cv = int(((_dff["color_semaforo"] == "VERDE") & (~_az)).sum())
+            _cz = int(_az.sum())
+            _ca = int((_dff["color_semaforo"] == "AMARILLO").sum())
+            _cr = int((_dff["color_semaforo"] == "ROJO").sum())
+            _segs = [("🟢", _cv, "#16a34a"), ("🔵", _cz, "#2563eb"),
+                     ("🟡", _ca, "#ca8a04"), ("🔴", _cr, "#dc2626")]
+            _tot_g = sum(s[1] for s in _segs) or 1
+            _bar = "".join(
+                f'<div style="width:{100*c/_tot_g:.1f}%;background:{col};height:100%"></div>'
+                for _e, c, col in _segs if c > 0)
+            _leg = " &nbsp;·&nbsp; ".join(
+                f'<span style="white-space:nowrap">{e} <b>{c}</b> '
+                f'<span style="color:#94a3b8">{100*c/_tot_g:.0f}%</span></span>'
+                for e, c, col in _segs)
+            st.markdown(
+                f'<div style="font-size:0.78em;color:#64748b;margin:2px 0 3px 2px">'
+                f'Distribución por semáforo · {_tot_g} OTs</div>'
+                f'<div style="display:flex;height:20px;border-radius:5px;overflow:hidden;'
+                f'border:1px solid #e2e8f0">{_bar}</div>'
+                f'<div style="margin-top:6px;font-size:0.9em">{_leg}</div>',
+                unsafe_allow_html=True)
 
         # ── Vista: Pendientes por cerrar (OT por OT) ──────────────────────
         # Lista TODA OT con trabajo sin terminar (completitud < 100%),
