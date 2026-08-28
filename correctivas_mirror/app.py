@@ -3595,29 +3595,47 @@ if vista == "🔍 Cierre Fracttal":
                 mime="text/csv",
             )
         with _a3:
-            # Mini-gráfico referencial: distribución por semáforo de la vista
+            # Mini-dona referencial: distribución por semáforo de la vista
             # actual (verde ya-listo / azul <24h / amarillo / rojo).
             _az = _dff["_azul"] if "_azul" in _dff.columns else pd.Series(False, index=_dff.index)
             _cv = int(((_dff["color_semaforo"] == "VERDE") & (~_az)).sum())
             _cz = int(_az.sum())
             _ca = int((_dff["color_semaforo"] == "AMARILLO").sum())
             _cr = int((_dff["color_semaforo"] == "ROJO").sum())
-            _segs = [("🟢", _cv, "#16a34a"), ("🔵", _cz, "#2563eb"),
-                     ("🟡", _ca, "#ca8a04"), ("🔴", _cr, "#dc2626")]
-            _tot_g = sum(s[1] for s in _segs) or 1
-            _bar = "".join(
-                f'<div style="width:{100*c/_tot_g:.1f}%;background:{col};height:100%"></div>'
-                for _e, c, col in _segs if c > 0)
-            _leg = " &nbsp;·&nbsp; ".join(
-                f'<span style="white-space:nowrap">{e} <b>{c}</b> '
-                f'<span style="color:#94a3b8">{100*c/_tot_g:.0f}%</span></span>'
-                for e, c, col in _segs)
+            _segs = [("🟢", "Verde", _cv, "#16a34a"), ("🔵", "Azul", _cz, "#2563eb"),
+                     ("🟡", "Amarillo", _ca, "#ca8a04"), ("🔴", "Rojo", _cr, "#dc2626")]
+            _tot_g = sum(s[2] for s in _segs) or 1
+            # Stops del conic-gradient (dona)
+            _stops, _acc = [], 0
+            for _e, _l, _c, _col in _segs:
+                if _c <= 0:
+                    continue
+                _p0 = 100 * _acc / _tot_g
+                _acc += _c
+                _p1 = 100 * _acc / _tot_g
+                _stops.append(f"{_col} {_p0:.2f}% {_p1:.2f}%")
+            _grad = ", ".join(_stops) if _stops else "#e2e8f0 0% 100%"
+            _leg = "<br>".join(
+                f'<span style="white-space:nowrap">{e} {l} <b>{c}</b> '
+                f'<span style="color:#94a3b8">({100*c/_tot_g:.0f}%)</span></span>'
+                for e, l, c, col in _segs if c > 0)
             st.markdown(
-                f'<div style="font-size:0.78em;color:#64748b;margin:2px 0 3px 2px">'
-                f'Distribución por semáforo · {_tot_g} OTs</div>'
-                f'<div style="display:flex;height:20px;border-radius:5px;overflow:hidden;'
-                f'border:1px solid #e2e8f0">{_bar}</div>'
-                f'<div style="margin-top:6px;font-size:0.9em">{_leg}</div>',
+                f'<div style="font-size:0.78em;color:#64748b;margin:2px 0 4px 2px">'
+                f'Distribución por semáforo</div>'
+                f'<div style="display:flex;align-items:center;gap:16px">'
+                f'  <div style="position:relative;width:92px;height:92px;flex:0 0 auto">'
+                f'    <div style="width:92px;height:92px;border-radius:50%;'
+                f'background:conic-gradient({_grad});'
+                f'-webkit-mask:radial-gradient(circle 29px at 50% 50%, transparent 29px, #000 30px);'
+                f'mask:radial-gradient(circle 29px at 50% 50%, transparent 29px, #000 30px)"></div>'
+                f'    <div style="position:absolute;inset:0;display:flex;flex-direction:column;'
+                f'align-items:center;justify-content:center;line-height:1.05">'
+                f'      <div style="font-size:1.3em;font-weight:700">{_tot_g}</div>'
+                f'      <div style="font-size:0.6em;color:#94a3b8">OTs</div>'
+                f'    </div>'
+                f'  </div>'
+                f'  <div style="font-size:0.9em;line-height:1.65">{_leg}</div>'
+                f'</div>',
                 unsafe_allow_html=True)
 
         # ── Vista: Pendientes por cerrar (OT por OT) ──────────────────────
