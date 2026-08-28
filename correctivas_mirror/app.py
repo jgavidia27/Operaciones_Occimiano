@@ -3097,43 +3097,86 @@ if vista == "🔍 Cierre Fracttal":
         _k6.metric("⚠️ >30 días", f"{_n_old}",
                    help="OTs con 30 días o más — priorizar cierre urgente")
 
-        # ── SLA Shell: deben estar cerradas TODAS al día 20 de cada mes ──
-        # Regla operativa: facturación mensual Shell se cierra el día 20.
-        # Cualquier OT Shell abierta después del día 20 es un incumplimiento.
+        # ── SLA Shell: cada OT debe cerrarse antes del día 20 de SU ciclo ──
+        # Regla operativa (Jesús, 2026-08-28): la facturación mensual Shell
+        # corta el día 20. El plazo NO es un único "día 20" global: depende de
+        # cuándo se generó la OT.
+        #   • OT generada hasta el día 20 → vence ese mismo día 20.
+        #   • OT generada DESPUÉS del 20 → pertenece al ciclo siguiente y vence
+        #     el día 20 del mes próximo.
+        # Ej.: una OT del 21-08 debe cerrarse antes del 20-09, NO del 20-08.
+        # Por eso, pasado el día 20, las OTs nuevas NO están "vencidas".
         _shell_open = _dfr[_dfr["cliente"].astype(str).str.upper().str.contains(
-            "SHELL", na=False)] if "cliente" in _dfr.columns else pd.DataFrame()
+            "SHELL", na=False)].copy() if "cliente" in _dfr.columns else pd.DataFrame()
         if not _shell_open.empty:
-            _hoy_s = datetime.now()
-            _dia_hoy = _hoy_s.day
-            if _dia_hoy <= 20:
-                _dias_al_20 = 20 - _dia_hoy
-                # Semáforo por urgencia
-                if _dias_al_20 == 0:
-                    _emo, _color_bg, _color_bd, _color_tx = "🔴", "#7f1d1d", "#dc2626", "#fff"
-                    _msg = f"HOY es el día 20 — deben cerrarse HOY"
-                elif _dias_al_20 <= 3:
-                    _emo, _color_bg, _color_bd, _color_tx = "🔴", "#fef2f2", "#dc2626", "#991b1b"
-                    _msg = f"faltan {_dias_al_20} día(s) para el cierre mensual Shell (día 20)"
-                elif _dias_al_20 <= 7:
-                    _emo, _color_bg, _color_bd, _color_tx = "🟠", "#fff7ed", "#ea580c", "#9a3412"
-                    _msg = f"faltan {_dias_al_20} día(s) para el cierre mensual Shell (día 20)"
+            from datetime import date as _date
+            _hoy_d = datetime.now().date()
+
+            def _deadline_shell(cd):
+                """Día 20 del ciclo al que pertenece la OT según su generación."""
+                dt = pd.to_datetime(cd, errors="coerce")
+                if pd.isna(dt):
+                    return None
+                d = dt.date()
+                if d.day <= 20:
+                    y, m = d.year, d.month
                 else:
-                    _emo, _color_bg, _color_bd, _color_tx = "🟡", "#fefce8", "#ca8a04", "#713f12"
-                    _msg = f"faltan {_dias_al_20} días para el cierre mensual Shell (día 20)"
-            else:
-                # Ya pasó el día 20 → vencido
-                _dias_venc = _dia_hoy - 20
-                _emo, _color_bg, _color_bd, _color_tx = "🚨", "#7f1d1d", "#dc2626", "#fff"
-                _msg = (f"SLA VENCIDO — hace {_dias_venc} día(s) que Shell debió estar cerrado "
-                        f"(fecha límite: día 20 de cada mes)")
-            st.markdown(
-                f'<div style="background:{_color_bg};color:{_color_tx};'
-                f'padding:12px 16px;border-radius:6px;margin:10px 0;'
-                f'border-left:4px solid {_color_bd}">'
-                f'<b>{_emo} Shell · {len(_shell_open)} OTs pendientes de cerrar</b> — {_msg}.'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+                    m, y = d.month + 1, d.year
+                    if m > 12:
+                        m, y = 1, y + 1
+                return _date(y, m, 20)
+
+            _shell_open["_deadline"] = _shell_open["creation_date"].map(_deadline_shell)
+            _venc = _shell_open[_shell_open["_deadline"].map(
+                lambda x: x is not None and x < _hoy_d)]
+            _hoy_ot = _shell_open[_shell_open["_deadline"].map(
+                lambda x: x is not None and x == _hoy_d)]
+            _fut = _shell_open[_shell_open["_deadline"].map(
+                lambda x: x is None or x > _hoy_d)]
+
+            def _banner(emo, bg, bd, tx, html):
+                st.markdown(
+                    f'<div style="background:{bg};color:{tx};'
+                    f'padding:12px 16px;border-radius:6px;margin:10px 0;'
+                    f'border-left:4px solid {bd}">{emo} {html}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # Banner 1 — VENCIDAS / vencen HOY (urgente)
+            if len(_venc) or len(_hoy_ot):
+                if len(_venc):
+                    _fv = ", ".join(f"{d.day:02d}/{d.month:02d}/{d.year}"
+                                    for d in sorted({d for d in _venc["_deadline"] if d}))
+                    _dias_max = (_hoy_d - min(d for d in _venc["_deadline"] if d)).days
+                    _m = (f'<b>Shell · {len(_venc)} OT(s) VENCIDAS</b> — debieron cerrarse '
+                          f'el {_fv} y siguen abiertas (hace {_dias_max} día(s)). Cerrar de inmediato.')
+                    if len(_hoy_ot):
+                        _m += f' Además {len(_hoy_ot)} vence(n) HOY.'
+                    _banner("🚨", "#7f1d1d", "#dc2626", "#fff", _m)
+                else:
+                    _banner("🔴", "#7f1d1d", "#dc2626", "#fff",
+                            f'<b>Shell · {len(_hoy_ot)} OT(s) vencen HOY</b> (día 20) — cerrar hoy.')
+
+            # Banner 2 — ciclo actual (aún dentro de plazo)
+            if len(_fut):
+                _fechas_f = sorted({d for d in _fut["_deadline"] if d})
+                _prox = _fechas_f[0] if _fechas_f else None
+                if _prox:
+                    _dias = (_prox - _hoy_d).days
+                    _lim = f"{_prox.day:02d}/{_prox.month:02d}/{_prox.year}"
+                    if _dias <= 3:
+                        _emo, _bg, _bd, _tx = "🔴", "#fef2f2", "#dc2626", "#991b1b"
+                    elif _dias <= 7:
+                        _emo, _bg, _bd, _tx = "🟠", "#fff7ed", "#ea580c", "#9a3412"
+                    else:
+                        _emo, _bg, _bd, _tx = "🟡", "#fefce8", "#ca8a04", "#713f12"
+                    _banner(_emo, _bg, _bd, _tx,
+                            f'<b>Shell · {len(_fut)} OTs del ciclo actual</b> — deben cerrarse '
+                            f'antes del {_lim} (faltan {_dias} días).')
+                else:
+                    _banner("🟡", "#fefce8", "#ca8a04", "#713f12",
+                            f'<b>Shell · {len(_fut)} OTs pendientes de cerrar</b> '
+                            f'(sin fecha de generación para calcular el plazo).')
 
         # Filtros
         st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
