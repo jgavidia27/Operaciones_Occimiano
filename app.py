@@ -15830,12 +15830,19 @@ elif _page == _NAV_PAGES[0]:
             _CC_STGO   = ["Juan Gallardo", "Luis Pinto", "Victor Bahamonde"]
             _CC_REF    = _date_cc(2026, 3, 9)   # lunes de referencia (corregido)
             _semanas_cc_por_equipo: dict = {}
-            for _ms_cc in _meses_bono_cc:
-                for _lun_cc in pd.date_range(
-                    start=pd.Period(_ms_cc, "M").start_time,
-                    end=pd.Period(_ms_cc, "M").end_time,
-                    freq="W-MON",
-                ):
+            # Una semana de turno cuenta para el mes donde cae su MAYORÍA (regla
+            # ISO: el jueves de la semana). Así una semana que cruza el borde de
+            # mes (ej. 28-jun a 4-jul, turno de Pinto) cuenta para julio, no se
+            # pierde por tener el lunes en junio. Cada equipo tiene ~3 turnos por
+            # mes-y-medio (verificado con el turno real de Jesús).
+            _meses_cc_set = set(_meses_bono_cc)
+            if _meses_cc_set:
+                _cc_ini = pd.Period(min(_meses_cc_set), "M").start_time - pd.Timedelta(days=7)
+                _cc_fin = pd.Period(max(_meses_cc_set), "M").end_time + pd.Timedelta(days=7)
+                for _lun_cc in pd.date_range(_cc_ini, _cc_fin, freq="W-MON"):
+                    # ¿la mayoría de la semana (su jueves) cae en los meses del período?
+                    if str((_lun_cc + pd.Timedelta(days=3)).to_period("M")) not in _meses_cc_set:
+                        continue
                     # Corte "hasta hoy": solo semanas cuyo lunes ya ocurrió.
                     if _cc_cap is not None and _lun_cc.normalize() > _cc_cap:
                         continue
@@ -16425,11 +16432,16 @@ elif _page == _NAV_PAGES[0]:
             _bono_tbl = {}
             for _tk,_tm in _TRIMS_E.items():
                 _cc_w = {}
-                for _mm in _tm:
-                    _ps = f"{_yr}-{_mm:02d}"
-                    for _lun in pd.date_range(pd.Period(_ps,"M").start_time,pd.Period(_ps,"M").end_time,freq="W-MON"):
-                        _eq_r = _CC_STGO_E[(_lun.date()-_CC_REF_E).days//7 % 3]
-                        _cc_w[_eq_r] = _cc_w.get(_eq_r,0)+1
+                # Semana cuenta para el mes de su MAYORÍA (jueves) — igual que el
+                # bono terreno; evita perder semanas que cruzan el borde de mes.
+                _mset_e = {f"{_yr}-{_mm:02d}" for _mm in _tm}
+                _ini_e = pd.Period(min(_mset_e),"M").start_time - pd.Timedelta(days=7)
+                _fin_e = pd.Period(max(_mset_e),"M").end_time + pd.Timedelta(days=7)
+                for _lun in pd.date_range(_ini_e,_fin_e,freq="W-MON"):
+                    if str((_lun+pd.Timedelta(days=3)).to_period("M")) not in _mset_e:
+                        continue
+                    _eq_r = _CC_STGO_E[(_lun.date()-_CC_REF_E).days//7 % 3]
+                    _cc_w[_eq_r] = _cc_w.get(_eq_r,0)+1
                 _sf = [r for r in _sla_records if r.get("mes_num") in _tm]
                 _pf = [r for r in _prec_records if r.get("mes_num") in _tm]
                 _mfr = [r for r in _pm_records if r.get("mes_num") in _tm]

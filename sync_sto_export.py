@@ -372,13 +372,16 @@ def main():
     bono_tbl = {}
     for tk, tm in TRIMS.items():
         cc_w = {}
-        for mm in tm:
-            ps = f"{yr}-{mm:02d}"
-            for lun in pd.date_range(
-                pd.Period(ps, "M").start_time, pd.Period(ps, "M").end_time, freq="W-MON"
-            ):
-                eq_r = CC_STGO[(lun.date() - CC_REF).days // 7 % 3]
-                cc_w[eq_r] = cc_w.get(eq_r, 0) + 1
+        # Semana cuenta para el mes de su MAYORÍA (jueves, regla ISO) — evita
+        # perder semanas que cruzan el borde de mes (28-jun a 4-jul = julio).
+        mset = {f"{yr}-{mm:02d}" for mm in tm}
+        ini = pd.Period(min(mset), "M").start_time - pd.Timedelta(days=7)
+        fin = pd.Period(max(mset), "M").end_time + pd.Timedelta(days=7)
+        for lun in pd.date_range(ini, fin, freq="W-MON"):
+            if str((lun + pd.Timedelta(days=3)).to_period("M")) not in mset:
+                continue
+            eq_r = CC_STGO[(lun.date() - CC_REF).days // 7 % 3]
+            cc_w[eq_r] = cc_w.get(eq_r, 0) + 1
 
         sf = [r for r in sla_records if r.get("mes_num") in tm]
         pf = [r for r in prec_records if r.get("mes_num") in tm]
