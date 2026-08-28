@@ -3230,6 +3230,12 @@ if vista == "🔍 Cierre Fracttal":
             es_remota = "REMOTA" in metodo and not tipo.startswith("PREVENT")
 
             if color == "VERDE":
+                _ml = motivo.lower()
+                if "pendiente menor" in _ml or "pendiente sin detalle" in _ml:
+                    _falta = motivo.split("pendiente menor:", 1)[1].strip() if "pendiente menor:" in motivo else ""
+                    if _falta:
+                        return f"Preventiva {pct}% — se puede cerrar; pendiente menor (seguimiento): {_falta}"
+                    return f"Preventiva {pct}% — se puede cerrar; pendiente sin detalle (revisar en seguimiento)"
                 if es_remota:
                     return "Atendida vía remota — 100% completa, sin necesidad de recursos físicos. Cerrar"
                 partes = ["100% completa"]
@@ -3248,13 +3254,16 @@ if vista == "🔍 Cierre Fracttal":
                             "tras confirmar con el técnico")
                 if "sin: tipo falla" in motivo.lower() or "sin: causa" in motivo.lower() or "sin: deteccion" in motivo.lower():
                     return f"Correctiva incompleta — {motivo}. Pedir al técnico completar. NO cerrar"
-                if "dice 'si'" in motivo.lower() or "dice 'no'" in motivo.lower():
-                    return f"Incongruencia repuestos — {motivo}. Validar con técnico antes de cerrar"
                 if "cambio" in motivo.lower() or "reemplaz" in motivo.lower():
                     return f"Trabajo menciona cambio de pieza pero no hay repuesto cargado. Validar antes de cerrar"
                 return f"Revisar: {motivo}. Confirmar con técnico antes de cerrar"
 
             if color == "ROJO":
+                if "mantención de fondo" in motivo.lower() or "mantencion de fondo" in motivo.lower():
+                    _det = _s(r.get("subtareas_pendientes")) or (
+                        motivo.split(":", 1)[1].strip() if ":" in motivo else "")
+                    return (f"Incompleta ({pct}%) — falta la mantención de fondo de la "
+                            f"lavadora/aspiradora: {_det}. NO cerrar")
                 if "completitud" in motivo.lower():
                     subs = _s(r.get("subtareas_pendientes"))
                     if subs:
@@ -3262,6 +3271,9 @@ if vista == "🔍 Cierre Fracttal":
                     return f"Incompleta ({pct}%) — falta terminar el trabajo en Fracttal. NO cerrar"
                 if "sin recursos" in motivo.lower():
                     return "Sin recursos registrados — pedir al técnico cargar mano de obra / repuestos / servicios. NO cerrar"
+                if "dice 'si'" in motivo.lower():
+                    return ("Incongruencia repuestos — dice que SÍ usó repuestos pero no cargó "
+                            "ninguno en recursos. Pedir al técnico que los cargue en Fracttal. NO cerrar")
                 return f"Requiere corrección: {motivo}. NO cerrar"
 
             return motivo or "—"
@@ -3355,6 +3367,55 @@ if vista == "🔍 Cierre Fracttal":
                 mime="text/csv",
             )
 
+        # ── Vista: Pendientes por cerrar (OT por OT) ──────────────────────
+        # Lista TODA OT con trabajo sin terminar (completitud < 100%),
+        # independiente de los filtros de arriba, para tener la foto completa
+        # de qué quedó pendiente y de quién es responsable. Incluye las
+        # preventivas VERDES con pendiente menor (se pueden cerrar, pero el
+        # pendiente queda registrado para seguimiento).
+        _pct_num = pd.to_numeric(_dfr.get("completed_pct"), errors="coerce").fillna(100)
+        _pend = _dfr[_pct_num < 100].copy()
+        if not _pend.empty:
+            _emoji_sem = {"VERDE": "🟢", "AMARILLO": "🟡", "ROJO": "🔴"}
+            _pend["_sem"] = _pend["color_semaforo"].map(_emoji_sem).fillna("")
+            _pend["_falto"] = _pend["subtareas_pendientes"].apply(
+                lambda s: _s(s) if _s(s) else "Sin detalle (revisar en Fracttal)")
+            _pend["_tec"] = _pend["personnel"].apply(lambda x: _title_smart(_s(x)) or "—")
+            _pend["_act"] = _pend.apply(
+                lambda r: _limpiar_activo(r.get("activo"), r.get("parent_desc")), axis=1)
+            _pend["_cli"] = _pend["cliente"].apply(lambda x: _title_smart(_s(x)) or "—")
+            _pend = _pend.sort_values(["color_semaforo", "completed_pct"],
+                                      ascending=[False, True])
+            _pend_show = _pend[["_sem", "folio", "_tec", "_cli", "eds_occim",
+                                "_act", "completed_pct", "_falto"]].rename(columns={
+                "_sem": " ", "folio": "N° OT", "_tec": "Técnico responsable",
+                "_cli": "Cliente", "eds_occim": "Cód. EDS", "_act": "Activo",
+                "completed_pct": "%", "_falto": "Qué faltó por realizar",
+            })
+            _n_rojo_pend = int((_pend["color_semaforo"] == "ROJO").sum())
+            with st.expander(
+                f"🔧 Pendientes por cerrar — {len(_pend)} OTs con trabajo sin terminar "
+                f"({_n_rojo_pend} 🔴 no cerrar)", expanded=False):
+                st.caption(
+                    "OTs con completitud < 100%. "
+                    "🔴 = NO cerrar (falta mantención de fondo de lavadora/aspiradora, "
+                    "recursos o es correctiva incompleta) · "
+                    "🟢 = se puede cerrar; el pendiente es menor y queda en seguimiento.")
+                st.dataframe(
+                    _pend_show, hide_index=True, use_container_width=True,
+                    height=min(460, 60 + 35 * len(_pend_show)),
+                    column_config={
+                        " ": st.column_config.TextColumn(width=36),
+                        "N° OT": st.column_config.TextColumn(width=90),
+                        "Técnico responsable": st.column_config.TextColumn(width=170),
+                        "Cliente": st.column_config.TextColumn(width=110),
+                        "Cód. EDS": st.column_config.TextColumn(width=80),
+                        "Activo": st.column_config.TextColumn(width=200),
+                        "%": st.column_config.NumberColumn(width=55, format="%d%%"),
+                        "Qué faltó por realizar": st.column_config.TextColumn(width=380),
+                    },
+                )
+
         # Tabla principal - ORDEN: Semáforo, Fecha, N° OT, luego el resto
         _COL_MAP = {
             "color_semaforo":     "Semáforo",
@@ -3370,12 +3431,13 @@ if vista == "🔍 Cierre Fracttal":
             "dias_en_revision":   "Días",
             "completed_pct":      "%",
             "total_cost":         "Costo $",
-            "motivo_semaforo":    "Motivo",
+            # "Resolución" ocupa el lugar de la antigua columna "Motivo"
+            # (motivo_semaforo) — se eliminó por redundante.
+            "_resolucion":        "Resolución",
             "trabajo_realizado":  "Trabajo realizado (técnico)",
             "entrega_repuestos":  "¿Entregó rep.?",
             "repuestos_detalle":  "Repuestos usados",
             "descripcion_falla":  "Descripción falla",
-            "_resolucion":        "Resolución",
         }
         _cols_out = [c for c in _COL_MAP if c in _dff.columns]
         _tbl = _dff[_cols_out].rename(columns=_COL_MAP).copy()
@@ -3449,8 +3511,6 @@ if vista == "🔍 Cierre Fracttal":
                     width=100, format="$%d"),
                 "Semáforo":         st.column_config.TextColumn(width=60,
                     help="🟢 listo para cerrar · 🟡 revisar · 🔴 no cerrar"),
-                "Motivo":           st.column_config.TextColumn(width=250,
-                    help="Motivo del color del semáforo (incluye incongruencias)"),
                 "Trabajo realizado (técnico)": st.column_config.TextColumn(
                     width=280,
                     help="Comentario del técnico en 'TRABAJO REALIZADO PARA CORRECCIÓN'"),

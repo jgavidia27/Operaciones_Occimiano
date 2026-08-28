@@ -91,7 +91,9 @@ def fetch_en_revision(token: str) -> tuple[list, dict]:
     seen_folios = set()
     seen_repre  = set()   # folios que ya tienen fila representativa
     result = []
-    subs_pend: dict[str, list[dict]] = {}
+    # Acumulamos TODA fila done=False por folio, sin importar el orden en que
+    # Fracttal las pagina. Al final filtramos a los folios En Revisión.
+    subs_pend_raw: dict[str, list[dict]] = {}
     start = 0
     pages = 0
     while pages < MAX_PAGES:
@@ -121,10 +123,13 @@ def fetch_en_revision(token: str) -> tuple[list, dict]:
                     seen_repre.add(fol)
                     seen_folios.add(fol)
                     result.append(wo)
-                # Acumular subtareas pendientes de esa OT (done=False)
-                # SOLO para folios que quedaron marcados En Revisión.
-            if fol in seen_folios and wo.get("done") is False:
-                subs_pend.setdefault(fol, []).append({
+            # Acumular TODA subtarea pendiente (done=False), SIN depender de
+            # que la fila representativa DONE ya se haya visto. Fracttal pagina
+            # 1 fila por subtarea y la pendiente (p.ej. CAMBIO DE ACEITE) puede
+            # llegar ANTES que la fila DONE del folio; el filtro por folio En
+            # Revisión se aplica al final.
+            if wo.get("done") is False:
+                subs_pend_raw.setdefault(fol, []).append({
                     "task":   (wo.get("description") or "").strip(),
                     "activo": (wo.get("items_log_description") or "").strip(),
                 })
@@ -132,6 +137,8 @@ def fetch_en_revision(token: str) -> tuple[list, dict]:
         pages += 1
         if len(data) < 100:
             break
+    # Solo conservamos subtareas pendientes de folios que quedaron En Revisión.
+    subs_pend = {f: v for f, v in subs_pend_raw.items() if f in seen_repre}
     log(f"Fracttal: {pages} paginas barridas, {len(result)} OTs En Revision "
         f"({sum(len(v) for v in subs_pend.values())} subtareas pendientes acumuladas)",
         "OK")
@@ -226,19 +233,39 @@ def calcular_semaforo(wo: dict, extras: dict) -> tuple:
     extras incluye trabajo_realizado, entrega_repuestos, tiene_repuesto_real,
     repuestos_detalle, servicios_detalle, hh_detalle, subtareas_pendientes."""
     completed = wo.get("completed_percentage") or 0
+    tipo_main = (wo.get("tasks_log_task_type_main") or "").upper()
+    es_preventiva_wo = tipo_main.startswith("PREVENT")
     if completed < 100:
-        # Excepción de negocio: si lo ÚNICO pendiente es "cambio de aceite",
-        # la OT se marca AMARILLA (no roja). Justificación: en equipos con
-        # poco uso el aceite sigue en buen estado y omitir el cambio no es
-        # crítico. Si además del aceite hay otra subtarea pendiente → ROJO.
+        # Regla de negocio (Jesús, 2026-08-28):
+        #   • PREVENTIVA incompleta → VERDE (se puede cerrar), PORQUE lo que
+        #     suele faltar es menor (cambio de aceite por uso, filtros, etc.) y
+        #     no impide facturar. El detalle de lo pendiente se lista en la
+        #     vista "Pendientes por cerrar" del panel.
+        #   • EXCEPCIÓN → ROJO: si lo pendiente es la MANTENCIÓN de fondo de la
+        #     LAVADORA o la ASPIRADORA (el trabajo core del servicio). Eso nunca
+        #     puede quedar verde.
+        #   • CORRECTIVA u otro tipo incompleto → ROJO (no cerrar).
         subs = extras.get("subtareas_pendientes") or []
-        if subs:
-            names = [(s.get("task") or "").upper() for s in subs]
-            solo_aceite = names and all("CAMBIO DE ACEITE" in n for n in names)
-            if solo_aceite:
-                return ("AMARILLO",
-                        f"Solo falta cambio de aceite ({completed}%) — "
-                        "puede omitirse si el equipo tuvo poco uso", None)
+        pend_txt = "; ".join(sorted({(s.get("task") or "").strip()
+                                     for s in subs if (s.get("task") or "").strip()}))
+        if es_preventiva_wo:
+            def _es_core_pend(s):
+                task = (s.get("task") or "").upper()
+                blob = task + " " + (s.get("activo") or "").upper()
+                # El cambio de aceite es por uso; no cuenta como mantención de
+                # fondo aunque sea sobre una bomba del equipo.
+                if "CAMBIO DE ACEITE" in task:
+                    return False
+                return ("LAVADORA" in blob) or ("ASPIRAD" in blob)
+            core_pend = [s for s in subs if _es_core_pend(s)]
+            if core_pend:
+                _c = "; ".join(sorted({(s.get("task") or "").strip() for s in core_pend}))
+                return ("ROJO",
+                        f"Falta mantención de fondo lavadora/aspiradora ({completed}%): {_c}",
+                        None)
+            motivo = (f"Preventiva {completed}% — pendiente menor: {pend_txt}"
+                      if pend_txt else f"Preventiva {completed}% — pendiente sin detalle")
+            return ("VERDE", motivo, None)
         return ("ROJO", f"Completitud={completed}%", None)
 
     # Detectar atención remota (no requiere recursos/costos/repuestos)
@@ -276,17 +303,24 @@ def calcular_semaforo(wo: dict, extras: dict) -> tuple:
             if not tiene_det:   missing.append("deteccion")
             return ("AMARILLO", f"Correctivo sin: {', '.join(missing)}", None)
 
-    # Congruencia entrega_repuestos vs recursos reales
-    incong = []
+    # Congruencia entrega_repuestos vs recursos reales.
+    # Regla de negocio (Jesús, 2026-08-28): la incongruencia solo es GRAVE en
+    # UN sentido:
+    #   • Dice 'SI' entregó repuestos PERO no cargó ninguno en recursos → ROJO.
+    #     Repuestos usados sin registrar: no se pueden facturar / quedan sin
+    #     costo. Hay que exigir que los cargue antes de cerrar.
+    #   • Dice 'NO' entregó repuestos PERO SÍ hay repuestos cargados → NO es
+    #     problema. El técnico solo se equivocó al marcar el flag; los repuestos
+    #     quedaron cargados y con costo. Se deja pasar (no baja el semáforo).
     entrega = extras.get("entrega_repuestos")
     tiene_rep = extras.get("tiene_repuesto_real", False)
     if entrega == "SI" and not tiene_rep:
-        incong.append("Dice 'SI' a entrega repuestos pero no hay repuesto registrado en recursos")
-    elif entrega == "NO" and tiene_rep:
-        incong.append("Dice 'NO' a entrega repuestos pero HAY repuestos en recursos")
+        _m = "Dice 'SI' a entrega repuestos pero no cargó ninguno en recursos"
+        return ("ROJO", _m, _m)
 
     # Congruencia trabajo_realizado (keyword de cambio) vs repuestos
     # No aplica a OTs remotas (no hay intervención física)
+    incong = []
     trabajo = (extras.get("trabajo_realizado") or "").lower()
     if not es_remota and trabajo and any(k in trabajo for k in ("cambio de", "cambio ", "reemplaz")):
         if not tiene_rep:
