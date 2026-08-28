@@ -15223,16 +15223,49 @@ elif _page == _NAV_PAGES[0]:
             )
         _solo_junio = _modo_bono == _MODO_SOLO_JUN
 
+        # ── Alcance del corte (Jesús, 2026-08-28) ─────────────────────────
+        # Además del trimestre completo, permite calcular el bono "hasta hoy"
+        # (incluye el mes en curso a prorrata de días) o "meses cerrados" (solo
+        # meses ya terminados). El pool de terreno se prorratea y las semanas de
+        # callcenter se recortan al corte. Solo aplica al trimestre en curso.
+        _SCOPE_FULL = "Trimestre completo"
+        _SCOPE_HOY  = "Hasta hoy"
+        _SCOPE_CERR = "Meses cerrados"
+        _hoy_bono = pd.Timestamp.now().normalize()
+        _periods_bono = [pd.Period(_m, "M") for _m in _all_meses_bono]
+        _meses_cerr = [p for p in _periods_bono if p.end_time < _hoy_bono]
+        _mes_actual = [p for p in _periods_bono if p.start_time <= _hoy_bono <= p.end_time]
+        _trim_en_curso = bool(_mes_actual)
+        _scope_bono = _SCOPE_FULL
+        if _trim_en_curso and not _solo_junio:
+            _scope_bono = st.radio(
+                "Alcance del corte",
+                [_SCOPE_FULL, _SCOPE_HOY, _SCOPE_CERR],
+                horizontal=True,
+                key="bono_scope",
+                help=(
+                    "Trimestre completo: paga los 3 meses (pool íntegro).  "
+                    "Hasta hoy: corta en la fecha de hoy — incluye el mes en curso a "
+                    "prorrata de días; el pool de terreno y las semanas de callcenter "
+                    "se prorratean al corte.  "
+                    "Meses cerrados: solo meses ya terminados (ej. si hoy es agosto, "
+                    "solo julio)."
+                ),
+            )
+        _scope_activo = _scope_bono != _SCOPE_FULL and not _solo_junio
+
         with _bf1:
             _meses_bono_sel = st.multiselect(
                 "Mes específico (dejar vacío = todo el trimestre)",
                 options=_all_meses_bono,
                 default=[],
                 key="bono_mes_drill",
-                disabled=_solo_junio,
-                help=("Deshabilitado en modo 'Solo Junio': el período queda fijado "
-                      "a junio como referencia del trimestre completo."
-                      if _solo_junio else None),
+                disabled=_solo_junio or _scope_activo,
+                help=("Deshabilitado: el alcance del corte fija el período."
+                      if _scope_activo else
+                      ("Deshabilitado en modo 'Solo Junio': el período queda fijado "
+                       "a junio como referencia del trimestre completo."
+                       if _solo_junio else None)),
             )
         _meses_bono_activos = _meses_bono_sel if _meses_bono_sel else _all_meses_bono
 
@@ -15249,11 +15282,52 @@ elif _page == _NAV_PAGES[0]:
             _meses_bono_cc  = _meses_bono_activos
             _kpi_subset     = bool(_meses_bono_sel)
 
+        # ── Prorrateo por alcance del corte ───────────────────────────────
+        # _frac_pool escala el pool de terreno ($500K/trim); _cc_cap recorta
+        # las semanas de callcenter; _n_meses_efect es el divisor del promedio
+        # mensual. Por defecto (trimestre completo) todo queda como antes.
+        _frac_pool = 1.0
+        _cc_cap = None
+        _n_meses_efect = float(len(_all_meses_bono)) or 3.0
+        if _scope_activo:
+            _dias_mes_act = _mes_actual[0].days_in_month if _mes_actual else 0
+            _dias_transc  = min(_hoy_bono.day, _dias_mes_act) if _dias_mes_act else 0
+            _frac_mes_act = (_dias_transc / _dias_mes_act) if _dias_mes_act else 0.0
+            if _scope_bono == _SCOPE_CERR:
+                _sel_scope = [str(p) for p in _meses_cerr]
+                _units = float(len(_meses_cerr))
+                _cc_cap = None
+            else:  # _SCOPE_HOY
+                _sel_scope = [str(p) for p in (_meses_cerr + _mes_actual)]
+                _units = len(_meses_cerr) + _frac_mes_act
+                _cc_cap = _hoy_bono
+            if _sel_scope:
+                _meses_bono_kpi = _sel_scope
+                _meses_bono_cc  = _sel_scope
+                _kpi_subset     = True
+                _frac_pool      = _units / 3.0
+                _n_meses_efect  = _units if _units > 0 else 1.0
+
         if _solo_junio:
             st.caption(
                 "🔎 **Modo excepción inicial** — Junio define todo el trimestre "
                 "Abr–Jun: KPIs medidos solo con junio, pero se paga el bono "
                 "trimestral completo (terreno + callcenter de las 13 semanas)."
+            )
+        elif _scope_bono == _SCOPE_HOY:
+            _pct_pool = _frac_pool * 100
+            st.caption(
+                f"✂️ **Corte hasta hoy ({_hoy_bono:%d-%m-%Y})** — se paga el "
+                f"**{_pct_pool:.0f}%** del pool de terreno ({len(_meses_cerr)} mes(es) "
+                f"cerrado(s) + {_frac_mes_act*100:.0f}% del mes en curso) y el callcenter "
+                f"de las semanas hasta hoy. KPIs medidos con los datos existentes al corte."
+            )
+        elif _scope_bono == _SCOPE_CERR:
+            _pct_pool = _frac_pool * 100
+            _lbl_cerr = ", ".join(p.strftime("%b").capitalize() for p in _meses_cerr) or "ninguno aún"
+            st.caption(
+                f"📅 **Meses cerrados ({_lbl_cerr})** — se paga el **{_pct_pool:.0f}%** "
+                f"del pool de terreno ({len(_meses_cerr)}/3 meses) y el callcenter de esos meses."
             )
 
         # ── Filtros equipo / técnico ──────────────────────────────────────────
@@ -15695,6 +15769,9 @@ elif _page == _NAV_PAGES[0]:
                     end=pd.Period(_ms_cc, "M").end_time,
                     freq="W-MON",
                 ):
+                    # Corte "hasta hoy": solo semanas cuyo lunes ya ocurrió.
+                    if _cc_cap is not None and _lun_cc.normalize() > _cc_cap:
+                        continue
                     _idx_cc = ((_lun_cc.date() - _CC_REF).days // 7) % len(_CC_STGO)
                     _eq_cc  = _CC_STGO[_idx_cc]
                     _semanas_cc_por_equipo[_eq_cc] = (
@@ -15757,7 +15834,7 @@ elif _page == _NAV_PAGES[0]:
                 # IMPORTANTE: siempre dividir por el equipo completo (_n_equipo_real),
                 # no por _miembros_full que puede estar filtrado a 1 persona.
                 _n_pool       = _n_equipo_real
-                _pp_max       = int(_BONO_TOTAL / _n_pool) if _n_pool > 0 else _BONO_TOTAL
+                _pp_max       = int(_BONO_TOTAL * _frac_pool / _n_pool) if _n_pool > 0 else int(_BONO_TOTAL * _frac_pool)
                 _pp_ind       = int(_pp_max * 0.50)   # parte individual
                 _pp_eq        = int(_pp_max * 0.50)   # parte equipo
                 _MAX_IND_SLA  = int(_pp_ind * 0.40)
@@ -16015,12 +16092,18 @@ elif _page == _NAV_PAGES[0]:
                     f'{_cc_eq_cell}</td></tr>'
                 )
 
-                # Fila 7: TOTAL trimestral (individual + equipo + callcenter)
+                # Fila 7: TOTAL del período (individual + equipo + callcenter)
+                if _scope_bono == _SCOPE_HOY:
+                    _total_lbl = "TOTAL a pagar · corte hoy"
+                elif _scope_bono == _SCOPE_CERR:
+                    _total_lbl = "TOTAL a pagar · meses cerrados"
+                else:
+                    _total_lbl = "TOTAL trimestral"
                 _totales_trim = {}
                 _html += (
                     f'<tr style="background:{_t.get("info_bg", "#eff6ff")};">'
                     f'<td style="padding:9px 10px;font-weight:800;font-size:0.90rem;'
-                    f'border-top:2px solid {_t["border"]};">TOTAL trimestral</td>'
+                    f'border-top:2px solid {_t["border"]};">{_total_lbl}</td>'
                 )
                 for _tf in _miembros_full:
                     _k = _tec_kpis[_tf]
@@ -16048,11 +16131,14 @@ elif _page == _NAV_PAGES[0]:
                     f'font-style:italic;font-size:0.80rem;">—</td></tr>'
                 )
 
-                # Fila 8: Promedio mensual (trimestral ÷ 3)
+                # Fila 8: Promedio mensual (total del período ÷ meses efectivos)
+                _div_mens = _n_meses_efect if _n_meses_efect and _n_meses_efect > 0 else 3.0
+                _div_lbl = (f"{_div_mens:.1f}".rstrip("0").rstrip("."))
                 _html += (
                     f'<tr style="background:{_t.get("info_bg", "#eff6ff")};">'
                     f'<td style="padding:8px 10px;font-weight:700;font-size:0.87rem;">'
-                    f'Promedio mensual <span style="color:{_t["muted"]};font-size:0.76rem;">(÷ 3)</span></td>'
+                    f'Promedio mensual <span style="color:{_t["muted"]};font-size:0.76rem;">'
+                    f'(÷ {_div_lbl} mes{"es" if _div_mens != 1 else ""})</span></td>'
                 )
                 for _tf in _miembros_full:
                     _tot_v, _has_v = _totales_trim[_tf]
@@ -16061,7 +16147,7 @@ elif _page == _NAV_PAGES[0]:
                     else:
                         _mens_cell = (
                             f'<span style="font-weight:700;font-size:0.92rem;">'
-                            f'{_clp_fmt(_tot_v // 3)}</span>'
+                            f'{_clp_fmt(int(_tot_v / _div_mens))}</span>'
                         )
                     _html += (
                         f'<td style="padding:8px 10px;text-align:center;">{_mens_cell}</td>'
