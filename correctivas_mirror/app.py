@@ -3700,15 +3700,15 @@ if vista == "🔍 Cierre Fracttal":
             "_metodo_short":      "Método",
             "personnel":          "Técnico",
             "cliente":            "Cliente",
-            "activo":             "Activo",
+            # Resolución (la columna más importante) va donde estaba Activo, y
+            # Activo pasa a donde estaba Resolución (swap pedido por Jesús).
+            "_resolucion":        "Resolución",
             "_estacion":          "Estación",
             "eds_occim":          "Cód. EDS",
             "dias_en_revision":   "Días",
             "completed_pct":      "%",
             "total_cost":         "Costo $",
-            # "Resolución" ocupa el lugar de la antigua columna "Motivo"
-            # (motivo_semaforo) — se eliminó por redundante.
-            "_resolucion":        "Resolución",
+            "activo":             "Activo",
             "trabajo_realizado":  "Trabajo realizado (técnico)",
             "entrega_repuestos":  "¿Entregó rep.?",
             "repuestos_detalle":  "Repuestos usados",
@@ -3730,6 +3730,13 @@ if vista == "🔍 Cierre Fracttal":
             _emoji_rep = {"SI": "✅ SI", "NO": "❌ NO", "N/A": "➖ N/A"}
             _tbl["¿Entregó rep.?"] = _tbl["¿Entregó rep.?"].map(
                 lambda x: _emoji_rep.get(x, "—" if pd.isna(x) else str(x)))
+        # Resolución destacada: cada celda arranca con el círculo del semáforo
+        # (🟢/🔵/🟡/🔴) para que la columna quede color-codificada y salte a la
+        # vista (es la columna más importante). Evita duplicar si ya lo trae.
+        if "Resolución" in _tbl.columns:
+            _tbl["Resolución"] = [
+                (r if str(r)[:1] in ("🟢", "🔵", "🟡", "🔴") else f"{s} {r}")
+                for s, r in zip(_tbl["Semáforo"].values, _tbl["Resolución"].astype(str).values)]
 
         # Formatear review_date (UTC -> Chile)
         if "Fecha - pasó a revisión" in _tbl.columns:
@@ -3803,8 +3810,9 @@ if vista == "🔍 Cierre Fracttal":
                     help="Recursos tipo inventario/repuesto registrados en Fracttal"),
                 "Descripción falla": st.column_config.TextColumn(width=220,
                     help="Campo 'DESCRIPCIÓN DE LA FALLA ENCONTRADA' del técnico"),
-                "Resolución": st.column_config.TextColumn(width=320,
-                    help="Conclusión sugerida: por qué (o no) se debería cerrar esta OT"),
+                "Resolución": st.column_config.TextColumn(width=460,
+                    help="⭐ Columna clave — conclusión sugerida: por qué (o no) se "
+                         "debería cerrar esta OT. El círculo indica el semáforo."),
             },
         )
 
