@@ -2054,8 +2054,62 @@ if vista == "🔗 Enlace Copec":
 
     df["os_fracttal"] = df.apply(_resolve_os, axis=1)
 
+    # ── EDS DOBLES: 1 orden Enlace → 2 OTs Fracttal ────────────────
+    # Algunas EDS son físicamente dobles (dos islas de lavado: Norte/Sur,
+    # Oriente/Poniente, etc.). Enlace emite UNA sola orden preventiva que
+    # junta insumos de ambas islas, pero Fracttal genera DOS OTs (una por
+    # isla), casi siempre el mismo día. `_best_match` engancha solo una;
+    # aquí resolvemos AMBAS para estas EDS. Solo aplica a PREVENTIVAS
+    # (las correctivas son por incidente, no se dividen por isla).
+    EDS_DOBLES = {"20079", "40046", "40502", "60001", "60079", "60107", "60711", "60783"}
+
+    def _best_match_multi(cands, fecha_iso, ventana_dias, tol=3):
+        """Como _best_match pero devuelve TODAS las OTs del clúster de fecha
+        más cercano (delta mínimo .. delta mínimo + tol días). Para una EDS
+        doble esto captura el par Norte+Sur (misma fecha) sin arrastrar OTs
+        del mes anterior/siguiente."""
+        if not cands or not fecha_iso:
+            return []
+        try:
+            d0 = _dt.strptime(fecha_iso[:10], "%Y-%m-%d")
+        except ValueError:
+            return []
+        scored = []
+        for fp, id_ot in cands:
+            try:
+                delta = (_dt.strptime(fp, "%Y-%m-%d") - d0).days
+            except ValueError:
+                continue
+            if 0 <= delta <= ventana_dias:
+                scored.append((delta, id_ot))
+        if not scored:
+            return []
+        scored.sort()
+        best_d = scored[0][0]
+        # dedup preservando orden por cercanía
+        out = []
+        for delta, id_ot in scored:
+            if delta <= best_d + tol and id_ot not in out:
+                out.append(id_ot)
+        return out
+
+    def _resolve_os_all(row):
+        eds = str(row.get("eds_codigo") or "")
+        if row["tipo_aviso"] == "PREVENTIVO" and eds in EDS_DOBLES:
+            lst = _best_match_multi(_prev_by_eds.get(eds, []),
+                                    row.get("fecha_creacion") or "", ventana_dias=45)
+            if lst:
+                return lst
+        one = row.get("os_fracttal")
+        return [one] if one else []
+
+    df["os_fracttal_all"] = df.apply(_resolve_os_all, axis=1)
+    # os_fracttal (single) queda como el primero del clúster, para que sea
+    # consistente con os_fracttal_all en el resto de vistas.
+    df["os_fracttal"] = df["os_fracttal_all"].map(lambda l: l[0] if l else None)
+
     # Detalles Fracttal (responsable, fechas, etc.) para el panel expandido
-    _ots_ids = tuple(sorted({x for x in df["os_fracttal"].dropna().unique() if x}))
+    _ots_ids = tuple(sorted({oid for lst in df["os_fracttal_all"] for oid in lst if oid}))
     _ots_detalle = cargar_ots_detalle(_ots_ids)
 
     # _title_smart definido a nivel de módulo (arriba, línea ~74)
@@ -2445,6 +2499,49 @@ if vista == "🔗 Enlace Copec":
             emoji = "🔴" if no_cerrados == total else "🟠"
             return f"{emoji} Cierre pendiente ({no_cerrados})"
 
+        def _combina_ots(ot_ids):
+            """Combina 1..N OTs (EDS doble) en (display, estado_ui, fecha_cierre).
+            - display: 'OS-A + OS-B'
+            - estado_ui: estado combinado; si difieren, muestra la mezcla
+              (ej. una isla Finalizada y otra En Progreso).
+            - fecha_cierre: MAX solo si TODAS están finalizadas (si una isla
+              sigue abierta, el cierre Fracttal queda pendiente)."""
+            ids = [x for x in ot_ids if x]
+            if not ids:
+                return "⏳ pendiente", "", pd.NaT
+            disp = " + ".join(ids)
+            estados, fechas, all_fin = [], [], True
+            for oid in ids:
+                ot = _ots_detalle.get(oid)
+                if not ot:
+                    all_fin = False
+                    continue
+                e = _estado_fracttal_ui(ot)
+                estados.append(e)
+                ff = ot.get("fecha_finalizacion")
+                if ff:
+                    fechas.append(pd.to_datetime(ff, errors="coerce", utc=True))
+                if "Finalizada" not in e:
+                    all_fin = False
+            if not estados:
+                estado_ui = ""
+            elif len(set(estados)) == 1:
+                estado_ui = estados[0]
+            else:
+                estado_ui = " / ".join(estados)
+            fecha_cierre = max(fechas) if (fechas and all_fin) else pd.NaT
+            return disp, estado_ui, fecha_cierre
+
+        def _ots_de_grupo(g):
+            """Une (dedup, orden por cercanía) todas las OTs de os_fracttal_all
+            del grupo de avisos g."""
+            out = []
+            for lst in g["os_fracttal_all"]:
+                for oid in (lst or []):
+                    if oid and oid not in out:
+                        out.append(oid)
+            return out
+
         rows_view = []
         _prev = d[d["tipo_aviso"] == "PREVENTIVO"].copy()
         _corr = d[d["tipo_aviso"] != "PREVENTIVO"].copy()
@@ -2475,21 +2572,10 @@ if vista == "🔗 Enlace Copec":
                     desc += f" · ({len(reps)} equipos)"
                 n_plan = " + ".join(str(x) for x in plans["id_sap"])
                 n_rep  = " + ".join(str(x) for x in reps["id_sap"])
-                # OS Fracttal: el primero no vacío entre todos
-                os_fr = ""
-                for _id in todos_ids:
-                    row = g[g["id_sap"] == _id].iloc[0]
-                    if row.get("os_fracttal"):
-                        os_fr = row["os_fracttal"]; break
-                # Cierre Fracttal + Estado Fracttal: de la OT matcheada
-                fecha_cierre_frac = pd.NaT
-                estado_frac = ""
-                if os_fr and _ots_detalle.get(os_fr):
-                    _ot = _ots_detalle[os_fr]
-                    ff = _ot.get("fecha_finalizacion")
-                    if ff:
-                        fecha_cierre_frac = pd.to_datetime(ff, errors="coerce", utc=True)
-                    estado_frac = _estado_fracttal_ui(_ot)
+                # OS Fracttal: EDS dobles enganchan 2 OTs (Norte+Sur) → mostrar
+                # ambas y combinar estado/cierre. EDS simples: una sola.
+                _ot_ids = _ots_de_grupo(g)
+                os_fr, estado_frac, fecha_cierre_frac = _combina_ots(_ot_ids)
                 # Cierre Enlace: MAX(fecha_ultimo_cambio) si TODOS cerrados
                 fechas_ult = [pd.to_datetime(g[g["id_sap"] == i].iloc[0]["fecha_ultimo_cambio"],
                                              errors="coerce", utc=True) for i in todos_ids]
@@ -2537,14 +2623,10 @@ if vista == "🔗 Enlace Copec":
             desc = f"{prefijo} {comuna} · (sin par)" if comuna else f"{prefijo} · (sin par)"
             no_cerr = 0 if r["estado"] == "CERRADO" else 1
             estado_ui = "✅ Cerrado" if no_cerr == 0 else "🟠 Cierre pendiente (1)"
-            os_fr = r.get("os_fracttal") or ""
-            fecha_cierre_frac = pd.NaT
-            estado_frac = ""
-            if os_fr and _ots_detalle.get(os_fr):
-                _ot = _ots_detalle[os_fr]
-                ff = _ot.get("fecha_finalizacion")
-                if ff: fecha_cierre_frac = pd.to_datetime(ff, errors="coerce", utc=True)
-                estado_frac = _estado_fracttal_ui(_ot)
+            # EDS dobles: aunque el aviso Enlace venga sin par Plan/Repuestos,
+            # en Fracttal igual puede tener 2 OTs (Norte+Sur) → mostrar ambas.
+            _ot_ids = list(r.get("os_fracttal_all") or [])
+            os_fr, estado_frac, fecha_cierre_frac = _combina_ots(_ot_ids)
             fecha_cierre_enl = pd.to_datetime(r["fecha_ultimo_cambio"], errors="coerce", utc=True) \
                 if r["estado"] == "CERRADO" else pd.NaT
             rows_view.append({
@@ -2642,7 +2724,8 @@ if vista == "🔗 Enlace Copec":
                 "Creado":      st.column_config.TextColumn(width=100),
                 "N° MP Fija":     st.column_config.TextColumn(width=90),
                 "N° MP Variable":      st.column_config.TextColumn(width=90),
-                "N° OT Fracttal": st.column_config.TextColumn(width=100),
+                "N° OT Fracttal": st.column_config.TextColumn(width=165,
+                    help="EDS dobles muestran 2 OTs (una por isla: Norte+Sur, Oriente+Poniente…)."),
                 "Tipo":        st.column_config.TextColumn(width=100),
                 "Prioridad":   st.column_config.TextColumn(width=80),
                 "Estado Enlace":   st.column_config.TextColumn(width=200),
@@ -2718,7 +2801,9 @@ if vista == "🔗 Enlace Copec":
                 "IN_PROGRESS": "En progreso",
                 "PAUSED":      "Pausada",
             }
-            os_ids_unicos = sorted({av.get("os_fracttal") for _, av in _detalle.iterrows() if av.get("os_fracttal")})
+            os_ids_unicos = sorted({oid for _, av in _detalle.iterrows()
+                                    for oid in (av.get("os_fracttal_all") or [])
+                                    if oid})
             st.markdown("")
             if not os_ids_unicos:
                 st.markdown("**🔧 OT Fracttal:** ⏳ _no creada aún en Fracttal_")
