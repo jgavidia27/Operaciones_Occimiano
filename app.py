@@ -15305,6 +15305,9 @@ elif _page == _NAV_PAGES[0]:
         _frac_pool = 1.0
         _cc_cap = None
         _n_meses_efect = float(len(_all_meses_bono)) or 3.0
+        # _es_estimativo: el cálculo proyecta MÁS ALLÁ de hoy (asume que se
+        # trabajan días/meses que aún no ocurren). Real = corte ≤ hoy.
+        _es_estimativo = False
         if _scope_activo:
             _dias_mes_act = _mes_actual[0].days_in_month if _mes_actual else 0
             _dias_transc  = min(_hoy_bono.day, _dias_mes_act) if _dias_mes_act else 0
@@ -15313,10 +15316,15 @@ elif _page == _NAV_PAGES[0]:
                 _sel_scope = [str(p) for p in _meses_cerr]
                 _units = float(len(_meses_cerr))
                 _cc_cap = None
+                # Estimativo si el último mes "cerrado" en realidad termina
+                # después de hoy (ej. hoy 15-ago y se toma agosto como cerrado).
+                _fin_efectivo = _meses_cerr[-1].end_time.normalize() if _meses_cerr else None
             else:  # _SCOPE_HOY
                 _sel_scope = [str(p) for p in (_meses_cerr + _mes_actual)]
                 _units = len(_meses_cerr) + _frac_mes_act
                 _cc_cap = _hoy_bono
+                _fin_efectivo = _hoy_bono.normalize()
+            _es_estimativo = bool(_fin_efectivo is not None and _fin_efectivo > _now_real)
             # Aplicar SIEMPRE (aun con 0 meses → paga $0; no caer al trimestre
             # completo). Si el corte cae en el primer mes, 'meses cerrados' = 0.
             _meses_bono_kpi = _sel_scope
@@ -15356,6 +15364,24 @@ elif _page == _NAV_PAGES[0]:
                     f"📅 **Meses cerrados ({_lbl_cerr})** — se paga el **{_pct_pool:.0f}%** "
                     f"del pool de terreno ({len(_meses_cerr)}/3 meses) y el callcenter de esos meses."
                 )
+
+        # ── Aviso REAL vs ESTIMATIVO ──────────────────────────────────────
+        if _scope_activo and _es_estimativo:
+            st.warning(
+                f"⚠️ **Cálculo ESTIMATIVO** — el corte seleccionado "
+                f"(**{_fin_efectivo:%d-%m-%Y}**) es posterior a hoy "
+                f"(**{_now_real:%d-%m-%Y}**). Este monto es hipotético: asume que el "
+                f"técnico/equipo **trabaja todos los días hasta esa fecha y termina con "
+                f"estos mismos indicadores**. No es lo devengado aún.  \n"
+                f"👉 Para el **pago REAL a hoy**, pon la fecha de corte = hoy "
+                f"({_now_real:%d-%m-%Y})."
+            )
+        elif _scope_activo:
+            st.success(
+                f"✅ **Cálculo REAL** — monto efectivamente devengado al "
+                f"{_hoy_bono:%d-%m-%Y}"
+                f"{' (hoy)' if _hoy_bono.normalize() == _now_real else ''}."
+            )
 
         # ── Filtros equipo / técnico ──────────────────────────────────────────
         _eq_opts_bono = ["Todos"] + [_EQUIPO_LABEL.get(k, k) for k in GRUPOS_TERRENO]
@@ -16127,6 +16153,10 @@ elif _page == _NAV_PAGES[0]:
                     _total_lbl = f"TOTAL a pagar · meses cerrados ({_lbl_cerr_meses})"
                 else:
                     _total_lbl = "TOTAL trimestral"
+                if _scope_activo and _es_estimativo:
+                    _total_lbl += " · ESTIMATIVO"
+                elif _scope_activo:
+                    _total_lbl += " · real"
                 _totales_trim = {}
                 _html += (
                     f'<tr style="background:{_t.get("info_bg", "#eff6ff")};">'
