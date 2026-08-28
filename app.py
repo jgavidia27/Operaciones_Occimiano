@@ -15224,34 +15224,50 @@ elif _page == _NAV_PAGES[0]:
         _solo_junio = _modo_bono == _MODO_SOLO_JUN
 
         # ── Alcance del corte (Jesús, 2026-08-28) ─────────────────────────
-        # Además del trimestre completo, permite calcular el bono "hasta hoy"
-        # (incluye el mes en curso a prorrata de días) o "meses cerrados" (solo
-        # meses ya terminados). El pool de terreno se prorratea y las semanas de
-        # callcenter se recortan al corte. Solo aplica al trimestre en curso.
+        # Calcula el bono a un CORTE (útil para desvinculaciones: cuánto se le
+        # debe a alguien si se va hoy, mañana, etc.). Tres escenarios:
+        #  • Trimestre completo (pool íntegro).
+        #  • Hasta fecha de corte: incluye el mes en curso a prorrata de días
+        #    hasta esa fecha (default hoy). Pool de terreno prorrateado y
+        #    semanas de callcenter recortadas al corte.
+        #  • Meses cerrados: solo meses ya terminados a la fecha de corte.
+        # La fecha de corte es ajustable → sirve para simular cualquier salida.
         _SCOPE_FULL = "Trimestre completo"
-        _SCOPE_HOY  = "Hasta hoy"
+        _SCOPE_HOY  = "Hasta fecha de corte"
         _SCOPE_CERR = "Meses cerrados"
-        _hoy_bono = pd.Timestamp.now().normalize()
+        _now_real = pd.Timestamp.now().normalize()
         _periods_bono = [pd.Period(_m, "M") for _m in _all_meses_bono]
-        _meses_cerr = [p for p in _periods_bono if p.end_time < _hoy_bono]
-        _mes_actual = [p for p in _periods_bono if p.start_time <= _hoy_bono <= p.end_time]
-        _trim_en_curso = bool(_mes_actual)
+        _trim_contiene_hoy = any(p.start_time <= _now_real <= p.end_time for p in _periods_bono)
         _scope_bono = _SCOPE_FULL
-        if _trim_en_curso and not _solo_junio:
+        _hoy_bono = _now_real
+        if _trim_contiene_hoy and not _solo_junio:
             _scope_bono = st.radio(
-                "Alcance del corte",
+                "Alcance del corte (para pagos / desvinculaciones)",
                 [_SCOPE_FULL, _SCOPE_HOY, _SCOPE_CERR],
                 horizontal=True,
                 key="bono_scope",
                 help=(
                     "Trimestre completo: paga los 3 meses (pool íntegro).  "
-                    "Hasta hoy: corta en la fecha de hoy — incluye el mes en curso a "
-                    "prorrata de días; el pool de terreno y las semanas de callcenter "
-                    "se prorratean al corte.  "
-                    "Meses cerrados: solo meses ya terminados (ej. si hoy es agosto, "
-                    "solo julio)."
+                    "Hasta fecha de corte: cuánto se le debe a alguien si se va en esa "
+                    "fecha — incluye el mes en curso a prorrata de días; el pool de "
+                    "terreno y las semanas de callcenter se prorratean al corte.  "
+                    "Meses cerrados: solo meses ya terminados a esa fecha."
                 ),
             )
+            if _scope_bono != _SCOPE_FULL:
+                _trim_ini = _periods_bono[0].start_time.date()
+                _trim_fin = _periods_bono[-1].end_time.date()
+                _fecha_corte = st.date_input(
+                    "Fecha de corte",
+                    value=min(_now_real.date(), _trim_fin),
+                    min_value=_trim_ini, max_value=_trim_fin,
+                    format="DD/MM/YYYY", key="bono_fecha_corte",
+                    help="Simula un corte a esta fecha (ej. fecha de desvinculación). "
+                         "Por defecto hoy. El cálculo se recorta a esta fecha.",
+                )
+                _hoy_bono = pd.Timestamp(_fecha_corte)
+        _meses_cerr = [p for p in _periods_bono if p.end_time < _hoy_bono]
+        _mes_actual = [p for p in _periods_bono if p.start_time <= _hoy_bono <= p.end_time]
         _scope_activo = _scope_bono != _SCOPE_FULL and not _solo_junio
 
         with _bf1:
@@ -15301,12 +15317,13 @@ elif _page == _NAV_PAGES[0]:
                 _sel_scope = [str(p) for p in (_meses_cerr + _mes_actual)]
                 _units = len(_meses_cerr) + _frac_mes_act
                 _cc_cap = _hoy_bono
-            if _sel_scope:
-                _meses_bono_kpi = _sel_scope
-                _meses_bono_cc  = _sel_scope
-                _kpi_subset     = True
-                _frac_pool      = _units / 3.0
-                _n_meses_efect  = _units if _units > 0 else 1.0
+            # Aplicar SIEMPRE (aun con 0 meses → paga $0; no caer al trimestre
+            # completo). Si el corte cae en el primer mes, 'meses cerrados' = 0.
+            _meses_bono_kpi = _sel_scope
+            _meses_bono_cc  = _sel_scope
+            _kpi_subset     = True
+            _frac_pool      = _units / 3.0
+            _n_meses_efect  = _units if _units > 0 else 1.0
 
         if _solo_junio:
             st.caption(
@@ -15316,19 +15333,29 @@ elif _page == _NAV_PAGES[0]:
             )
         elif _scope_bono == _SCOPE_HOY:
             _pct_pool = _frac_pool * 100
+            _es_hoy = _hoy_bono.normalize() == _now_real
             st.caption(
-                f"✂️ **Corte hasta hoy ({_hoy_bono:%d-%m-%Y})** — se paga el "
-                f"**{_pct_pool:.0f}%** del pool de terreno ({len(_meses_cerr)} mes(es) "
-                f"cerrado(s) + {_frac_mes_act*100:.0f}% del mes en curso) y el callcenter "
-                f"de las semanas hasta hoy. KPIs medidos con los datos existentes al corte."
+                f"✂️ **Corte al {_hoy_bono:%d-%m-%Y}{' (hoy)' if _es_hoy else ''}** — es lo que "
+                f"se le debería pagar a cada técnico si el corte cerrara en esa fecha "
+                f"(útil para desvinculaciones). Se paga el **{_pct_pool:.0f}%** del pool de "
+                f"terreno ({len(_meses_cerr)} mes(es) cerrado(s) + {_frac_mes_act*100:.0f}% "
+                f"del mes en curso) y el callcenter de las semanas hasta el corte. KPIs "
+                f"medidos con los datos existentes al corte."
             )
         elif _scope_bono == _SCOPE_CERR:
             _pct_pool = _frac_pool * 100
-            _lbl_cerr = ", ".join(p.strftime("%b").capitalize() for p in _meses_cerr) or "ninguno aún"
-            st.caption(
-                f"📅 **Meses cerrados ({_lbl_cerr})** — se paga el **{_pct_pool:.0f}%** "
-                f"del pool de terreno ({len(_meses_cerr)}/3 meses) y el callcenter de esos meses."
-            )
+            if not _meses_cerr:
+                st.caption(
+                    f"📅 **Meses cerrados** — al {_hoy_bono:%d-%m-%Y} **no hay ningún mes "
+                    f"cerrado** del trimestre, así que el pago por meses cerrados es **$0**. "
+                    f"Usá 'Hasta fecha de corte' para el prorrateo del mes en curso."
+                )
+            else:
+                _lbl_cerr = ", ".join(p.strftime("%b").capitalize() for p in _meses_cerr)
+                st.caption(
+                    f"📅 **Meses cerrados ({_lbl_cerr})** — se paga el **{_pct_pool:.0f}%** "
+                    f"del pool de terreno ({len(_meses_cerr)}/3 meses) y el callcenter de esos meses."
+                )
 
         # ── Filtros equipo / técnico ──────────────────────────────────────────
         _eq_opts_bono = ["Todos"] + [_EQUIPO_LABEL.get(k, k) for k in GRUPOS_TERRENO]
@@ -16094,9 +16121,10 @@ elif _page == _NAV_PAGES[0]:
 
                 # Fila 7: TOTAL del período (individual + equipo + callcenter)
                 if _scope_bono == _SCOPE_HOY:
-                    _total_lbl = "TOTAL a pagar · corte hoy"
+                    _total_lbl = f"TOTAL a pagar · corte {_hoy_bono:%d-%m-%Y}"
                 elif _scope_bono == _SCOPE_CERR:
-                    _total_lbl = "TOTAL a pagar · meses cerrados"
+                    _lbl_cerr_meses = "/".join(p.strftime("%b").capitalize() for p in _meses_cerr) or "—"
+                    _total_lbl = f"TOTAL a pagar · meses cerrados ({_lbl_cerr_meses})"
                 else:
                     _total_lbl = "TOTAL trimestral"
                 _totales_trim = {}
