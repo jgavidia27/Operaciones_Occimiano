@@ -3085,13 +3085,18 @@ if vista == "🔍 Cierre Fracttal":
         _n_rojo  = int((_dfr["color_semaforo"] == "ROJO").sum())
         _n_15    = int((_dfr["dias_en_revision"] >= 15).sum())
         _n_old   = int((_dfr["dias_en_revision"] >= 30).sum())
-        _monto_v = _dfr.loc[_dfr["color_semaforo"] == "VERDE", "total_cost"].sum()
+        _cost_num = pd.to_numeric(_dfr["total_cost"], errors="coerce").fillna(0)
+        _monto_v = _cost_num[_dfr["color_semaforo"] == "VERDE"].sum()
+        _monto_r = _cost_num[_dfr["color_semaforo"] == "ROJO"].sum()
 
         _k1, _k2, _k3, _k4, _k5, _k6 = st.columns(6)
         _k1.metric("Total pendientes", f"{_n_total}")
         _k2.metric("🟢 Cerrar hoy", f"{_n_verde}", f"${int(_monto_v):,}".replace(",", "."))
         _k3.metric("🟡 Revisar", f"{_n_amar}")
-        _k4.metric("🔴 Devolver", f"{_n_rojo}")
+        _k4.metric("🔴 Devolver", f"{_n_rojo}",
+                   f"${int(_monto_r):,} en riesgo".replace(",", "."),
+                   delta_color="inverse",
+                   help="Monto de las OTs rojas: facturación bloqueada hasta corregirlas.")
         _k5.metric("⏳ >15 días", f"{_n_15}",
                    help="OTs con 15 días o más esperando validación")
         _k6.metric("⚠️ >30 días", f"{_n_old}",
@@ -3178,6 +3183,151 @@ if vista == "🔍 Cierre Fracttal":
                             f'<b>Shell · {len(_fut)} OTs pendientes de cerrar</b> '
                             f'(sin fecha de generación para calcular el plazo).')
 
+        # ── Alerta: repuestos usados pero NO cargados (pérdida directa) ────
+        # 'dice SÍ entregó repuestos pero no cargó ninguno en recursos' →
+        # repuestos usados que no se pueden facturar. Es plata que se pierde.
+        _mot = _dfr.get("motivo_semaforo", pd.Series([], dtype=str)).astype(str).str.lower()
+        _fuga = _dfr[(_dfr["color_semaforo"] == "ROJO") & _mot.str.contains("dice 'si'", na=False)]
+        if not _fuga.empty:
+            _fol_fuga = ", ".join(
+                f"{r['folio']} ({_title_smart(str(r.get('personnel') or ''))})"
+                for _, r in _fuga.iterrows())
+            st.markdown(
+                f'<div style="background:#7f1d1d;color:#fff;padding:12px 16px;'
+                f'border-radius:6px;margin:10px 0;border-left:4px solid #dc2626">'
+                f'💸 <b>{len(_fuga)} OT(s) con repuestos usados SIN cargar</b> — el técnico '
+                f'declaró que usó repuestos pero no los registró en Fracttal. No se pueden '
+                f'facturar hasta cargarlos. → {_fol_fuga}.</div>',
+                unsafe_allow_html=True)
+
+        # ── Diagnóstico rápido: rojas por causa + carga por técnico ────────
+        _rojo_df = _dfr[_dfr["color_semaforo"] == "ROJO"].copy()
+        with st.expander(f"📊 Diagnóstico — {len(_rojo_df)} rojas por causa · carga por técnico",
+                         expanded=False):
+            _dcol1, _dcol2 = st.columns(2)
+            with _dcol1:
+                st.markdown("**🔴 Rojas por causa** _(qué perseguir)_")
+                def _causa(m):
+                    m = str(m or "").lower()
+                    if "mantención de fondo" in m or "mantencion de fondo" in m:
+                        return "Falta mantención lavadora/aspiradora"
+                    if "sin recursos" in m:
+                        return "Sin recursos cargados"
+                    if "dice 'si'" in m:
+                        return "Repuestos: dice SÍ, no cargó"
+                    if "sin:" in m:
+                        return "Correctiva sin falla/causa/detección"
+                    if "completitud" in m:
+                        return "Incompleta (otro)"
+                    return "Otro"
+                if _rojo_df.empty:
+                    st.caption("Sin OTs rojas 🎉")
+                else:
+                    _cc = _rojo_df["motivo_semaforo"].map(_causa).value_counts()
+                    _cc_df = _cc.rename_axis("Causa").reset_index(name="OTs")
+                    st.dataframe(_cc_df, hide_index=True, use_container_width=True,
+                                 height=min(240, 60 + 35 * len(_cc_df)))
+            with _dcol2:
+                st.markdown("**👤 Carga por técnico** _(accountability)_")
+                if "personnel" in _dfr.columns:
+                    _g = _dfr.assign(
+                        _rojo=(_dfr["color_semaforo"] == "ROJO").astype(int)
+                    ).groupby("personnel").agg(
+                        Pend=("folio", "count"), Rojas=("_rojo", "sum"),
+                        DíasMáx=("dias_en_revision", "max")).reset_index()
+                    _g = _g[_g["personnel"].astype(str).str.strip() != ""]
+                    _g["% rojo"] = (100 * _g["Rojas"] / _g["Pend"]).round(0).astype(int)
+                    _g["Técnico"] = _g["personnel"].map(lambda x: _title_smart(str(x)))
+                    _g = _g[["Técnico", "Pend", "Rojas", "% rojo", "DíasMáx"]].sort_values(
+                        ["Rojas", "Pend"], ascending=False)
+                    st.dataframe(_g, hide_index=True, use_container_width=True,
+                                 height=min(320, 60 + 35 * len(_g)),
+                                 column_config={
+                                     "% rojo": st.column_config.NumberColumn(format="%d%%", width=70),
+                                 })
+
+        # ── Cruce con Enlace Copec (solo COPEC) ───────────────────────────
+        # Une cada OT COPEC con su aviso de Enlace (por EDS + fecha) para ver
+        # si el aviso sigue abierto: OT lista en Fracttal pero aviso Enlace
+        # abierto = Copec aún no paga. Shell/Aramco no están en Enlace Copec.
+        @st.cache_data(ttl=120)
+        def _cargar_enlace_idx():
+            idx = {}
+            try:
+                _rows = _sb_get("enlace_avisos", {
+                    "select": "eds_codigo,fecha_creacion,estado,numero_orden,tipo_aviso",
+                    "order": "fecha_creacion.desc", "limit": "5000"})
+            except Exception:
+                _rows = []
+            for a in _rows:
+                eds = str(a.get("eds_codigo") or "").strip()
+                fc = a.get("fecha_creacion")
+                if not eds or not fc:
+                    continue
+                idx.setdefault(eds, []).append(
+                    (fc[:10], (a.get("estado") or ""), a.get("numero_orden") or "",
+                     a.get("tipo_aviso") or ""))
+            return idx
+
+        _copec = _dfr[_dfr["cliente"].astype(str).str.upper().str.contains("COPEC", na=False)].copy() \
+            if "cliente" in _dfr.columns else pd.DataFrame()
+        _copec = _copec[_copec["eds_occim"].astype(str).str.fullmatch(r"\d+", na=False)] \
+            if not _copec.empty else _copec
+        if not _copec.empty:
+            _eidx = _cargar_enlace_idx()
+            from datetime import datetime as _dtm
+            def _match_aviso(row):
+                eds = str(row.get("eds_occim") or "").strip()
+                cd = pd.to_datetime(row.get("creation_date"), errors="coerce")
+                cands = _eidx.get(eds, [])
+                if not cands or pd.isna(cd):
+                    return (None, None, None)
+                d0 = cd.date()
+                best = None
+                for fp, est, orden, tipo in cands:
+                    try:
+                        fd = _dtm.strptime(fp, "%Y-%m-%d").date()
+                    except ValueError:
+                        continue
+                    delta = (d0 - fd).days  # aviso es anterior a la OT → delta>=0
+                    if -1 <= delta <= 60:
+                        if best is None or abs(delta) < best[0]:
+                            best = (abs(delta), est, orden, fp)
+                if best is None:
+                    return (None, None, None)
+                return (best[1], best[2], best[3])  # estado, orden, fecha
+            _mm = _copec.apply(_match_aviso, axis=1, result_type="expand")
+            _copec["_enl_estado"] = _mm[0]
+            _copec["_enl_orden"] = _mm[1]
+            _copec["_enl_fecha"] = _mm[2]
+            _abiertos = _copec[_copec["_enl_estado"].map(
+                lambda x: bool(x) and str(x).upper() != "CERRADO")]
+            _sin_match = _copec[_copec["_enl_estado"].isna()]
+            _n_ab = len(_abiertos)
+            with st.expander(
+                f"🔗 Cruce con Enlace Copec — {_n_ab} OT(s) con aviso Enlace aún abierto "
+                f"({len(_copec)} OTs COPEC · {len(_sin_match)} sin match)", expanded=False):
+                st.caption(
+                    "Empareja cada OT COPEC con su aviso Enlace por EDS + fecha. "
+                    "Un aviso abierto = Copec aún no cierra el servicio (no paga) aunque la "
+                    "OT esté lista en Fracttal. Cerrar también en Enlace. "
+                    "(Match aproximado; Shell/Aramco no aplican.)")
+                _emap = {"VERDE": "🟢", "AMARILLO": "🟡", "ROJO": "🔴"}
+                def _enl_ui(x):
+                    if x is None or (isinstance(x, float) and pd.isna(x)):
+                        return "— sin aviso"
+                    return "🟢 cerrado" if str(x).upper() == "CERRADO" else f"🟠 abierto ({x})"
+                _cop_show = _copec.copy()
+                _cop_show["Fracttal"] = _cop_show["color_semaforo"].map(_emap).fillna("")
+                _cop_show["Enlace"] = _cop_show["_enl_estado"].map(_enl_ui)
+                _cop_show["Técnico"] = _cop_show["personnel"].map(lambda x: _title_smart(str(x)))
+                _cop_show = _cop_show.rename(columns={
+                    "folio": "N° OT", "eds_occim": "EDS", "_enl_orden": "N° orden Enlace"})
+                _cols_cop = ["Fracttal", "N° OT", "EDS", "Técnico", "Enlace", "N° orden Enlace"]
+                _cop_show = _cop_show.sort_values("_enl_estado", na_position="last")
+                st.dataframe(_cop_show[_cols_cop], hide_index=True, use_container_width=True,
+                             height=min(420, 60 + 35 * len(_cop_show)))
+
         # Filtros
         st.markdown('<div class="section-hdr">Filtros</div>', unsafe_allow_html=True)
         _f1, _f2, _f3, _f4, _f5 = st.columns([1.2, 1.4, 1.2, 1, 1.5])
@@ -3248,6 +3398,9 @@ if vista == "🔍 Cierre Fracttal":
                 (_dff["_review_dt"].dt.date >= _d0) &
                 (_dff["_review_dt"].dt.date <= _d1)
             ]
+        # Orden cronológico REAL por timestamp de review (más viejo primero).
+        # dias_en_revision es entero (días) y dejaba empates desordenados.
+        _dff = _dff.sort_values("_review_dt", ascending=True, na_position="last")
         _dff = _dff.drop(columns=["_review_dt"], errors="ignore")
 
         # ── Resolución: conclusión breve sobre si cerrar o no ─────────────
