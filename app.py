@@ -7698,9 +7698,11 @@ elif _page == _NAV_PAGES[4]:
                 _mp_por_dia[_f.date()] = _mp_por_dia.get(_f.date(), 0) + _n
                 _dias_habiles_trab.add(_f.date())
 
-        # ── Fracttal: MPs finalizadas del mes (cierre real) ───────────────
+        # ── Fracttal: MPs del mes (creadas, cerradas, y cierre REAL por día) ──
         @st.cache_data(ttl=600, show_spinner=False)
         def _fracttal_mp_mes(y, m):
+            """Devuelve (creadas, finalizadas, {fecha: n_finalizadas_ese_dia}).
+            El cierre por día usa fecha_finalizacion = producción real diaria."""
             try:
                 from supabase_client import _query as _sq
                 _ini = f"{y}-{m:02d}-01"
@@ -7710,10 +7712,19 @@ elif _page == _NAV_PAGES[4]:
                             f"&tipo_tarea=like.PREVENTIVA*&fecha_creacion=gte.{_ini}", limit=5000)
                 _rows = [o for o in _rows if (o.get("fecha_creacion") or "")[:10] <= _fin]
                 _fin_ok = sum(1 for o in _rows if "Finaliz" in str(o.get("estado", "")))
-                return len(_rows), _fin_ok
+                # Producción diaria real: MPs finalizadas por fecha_finalizacion
+                _prod = _sq("ordenes_trabajo",
+                            f"select=fecha_finalizacion,tipo_tarea"
+                            f"&tipo_tarea=like.PREVENTIVA*&fecha_finalizacion=gte.{_ini}", limit=5000)
+                _por_dia = {}
+                for o in _prod:
+                    _ff = (o.get("fecha_finalizacion") or "")[:10]
+                    if _ini <= _ff <= _fin:
+                        _por_dia[_ff] = _por_dia.get(_ff, 0) + 1
+                return len(_rows), _fin_ok, _por_dia
             except Exception:
-                return 0, 0
-        _fr_creadas, _fr_hechas = _fracttal_mp_mes(_y_cap, _m_cap)
+                return 0, 0, {}
+        _fr_creadas, _fr_hechas, _prod_dia = _fracttal_mp_mes(_y_cap, _m_cap)
 
         # ── Cálculo de pendientes y ritmo ─────────────────────────────────
         _hechas = _fr_hechas   # cierre real (Fracttal)
@@ -7731,21 +7742,49 @@ elif _page == _NAV_PAGES[4]:
             _hab_restantes = 0 if _hoy_cap.date() > _date_cap(_y_cap, _m_cap, _ndays) else _tot_hab
         _hab_transc = _tot_hab - _hab_restantes
 
-        # Ritmo histórico (MPs/día hábil) — de la grilla del mes o Fracttal
-        _dias_grid = len(_dias_habiles_trab) or 1
-        _ritmo_grid = _mp_grid / _dias_grid if _dias_grid else 0
-        _ritmo_fr = (_fr_hechas / _hab_transc) if _hab_transc > 0 else 0
-        _ritmo_base = round(_ritmo_fr if _ritmo_fr > 0 else (_ritmo_grid or 12), 1)
+        # ── RITMO REAL MEDIDO (Fracttal, MPs finalizadas por día) ─────────
+        # Producción diaria real: solo días hábiles con cierre.
+        _prod_hab = {pd.to_datetime(f).date(): n for f, n in _prod_dia.items()
+                     if pd.to_datetime(f).weekday() < 5}
+        _dias_con_prod = len(_prod_hab)
+        _ritmo_real = round(sum(_prod_hab.values()) / _dias_con_prod, 1) if _dias_con_prod else 0.0
+        # Ritmo NECESARIO para cerrar el mes a tiempo
+        _ritmo_nec = (_pendientes / _hab_restantes) if _hab_restantes > 0 else float("inf")
 
-        # ── What-if: ritmo objetivo ───────────────────────────────────────
+        st.markdown("#### 📈 Ritmo real — ¿cuántas MPs estamos cerrando por día?")
+        _rr1, _rr2, _rr3 = st.columns(3)
+        _rr1.metric("⚡ Ritmo actual (medido)", f"{_ritmo_real:.1f} MP/día",
+                    help="Promedio real de MPs finalizadas en Fracttal por día hábil con cierre este mes.")
+        _rr2.metric("🎯 Ritmo necesario", f"{_ritmo_nec:.1f} MP/día" if _hab_restantes else "—",
+                    help="MPs/día que se necesitan para cerrar las pendientes antes de fin de mes.")
+        _brecha = _ritmo_real - _ritmo_nec if _hab_restantes else 0
+        _rr3.metric("Brecha", f"{_brecha:+.1f} MP/día",
+                    delta_color="normal" if _brecha >= 0 else "inverse",
+                    help="Ritmo actual − necesario. Negativo = vas por debajo del ritmo requerido.")
+        if _prod_hab:
+            _prod_df = pd.DataFrame(
+                [{"Día": d.strftime("%d-%b"), "MPs cerradas": n} for d, n in sorted(_prod_hab.items())]
+            ).set_index("Día")
+            st.bar_chart(_prod_df, height=200, color="#0ea5e9")
+            st.caption(f"MPs finalizadas por día hábil ({_dias_con_prod} días con cierre · "
+                       f"{sum(_prod_hab.values())} MPs). El promedio real es tu **ritmo actual**.")
+        else:
+            st.info("Aún no hay MPs finalizadas este mes en Fracttal para medir el ritmo.")
+
+        # ── What-if: ritmo objetivo (arranca en el ritmo REAL medido) ─────
         st.markdown("#### 🎯 Proyección de cierre del mes")
         _wc1, _wc2 = st.columns([2, 3])
         with _wc1:
             _ritmo = st.slider(
-                "Ritmo (MPs cerradas por día hábil)", 1, 40,
-                int(max(1, round(_ritmo_base))), key="cap_ritmo",
-                help=f"Ritmo histórico ≈ {_ritmo_base:.1f} MPs/día. Súbelo/bájalo para simular "
-                     "más técnicos en MP, o menos (enfermos/desvinculados).")
+                "Ritmo a proyectar (MPs cerradas por día hábil)", 1, 40,
+                int(max(1, round(_ritmo_real or 12))), key="cap_ritmo",
+                help=f"Arranca en tu ritmo REAL medido ({_ritmo_real:.1f}/día). Súbelo para simular "
+                     "más técnicos en MP (~2,3 MP por técnico-día), o bájalo (enfermos/desvinculados).")
+        with _wc2:
+            _tec_equiv = _ritmo / 2.3
+            st.caption(f"↔️ **{_ritmo} MPs/día ≈ {_tec_equiv:.0f} técnicos** dedicados a MP "
+                       f"(a ~2,3 MP por técnico-día). Tu ritmo real actual es **{_ritmo_real:.1f}/día "
+                       f"(~{(_ritmo_real/2.3):.0f} técnicos)**.")
 
         # Proyección: días hábiles necesarios para las pendientes
         _dias_nec = _pendientes / _ritmo if _ritmo > 0 else 999
