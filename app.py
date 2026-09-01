@@ -7555,7 +7555,7 @@ elif _page == _NAV_PAGES[4]:
 
     _hdr(_PAGE_TITLE[_NAV_PAGES[4]])
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
-    _sub_tabs_util = ["🗓️ Programación STO", "📅 Cronograma de Turnos", "📡 En Vivo"]
+    _sub_tabs_util = ["🗓️ Programación STO", "🧮 Capacidad MP", "📅 Cronograma de Turnos", "📡 En Vivo"]
     if _is_admin:
         _sub_tabs_util.append("⏰ Validación HHEE")
         _sub_tabs_util.append("🚗 Uso de Vehículos")
@@ -7568,6 +7568,278 @@ elif _page == _NAV_PAGES[4]:
         key="util_sub_tab",
     )
     st.divider()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # SUB-TAB: 🧮 Capacidad MP — ¿alcanzamos el mes?
+    # Cuenta las MPs reales del Excel (grilla), las cruza con Fracttal
+    # (cierre real) y proyecta cuándo se termina el mes con el equipo actual.
+    # Modelo: MPs reales × horas/MP por zona (parámetros de Jesús).
+    # ─────────────────────────────────────────────────────────────────────
+    if _util_sub_tab == "🧮 Capacidad MP":
+        import calendar as _cal_cap
+        import re as _re_cap
+        from datetime import date as _date_cap
+
+        st.title("🧮 Capacidad MP — ¿alcanzamos el mes?")
+        st.caption(
+            "Cuenta las MPs reales de la grilla del Excel, las cruza con Fracttal (cierre real) "
+            "y proyecta **cuándo terminas el mes** con el equipo actual y cuánta **holgura** queda. "
+            "Modelo: MPs reales × horas por zona (mantención 1h30 + traslados)."
+        )
+
+        _MESES_ES = {1:"ENERO",2:"FEBRERO",3:"MARZO",4:"ABRIL",5:"MAYO",6:"JUNIO",
+                     7:"JULIO",8:"AGOSTO",9:"SEPTIEMBRE",10:"OCTUBRE",11:"NOVIEMBRE",12:"DICIEMBRE"}
+        _hoy_cap = pd.Timestamp.now().normalize()
+        _cc1, _cc2 = st.columns([1, 3])
+        with _cc1:
+            _mes_sel_cap = st.selectbox(
+                "Mes", [f"{_MESES_ES[m]} {_hoy_cap.year}" for m in range(1, 13)],
+                index=_hoy_cap.month - 1, key="cap_mes")
+        _m_cap = next(k for k, v in _MESES_ES.items() if v == _mes_sel_cap.split()[0])
+        _y_cap = int(_mes_sel_cap.split()[1])
+        _es_mes_actual = (_m_cap == _hoy_cap.month and _y_cap == _hoy_cap.year)
+
+        # ── Parámetros de tiempo (editables) ──────────────────────────────
+        with st.expander("⚙️ Parámetros de tiempo y capacidad (ajústalos a tu realidad)", expanded=False):
+            _p1, _p2, _p3 = st.columns(3)
+            _h_maint = _p1.number_input("Duración MP (h)", value=1.5, step=0.25, key="cap_hmaint")
+            _h_jornada = _p2.number_input("Jornada útil (h/día)", value=8.0, step=0.5, key="cap_jornada")
+            _plan_total = int(_p3.number_input(
+                "MPs planificadas del mes (universo Excel)", value=360, step=10, key="cap_plan",
+                help="Total de MPs que el mes debería tener. Default ≈ mes típico."))
+            st.markdown("**Tiempos por zona** (traslados ida/vuelta + entre estaciones):")
+            _z1, _z2, _z3 = st.columns(3)
+            with _z1:
+                st.markdown("🏙️ **Santiago**")
+                _st_lleg = st.number_input("Llegada ida (min)", value=45, step=5, key="cap_st_lleg")
+                _st_tras = st.number_input("Traslado/estación (min)", value=15, step=5, key="cap_st_tras")
+                _st_est = st.number_input("Estaciones/día", value=3, step=1, key="cap_st_est")
+            with _z2:
+                st.markdown("🌄 **Regiones**")
+                _rg_lleg = st.number_input("Llegada ida (min) ", value=90, step=5, key="cap_rg_lleg")
+                _rg_tras = st.number_input("Traslado/estación (min) ", value=15, step=5, key="cap_rg_tras")
+                _rg_est = st.number_input("Estaciones/día ", value=2, step=1, key="cap_rg_est")
+            with _z3:
+                st.markdown("🏔️ **Regiones lejanas**")
+                _r2_lleg = st.number_input("Llegada ida (min)  ", value=150, step=5, key="cap_r2_lleg")
+                _r2_tras = st.number_input("Traslado/estación (min)  ", value=15, step=5, key="cap_r2_tras")
+                _r2_est = st.number_input("Estaciones/día  ", value=2, step=1, key="cap_r2_est")
+            st.markdown("**Distribución de MPs por zona** (del universo Excel):")
+            _d1, _d2, _d3 = st.columns(3)
+            _pct_stgo = _d1.slider("% Santiago", 0, 100, 50, key="cap_pct_stgo")
+            _pct_reg = _d2.slider("% Regiones", 0, 100, 29, key="cap_pct_reg")
+            _pct_reg2 = _d3.slider("% Regiones lejanas", 0, 100, 21, key="cap_pct_reg2")
+
+        # Horas efectivas por MP por zona (mantención + traslado prorrateado del día)
+        def _ef_h(maint_min, lleg_min, tras_min, est):
+            est = max(1, est)
+            dia = lleg_min * 2 + est * maint_min + (est - 1) * tras_min
+            return (dia / est) / 60.0
+        _mm = _h_maint * 60
+        _efh = {
+            "Santiago":  _ef_h(_mm, _st_lleg, _st_tras, _st_est),
+            "Regiones":  _ef_h(_mm, _rg_lleg, _rg_tras, _rg_est),
+            "Regiones2": _ef_h(_mm, _r2_lleg, _r2_tras, _r2_est),
+        }
+        _tot_pct = max(1, _pct_stgo + _pct_reg + _pct_reg2)
+        _h_por_mp = (_pct_stgo * _efh["Santiago"] + _pct_reg * _efh["Regiones"]
+                     + _pct_reg2 * _efh["Regiones2"]) / _tot_pct
+
+        # ── Cargar grilla del mes (Supabase programacion_sto) y contar MPs ──
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _cargar_grilla_cap(mes_hoja: str):
+            try:
+                from supabase_client import _query as _sq
+                return _sq("programacion_sto",
+                           f"select=fecha,tecnico,actividad"
+                           f"&mes_hoja=eq.{mes_hoja.replace(' ', '%20')}", limit=6000)
+            except Exception:
+                return []
+
+        def _contar_mp_actividad(txt):
+            """Cuenta MPs en una celda (con multiplicadores X2/X3) y clasifica el día."""
+            if not txt:
+                return 0, "vacio"
+            up = str(txt).upper()
+            lines = [l.strip() for l in up.split("\n") if l.strip()]
+            nmp = 0
+            for l in lines:
+                if l.startswith("MP") or "MC+MP" in l:
+                    m = _re_cap.search(r"X\s?(\d)", l)
+                    nmp += int(m.group(1)) if m else 1
+            if nmp > 0:
+                return nmp, "MP"
+            j = " ".join(lines)
+            for key, cat in [("TURNO", "Turno"), ("VACACION", "Vacaciones"), ("LIBRE", "Libre"),
+                             ("PERMISO", "Permiso"), ("PERM.", "Permiso"), ("CAPACIT", "Capacitación"),
+                             ("FEEDBACK", "Capacitación"), ("FEED", "Capacitación"), ("PULSE", "Capacitación"),
+                             ("OFICINA", "Oficina/Reunión"), ("REU", "Oficina/Reunión"),
+                             ("INSTAL", "Instalación"), ("INVENTARIO", "Inventario"), ("MC", "Correctivo"),
+                             ("VIAJE", "Viaje"), ("LEV", "Levantamiento")]:
+                if key in j:
+                    return 0, cat
+            return 0, "Otro"
+
+        _grid_rows = _cargar_grilla_cap(_mes_sel_cap)
+        _mp_grid = 0
+        _act_cats = {}
+        _mp_por_dia = {}
+        _dias_habiles_trab = set()
+        for _r in _grid_rows:
+            _f = pd.to_datetime(_r.get("fecha"), errors="coerce")
+            if pd.isna(_f) or _f.weekday() >= 5:
+                continue
+            _n, _cat = _contar_mp_actividad(_r.get("actividad"))
+            if _cat == "vacio":
+                continue
+            _act_cats[_cat] = _act_cats.get(_cat, 0) + 1
+            if _cat == "MP":
+                _mp_grid += _n
+                _mp_por_dia[_f.date()] = _mp_por_dia.get(_f.date(), 0) + _n
+                _dias_habiles_trab.add(_f.date())
+
+        # ── Fracttal: MPs finalizadas del mes (cierre real) ───────────────
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _fracttal_mp_mes(y, m):
+            try:
+                from supabase_client import _query as _sq
+                _ini = f"{y}-{m:02d}-01"
+                _fin = f"{y}-{m:02d}-{_cal_cap.monthrange(y, m)[1]:02d}"
+                _rows = _sq("ordenes_trabajo",
+                            f"select=id_ot,estado,fecha_creacion,tipo_tarea"
+                            f"&tipo_tarea=like.PREVENTIVA*&fecha_creacion=gte.{_ini}", limit=5000)
+                _rows = [o for o in _rows if (o.get("fecha_creacion") or "")[:10] <= _fin]
+                _fin_ok = sum(1 for o in _rows if "Finaliz" in str(o.get("estado", "")))
+                return len(_rows), _fin_ok
+            except Exception:
+                return 0, 0
+        _fr_creadas, _fr_hechas = _fracttal_mp_mes(_y_cap, _m_cap)
+
+        # ── Cálculo de pendientes y ritmo ─────────────────────────────────
+        _hechas = _fr_hechas   # cierre real (Fracttal)
+        _pendientes = max(0, _plan_total - _hechas)
+
+        # Días hábiles del mes: total, transcurridos, restantes (desde hoy si es el mes actual)
+        _ndays = _cal_cap.monthrange(_y_cap, _m_cap)[1]
+        _dias_hab_mes = [d for d in range(1, _ndays + 1)
+                         if _date_cap(_y_cap, _m_cap, d).weekday() < 5]
+        _tot_hab = len(_dias_hab_mes)
+        if _es_mes_actual:
+            _hab_restantes = sum(1 for d in _dias_hab_mes
+                                 if _date_cap(_y_cap, _m_cap, d) >= _hoy_cap.date())
+        else:
+            _hab_restantes = 0 if _hoy_cap.date() > _date_cap(_y_cap, _m_cap, _ndays) else _tot_hab
+        _hab_transc = _tot_hab - _hab_restantes
+
+        # Ritmo histórico (MPs/día hábil) — de la grilla del mes o Fracttal
+        _dias_grid = len(_dias_habiles_trab) or 1
+        _ritmo_grid = _mp_grid / _dias_grid if _dias_grid else 0
+        _ritmo_fr = (_fr_hechas / _hab_transc) if _hab_transc > 0 else 0
+        _ritmo_base = round(_ritmo_fr if _ritmo_fr > 0 else (_ritmo_grid or 12), 1)
+
+        # ── What-if: ritmo objetivo ───────────────────────────────────────
+        st.markdown("#### 🎯 Proyección de cierre del mes")
+        _wc1, _wc2 = st.columns([2, 3])
+        with _wc1:
+            _ritmo = st.slider(
+                "Ritmo (MPs cerradas por día hábil)", 1, 40,
+                int(max(1, round(_ritmo_base))), key="cap_ritmo",
+                help=f"Ritmo histórico ≈ {_ritmo_base:.1f} MPs/día. Súbelo/bájalo para simular "
+                     "más técnicos en MP, o menos (enfermos/desvinculados).")
+
+        # Proyección: días hábiles necesarios para las pendientes
+        _dias_nec = _pendientes / _ritmo if _ritmo > 0 else 999
+        _holgura = _hab_restantes - _dias_nec
+
+        # Fecha estimada de término (sumando días hábiles desde hoy)
+        def _sumar_habiles(desde, ndias):
+            d = desde
+            restan = ndias
+            while restan > 0:
+                d = d + pd.Timedelta(days=1)
+                if d.weekday() < 5:
+                    restan -= 1
+            return d
+        _desde = _hoy_cap if _es_mes_actual else pd.Timestamp(_date_cap(_y_cap, _m_cap, 1))
+        _fecha_fin = _sumar_habiles(_desde, int(_dias_nec)) if _pendientes > 0 else _desde
+        _fin_mes = pd.Timestamp(_date_cap(_y_cap, _m_cap, _ndays))
+
+        # KPIs
+        _k1, _k2, _k3, _k4 = st.columns(4)
+        _k1.metric("MPs del mes (plan)", f"{_plan_total}")
+        _k2.metric("✅ Cerradas (Fracttal)", f"{_hechas}",
+                   help="MPs preventivas finalizadas en Fracttal este mes.")
+        _k3.metric("⏳ Pendientes", f"{_pendientes}")
+        _k4.metric("📅 Días hábiles restantes", f"{_hab_restantes}",
+                   help=f"De {_tot_hab} hábiles del mes; {_hab_transc} transcurridos.")
+
+        # Semáforo de holgura
+        if _pendientes == 0:
+            _cbg, _cbd, _emo, _msg = "#065f46", "#10b981", "✅", "Mes completo — todas las MPs cerradas."
+        elif _holgura >= 3:
+            _cbg, _cbd, _emo = "#065f46", "#10b981", "🟢"
+            _msg = (f"Vas bien. Al ritmo de {_ritmo}/día terminas ~<b>{_fecha_fin:%d-%m}</b> "
+                    f"con <b>{_holgura:.1f} días de holgura</b> antes de fin de mes.")
+        elif _holgura >= 1:
+            _cbg, _cbd, _emo = "#78350f", "#f59e0b", "🟡"
+            _msg = (f"Ajustado. Terminas ~<b>{_fecha_fin:%d-%m}</b>, solo "
+                    f"<b>{_holgura:.1f} días de holgura</b>. Un imprevisto y no llegas.")
+        elif _holgura >= 0:
+            _cbg, _cbd, _emo = "#7c2d12", "#ea580c", "🟠"
+            _msg = (f"Al límite. Terminas justo ~<b>{_fecha_fin:%d-%m}</b> "
+                    f"(<b>{_holgura*8:.0f} h de holgura</b>). Sin margen para imprevistos.")
+        else:
+            _cbg, _cbd, _emo = "#7f1d1d", "#dc2626", "🔴"
+            _faltan = -_holgura
+            _msg = (f"<b>NO alcanzas.</b> Faltan <b>{_faltan:.1f} días hábiles</b> de capacidad "
+                    f"(~{_pendientes} pendientes ÷ {_ritmo}/día = {_dias_nec:.0f} días vs "
+                    f"{_hab_restantes} disponibles). Necesitas subir el ritmo o refuerzo.")
+        st.markdown(
+            f'<div style="background:{_cbg};color:#fff;padding:14px 18px;border-radius:8px;'
+            f'margin:8px 0;border-left:5px solid {_cbd};font-size:1.02em">{_emo} {_msg}</div>',
+            unsafe_allow_html=True)
+
+        # ── Horas Hombre ──────────────────────────────────────────────────
+        _hh_req = _pendientes * _h_por_mp
+        _hh_disp = _hab_restantes * _ritmo * _h_por_mp   # capacidad al ritmo elegido
+        _hc1, _hc2, _hc3 = st.columns(3)
+        _hc1.metric("⏱️ Horas/MP (prom. zona)", f"{_h_por_mp:.2f} h",
+                    help=f"Santiago {_efh['Santiago']:.2f}h · Regiones {_efh['Regiones']:.2f}h · "
+                         f"Lejanas {_efh['Regiones2']:.2f}h (mantención + traslados).")
+        _hc2.metric("🔧 Horas requeridas (pendientes)", f"{_hh_req:,.0f} h".replace(",", "."))
+        _hc3.metric("🧑‍🔧 Horas disponibles (al ritmo)", f"{_hh_disp:,.0f} h".replace(",", "."))
+
+        st.divider()
+        # ── Mezcla de actividad del equipo (por qué la capacidad es la que es) ──
+        _cga, _cgb = st.columns([3, 2])
+        with _cga:
+            st.markdown("#### 🧭 En qué se va el tiempo del equipo (grilla del mes)")
+            if _act_cats:
+                _tot_td = sum(_act_cats.values())
+                _act_df = (pd.DataFrame(
+                    [{"Actividad": k, "Téc-días": v, "%": round(100 * v / _tot_td)}
+                     for k, v in sorted(_act_cats.items(), key=lambda x: -x[1])]))
+                st.dataframe(_act_df, hide_index=True, use_container_width=True,
+                             column_config={"%": st.column_config.NumberColumn(format="%d%%", width=70)})
+                _pct_mp = round(100 * _act_cats.get("MP", 0) / _tot_td)
+                st.caption(f"Solo el **{_pct_mp}%** del tiempo va a MP ({_act_cats.get('MP',0)} de "
+                           f"{_tot_td} téc-días). El resto se lo comen turnos, capacitaciones, etc. "
+                           "Ahí está el margen si necesitas acelerar.")
+            else:
+                st.info("Aún no hay grilla cargada para este mes en `programacion_sto`.")
+        with _cgb:
+            st.markdown("#### 🔗 Cruce Excel ↔ Fracttal")
+            st.markdown(
+                f"- MPs contadas en la **grilla Excel**: **{_mp_grid}**  \n"
+                f"- MPs **creadas en Fracttal**: **{_fr_creadas}**  \n"
+                f"- MPs **cerradas en Fracttal**: **{_fr_hechas}**")
+            _gap = abs(_mp_grid - _fr_creadas)
+            if _mp_grid and _fr_creadas and _gap / max(_mp_grid, _fr_creadas) > 0.25:
+                st.warning("⚠️ Excel y Fracttal difieren >25%. Suele ser porque la grilla detalla "
+                           "sobre todo a los técnicos de Santiago; las MPs regionales quedan en "
+                           "Fracttal. Revisar que no falte registro.")
+            else:
+                st.success("✅ Excel y Fracttal razonablemente sincronizados.")
 
     # ─────────────────────────────────────────────────────────────────────
     # SUB-TAB: 📅 Programación STO — grid de programación diaria por
