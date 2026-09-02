@@ -3,15 +3,15 @@ name: Weekly Shell Consumos (Comercial)
 # Lunes a las 09:45 hora Chile (UTC-4 invierno / UTC-3 verano).
 # Cron en UTC: 13:45 UTC ≈ 09:45-10:45 CLT según DST. Aceptable.
 on:
-  schedule:
-    # Cron DIARIO en la ventana horaria del envío. El script sale sin
-    # hacer nada los días que no son lunes (gate por weekday) y con
-    # dedupe idempotente si el correo del lunes ya salió. Estrategia:
-    # 21 oportunidades semanales en vez de 3 — los crons semanales de
-    # GitHub Actions saltan disparos con alta frecuencia (best-effort).
-    - cron: "45 13 * * *"     # 13:45 UTC diario (~09:45 CLT)
-    - cron: "15 14 * * *"     # 14:15 UTC diario
-    - cron: "45 14 * * *"     # 14:45 UTC diario
+  # ── DETENIDO (Jesús, 2026-09): ya NO se envía el reporte semanal de
+  # consumos de bombas Shell. Se desactivó el schedule automático; el
+  # workflow queda solo como ejecución manual (workflow_dispatch) por si
+  # alguna vez se necesita re-correr puntualmente. Para reanudar el envío
+  # automático, descomentar el bloque 'schedule'.
+  # schedule:
+  #   - cron: "45 13 * * *"     # 13:45 UTC diario (~09:45 CLT)
+  #   - cron: "15 14 * * *"     # 14:15 UTC diario
+  #   - cron: "45 14 * * *"     # 14:45 UTC diario
   workflow_dispatch:
     inputs:
       dry_run:
