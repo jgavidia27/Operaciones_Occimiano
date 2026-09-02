@@ -286,6 +286,44 @@ TECNICOS_INACTIVOS_FULL: frozenset[str] = frozenset(
 )
 
 
+# ── Bajas con fecha de corte (dejaron el equipo/empresa) ─────────────────────
+# A diferencia de TECNICOS_INACTIVOS (que excluye TODO, incluida la data
+# histórica), una BAJA conserva la data del técnico HASTA 'hasta' (trabajó esos
+# meses y le corresponde ese período/bono) y solo lo excluye DESDE el mes
+# siguiente. Se mantiene en GRUPOS_TERRENO para el mapeo histórico y se oculta
+# del dropdown de técnico.
+TECNICOS_BAJA: dict[str, dict] = {
+    # "nombre_full": {"equipo": ..., "hasta": "YYYY-MM-DD" (último día trabajado)}
+    # Javier Hein sale del equipo de Juan Gallardo el 2026-09-01 (último día
+    # trabajado 2026-08-31). Su Jul/Ago cuenta; desde septiembre no se considera.
+    "Javier Hein Pacheco": {"equipo": "Juan Gallardo", "hasta": "2026-08-31"},
+}
+TECNICOS_BAJA_FULL: frozenset[str] = frozenset(TECNICOS_BAJA.keys())
+
+def _norm_baja(s) -> str:
+    return " ".join(str(s).lower().split())
+
+_BAJA_NORM: dict[str, dict] = {_norm_baja(k): v for k, v in TECNICOS_BAJA.items()}
+
+def esta_de_baja(tecnico_full) -> bool:
+    """True si el técnico tiene una baja registrada (para ocultarlo del dropdown
+    de técnico). No afecta su data histórica."""
+    return _norm_baja(tecnico_full) in _BAJA_NORM
+
+def baja_activo_en_meses(tecnico_full, meses) -> bool:
+    """True si el técnico estuvo activo en ALGUNO de los meses dados.
+    `meses` = iterable de 'YYYY-MM' (o fechas cuyos primeros 7 chars sean el mes).
+    Un técnico sin baja SIEMPRE está activo. Uno de baja está activo en el mes M
+    si M <= el mes de su 'hasta'. Sirve para el roster del bono: si TODO el
+    período medido es posterior a su baja, no se le considera (ni se le da slot
+    en el pool)."""
+    info = _BAJA_NORM.get(_norm_baja(tecnico_full))
+    if not info:
+        return True
+    hasta_mes = str(info["hasta"])[:7]
+    return any(str(m)[:7] <= hasta_mes for m in (meses or []))
+
+
 def aplicar_transferencias(df, col_fecha, col_equipo="equipo", col_tecnico=None):
     """Reasigna equipo/grupo para filas anteriores a una transferencia de técnico.
 

@@ -32,6 +32,7 @@ from data import (
     NUMERAL_MOTIVO_LABEL, aplicar_numerales_subtarea,
     GRUPOS_TERRENO, get_grupo_tecnico, aplicar_transferencias, TECNICOS_NO_APLICA,
     TECNICOS_INACTIVOS_FULL,
+    TECNICOS_BAJA_FULL, esta_de_baja, baja_activo_en_meses,
     SENIORS, SENIOR_MULTI_TEAMS, get_senior_team_members,
     build_meters_fichas_df, enrich_fichas_with_readings,
 )
@@ -15708,9 +15709,12 @@ elif _page == _NAV_PAGES[0]:
         ) if _bono_eq_sel != "Todos" else None
         # Opciones de técnico: miembros del equipo seleccionado (o todos si equipo = Todos)
         if _bono_eq_key:
+            # Ocultar bajas del dropdown (ya no son miembros actuales); su data
+            # histórica de Jul/Ago igual se cuenta en el roster date-aware.
             _tec_opts_bono = ["Todos"] + [
                 m for m in GRUPOS_TERRENO[_bono_eq_key].get("miembros", [])
                 if not _es_excluido(TECH_NAME_MAP.get(m, m))
+                and not esta_de_baja(TECH_NAME_MAP.get(m, m))
             ]
         else:
             _tec_opts_bono = ["Todos"]
@@ -16173,9 +16177,16 @@ elif _page == _NAV_PAGES[0]:
                 _miembros_short = _grp_info.get("miembros", [])
                 # Convertir short names → full names
                 _miembros_full = [TECH_NAME_MAP.get(m, m) for m in _miembros_short]
-                # Filtrar excluidos
+                # Filtrar excluidos (inactivos/no-aplica)
                 _miembros_full = [
                     t for t in _miembros_full if not _es_excluido(t)
+                ]
+                # Filtrar BAJAS según el período medido: si el técnico se dio de
+                # baja y TODO el período (_meses_bono_kpi) es posterior a su
+                # último mes trabajado, no se le considera (ni ocupa slot del
+                # pool). Su Jul/Ago sigue contando cuando el período los incluye.
+                _miembros_full = [
+                    t for t in _miembros_full if baja_activo_en_meses(t, _meses_bono_kpi)
                 ]
                 if not _miembros_full:
                     continue
