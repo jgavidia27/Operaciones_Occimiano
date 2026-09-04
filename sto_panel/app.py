@@ -175,6 +175,13 @@ def _login_view():
             pass
 
 
+# Acceso explícito SOLO a este panel (supervisores/seniors que no son técnicos
+# de terreno). No les da admin en la app móvil ni gestión de PINs.
+PANEL_ACCESO_EXTRA: dict[str, str] = {
+    "bballadares@occimiano.cl": "Braulio Balladares",
+}
+
+
 def _senior_info() -> dict | None:
     email = (st.session_state.get("_auth_email") or "").strip().lower()
     if not email:
@@ -182,6 +189,9 @@ def _senior_info() -> dict | None:
     nombre_sess = st.session_state.get("_auth_nombre") or ""
     if email in ADMINS:
         return {"email": email, "short": "Admin", "nombre": nombre_sess or "Administrador"}
+    if email in PANEL_ACCESO_EXTRA:
+        return {"email": email, "short": "Senior",
+                "nombre": nombre_sess or PANEL_ACCESO_EXTRA[email]}
     u = USERS.get(email)
     if u and u.get("short") in SENIORS:
         return {"email": email, "short": u["short"], "nombre": nombre_sess or u.get("full", u["short"])}
