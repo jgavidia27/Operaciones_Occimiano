@@ -76,12 +76,21 @@ def _tipo_activo(nombre: str) -> str:
 def query_preventiva_folios(desde: str) -> list:
     """Folios candidatos: preventivas y correctivas (todas) desde `desde`.
     No filtramos por nombre_activo porque OTs compuestas tienen activos
-    principales que no son lavadora pero contienen subtareas que sí lo son."""
+    principales que no son lavadora pero contienen subtareas que sí lo son.
+
+    IMPORTANTE (fix 2026-09): antes filtrábamos SOLO por fecha_creacion. Pero
+    una MP se crea y se FINALIZA (se llena el formulario) días o semanas
+    después — vimos brechas de 13 días. En modo incremental, esas OTs salían
+    de la ventana ANTES de finalizarse, así que su formulario completo nunca
+    se sincronizaba y quedaban con 0 filas (aparecían como "—" / "sin sync").
+    Ahora incluimos también las OTs FINALIZADAS recientemente (fecha_finalizacion
+    >= desde), no solo las creadas, para no perder ninguna."""
     folios, offset, page = [], 0, 1000
     while True:
         url = (f"{SUPABASE_URL}/rest/v1/{TABLE_OT}"
-               f"?select=id_ot&fecha_creacion=gte.{desde}"
-               f"&or=(tipo_tarea.ilike.*PREVENTIVA*,tipo_tarea.ilike.*CORRECTIVA*)"
+               f"?select=id_ot"
+               f"&and=(or(tipo_tarea.ilike.*PREVENTIVA*,tipo_tarea.ilike.*CORRECTIVA*),"
+               f"or(fecha_creacion.gte.{desde},fecha_finalizacion.gte.{desde}))"
                f"&order=fecha_creacion.desc&limit={page}&offset={offset}")
         r = requests.get(url, headers=_sb_headers(), timeout=30)
         if r.status_code != 200:
@@ -511,7 +520,12 @@ def main():
         folios = [f.strip() for f in args.folios.split(",") if f.strip()]
         log(f"Folios puntuales: {len(folios)}")
     else:
-        desde = ((datetime.now() - timedelta(hours=72)).strftime("%Y-%m-%d")
+        # Ventana incremental de 14 días: cubre la brecha creación→finalización
+        # observada (hasta 13 días). Con la query por fecha_finalizacion, esto
+        # garantiza recapturar cualquier MP finalizada en las últimas 2 semanas
+        # con su formulario ya completo. El sync corre cada 2h, así que hay
+        # solapamiento de sobra y ninguna OT finalizada tarde se pierde.
+        desde = ((datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
                  if args.modo == "incremental" else args.desde)
         log(f"Buscando OTs desde {desde}...")
         folios = query_preventiva_folios(desde)
