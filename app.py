@@ -8961,6 +8961,29 @@ elif _page == _NAV_PAGES[4]:
         # quedan ARRIBA en el selector; las más antiguas, abajo.
         _weeks = list(reversed(_weeks))
 
+        # ── Suplencias de técnicos en turnos (con fecha de vigencia) ─────────
+        # Reemplaza el nombre en la vista SOLO para las semanas a partir de
+        # 'desde' (regla del jueves: la semana cuenta para el mes de su jueves),
+        # respetando el histórico donde el técnico saliente sí trabajó.
+        # Javier Hein deja el STO; lo suplanta Juan Francisco Toro desde sep-2026.
+        _SUPLENCIAS_TURNOS = [
+            {"sale": "Javier Hein Pacheco", "entra": "Juan Francisco Toro Jimenez", "desde": "2026-09-01"},
+        ]
+        try:
+            for _wk in _weeks:
+                _ds_w = _wk.get("dates", [])
+                if len(_ds_w) < 4:
+                    continue
+                _jueves = _ds_w[3]  # 'YYYY-MM-DD' — jueves de la semana
+                for _sup in _SUPLENCIAS_TURNOS:
+                    if _jueves >= _sup["desde"]:
+                        for _zn_w in _wk.get("zones", {}).values():
+                            for _t_w in _zn_w.get("turnos", []):
+                                if (_t_w.get("tecnico") or "").strip() == _sup["sale"]:
+                                    _t_w["tecnico"] = _sup["entra"]
+        except Exception:
+            pass
+
         _hoy = _date_turnos.today()
         _hoy_iso = _hoy.isoformat()
         _DIA_NOMBRE = {0: "LUN", 1: "MAR", 2: "MIÉ", 3: "JUE", 4: "VIE", 5: "SÁB", 6: "DOM"}
