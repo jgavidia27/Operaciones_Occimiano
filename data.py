@@ -267,6 +267,24 @@ TRANSFERENCIAS_EQUIPO: list[dict] = [
 ]
 
 
+# ── Traslados TEMPORALES acotados (ventana con fecha de inicio y fin) ─────────
+# A diferencia de TRANSFERENCIAS_EQUIPO (cambio permanente que corrige el
+# histórico), aquí el técnico se mueve a OTRO equipo SOLO durante la ventana
+# [desde, hasta] (inclusive del día 'hasta'). Fuera de esa ventana conserva su
+# equipo base de GRUPOS_TERRENO. Se aplica a la atribución por fila en TODOS los
+# indicadores (dentro de aplicar_transferencias).
+TRASLADOS_TEMPORALES: list[dict] = [
+    # Juan Francisco Toro (equipo base Luis Pinto) suplanta a Javier Hein en el
+    # equipo de Juan Gallardo mientras se cubre su salida — sep-2026 únicamente.
+    {
+        "tecnico_patterns": ["juan francisco", "toro jimenez"],
+        "equipo_temporal": "Juan Gallardo",
+        "desde": "2026-09-01",
+        "hasta": "2026-09-30",
+    },
+]
+
+
 # ── Técnicos inactivos (no aparecen en filtros/dropdowns) ─────────────────
 # Se conservan en GRUPOS_TERRENO / TECH_NAME_MAP para que sus datos históricos
 # sigan mapeando al equipo correcto y las estadísticas retroactivas no cambien,
@@ -331,7 +349,7 @@ def aplicar_transferencias(df, col_fecha, col_equipo="equipo", col_tecnico=None)
     nuevo.  Esta función corrige las filas cuya fecha es anterior al corte,
     devolviéndolas al equipo original.
     """
-    if df.empty or col_tecnico is None or not TRANSFERENCIAS_EQUIPO:
+    if df.empty or col_tecnico is None or (not TRANSFERENCIAS_EQUIPO and not TRASLADOS_TEMPORALES):
         return df
     _dates = pd.to_datetime(df[col_fecha], errors="coerce")
     if _dates.dt.tz is not None:
@@ -345,6 +363,17 @@ def aplicar_transferencias(df, col_fecha, col_equipo="equipo", col_tecnico=None)
         mask = mask_tec & (_dates < corte) & (df[col_equipo] == t["hacia"])
         if mask.any():
             df.loc[mask, col_equipo] = t["desde"]
+    # Traslados temporales acotados: reasigna el equipo del técnico al equipo
+    # temporal SOLO para las filas dentro de la ventana [desde, hasta] (inclusive).
+    for tt in TRASLADOS_TEMPORALES:
+        d0 = pd.Timestamp(tt["desde"])
+        d1 = pd.Timestamp(tt["hasta"]) + pd.Timedelta(days=1)  # 'hasta' inclusive
+        mask_tec = pd.Series(False, index=df.index)
+        for pat in tt["tecnico_patterns"]:
+            mask_tec |= _names.str.contains(pat, na=False, regex=False)
+        mask = mask_tec & (_dates >= d0) & (_dates < d1)
+        if mask.any():
+            df.loc[mask, col_equipo] = tt["equipo_temporal"]
     return df
 
 
