@@ -8873,6 +8873,9 @@ elif _page == _NAV_PAGES[4]:
         if not _weeks:
             st.info("Sin datos de turnos disponibles.")
             st.stop()
+        # Semanas REALES del JSON (referencia estable para las proyecciones,
+        # tanto hacia atrás como hacia adelante).
+        _real_weeks = list(_weeks)
 
         # ── Proyección cíclica hacia ATRÁS ──────────────────────────────────
         # La rotación es cíclica: Centro rota cada 3 semanas
@@ -8912,8 +8915,51 @@ elif _page == _NAV_PAGES[4]:
         except Exception:
             pass
 
+        # ── Proyección cíclica hacia ADELANTE ───────────────────────────────
+        # turnos_data.json es manual y suele quedarse atrás (se cortaba en la
+        # última semana cargada). Proyectamos las semanas FUTURAS —incluida la
+        # semana actual— siguiendo la MISMA rotación cíclica, hasta ~8 semanas
+        # por delante de hoy (se auto-extiende con el tiempo). Marcadas
+        # "estimado". Igual que la proyección hacia atrás, NO refleja cambios
+        # de dotación ni excepciones puntuales.
+        try:
+            import copy as _copy_fwd
+            from datetime import timedelta as _td_fwd
+            if _real_weeks and len(_real_weeks[0].get("dates", [])) >= 7:
+                _w0_lun_f   = _date_turnos.fromisoformat(_real_weeks[0]["dates"][0])
+                _last_lun_f = _date_turnos.fromisoformat(_real_weeks[-1]["dates"][0])
+                _k_last     = round((_last_lun_f - _w0_lun_f).days / 7)
+                _ceil_f     = _date_turnos.today() + _td_fwd(weeks=8)
+                _gen_fwd    = []
+                _kf = _k_last + 1
+                while True:
+                    _lun = _w0_lun_f + _td_fwd(weeks=_kf)
+                    if _lun > _ceil_f:
+                        break
+                    _pos = _kf % 3   # 0=Gallardo, 1=Pinto, 2=Bahamonde
+                    if _pos == 0:
+                        _src = 0 if ((_kf // 3) % 2 == 0) else 3
+                    elif _pos == 1:
+                        _src = [1, 4, 7][((_kf - 1) // 3) % 3]
+                    else:
+                        _src = [2, 5][((_kf - 2) // 3) % 2]
+                    if _src >= len(_real_weeks):
+                        break
+                    _zn  = _copy_fwd.deepcopy(_real_weeks[_src].get("zones", {}))
+                    _dts = [(_lun + _td_fwd(days=_dd)).isoformat() for _dd in range(7)]
+                    _gen_fwd.append({"dates": _dts, "zones": _zn, "_estimado": True})
+                    _kf += 1
+                if _gen_fwd:
+                    _weeks = _weeks + _gen_fwd
+        except Exception:
+            pass
+
         # Aplicar correcciones reportadas (sobre el plan)
         _weeks = _aplicar_correcciones_turnos(_weeks)
+
+        # Orden DESCENDENTE: la semana más reciente (y las proyectadas a futuro)
+        # quedan ARRIBA en el selector; las más antiguas, abajo.
+        _weeks = list(reversed(_weeks))
 
         _hoy = _date_turnos.today()
         _hoy_iso = _hoy.isoformat()
@@ -8953,11 +8999,12 @@ elif _page == _NAV_PAGES[4]:
         _w_zones = _w_data.get("zones", {})
         if _w_data.get("_estimado"):
             st.warning(
-                "📅 **Semana estimada (proyección cíclica).** Esta semana es anterior "
-                "a los datos cargados; se reconstruyó siguiendo la rotación cíclica "
-                "(Centro: Gallardo → Pinto → Bahamonde cada 3 semanas + rotación de "
-                "técnicos). **No refleja** cambios de dotación (altas/bajas/traslados) "
-                "ni excepciones puntuales de ese período."
+                "📅 **Semana estimada (proyección cíclica).** Esta semana está fuera "
+                "de los datos cargados manualmente; se proyectó siguiendo la rotación "
+                "cíclica (Centro: Gallardo → Pinto → Bahamonde + rotación de técnicos). "
+                "**No refleja** cambios de dotación (altas/bajas/traslados) ni "
+                "excepciones puntuales de ese período. Confírmala antes de usarla como "
+                "definitiva."
             )
 
         _is_dark = _current_theme == "dark"
