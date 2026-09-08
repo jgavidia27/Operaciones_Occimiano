@@ -2143,7 +2143,13 @@ if _page == _NAV_PAGES[1]:
             # Base de evaluación SLA: solo los ya cerrados (CUMPLE + NO CUMPLE).
             _base_sla    = _cumple_c + _nocumple_c
             _pct_c       = round(_cumple_c / _base_sla * 100, 1) if _base_sla > 0 else 0.0
-            _n_p1        = int((df_ll["prioridad"].str.upper() == "P1").sum())
+            # Base ÚNICA para los gráficos de distribución/volumen: solo los
+            # llamados EVALUADOS (Cumple + No cumple). Garantiza que el donut por
+            # prioridad, el chart por cliente y el mensual sumen EXACTAMENTE
+            # _base_sla (el "Total llamados" de arriba). Pendientes y Otros se
+            # muestran como KPI aparte y NO entran en el total.
+            _df_eval     = _df_valid[_df_valid["cumplimiento"].isin(["CUMPLE", "NO CUMPLE"])]
+            _n_p1        = int((_df_eval["prioridad"].str.upper() == "P1").sum())
             _otros       = _otros_c
 
             # Card grande con el % de cumplimiento como métrica principal
@@ -2162,7 +2168,9 @@ if _page == _NAV_PAGES[1]:
             # Fila de desglose: Total (Cumple+No cumple) + mini-cards
             lk0, lk1, lk2, lk3, lk4, lk5 = st.columns(6)
             lk0.metric("📞 Total llamados", f"{_base_sla:,}",
-                       help="Suma de Cumple + No cumple (llamados evaluados para SLA)")
+                       help="Cumple + No cumple (llamados evaluados para SLA). "
+                            "Es la base de todos los gráficos: Pendientes y Otros "
+                            "se muestran aparte y NO suman a este total.")
             lk1.metric("✅ Cumple SLA", f"{_cumple_c:,}",
                        delta=f"{_pct_c}%" if _base_sla else None, delta_color="off",
                        help="Llamados cerrados dentro del umbral SLA")
@@ -2212,7 +2220,7 @@ if _page == _NAV_PAGES[1]:
             with gc1:
                 _k = f"_fig_ll_prio_{_current_theme}_{_ll_sig_c}"
                 if _k not in st.session_state:
-                    _d = df_ll["prioridad"].value_counts().reset_index()
+                    _d = _df_eval["prioridad"].value_counts().reset_index()
                     _d.columns = ["Prioridad","Llamados"]
                     _f = px.pie(_d, values="Llamados", names="Prioridad", color="Prioridad",
                                 color_discrete_map=prio_colors, title="Por prioridad", hole=0.45,
@@ -2228,7 +2236,7 @@ if _page == _NAV_PAGES[1]:
             with gc2:
                 _k = f"_fig_ll_cli_{_current_theme}_{_ll_sig_c}"
                 if _k not in st.session_state:
-                    _d = df_ll["cliente"].value_counts().reset_index()
+                    _d = _df_eval["cliente"].value_counts().reset_index()
                     _d.columns = ["Cliente","Llamados"]
                     _f = px.bar(_d, x="Cliente", y="Llamados", color="Cliente",
                                 color_discrete_map=CLIENT_COLORS, title="Por cliente", text_auto=True)
@@ -2516,17 +2524,20 @@ if _page == _NAV_PAGES[1]:
                         line_width=1.5, secondary_y=True,
                     )
 
-                    # Línea encima: TOTAL llamados atendidos (eje izquierdo)
+                    # Línea encima: TOTAL llamados EVALUADOS (Cumple + No cumple).
+                    # Debe COINCIDIR con el KPI "Total llamados" de arriba y con la
+                    # suma de las barras. NO usa 'llamados' (que incluía pendientes/
+                    # otros) sino '_eval' = cumple + no_cumple.
                     _fig_sla_evol.add_trace(
                         go.Scatter(
-                            x=_ev_grp["bucket_lbl"], y=_ev_grp["llamados"],
+                            x=_ev_grp["bucket_lbl"], y=_ev_grp["_eval"],
                             name="Total llamados",
                             mode="lines+markers+text",
                             line=dict(color="#334155", width=2.5),
                             marker=dict(size=10, color="#334155",
                                         line=dict(color="#ffffff", width=2),
                                         symbol="circle"),
-                            text=[f"<b>{int(v)}</b>" for v in _ev_grp["llamados"]],
+                            text=[f"<b>{int(v)}</b>" for v in _ev_grp["_eval"]],
                             textposition="top center",
                             textfont=dict(size=12, color="#0f172a", family="Arial"),
                             hovertemplate=(
@@ -2572,7 +2583,9 @@ if _page == _NAV_PAGES[1]:
 
             st.divider()
             st.markdown('<div class="section-header">Evolución mensual de llamados</div>', unsafe_allow_html=True)
-            _df_llm = df_ll.dropna(subset=["fecha_llamado"]).copy()
+            # Base evaluada (Cumple + No cumple): coincide con el "Total llamados"
+            # de arriba. Excluye Otros/basura y Pendientes.
+            _df_llm = _df_eval.dropna(subset=["fecha_llamado"]).copy()
             _df_llm["mes_lbl"] = _df_llm["_mes"].apply(_ym_a_lbl)
             _monthly_c = _df_llm.groupby(["mes_lbl","prioridad"]).size().reset_index(name="llamados")
             _mes_ord_c = [_ym_a_lbl(m) for m in sorted(_df_llm["_mes"].unique())]
