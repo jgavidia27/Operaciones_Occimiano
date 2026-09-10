@@ -2935,6 +2935,22 @@ if vista == "🔗 Enlace Copec":
                          .dt.total_seconds() / 3600).round(0)
     _rk_all["_norden"] = _rk_all["numero_orden"].fillna("").astype(str).str.strip()
     _rk_all["_mkey"] = _rk_all["_fcrea"].dt.strftime("%Y-%m")
+    # Fecha en que el técnico TERMINÓ el trabajo en Fracttal (de la OT matcheada).
+    _rk_all["_fin_fracttal"] = pd.to_datetime(
+        _rk_all["os_fracttal"].map(
+            lambda x: (_ots_detalle.get(x, {}) or {}).get("fecha_finalizacion") if x else None),
+        errors="coerce", utc=True)
+    try:
+        _rk_all["_fin_fracttal"] = _rk_all["_fin_fracttal"].dt.tz_convert(_CL_TZ)
+    except Exception:
+        pass
+    # "Cerró otro" (aprox): la orden está cerrada, el técnico ya había TERMINADO el
+    # trabajo en Fracttal, pero Enlace se cerró MÁS DE 48 H después → la cerró otro
+    # (tú/operaciones), no el técnico. Sin match en Fracttal no se puede determinar.
+    _gap_otro_h = (_rk_all["_fecha_cambio"] - _rk_all["_fin_fracttal"]).dt.total_seconds() / 3600
+    _rk_all["_cerro_otro"] = (_rk_all["_cerrada"]
+                              & _rk_all["_fin_fracttal"].notna()
+                              & (_gap_otro_h > 48))
 
     st.markdown("---")
     st.markdown(
@@ -3009,14 +3025,17 @@ if vista == "🔗 Enlace Copec":
                 avisos_abiertos=("id_sap", "count"),
                 correctivos=("tipo_aviso", lambda s: (s == "CORRECTIVO").sum()),
                 preventivos=("tipo_aviso", lambda s: (s == "PREVENTIVO").sum()),
+                cerro_otro=("_cerro_otro", "sum"),
                 horas_max=("_horas", "max"),
             ).reset_index().sort_values("avisos_abiertos", ascending=False)
             _rk_grp["horas_max"] = _rk_grp["horas_max"].fillna(0).astype(int)
+            _rk_grp["cerro_otro"] = _rk_grp["cerro_otro"].fillna(0).astype(int)
             _rk_grp = _rk_grp.rename(columns={
                 "_tecnico":         "Técnico",
                 "avisos_abiertos":  "Órdenes no cerradas",
                 "correctivos":      "Correctivos",
                 "preventivos":      "Preventivos",
+                "cerro_otro":       "Cerró otro (aprox)",
                 "horas_max":        "Máx sin cerrar (h)",
             })
 
@@ -3033,6 +3052,11 @@ if vista == "🔗 Enlace Copec":
                     "Órdenes no cerradas":  st.column_config.NumberColumn(width=160),
                     "Correctivos":          st.column_config.NumberColumn(width=110),
                     "Preventivos":          st.column_config.NumberColumn(width=110),
+                    "Cerró otro (aprox)":   st.column_config.NumberColumn(
+                        width=150,
+                        help="Órdenes cerradas por alguien que NO es el técnico "
+                             "(Enlace se cerró +48h después de que el técnico terminó "
+                             "el trabajo en Fracttal). Aproximado."),
                     "Máx sin cerrar (h)":   st.column_config.NumberColumn(width=150),
                 },
             )
