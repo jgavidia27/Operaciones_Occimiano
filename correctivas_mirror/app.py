@@ -1534,9 +1534,21 @@ elif vista == "🔧 Repuestos":
                            else _extraer_cod_occim(r["desc_raw"])), axis=1)
             b["desc_copec"] = b.apply(
                 lambda r: _limpiar_desc(r["desc_raw"], r["cod_occim"]), axis=1)
-            b["cod_copec"] = b["cod_copec"].apply(
-                lambda v: (str(v).strip().rstrip(".0")
-                           if pd.notna(v) else None))
+            def _clean_cod_copec(v):
+                # BUG previo: str(v).rstrip(".0") se comía el cero FINAL legítimo
+                # ("502680.0" -> "50268"). Excel trae el código como float
+                # (502680.0); hay que convertir a int para no perder dígitos.
+                if pd.isna(v):
+                    return None
+                try:
+                    f = float(v)
+                    if f == int(f):
+                        return str(int(f))
+                except (ValueError, TypeError):
+                    pass
+                s = str(v).strip()
+                return s[:-2] if s.endswith(".0") else s
+            b["cod_copec"] = b["cod_copec"].apply(_clean_cod_copec)
             b["precio_copec"] = pd.to_numeric(
                 b["precio_copec"], errors="coerce").round(0)
             b["estado"] = estado
