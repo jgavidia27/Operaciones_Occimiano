@@ -1812,7 +1812,20 @@ if vista == "🔗 Enlace Copec":
             all_rows.extend(rows)
             if len(rows) < 1000:
                 break
-        return pd.DataFrame(all_rows)
+        _dfx = pd.DataFrame(all_rows)
+        # Marcar avisos "STALE": no vistos en la última sincronización. Si Enlace
+        # dejó de devolver un aviso, es que ya se cerró/quitó allá; como el sync
+        # solo hace upsert (nunca borra), quedaría congelado como "abierto". Un
+        # aviso cuyo sync_at es >6 h más viejo que el último sync global se
+        # considera ya no vigente en Enlace.
+        if not _dfx.empty and "sync_at" in _dfx.columns:
+            _sa = pd.to_datetime(_dfx["sync_at"], errors="coerce", utc=True)
+            _mx = _sa.max()
+            _dfx["_stale"] = ((_sa < (_mx - pd.Timedelta(hours=6)))
+                              if pd.notna(_mx) else False)
+        else:
+            _dfx["_stale"] = False
+        return _dfx
 
     @st.cache_data(ttl=3600)
     def cargar_estaciones_comuna() -> dict:
@@ -2362,7 +2375,10 @@ if vista == "🔗 Enlace Copec":
     # Si Fracttal ya validó (fecha_finalizacion poblada) y Enlace sigue
     # abierto, hay un problema operativo — el técnico olvidó cerrar en
     # Enlace pese a completar todo el flujo en Fracttal.
-    _abiertos_enl = df[df["estado"] != "CERRADO"].copy()
+    # Excluir avisos STALE: no vistos en el último sync → ya NO están abiertos en
+    # Enlace (se cerraron/quitaron allá; el sync no borra y quedaban congelados).
+    _stale_col = df["_stale"] if "_stale" in df.columns else pd.Series(False, index=df.index)
+    _abiertos_enl = df[(df["estado"] != "CERRADO") & ~_stale_col.fillna(False)].copy()
     _abiertos_enl = _abiertos_enl[_abiertos_enl["os_fracttal"].fillna("") != ""]
     _rows_desync = []
     _hoy = pd.Timestamp.now(tz=_CL_TZ)
@@ -2941,8 +2957,14 @@ if vista == "🔗 Enlace Copec":
     _rk_all["_fecha_cambio"] = pd.to_datetime(
         _rk_all["fecha_ultimo_cambio"], errors="coerce", utc=True).dt.tz_convert(_CL_TZ)
     _rk_all["_cerrada"] = _rk_all["estado"].astype(str) == "CERRADO"
-    # Fin del período abierto: si está cerrada, su último cambio; si no, ahora.
-    _rk_all["_fin"] = _rk_all["_fecha_cambio"].where(_rk_all["_cerrada"], _now)
+    # "Stale": aviso no visto en el último sync → ya no está abierto en Enlace.
+    # Se trata como TERMINADO en su último cambio (no sigue creciendo hasta hoy).
+    if "_stale" not in _rk_all.columns:
+        _rk_all["_stale"] = False
+    _rk_all["_ended"] = _rk_all["_cerrada"] | _rk_all["_stale"].fillna(False)
+    # Fin del período abierto: si terminó (cerrada o stale), su último cambio; si
+    # no, ahora.
+    _rk_all["_fin"] = _rk_all["_fecha_cambio"].where(_rk_all["_ended"], _now)
     _rk_all["_horas"] = ((_rk_all["_fin"] - _rk_all["_fcrea"])
                          .dt.total_seconds() / 3600).round(0)
     _rk_all["_norden"] = _rk_all["numero_orden"].fillna("").astype(str).str.strip()
