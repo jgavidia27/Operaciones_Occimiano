@@ -173,6 +173,45 @@ def _sb_get(path, params, timeout=25):
     return data
 
 
+def _sb_write(method: str, path: str, json_body=None, params=None, timeout=20):
+    """POST/DELETE a Supabase (PostgREST). No hace st.stop en error.
+    Devuelve (ok, status_code, texto)."""
+    url, key = _sb_config()
+    headers = {"apikey": key, "Authorization": f"Bearer {key}",
+               "Content-Type": "application/json"}
+    if method.upper() == "POST":
+        headers["Prefer"] = "resolution=merge-duplicates,return=minimal"
+    try:
+        r = requests.request(method.upper(), f"{url}/rest/v1/{path}",
+                             params=params or {}, headers=headers,
+                             json=json_body, timeout=timeout)
+        return (r.status_code in (200, 201, 204), r.status_code, r.text[:300])
+    except Exception as e:
+        return (False, 0, str(e))
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _cargar_ordenes_avisadas() -> dict:
+    """Órdenes de Enlace marcadas como 'el técnico avisó' → se descuentan del
+    ranking de órdenes no cerradas. Devuelve {numero_orden: fila}. Si la tabla
+    aún no existe en Supabase, devuelve {} sin romper el panel."""
+    url, key = _sb_config()
+    try:
+        r = requests.get(
+            f"{url}/rest/v1/enlace_ordenes_avisadas",
+            params={"select": "numero_orden,tecnico,marcado_por,nota,fecha",
+                    "limit": "10000"},
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return {}
+        return {str(x["numero_orden"]).strip(): x
+                for x in r.json() if x.get("numero_orden")}
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=900, show_spinner="Cargando llamados correctivos...", persist="disk")
 def cargar_llamados(fecha_desde: str) -> pd.DataFrame:
     """Base: v_llamados_sla (vista ya enriquecida con cumplimiento,
@@ -2873,41 +2912,93 @@ if vista == "🔗 Enlace Copec":
                         lineas.append(f"**Comentario técnico:** {ot['comentario_tecnico']}")
                     st.markdown("  \n".join(lineas))
 
-    # ── Ranking técnicos con órdenes ABIERTAS (incluye todos los no cerrados) ──
-    # Toma avisos != CERRADO, enriquece con técnico (de la OT Fracttal matcheada),
-    # y agrupa. La tabla es clickeable → detalle de las OTs del técnico.
-    # Los avisos sin OT Fracttal aún matcheada se muestran como métrica aparte.
-    _rk_base = df[df["estado"] != "CERRADO"].copy()
-    if not _rk_base.empty:
-        _rk_base["_tecnico"] = _rk_base["os_fracttal"].map(
-            lambda x: (_ots_detalle.get(x, {}) or {}).get("responsable") if x else None
-        )
-        _rk_base["_fecha_cambio"] = pd.to_datetime(
-            _rk_base["fecha_ultimo_cambio"], errors="coerce", utc=True).dt.tz_convert(_CL_TZ)
-        _now = pd.Timestamp.now(tz=_CL_TZ)
-        _rk_base["_horas"] = ((_now - _rk_base["_fecha_cambio"]).dt.total_seconds() / 3600).round(0)
+    # ── Ranking técnicos — órdenes de Enlace NO CERRADAS (histórico acumulado) ──
+    # Antes se miraba solo el estado ACTUAL (estado != CERRADO): cuando una orden
+    # se cerraba desaparecía y el ranking "se reiniciaba". Ahora se mide la
+    # DURACIÓN que estuvo abierta (cerradas: creación→último cambio; abiertas:
+    # creación→ahora). Una orden cuenta como NO CERRADA si estuvo abierta más de
+    # X horas (umbral configurable). Se filtra por mes/semana y las órdenes por
+    # las que el técnico avisó se descuentan (tabla enlace_ordenes_avisadas).
+    _now = pd.Timestamp.now(tz=_CL_TZ)
+    _rk_all = df.copy()
+    _rk_all["_tecnico"] = _rk_all["os_fracttal"].map(
+        lambda x: (_ots_detalle.get(x, {}) or {}).get("responsable") if x else None
+    )
+    _rk_all["_fcrea"] = pd.to_datetime(
+        _rk_all["fecha_creacion"], errors="coerce", utc=True).dt.tz_convert(_CL_TZ)
+    _rk_all["_fecha_cambio"] = pd.to_datetime(
+        _rk_all["fecha_ultimo_cambio"], errors="coerce", utc=True).dt.tz_convert(_CL_TZ)
+    _rk_all["_cerrada"] = _rk_all["estado"].astype(str) == "CERRADO"
+    # Fin del período abierto: si está cerrada, su último cambio; si no, ahora.
+    _rk_all["_fin"] = _rk_all["_fecha_cambio"].where(_rk_all["_cerrada"], _now)
+    _rk_all["_horas"] = ((_rk_all["_fin"] - _rk_all["_fcrea"])
+                         .dt.total_seconds() / 3600).round(0)
+    _rk_all["_norden"] = _rk_all["numero_orden"].fillna("").astype(str).str.strip()
+    _rk_all["_mkey"] = _rk_all["_fcrea"].dt.strftime("%Y-%m")
 
-        # Separar avisos con técnico identificado vs sin OT en Fracttal
+    st.markdown("---")
+    st.markdown(
+        '<div class="section-hdr">🏁 Ranking técnicos — órdenes de Enlace no cerradas</div>',
+        unsafe_allow_html=True,
+    )
+
+    _MESES_ES = {"01": "Ene", "02": "Feb", "03": "Mar", "04": "Abr", "05": "May",
+                 "06": "Jun", "07": "Jul", "08": "Ago", "09": "Sep", "10": "Oct",
+                 "11": "Nov", "12": "Dic"}
+    def _mlbl(m):
+        try:
+            _y, _mo = str(m).split("-")
+            return f"{_MESES_ES.get(_mo, _mo)} {_y}"
+        except Exception:
+            return str(m)
+    _meses_disp = sorted([m for m in _rk_all["_mkey"].dropna().unique()], reverse=True)
+    _fc1, _fc2, _fc3 = st.columns([1.4, 1.4, 2])
+    _mes_sel = _fc1.selectbox("Mes", ["Todos los meses"] + [_mlbl(m) for m in _meses_disp],
+                              key="rk_mes")
+    _lbl_to_m = {_mlbl(m): m for m in _meses_disp}
+    if _mes_sel != "Todos los meses":
+        _sem_sel = _fc2.selectbox(
+            "Semana del mes",
+            ["Todas", "Semana 1", "Semana 2", "Semana 3", "Semana 4", "Semana 5"],
+            key="rk_sem")
+    else:
+        _fc2.selectbox("Semana del mes", ["Todas"], disabled=True, key="rk_sem")
+        _sem_sel = "Todas"
+    _umbral = _fc3.slider(
+        "Cuenta como NO cerrada si estuvo abierta más de (horas)",
+        min_value=1, max_value=72, value=2, key="rk_umbral")
+
+    _f = _rk_all[_rk_all["_horas"] > _umbral].copy()
+    if _mes_sel != "Todos los meses":
+        _f = _f[_f["_mkey"] == _lbl_to_m[_mes_sel]]
+        if _sem_sel != "Todas":
+            _f = _f[((_f["_fcrea"].dt.day - 1) // 7 + 1) == int(_sem_sel.split()[-1])]
+    _exc = _cargar_ordenes_avisadas()
+    _exc_set = set(_exc.keys())
+    _n_desc = int(_f["_norden"].isin(_exc_set).sum())
+    _f = _f[~_f["_norden"].isin(_exc_set)]
+
+    # Compat: el detalle de más abajo usa _rk_base y la columna _horas.
+    _rk_base = _f
+    if not _rk_base.empty:
         _sin_ot = _rk_base[_rk_base["_tecnico"].isna()]
         _con_tec = _rk_base[_rk_base["_tecnico"].notna()]
 
-        st.markdown("---")
-        st.markdown(
-            '<div class="section-hdr">🏁 Ranking técnicos con órdenes abiertas</div>',
-            unsafe_allow_html=True,
-        )
         st.caption(
-            "Avisos que aún no están cerrados en Enlace y tienen OT en Fracttal, "
-            "agrupados por técnico responsable. Cliquea una fila para ver el detalle."
+            f"Órdenes de Enlace que estuvieron abiertas **más de {_umbral} h** sin "
+            "cerrar, por técnico responsable (incluye cerradas que tardaron — no se "
+            "reinicia). Cliquea una fila para ver el detalle."
         )
+        if _n_desc:
+            st.caption(f"↩️ {_n_desc} orden(es) descontada(s) porque el técnico avisó.")
 
-        # Métrica avisos sin OT (no forman parte del ranking)
+        # Métrica órdenes sin OT (no se puede identificar al técnico)
         if not _sin_ot.empty:
             st.info(
-                f"ℹ️ Además hay **{len(_sin_ot)} avisos abiertos sin OT en Fracttal aún** "
+                f"ℹ️ Además hay **{len(_sin_ot)} órdenes sin OT en Fracttal** aún "
                 f"({int((_sin_ot['tipo_aviso']=='CORRECTIVO').sum())} correctivos · "
                 f"{int((_sin_ot['tipo_aviso']=='PREVENTIVO').sum())} preventivos). "
-                f"Aún no se les puede asignar un técnico responsable en este ranking."
+                f"Sin OT no se identifica al técnico responsable."
             )
 
         if _con_tec.empty:
@@ -2923,7 +3014,7 @@ if vista == "🔗 Enlace Copec":
             _rk_grp["horas_max"] = _rk_grp["horas_max"].fillna(0).astype(int)
             _rk_grp = _rk_grp.rename(columns={
                 "_tecnico":         "Técnico",
-                "avisos_abiertos":  "Avisos abiertos",
+                "avisos_abiertos":  "Órdenes no cerradas",
                 "correctivos":      "Correctivos",
                 "preventivos":      "Preventivos",
                 "horas_max":        "Máx sin cerrar (h)",
@@ -2938,11 +3029,11 @@ if vista == "🔗 Enlace Copec":
                 on_select="rerun", selection_mode="single-row",
                 key="enlace_ranking_tab",
                 column_config={
-                    "Técnico":            st.column_config.TextColumn(width=260),
-                    "Avisos abiertos":    st.column_config.NumberColumn(width=140),
-                    "Correctivos":        st.column_config.NumberColumn(width=110),
-                    "Preventivos":        st.column_config.NumberColumn(width=110),
-                    "Máx sin cerrar (h)": st.column_config.NumberColumn(width=150),
+                    "Técnico":              st.column_config.TextColumn(width=260),
+                    "Órdenes no cerradas":  st.column_config.NumberColumn(width=160),
+                    "Correctivos":          st.column_config.NumberColumn(width=110),
+                    "Preventivos":          st.column_config.NumberColumn(width=110),
+                    "Máx sin cerrar (h)":   st.column_config.NumberColumn(width=150),
                 },
             )
 
@@ -2991,6 +3082,57 @@ if vista == "🔗 Enlace Copec":
                     "Sin cerrar":     st.column_config.TextColumn(width=95),
                 },
             )
+
+    # ── Descontar una orden: el técnico avisó que no le cerraba ────────────────
+    st.markdown("---")
+    with st.expander("↩️ Descontar una orden (el técnico avisó que no le cerraba)"):
+        st.caption(
+            "Si el técnico te avisó que una orden de Enlace no le cerraba y la "
+            "cerraste tú manualmente, ponla aquí para NO imputársela. Queda "
+            "descontada del ranking en TODOS los períodos (no se reinicia)."
+        )
+        _ea1, _ea2 = st.columns([2, 1])
+        _norden_in = _ea1.text_input(
+            "N° orden de Enlace", key="rk_add_norden",
+            placeholder="Ej. 000082189737").strip()
+        _nota_in = _ea1.text_input("Nota (opcional)", key="rk_add_nota").strip()
+        _ok_chk = _ea2.checkbox("Confirmo que el técnico avisó", key="rk_add_chk")
+        if _ea2.button("Descontar orden", key="rk_add_btn", type="primary",
+                       disabled=not (_norden_in and _ok_chk)):
+            _tec_ord = ""
+            _match = _rk_all[_rk_all["_norden"] == _norden_in]
+            if not _match.empty:
+                _tec_ord = str(_match.iloc[0].get("_tecnico") or "")
+            _ok, _sc, _txt = _sb_write(
+                "POST", "enlace_ordenes_avisadas",
+                json_body={"numero_orden": _norden_in,
+                           "tecnico": _tec_ord or None,
+                           "marcado_por": "panel",
+                           "nota": _nota_in or None})
+            if _ok:
+                _cargar_ordenes_avisadas.clear()
+                st.success(f"Orden {_norden_in} descontada.")
+                st.rerun()
+            elif _sc == 404 or "PGRST205" in (_txt or "") or "does not exist" in (_txt or "").lower():
+                st.error("Falta crear la tabla `enlace_ordenes_avisadas` en Supabase "
+                         "(te pasé el SQL). Créala y reintenta.")
+            else:
+                st.error(f"No se pudo guardar (HTTP {_sc}). {_txt}")
+
+        _exc_now = _cargar_ordenes_avisadas()
+        if _exc_now:
+            st.markdown(f"**Órdenes descontadas ({len(_exc_now)}):**")
+            for _no, _row in sorted(_exc_now.items()):
+                _dc1, _dc2 = st.columns([5, 1])
+                _dc1.write(
+                    f"`{_no}` · {(_row.get('tecnico') or '—')}"
+                    + (f" · _{_row.get('nota')}_" if _row.get('nota') else "")
+                )
+                if _dc2.button("Quitar", key=f"rk_del_{_no}"):
+                    _sb_write("DELETE", "enlace_ordenes_avisadas",
+                              params={"numero_orden": f"eq.{_no}"})
+                    _cargar_ordenes_avisadas.clear()
+                    st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════
