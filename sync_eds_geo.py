@@ -197,10 +197,32 @@ def main():
     log(f"  con comuna: {con_comuna} "
         f"({con_comuna / max(1, len(locs)) * 100:.0f}%)")
 
-    filas, sin_loc = [], []
+    # Índice por nombre normalizado para el rescate: buena parte de las EDS
+    # activas no tiene `loc_fracttal` cargado en estaciones_servicio, pero su
+    # nombre coincide con el de la ubicación. Es un match textual, así que se
+    # marca con otra `fuente` para poder auditarlo después.
+    por_nombre = {_norm(re.sub(r"\{\s*LOC-\d+\s*\}", "", l["desc"])): l
+                  for l in locs}
+
+    def rescatar(nombre: str):
+        n = _norm(nombre)
+        if not n or len(n) < 8:
+            return None
+        if n in por_nombre:
+            return por_nombre[n]
+        cands = [l for k, l in por_nombre.items() if k.startswith(n) or n in k]
+        return cands[0] if len(cands) == 1 else None   # ambiguo => no se inventa
+
+    filas, sin_loc, rescatadas = [], [], 0
     for e in estaciones():
         lf = str(e.get("loc_fracttal") or "").upper()
         loc = por_code.get(lf)
+        fuente = "loc_fracttal"
+        if not loc:
+            loc = rescatar(e.get("nombre"))
+            fuente = "match_nombre"
+            if loc:
+                rescatadas += 1
         if not loc:
             if e.get("activa"):
                 sin_loc.append(e["eds_occim"])
@@ -211,11 +233,12 @@ def main():
             "latitud": loc["lat"],
             "longitud": loc["lon"],
             "comuna": loc["comuna"],
-            "fuente": "loc_fracttal",
+            "fuente": fuente,
         })
 
-    log(f"EDS con coordenadas: {len(filas)}")
-    log(f"EDS activas SIN ubicación Fracttal: {len(sin_loc)}"
+    log(f"EDS con coordenadas: {len(filas)} "
+        f"({rescatadas} rescatadas por nombre)")
+    log(f"EDS activas SIN coordenadas: {len(sin_loc)}"
         + (f" -> {', '.join(sorted(sin_loc)[:12])}" if sin_loc else ""))
 
     if args.dry_run:
