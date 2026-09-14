@@ -9,7 +9,7 @@ Carlos Avila) genera un Excel del mes ACTUAL con sus 3 indicadores
 principales (Desempeño SLA + Efectividad MP + Precisión Fracttal) filtrado
 por su equipo, y lo envía por email vía Gmail SMTP.
 
-CC: jcaceres@occimiano.cl + wsoto@occimiano.cl en todos los correos.
+CC: bballadares@occimiano.cl + wsoto@occimiano.cl en todos los correos.
 
 Env vars requeridas (GitHub Secrets):
     GMAIL_APP_PASSWORD    — App password Gmail 16 chars (sin espacios)
@@ -53,7 +53,7 @@ GMAIL_SENDER   = "jgavidia@occimiano.cl"
 GMAIL_DISPLAY  = "Operaciones Occimiano"
 GMAIL_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 
-CC_FIJOS = ["jcaceres@occimiano.cl", "wsoto@occimiano.cl"]
+CC_FIJOS = ["bballadares@occimiano.cl", "wsoto@occimiano.cl"]
 
 # Configuración por senior (email → equipo(s) y label)
 SENIORS = [
