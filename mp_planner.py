@@ -388,6 +388,13 @@ def detectar_ejecutadas(plan: pd.DataFrame, cartera: pd.DataFrame) -> pd.DataFra
 
 # ── Interfaz ─────────────────────────────────────────────────────────────────
 
+# Juego de caracteres para los rotulos del mapa. deck.gl construye el atlas de
+# la fuente a partir de esta lista; lo que no este aqui se dibuja como espacio
+# en blanco, no como simbolo de error, asi que el defecto pasa desapercibido
+# hasta que alguien mira el mapa ("Nuoa" en vez de "Ñuñoa").
+_CHARSET_ROTULOS = [chr(c) for c in range(32, 127)] + list(
+    "ÁÉÍÓÚÜÑáéíóúüñ·°ªº'’-")
+
 _DIAS_ES = {"Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles",
             "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado"}
 
@@ -634,16 +641,18 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                             "centro": _centroide(f["geometry"]),
                             "fill": col + [alpha],
                             "linea": col,
-                            # Cada capa trae su tooltip ya armado en `tip`: el
-                            # de Deck es uno solo para todas, y un template
-                            # compartido deja placeholders sin resolver (se ven
-                            # literales: "{estacion}") sobre la capa que no
-                            # tiene ese campo.
-                            "tip": (f"<b>{cn}</b><br/>{n_eds} EDS en cartera<br/>"
-                                    f"🔴 {int(r['vencidas'])} vencidas · "
-                                    f"🟡 {int(r['ventana'])} en ventana<br/>"
-                                    f"Mediana {int(r['dias']) if pd.notna(r['dias']) else 0}"
-                                    " días sin MP"),
+                            # Deck usa UN solo tooltip para todas las capas,
+                            # y el valor de un campo se inserta escapado (el
+                            # HTML dentro del dato se veria literal). Por eso
+                            # ambas capas exponen los mismos cuatro campos de
+                            # texto plano y las etiquetas viven en el template.
+                            "t1": cn,
+                            "t2": f"{n_eds} EDS en cartera",
+                            "t3": (f"🔴 {int(r['vencidas'])} vencidas · "
+                                   f"🟡 {int(r['ventana'])} en ventana"),
+                            "t4": (f"Mediana "
+                                   f"{int(r['dias']) if pd.notna(r['dias']) else 0}"
+                                   " días sin MP"),
                         },
                     })
                 st.caption(
@@ -671,14 +680,11 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     else dict(zip(plan["eds"],
                                   pd.to_datetime(plan["fecha"]).dt.strftime("%d-%m-%Y"))))
             pts["prog"] = pts["eds"].map(prog).fillna("sin programar")
-            pts["tip"] = [
-                f"<b>{e}</b> — {str(es)[:40]}<br/>{c} · {cm}<br/>"
-                f"{l} · {d} días sin MP<br/>Programada: {pr}<br/>"
-                f"Última: {u} · Límite: {li}"
-                for e, es, c, cm, l, d, pr, u, li in zip(
-                    pts["eds"], pts["estacion"], pts["cli"], pts["comuna"],
-                    pts["lbl"], pts["dias_sin_mp"], pts["prog"],
-                    pts["ult"], pts["lim"])]
+            pts["t1"] = [f"{e} — {str(es)[:40]}"
+                         for e, es in zip(pts["eds"], pts["estacion"])]
+            pts["t2"] = pts["cli"] + " · " + pts["comuna"].astype(str)
+            pts["t3"] = pts["lbl"] + " · " + pts["dias_sin_mp"].astype(str)                 + " días sin MP"
+            pts["t4"] = ("Programada: " + pts["prog"] + " · Límite: " + pts["lim"])
 
             try:
                 import pydeck as pdk
@@ -711,6 +717,10 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         get_color=[226, 232, 240] if dark else [15, 23, 42],
                         get_alignment_baseline="'center'",
                         get_text_anchor="'middle'",
+                        # Sin esto deck.gl arma el atlas con un set ASCII y
+                        # "Ñuñoa" se dibuja "u oa": los caracteres que faltan
+                        # se rinden como espacio, no como simbolo de error.
+                        character_set=_CHARSET_ROTULOS,
                         background=True,
                         get_background_color=[12, 37, 64, 190] if dark
                                              else [255, 255, 255, 205],
@@ -731,7 +741,7 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                             zoom=zoom, pitch=0),
                         layers=capas,
                         tooltip={
-                            "html": "{tip}",
+                            "html": "<b>{t1}</b><br/>{t2}<br/>{t3}<br/>{t4}",
                             "style": {
                                 "backgroundColor": "#0C2540" if dark else "#ffffff",
                                 "color": "#e2e8f0" if dark else "#1e293b",
