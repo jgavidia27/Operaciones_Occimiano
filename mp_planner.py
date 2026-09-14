@@ -429,12 +429,23 @@ def detectar_ejecutadas(plan: pd.DataFrame, cartera: pd.DataFrame) -> pd.DataFra
 
 # ── Interfaz ─────────────────────────────────────────────────────────────────
 
-# Juego de caracteres para los rotulos del mapa. deck.gl construye el atlas de
-# la fuente a partir de esta lista; lo que no este aqui se dibuja como espacio
-# en blanco, no como simbolo de error, asi que el defecto pasa desapercibido
-# hasta que alguien mira el mapa ("Nuoa" en vez de "Ñuñoa").
-_CHARSET_ROTULOS = [chr(c) for c in range(32, 127)] + list(
-    "ÁÉÍÓÚÜÑáéíóúüñ·°ªº'’-")
+# Caracteres conflictivos para el charset de la TextLayer: el parser JSON de
+# deck.gl evalua los strings de props como posibles expresiones, y una comilla
+# suelta en la lista rompe el grafico entero con "Unclosed quote".
+_CHARS_PROHIBIDOS = set("\"'`\\")
+
+
+def _charset(nombres) -> list:
+    """Juego de caracteres para los rotulos del mapa.
+
+    deck.gl construye el atlas de la fuente a partir de esta lista y lo que no
+    este aqui se dibuja como ESPACIO EN BLANCO, no como simbolo de error: el
+    defecto pasa desapercibido salvo mirando el mapa ("u oa" por "Ñuñoa").
+    Por eso se deriva de los nombres que realmente se van a rotular, en vez de
+    fijar un set ASCII y esperar que alcance.
+    """
+    cs = {c for n in nombres for c in str(n or "")} - _CHARS_PROHIBIDOS
+    return sorted(cs | set("0123456789 "))
 
 _DIAS_ES = {"Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles",
             "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado"}
@@ -714,9 +725,10 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     })
                 st.caption(
                     "**Haz clic en una comuna** para ver su detalle abajo. "
-                    "El color es la urgencia (rojo = tiene MP vencidas, ámbar = "
-                    "alguna en ventana, teal = al día) y la intensidad, cuántas "
-                    "EDS concentra.")
+                    "El color dice qué falta por hacer este mes: 🟢 verde = sin "
+                    "pendientes, 🟡 ámbar = quedan MP en plazo, 🔴 rojo = hay "
+                    "vencidas o no ejecutadas en su fecha. La intensidad indica "
+                    "cuántas EDS concentra la comuna.")
             else:
                 feats = []
                 st.warning(
@@ -760,10 +772,10 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         auto_highlight=True, id="comunas"))
                     # Nombre de la comuna sobre su centroide: sin rótulo hay
                     # que adivinar qué polígono es cuál.
-                    # Sin SDF: activarlo hacía que deck.gl dibujara los glifos
-                    # enormes y difuminados, tapando el mapa entero. El fondo
-                    # semitransparente reemplaza al contorno para dar contraste.
-                    capas.append(pdk.Layer(
+                    # Rótulo de comuna. El mapa base de CARTO no los pone a
+                    # zoom de ciudad, así que sin esta capa hay que adivinar
+                    # qué polígono es cuál.
+                    _rot = pdk.Layer(
                         "TextLayer",
                         data=[{"comuna": f["properties"]["comuna"],
                                "pos": f["properties"]["centro"]}
@@ -774,15 +786,21 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         get_color=[226, 232, 240] if dark else [15, 23, 42],
                         get_alignment_baseline="'center'",
                         get_text_anchor="'middle'",
-                        # Sin esto deck.gl arma el atlas con un set ASCII y
-                        # "Ñuñoa" se dibuja "u oa": los caracteres que faltan
-                        # se rinden como espacio, no como simbolo de error.
-                        character_set=_CHARSET_ROTULOS,
                         background=True,
                         get_background_color=[12, 37, 64, 190] if dark
                                              else [255, 255, 255, 205],
                         background_padding=[3, 1, 3, 1],
-                        pickable=False, id="rotulos"))
+                        pickable=False, id="rotulos")
+                    # characterSet se inyecta DESPUÉS de construir la capa: si
+                    # se pasa como argumento, pydeck lo prefija con "@@=" y
+                    # deck.gl lo evalúa como expresión, no como lista. Llega
+                    # convertido en función y la capa muere entera con
+                    # "function is not iterable". Sin él, deck.gl arma el atlas
+                    # de la fuente con un set ASCII y la Ñ y las vocales
+                    # acentuadas se dibujan como espacio: "Ñuñoa" queda "u oa".
+                    _rot.__dict__["characterSet"] = _charset(
+                        f["properties"]["comuna"] for f in feats)
+                    capas.append(_rot)
                 capas.append(pdk.Layer(
                     "ScatterplotLayer", data=pts, id="eds",
                     get_position="[lon, lat]", get_fill_color="color",
