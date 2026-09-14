@@ -123,6 +123,24 @@ def norm_comuna(nombre) -> str:
     return " ".join(_re.sub(r"[^A-Z0-9 ]", " ", s).split())
 
 
+def _centroide(geom) -> list | None:
+    """Punto donde va el rótulo: centroide del anillo exterior más grande.
+
+    No es el centroide del polígono completo — con comunas de forma irregular
+    ese punto puede caer fuera del área; el del anillo mayor siempre queda
+    dentro del cuerpo principal.
+    """
+    gt, co = geom.get("type"), geom.get("coordinates")
+    anillos = co if gt == "Polygon" else [p[0] for p in co if p]
+    if not anillos:
+        return None
+    r = max(anillos, key=len)
+    if not r:
+        return None
+    return [round(sum(p[0] for p in r) / len(r), 5),
+            round(sum(p[1] for p in r) / len(r), 5)]
+
+
 def cargar_comunas() -> dict | None:
     """Polígonos de las comunas de Chile (comunas_chile.geojson, en el repo).
 
@@ -613,6 +631,7 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         "geometry": f["geometry"],
                         "properties": {
                             "comuna": cn,
+                            "centro": _centroide(f["geometry"]),
                             "eds": n_eds,
                             "vencidas": int(r["vencidas"]),
                             "ventana": int(r["ventana"]),
@@ -662,6 +681,21 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         get_line_width=90, line_width_min_pixels=1.2,
                         stroked=True, filled=True, pickable=True,
                         auto_highlight=True, id="comunas"))
+                    # Nombre de la comuna sobre su centroide: sin rótulo hay
+                    # que adivinar qué polígono es cuál.
+                    capas.append(pdk.Layer(
+                        "TextLayer",
+                        data=[{"comuna": f["properties"]["comuna"],
+                               "pos": f["properties"]["centro"]}
+                              for f in feats if f["properties"]["centro"]],
+                        get_position="pos", get_text="comuna",
+                        get_size=11, size_units="pixels",
+                        get_color=[226, 232, 240] if dark else [30, 41, 59],
+                        get_alignment_baseline="'center'",
+                        get_text_anchor="'middle'",
+                        outline_width=2, outline_color=[12, 37, 64] if dark else [255, 255, 255],
+                        font_settings={"sdf": True},
+                        pickable=False, id="rotulos"))
                 capas.append(pdk.Layer(
                     "ScatterplotLayer", data=pts, id="eds",
                     get_position="[lon, lat]", get_fill_color="color",
