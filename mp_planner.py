@@ -28,6 +28,13 @@ TOLERANCIA = 5
 CAP_DIA = 3
 RADIO_KM = 8.0
 
+# Puesta en marcha del sistema. Hasta esta fecha la programacion de MP se lleva
+# en el Excel de operaciones; desde aqui, toda visita de MP se planifica y se
+# mide con este modulo. Antes de la fecha la vista es una PREVISUALIZACION: el
+# mes en curso todavia se esta ejecutando por el proceso antiguo, asi que las
+# MP que aparecen "atrasadas" no son deuda de este sistema.
+INICIO_SISTEMA = date(2026, 10, 1)
+
 # Comunas del Gran Santiago + provincias de la RM. Se usa para separar la
 # cartera en zonas operativas: un técnico de la RM no cruza a regiones.
 COMUNAS_RM = frozenset({
@@ -377,13 +384,24 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
         "cargado. Para cada EDS se toma su **última MP finalizada**, se proyecta "
         f"el objetivo a **{CICLO_DIAS} días** con tolerancia **±{TOLERANCIA}**, y "
         "las MPs que caen en el horizonte se agrupan en rutas por **cercanía "
-        "geográfica** respetando la capacidad de cada técnico."
+        "geográfica** respetando la capacidad de cada técnico. Cuenta como "
+        f"visita de este sistema toda MP desde el {INICIO_SISTEMA:%d-%m-%Y}."
     )
 
     try:
         from data import EDS_NO_APLICA
     except Exception:
         EDS_NO_APLICA = frozenset()
+
+    if hoy < INICIO_SISTEMA:
+        _faltan = (INICIO_SISTEMA - hoy).days
+        st.info(
+            f"🗓️ **Previsualización.** Este planificador rige las visitas de MP "
+            f"**desde el {INICIO_SISTEMA:%d-%m-%Y}** (faltan {_faltan} días). "
+            "Hasta entonces la programación vigente es la del **Excel de "
+            "operaciones**, y lo que ves aquí se recalcula solo a medida que se "
+            "cierran las MP del mes en curso: cada MP que se realiza corre su "
+            "próxima fecha objetivo.")
 
     geo = cargar_geo()
     if geo.empty:
@@ -448,8 +466,12 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
     # Ajuste manual el recálculo de lo pendiente.
     with st.expander("📆 Horizonte y dotación", expanded=False):
         r1, r2, r3 = st.columns([1.1, 1.1, 1.8])
-        ini = r1.date_input("Inicio", date(2026, 10, 1), key="mpp_ini")
-        fin_ = r2.date_input("Término", date(2026, 10, 31), key="mpp_fin")
+        _ini_def = max(hoy, INICIO_SISTEMA)
+        _fin_def = (_ini_def.replace(day=1) + timedelta(days=62)).replace(day=1)             - timedelta(days=1)
+        ini = r1.date_input("Inicio", _ini_def, key="mpp_ini",
+                            help=f"El sistema entra en marcha el "
+                                 f"{INICIO_SISTEMA:%d-%m-%Y}.")
+        fin_ = r2.date_input("Término", _fin_def, key="mpp_fin")
         todos_tec = sorted({m for v in eq_map.values() for m in v})
         miembros = eq_map.get(equipo, todos_tec) if equipo != "Todos" else todos_tec
         tecs = r3.multiselect("Técnicos del equipo", miembros,
@@ -704,104 +726,115 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                 st.caption(
                     f"Dotación disponible para MP: **{sin_turno:.1f} de {len(tecs)} "
                     f"técnicos** por día hábil, una vez descontados los de turno.")
-                arr = int((pd.to_datetime(base["limite"]).dt.date < ini).sum())
-                if arr:
-                    st.warning(
-                        f"**{arr} MP** de la selección ya superan su límite antes "
-                        f"del {ini:%d-%m-%Y}. Entran igual a la ruta, pero nacen "
-                        "incumplidas: son arrastre, no planificación.")
-                total_geo = len(base.dropna(subset=["lat", "lon"]))
-                m = st.columns(4)
-                m[0].metric("MP programadas", f"{len(plan):,}")
-                m[1].metric("Dentro de ventana", f"{int(plan['en_ventana'].sum()):,}",
-                            f"{plan['en_ventana'].mean() * 100:.0f}%")
-                m[2].metric("Jornadas usadas",
-                            f"{plan.groupby(['fecha', 'tecnico']).ngroups:,}",
-                            help=f"A {cap} MP por técnico/día.")
-                m[3].metric("Km por ruta (mediana)", f"{plan['km_ruta'].median():.1f}",
-                            help="Distancia entre las dos EDS más lejanas de la "
-                                 "jornada. Baja = ruta compacta.")
-                sin_cupo = total_geo - len(plan)
-                if sin_cupo > 0:
-                    need = math.ceil(total_geo / max(1, len(dias)) / cap)
-                    st.info(f"**{sin_cupo} MP** no alcanzan cupo con {len(tecs)} "
-                            f"técnico(s) en el período. Cubrir todo requiere "
-                            f"**{need} técnicos** dedicados a MP.")
+            arr = int((pd.to_datetime(base["limite"]).dt.date < ini).sum())
+            if arr and ini <= INICIO_SISTEMA:
+                # Antes de la puesta en marcha, lo "atrasado" no es deuda de
+                # este sistema: son las MP que el proceso en Excel todavia
+                # esta cerrando este mes. Recien el dia de arranque, con
+                # septiembre ya cerrado, el atraso que quede es real.
+                st.info(
+                    f"**{arr} MP** aparecen fuera de plazo al {ini:%d-%m-%Y}, "
+                    "pero su ventana cae **antes** de la puesta en marcha: "
+                    "siguen a cargo de la planificacion en Excel. Este numero "
+                    "baja solo a medida que se cierren, y el arrastre real se "
+                    f"conoce el {INICIO_SISTEMA:%d-%m-%Y}.")
+            elif arr:
+                st.warning(
+                    f"**{arr} MP** de la seleccion ya superan su limite antes "
+                    f"del {ini:%d-%m-%Y}. Entran igual a la ruta, pero nacen "
+                    "incumplidas: son arrastre, no planificacion.")
+            total_geo = len(base.dropna(subset=["lat", "lon"]))
+            m = st.columns(4)
+            m[0].metric("MP programadas", f"{len(plan):,}")
+            m[1].metric("Dentro de ventana", f"{int(plan['en_ventana'].sum()):,}",
+                        f"{plan['en_ventana'].mean() * 100:.0f}%")
+            m[2].metric("Jornadas usadas",
+                        f"{plan.groupby(['fecha', 'tecnico']).ngroups:,}",
+                        help=f"A {cap} MP por técnico/día.")
+            m[3].metric("Km por ruta (mediana)", f"{plan['km_ruta'].median():.1f}",
+                        help="Distancia entre las dos EDS más lejanas de la "
+                             "jornada. Baja = ruta compacta.")
+            sin_cupo = total_geo - len(plan)
+            if sin_cupo > 0:
+                need = math.ceil(total_geo / max(1, len(dias)) / cap)
+                st.info(f"**{sin_cupo} MP** no alcanzan cupo con {len(tecs)} "
+                        f"técnico(s) en el período. Cubrir todo requiere "
+                        f"**{need} técnicos** dedicados a MP.")
 
-                # Cobertura por cliente. El ruteo NO discrimina cliente — si la
-                # EDS más cercana a una Copec es una Shell, esa es la siguiente
-                # parada. Esto es para saber a quién se está atendiendo, no para
-                # condicionar la ruta.
-                with st.expander("🏷️ Clientes cubiertos en el período", expanded=False):
-                    st.caption(
-                        "Las rutas se optimizan **sólo por cercanía y fecha "
-                        "límite**: una jornada puede mezclar clientes si las "
-                        "estaciones están al lado. Este cuadro es para saber a "
-                        "quién se atiende, no para separar rutas por marca.")
-                    plan["_cli"] = plan["cliente"].map(_cli_corto)
-                    pend_cli = base.copy()
-                    pend_cli["_cli"] = pend_cli["cliente"].map(_cli_corto)
-                    rc = (plan.groupby("_cli")
-                              .agg(MP=("eds", "count"),
-                                   EnVentana=("en_ventana", "sum"))
-                              .reset_index())
-                    rc["Cobertura"] = rc["_cli"].map(
-                        pend_cli.groupby("_cli")["eds"].count())
-                    rc["% en ventana"] = (rc["EnVentana"] / rc["MP"] * 100).round(0)
-                    rc = (rc.rename(columns={"_cli": "Cliente",
-                                             "MP": "MP programadas",
-                                             "EnVentana": "Dentro de ventana",
-                                             "Cobertura": "EDS en cartera"})
-                            [["Cliente", "EDS en cartera", "MP programadas",
-                              "Dentro de ventana", "% en ventana"]]
-                            .sort_values("MP programadas", ascending=False))
-                    st.dataframe(rc, use_container_width=True, hide_index=True)
-                    mixtos = int(sum(
-                        1 for _, g in plan.groupby(["fecha", "tecnico"])
-                        if g["cliente"].map(_cli_corto).nunique() > 1))
-                    tot_j = plan.groupby(["fecha", "tecnico"]).ngroups
-                    st.caption(
-                        f"**{mixtos} de {tot_j} jornadas** combinan más de un "
-                        "cliente — señal de que la ruta se está armando por "
-                        "cercanía real y no por marca.")
+            # Cobertura por cliente. El ruteo NO discrimina cliente — si la
+            # EDS más cercana a una Copec es una Shell, esa es la siguiente
+            # parada. Esto es para saber a quién se está atendiendo, no para
+            # condicionar la ruta.
+            with st.expander("🏷️ Clientes cubiertos en el período", expanded=False):
+                st.caption(
+                    "Las rutas se optimizan **sólo por cercanía y fecha "
+                    "límite**: una jornada puede mezclar clientes si las "
+                    "estaciones están al lado. Este cuadro es para saber a "
+                    "quién se atiende, no para separar rutas por marca.")
+                plan["_cli"] = plan["cliente"].map(_cli_corto)
+                pend_cli = base.copy()
+                pend_cli["_cli"] = pend_cli["cliente"].map(_cli_corto)
+                rc = (plan.groupby("_cli")
+                          .agg(MP=("eds", "count"),
+                               EnVentana=("en_ventana", "sum"))
+                          .reset_index())
+                rc["Cobertura"] = rc["_cli"].map(
+                    pend_cli.groupby("_cli")["eds"].count())
+                rc["% en ventana"] = (rc["EnVentana"] / rc["MP"] * 100).round(0)
+                rc = (rc.rename(columns={"_cli": "Cliente",
+                                         "MP": "MP programadas",
+                                         "EnVentana": "Dentro de ventana",
+                                         "Cobertura": "EDS en cartera"})
+                        [["Cliente", "EDS en cartera", "MP programadas",
+                          "Dentro de ventana", "% en ventana"]]
+                        .sort_values("MP programadas", ascending=False))
+                st.dataframe(rc, use_container_width=True, hide_index=True)
+                mixtos = int(sum(
+                    1 for _, g in plan.groupby(["fecha", "tecnico"])
+                    if g["cliente"].map(_cli_corto).nunique() > 1))
+                tot_j = plan.groupby(["fecha", "tecnico"]).ngroups
+                st.caption(
+                    f"**{mixtos} de {tot_j} jornadas** combinan más de un "
+                    "cliente — señal de que la ruta se está armando por "
+                    "cercanía real y no por marca.")
 
-                for d, gd in plan.groupby("fecha"):
-                    dia_lbl = f"{d:%A %d-%m-%Y}"
-                    for en, es in _DIAS_ES.items():
-                        dia_lbl = dia_lbl.replace(en, es)
-                    st.markdown(f"##### {dia_lbl}")
-                    # Sólo los técnicos con ruta ese día: con la dotación
-                    # completa, una columna por persona deja tarjetas ilegibles.
-                    del_dia = sorted(gd["tecnico"].unique())
-                    cols = st.columns(min(4, len(del_dia)) or 1)
-                    for i, tec in enumerate(del_dia):
-                        gt = gd[gd["tecnico"] == tec]
-                        with cols[i % len(cols)]:
-                            km = float(gt["km_ruta"].iloc[0])
-                            coms = ", ".join(sorted(gt["comuna"].dropna().unique()))
-                            # Los clientes de la jornada son informativos: la ruta
-                            # se arma sólo por cercanía y fecha límite. Que un día
-                            # mezcle Copec y Shell es lo correcto si quedan al lado.
-                            clis = ", ".join(sorted(
-                                {_cli_corto(c) for c in gt["cliente"].dropna()
-                                 if str(c).strip()}))
-                            with st.container(border=True):
+            for d, gd in plan.groupby("fecha"):
+                dia_lbl = f"{d:%A %d-%m-%Y}"
+                for en, es in _DIAS_ES.items():
+                    dia_lbl = dia_lbl.replace(en, es)
+                st.markdown(f"##### {dia_lbl}")
+                # Sólo los técnicos con ruta ese día: con la dotación
+                # completa, una columna por persona deja tarjetas ilegibles.
+                del_dia = sorted(gd["tecnico"].unique())
+                cols = st.columns(min(4, len(del_dia)) or 1)
+                for i, tec in enumerate(del_dia):
+                    gt = gd[gd["tecnico"] == tec]
+                    with cols[i % len(cols)]:
+                        km = float(gt["km_ruta"].iloc[0])
+                        coms = ", ".join(sorted(gt["comuna"].dropna().unique()))
+                        # Los clientes de la jornada son informativos: la ruta
+                        # se arma sólo por cercanía y fecha límite. Que un día
+                        # mezcle Copec y Shell es lo correcto si quedan al lado.
+                        clis = ", ".join(sorted(
+                            {_cli_corto(c) for c in gt["cliente"].dropna()
+                             if str(c).strip()}))
+                        with st.container(border=True):
+                            st.markdown(
+                                f"**{tec}** · {len(gt)} MP · {km:.1f} km  \n"
+                                f"<span style='font-size:.75rem;color:{muted};'>"
+                                f"{coms}</span>  \n"
+                                f"<span style='font-size:.75rem;'>🏷️ {clis}</span>",
+                                unsafe_allow_html=True)
+                            for _, r in gt.iterrows():
+                                fl = "  ⚠️" if not r["en_ventana"] else ""
                                 st.markdown(
-                                    f"**{tec}** · {len(gt)} MP · {km:.1f} km  \n"
-                                    f"<span style='font-size:.75rem;color:{muted};'>"
-                                    f"{coms}</span>  \n"
-                                    f"<span style='font-size:.75rem;'>🏷️ {clis}</span>",
-                                    unsafe_allow_html=True)
-                                for _, r in gt.iterrows():
-                                    fl = "  ⚠️" if not r["en_ventana"] else ""
-                                    st.markdown(
-                                        f"<span style='font-size:.78rem;'>"
-                                        f"<b>{r['eds']}</b> {str(r['estacion'])[:28]}"
-                                        f"<br/><span style='color:{muted};'>"
-                                        f"{_cli_corto(r['cliente'])} · lím "
-                                        f"{pd.Timestamp(r['limite']):%d-%m}{fl}</span>"
-                                        f"</span>", unsafe_allow_html=True)
-                st.session_state["mpp_plan"] = plan
+                                    f"<span style='font-size:.78rem;'>"
+                                    f"<b>{r['eds']}</b> {str(r['estacion'])[:28]}"
+                                    f"<br/><span style='color:{muted};'>"
+                                    f"{_cli_corto(r['cliente'])} · lím "
+                                    f"{pd.Timestamp(r['limite']):%d-%m}{fl}</span>"
+                                    f"</span>", unsafe_allow_html=True)
+            st.session_state["mpp_plan"] = plan
 
     # ── Arrastre ─────────────────────────────────────────────────────────────
     with t_atr:
@@ -845,7 +878,7 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                 "EDS", opts, key="mpp_fix_eds",
                 format_func=lambda e: f"{e} — "
                 f"{str(base.loc[base['eds'] == e, 'estacion'].iloc[0])[:36]}")
-            f_sel = a2.date_input("Fecha", date(2026, 10, 1), key="mpp_fix_f")
+            f_sel = a2.date_input("Fecha", max(hoy, INICIO_SISTEMA), key="mpp_fix_f")
             todos_tec = sorted({m for v in eq_map.values() for m in v})
             t_sel = a3.selectbox("Técnico", todos_tec, key="mpp_fix_t")
             b1, b2 = st.columns(2)
