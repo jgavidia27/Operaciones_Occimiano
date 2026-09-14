@@ -74,7 +74,19 @@ def haversine(lat1, lon1, lat2, lon2) -> float:
 # ── Cartera ──────────────────────────────────────────────────────────────────
 
 def cargar_geo() -> pd.DataFrame:
-    """Coordenadas y comuna por EDS desde Supabase (tabla eds_geo)."""
+    """Coordenadas y comuna por EDS desde Supabase (tabla eds_geo).
+
+    Cacheada: se vuelve a leer en cada rerun de Streamlit —y un clic en el mapa
+    ES un rerun—, pero cambia solo cuando corre sync_eds_geo.py.
+    """
+    try:
+        import streamlit as _st
+        return _cargar_geo_cache()
+    except Exception:
+        return _cargar_geo_raw()
+
+
+def _cargar_geo_raw() -> pd.DataFrame:
     try:
         from supabase_client import _query
         rows = _query("eds_geo", "select=eds_occim,loc_fracttal,latitud,longitud,comuna", 5000)
@@ -98,6 +110,7 @@ ALIAS_COMUNA = {
     "Malloco": "Peñaflor",          # localidad de Peñaflor
     "La Calera": "Calera",          # nombre oficial: Calera
     "Valpapaíso": "Valparaíso",     # error de tipeo en el maestro de Fracttal
+    "Til Til": "Tiltil",            # nombre oficial: Tiltil, en una palabra
 }
 
 
@@ -118,6 +131,14 @@ def cargar_comunas() -> dict | None:
     de tolerancia, que a zoom nacional es invisible y baja el archivo de
     1,7 MB a 531 KB.
     """
+    try:
+        import streamlit as _st
+        return _cargar_comunas_cache()
+    except Exception:
+        return _cargar_comunas_raw()
+
+
+def _cargar_comunas_raw() -> dict | None:
     import json as _j
     import os as _o
     ruta = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),
@@ -128,6 +149,36 @@ def cargar_comunas() -> dict | None:
         return _j.loads(open(ruta, encoding="utf-8").read())
     except Exception:
         return None
+
+
+# ── Cachés de Streamlit ──────────────────────────────────────────────────────
+# Cada interacción con el mapa dispara un rerun completo del script. Sin caché,
+# un clic en una comuna volvía a pedir eds_geo a Supabase (1,3 s), releer el
+# GeoJSON y reconstruir toda la cartera (1,8 s): ~3 s de espera por clic para
+# recalcular cosas que no cambiaron.
+try:
+    import streamlit as _stc
+
+    @_stc.cache_data(ttl=1800, show_spinner=False)
+    def _cargar_geo_cache() -> pd.DataFrame:
+        return _cargar_geo_raw()
+
+    @_stc.cache_resource(show_spinner=False)
+    def _cargar_comunas_cache() -> dict | None:
+        return _cargar_comunas_raw()
+
+    @_stc.cache_data(ttl=900, show_spinner=False)
+    def _cartera_cache(_raw, _geo, hoy_iso: str, excl: tuple,
+                       ciclo: int, tol: int) -> pd.DataFrame:
+        """`_raw` y `_geo` van con guion bajo: Streamlit no los hashea. La clave
+        real es (fecha, exclusiones, ciclo, tolerancia), que es lo que el usuario
+        puede cambiar en pantalla."""
+        return construir_cartera(_raw, _geo, date.fromisoformat(hoy_iso),
+                                 frozenset(excl), ciclo, tol)
+except Exception:                      # fuera de Streamlit (tests, scripts)
+    _cargar_geo_cache = None
+    _cargar_comunas_cache = None
+    _cartera_cache = None
 
 
 def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
@@ -421,7 +472,11 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                                       help="Distancia máxima entre EDS de una misma "
                                            "ruta. Se expande sola si no hay vecinos."))
 
-    cartera = construir_cartera(raw_prev, geo, hoy, EDS_NO_APLICA, ciclo, tol)
+    if _cartera_cache is not None:
+        cartera = _cartera_cache(raw_prev, geo, hoy.isoformat(),
+                                 tuple(sorted(EDS_NO_APLICA)), ciclo, tol)
+    else:
+        cartera = construir_cartera(raw_prev, geo, hoy, EDS_NO_APLICA, ciclo, tol)
     if cartera.empty:
         st.warning("Sin historial de MP finalizadas para construir la cartera.")
         return
@@ -798,7 +853,19 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     "cliente — señal de que la ruta se está armando por "
                     "cercanía real y no por marca.")
 
-            for d, gd in plan.groupby("fecha"):
+            # Paginado por semana. Streamlit re-renderiza TODAS las pestañas
+            # en cada rerun —y un clic en el mapa es un rerun—, así que dibujar
+            # dos meses de tarjetas de ruta encarecía cada interacción aunque
+            # el usuario estuviera mirando el mapa.
+            _sem = plan["fecha"].dt.to_period("W")
+            _ops = sorted(_sem.unique())
+            _lbl = {w: f"{w.start_time:%d-%m} al {w.end_time:%d-%m}" for w in _ops}
+            _pick = st.radio("Semana", _ops, horizontal=True, key="mpp_semrut",
+                             format_func=lambda w: _lbl[w],
+                             help="Se dibuja una semana a la vez para que la "
+                                  "vista responda rápido.")
+            _vis = plan[_sem == _pick]
+            for d, gd in _vis.groupby("fecha"):
                 dia_lbl = f"{d:%A %d-%m-%Y}"
                 for en, es in _DIAS_ES.items():
                     dia_lbl = dia_lbl.replace(en, es)
