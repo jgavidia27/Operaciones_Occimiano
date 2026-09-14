@@ -632,12 +632,18 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         "properties": {
                             "comuna": cn,
                             "centro": _centroide(f["geometry"]),
-                            "eds": n_eds,
-                            "vencidas": int(r["vencidas"]),
-                            "ventana": int(r["ventana"]),
-                            "dias": int(r["dias"]) if pd.notna(r["dias"]) else 0,
                             "fill": col + [alpha],
                             "linea": col,
+                            # Cada capa trae su tooltip ya armado en `tip`: el
+                            # de Deck es uno solo para todas, y un template
+                            # compartido deja placeholders sin resolver (se ven
+                            # literales: "{estacion}") sobre la capa que no
+                            # tiene ese campo.
+                            "tip": (f"<b>{cn}</b><br/>{n_eds} EDS en cartera<br/>"
+                                    f"🔴 {int(r['vencidas'])} vencidas · "
+                                    f"🟡 {int(r['ventana'])} en ventana<br/>"
+                                    f"Mediana {int(r['dias']) if pd.notna(r['dias']) else 0}"
+                                    " días sin MP"),
                         },
                     })
                 st.caption(
@@ -665,6 +671,14 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     else dict(zip(plan["eds"],
                                   pd.to_datetime(plan["fecha"]).dt.strftime("%d-%m-%Y"))))
             pts["prog"] = pts["eds"].map(prog).fillna("sin programar")
+            pts["tip"] = [
+                f"<b>{e}</b> — {str(es)[:40]}<br/>{c} · {cm}<br/>"
+                f"{l} · {d} días sin MP<br/>Programada: {pr}<br/>"
+                f"Última: {u} · Límite: {li}"
+                for e, es, c, cm, l, d, pr, u, li in zip(
+                    pts["eds"], pts["estacion"], pts["cli"], pts["comuna"],
+                    pts["lbl"], pts["dias_sin_mp"], pts["prog"],
+                    pts["ult"], pts["lim"])]
 
             try:
                 import pydeck as pdk
@@ -683,6 +697,9 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         auto_highlight=True, id="comunas"))
                     # Nombre de la comuna sobre su centroide: sin rótulo hay
                     # que adivinar qué polígono es cuál.
+                    # Sin SDF: activarlo hacía que deck.gl dibujara los glifos
+                    # enormes y difuminados, tapando el mapa entero. El fondo
+                    # semitransparente reemplaza al contorno para dar contraste.
                     capas.append(pdk.Layer(
                         "TextLayer",
                         data=[{"comuna": f["properties"]["comuna"],
@@ -690,11 +707,14 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                               for f in feats if f["properties"]["centro"]],
                         get_position="pos", get_text="comuna",
                         get_size=11, size_units="pixels",
-                        get_color=[226, 232, 240] if dark else [30, 41, 59],
+                        size_min_pixels=9, size_max_pixels=14,
+                        get_color=[226, 232, 240] if dark else [15, 23, 42],
                         get_alignment_baseline="'center'",
                         get_text_anchor="'middle'",
-                        outline_width=2, outline_color=[12, 37, 64] if dark else [255, 255, 255],
-                        font_settings={"sdf": True},
+                        background=True,
+                        get_background_color=[12, 37, 64, 190] if dark
+                                             else [255, 255, 255, 205],
+                        background_padding=[3, 1, 3, 1],
                         pickable=False, id="rotulos"))
                 capas.append(pdk.Layer(
                     "ScatterplotLayer", data=pts, id="eds",
@@ -711,10 +731,7 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                             zoom=zoom, pitch=0),
                         layers=capas,
                         tooltip={
-                            "html": "<b>{eds}</b> {comuna}<br/>{estacion}<br/>"
-                                    "{cli}<br/>{lbl} · {dias_sin_mp} días sin MP<br/>"
-                                    "Programada: {prog}<br/>"
-                                    "Última: {ult} · Límite: {lim}",
+                            "html": "{tip}",
                             "style": {
                                 "backgroundColor": "#0C2540" if dark else "#ffffff",
                                 "color": "#e2e8f0" if dark else "#1e293b",
