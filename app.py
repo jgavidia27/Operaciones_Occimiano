@@ -9818,7 +9818,8 @@ elif _page == _NAV_PAGES[4]:
                 # Filtrar por umbral min
                 _agg = _agg[_agg["km"] >= max(0.5, _veh_min_km)]
 
-                # Turnos: cargar TODO turnos_data.json (10 semanas ya viene todo)
+                # Turnos: cargar TODO turnos_data.json (incluye las semanas
+                # proyectadas, marcadas con _estimado)
                 _turnos = _load_turnos_finde_desde_json()
 
                 # Función para detectar si técnico está de turno ese día

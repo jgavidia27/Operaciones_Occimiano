@@ -183,6 +183,10 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
     Se respetan tal cual y el resto se recalcula alrededor de ellas.
     """
     fijos = fijos or {}
+    # `tecnicos` puede ser una lista fija o un dict {fecha: [técnicos]}. Lo
+    # segundo es lo normal: quien está de turno atiende correctivas y no está
+    # disponible para MP ese día, así que la dotación cambia semana a semana.
+    por_dia = isinstance(tecnicos, dict)
     pend = {r["eds"]: r for r in cartera.to_dict("records")
             if pd.notna(r.get("lat")) and pd.notna(r.get("lon"))}
     filas = []
@@ -198,7 +202,7 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
         ocupado[k] = sum(1 for x in filas if (x["fecha"], x["tecnico"]) == k)
 
     for d in dias:
-        for tec in tecnicos:
+        for tec in (tecnicos.get(d, []) if por_dia else tecnicos):
             if not pend:
                 break
             cupo = cap - ocupado.get((d, tec), 0)
@@ -275,13 +279,37 @@ def _cli_corto(c) -> str:
     return s.title()
 
 
-def _equipos():
-    """Equipos de terreno y sus miembros, desde el roster maestro."""
+def _equipos(hasta: date | None = None):
+    """Equipos de terreno y sus miembros, sin los que están de baja a esa fecha.
+
+    El roster maestro conserva a los técnicos dados de baja para que la data
+    histórica siga mapeando a su equipo. Para planificar hacia adelante hay que
+    sacarlos, o el motor les asigna rutas a gente que ya no está.
+    """
     try:
-        from data import GRUPOS_TERRENO
+        from data import GRUPOS_TERRENO, TECNICOS_BAJA
     except Exception:
         return {}
-    return {k: list(v["miembros"]) for k, v in GRUPOS_TERRENO.items()}
+    corte = (hasta or date.today()).isoformat()
+    # Las bajas se registran con nombre completo y el roster usa nombre corto:
+    # el cruce es por tokens, igual que con los turnos.
+    fuera = set()
+    for full, info in (TECNICOS_BAJA or {}).items():
+        if str(info.get("hasta", "")) < corte:
+            fuera.add(frozenset(_tok(full)))
+
+    def de_baja(corto: str) -> bool:
+        t = _tok(corto)
+        return bool(t) and any(t <= f for f in fuera)
+
+    return {k: [m for m in v["miembros"] if not de_baja(m)]
+            for k, v in GRUPOS_TERRENO.items()}
+
+
+def _tok(nombre: str) -> set:
+    import unicodedata as _u
+    s = _u.normalize("NFKD", str(nombre or "").lower()).encode("ascii", "ignore").decode()
+    return {p for p in s.split() if len(p) > 2}
 
 
 def render(raw_prev, hoy: date, theme: dict | None = None):
@@ -431,9 +459,16 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
         fin_ = r2.date_input("Término", date(2026, 10, 31), key="mpp_fin")
         todos_tec = sorted({m for v in eq_map.values() for m in v})
         miembros = eq_map.get(equipo, todos_tec) if equipo != "Todos" else todos_tec
-        tecs = r3.multiselect("Técnicos disponibles", miembros,
-                              default=miembros[:3], key="mpp_tec")
-        sab = st.checkbox("Incluir sábados", value=False, key="mpp_sab")
+        tecs = r3.multiselect("Técnicos del equipo", miembros,
+                              default=miembros, key="mpp_tec")
+        s1, s2 = st.columns([1, 2])
+        sab = s1.checkbox("Incluir sábados", value=False, key="mpp_sab")
+        desc_turno = s2.checkbox(
+            "Descontar técnicos de turno (hacen correctivas)", value=True,
+            key="mpp_turno",
+            help="Estar de turno significa atender correctivas: ese día el "
+                 "técnico no está disponible para MP. La dotación se toma de "
+                 "Planificación Turnos STO, semana a semana.")
 
         if not tecs:
             st.info("Selecciona al menos un técnico para generar rutas.")
@@ -442,7 +477,21 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
         else:
             dias = dias_habiles(ini, fin_, sab)
             fijos = st.session_state.get("mpp_fijos", {})
-            plan = planificar(base, dias, tecs, cap, radio, fijos)
+            disp, sin_turno = tecs, None
+            if desc_turno:
+                try:
+                    import turnos as _tn
+                    mapa = _tn.de_turno_por_dia(fin_)
+                    disp = {d: _tn.disponibles_para_mp(tecs, d, mapa) for d in dias}
+                    sin_turno = sum(len(v) for v in disp.values()) / max(1, len(dias))
+                except Exception as exc:
+                    st.warning(f"No se pudo leer la programación de turnos ({exc}). "
+                               "Se usa la dotación completa.")
+            if sin_turno is not None:
+                st.caption(
+                    f"Dotación disponible para MP: **{sin_turno:.1f} de {len(tecs)} "
+                    f"técnicos** por día hábil, una vez descontados los de turno.")
+            plan = planificar(base, dias, disp, cap, radio, fijos)
             if plan.empty:
                 st.info("Nada que programar en el horizonte elegido.")
             else:
@@ -512,13 +561,13 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     for en, es in _DIAS_ES.items():
                         dia_lbl = dia_lbl.replace(en, es)
                     st.markdown(f"##### {dia_lbl}")
-                    cols = st.columns(len(tecs))
-                    for i, tec in enumerate(tecs):
+                    # Sólo los técnicos con ruta ese día: con la dotación
+                    # completa, una columna por persona deja tarjetas ilegibles.
+                    del_dia = sorted(gd["tecnico"].unique())
+                    cols = st.columns(min(4, len(del_dia)) or 1)
+                    for i, tec in enumerate(del_dia):
                         gt = gd[gd["tecnico"] == tec]
-                        with cols[i]:
-                            if gt.empty:
-                                st.caption(f"**{tec}** — sin ruta")
-                                continue
+                        with cols[i % len(cols)]:
                             km = float(gt["km_ruta"].iloc[0])
                             coms = ", ".join(sorted(gt["comuna"].dropna().unique()))
                             # Los clientes de la jornada son informativos: la ruta
