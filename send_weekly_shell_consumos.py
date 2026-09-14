@@ -2,7 +2,7 @@
 send_weekly_shell_consumos.py — Reporte semanal Shell al área comercial.
 ========================================================================
 
-Cada lunes envía a jperez, pgomez, dhevia, jcaceres, wsoto:
+Cada lunes envía a jperez, pgomez, dhevia, bballadares, wsoto:
   - Excel con TODAS las OTs Shell del MES en curso (hasta el domingo previo)
   - PPT con métricas de la SEMANA ISO ANTERIOR (lun→dom)
 
@@ -64,7 +64,7 @@ DESTINATARIOS = [
     "jperez@occimiano.cl",
     "pgomez@occimiano.cl",
     "dhevia@occimiano.cl",
-    "jcaceres@occimiano.cl",
+    "bballadares@occimiano.cl",
     "wsoto@occimiano.cl",
 ]
 

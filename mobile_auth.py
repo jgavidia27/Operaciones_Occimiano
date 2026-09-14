@@ -47,7 +47,7 @@ ADMINS = {
     "operaciones@occimiano.cl",
     "jgavidia@occimiano.cl",
     "dhevia@occimiano.cl",
-    "jcaceres@occimiano.cl",
+    "bballadares@occimiano.cl",
     "wsoto@occimiano.cl",
     "mhevia@occimiano.cl",
 }

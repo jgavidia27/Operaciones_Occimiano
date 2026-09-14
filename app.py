@@ -1534,7 +1534,7 @@ st.markdown("""
 # de asignación de técnicos, cronograma, HHEE, etc.)
 _UTIL_TIEMPO_EMAILS_PERMITIDOS = {
     "jgavidia@occimiano.cl",
-    "jcaceres@occimiano.cl",
+    "bballadares@occimiano.cl",
     "wsoto@occimiano.cl",
     "dhevia@occimiano.cl",
 }

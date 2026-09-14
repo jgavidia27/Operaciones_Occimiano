@@ -4,7 +4,7 @@ send_weekly_reincidencias_eds.py — Envío semanal (Miércoles 11 AM CLT).
 
 UN SOLO correo con el ranking EDS mes-a-la-fecha que superan 3 correctivos
 en el mes en curso, + detalle de OTs por cada EDS. Va a los 4 seniors +
-jcaceres + wsoto (todos como destinatarios directos).
+bballadares + wsoto (todos como destinatarios directos).
 
 Saludo genérico "Buenos días equipo".
 
@@ -51,7 +51,7 @@ DESTINATARIOS = [
     "vbahamonde@occimiano.cl",   # Victor Bahamonde
     "jgallardo@occimiano.cl",    # Juan Gallardo
     "lpinto@occimiano.cl",       # Luis Pinto
-    "jcaceres@occimiano.cl",     # Jesus Caceres
+    "bballadares@occimiano.cl",     # Braulio Balladares
     "wsoto@occimiano.cl",        # Wilson Soto
     "dhevia@occimiano.cl",       # D. Hevia
 ]

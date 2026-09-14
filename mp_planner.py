@@ -81,6 +81,48 @@ def cargar_geo() -> pd.DataFrame:
     return g.dropna(subset=["latitud", "longitud"])
 
 
+# Localidades y grafías que Fracttal usa pero que NO son comunas, o que no
+# coinciden con el nombre oficial. Sin esto la EDS queda fuera de todo polígono
+# y desaparece del mapa por comuna.
+ALIAS_COMUNA = {
+    "Batuco": "Lampa",              # localidad de Lampa
+    "Llolleo": "San Antonio",       # localidad de San Antonio
+    "Reñaca": "Viña del Mar",       # sector de Viña del Mar
+    "Malloco": "Peñaflor",          # localidad de Peñaflor
+    "La Calera": "Calera",          # nombre oficial: Calera
+    "Valpapaíso": "Valparaíso",     # error de tipeo en el maestro de Fracttal
+}
+
+
+def norm_comuna(nombre) -> str:
+    """Nombre de comuna comparable: sin tildes, mayúsculas, sin puntuación."""
+    import re as _re
+    import unicodedata as _u
+    s = _u.normalize("NFKD", str(nombre or "").upper())
+    s = s.encode("ascii", "ignore").decode()
+    return " ".join(_re.sub(r"[^A-Z0-9 ]", " ", s).split())
+
+
+def cargar_comunas() -> dict | None:
+    """Polígonos de las comunas de Chile (comunas_chile.geojson, en el repo).
+
+    Origen: github.com/fcortes/Chile-GeoJSON, con la geometría simplificada
+    (Douglas-Peucker) — la RM en alta resolución y el resto del país a ~650 m
+    de tolerancia, que a zoom nacional es invisible y baja el archivo de
+    1,7 MB a 531 KB.
+    """
+    import json as _j
+    import os as _o
+    ruta = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),
+                        "comunas_chile.geojson")
+    if not _o.path.exists(ruta):
+        return None
+    try:
+        return _j.loads(open(ruta, encoding="utf-8").read())
+    except Exception:
+        return None
+
+
 def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
                       eds_excluidas=frozenset(),
                       ciclo: int = CICLO_DIAS, tol: int = TOLERANCIA) -> pd.DataFrame:
@@ -103,6 +145,8 @@ def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
         "estacion":  dfp.get("estacion", pd.Series(dtype=str)).astype(str),
         "cliente":   dfp.get("cliente", pd.Series(dtype=str)).astype(str),
         "resp":      dfp.get("responsable", pd.Series(dtype=str)).astype(str),
+        "plan":      dfp.get("plan_tareas", pd.Series(dtype=str)).astype(str),
+        "tipo":      dfp.get("tipo_tarea", pd.Series(dtype=str)).astype(str),
         "fin":       fin,
     })[ok]
     h = h[h["eds"].notna() & (h["eds"].str.strip() != "") & (h["eds"] != "nan")]
@@ -117,6 +161,10 @@ def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
         estacion=("estacion", "last"),
         cliente=("cliente", "last"),
         ultimo_resp=("resp", "last"),
+        # El plan y el tipo de la ULTIMA MP: es el que se va a repetir en la
+        # proxima visita, asi que es el dato util para programar.
+        plan=("plan", "last"),
+        tipo=("tipo", "last"),
     ).reset_index()
 
     # Intervalo real entre MPs consecutivas — el cumplimiento histórico honesto.
@@ -394,87 +442,11 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                      f"consecutivas que se cerraron dentro de {ciclo + tol} días. "
                      "Es desempeño medido, no una meta.")
 
-    t_map, t_rut, t_atr, t_man = st.tabs(
-        ["🗺️  Mapa y cartera", "📅  Rutas", "🔴  Arrastre", "🔧  Ajuste manual"])
-
-    # ── Mapa ─────────────────────────────────────────────────────────────────
-    with t_map:
-        pts = base.dropna(subset=["lat", "lon"]).copy()
-        if pts.empty:
-            st.info("Sin coordenadas para la selección actual.")
-        else:
-            pts["color"] = pts["estado"].map(
-                lambda e: ESTADOS.get(e, ESTADOS["sin_hist"])[1])
-            pts["radio_m"] = pts["estado"].map(
-                {"vencida": 900, "ventana": 700, "proxima": 550}).fillna(400)
-            pts["lbl"] = pts["estado"].map(
-                lambda e: ESTADOS.get(e, ESTADOS["sin_hist"])[0])
-            pts["ult"] = pd.to_datetime(pts["ultima_mp"]).dt.strftime("%d-%m-%Y")
-            pts["lim"] = pd.to_datetime(pts["limite"]).dt.strftime("%d-%m-%Y")
-            pts["cli"] = pts["cliente"].map(_cli_corto)
-            try:
-                import pydeck as pdk
-                zoom = 11.5 if sel_com else (9.2 if zona == "Santiago (RM)" else 4.2)
-                # Con map_style=None pydeck NO dibuja mapa base y los puntos
-                # quedan flotando sobre el vacio: sin calles no se puede juzgar
-                # si una ruta es razonable. Carto no requiere token de Mapbox.
-                estilo_mapa = (pdk.map_styles.CARTO_DARK if dark
-                               else pdk.map_styles.CARTO_LIGHT)
-                st.pydeck_chart(pdk.Deck(
-                    map_style=estilo_mapa,
-                    initial_view_state=pdk.ViewState(
-                        latitude=float(pts["lat"].mean()),
-                        longitude=float(pts["lon"].mean()),
-                        zoom=zoom, pitch=0),
-                    layers=[pdk.Layer(
-                        "ScatterplotLayer", data=pts,
-                        get_position="[lon, lat]", get_fill_color="color",
-                        get_radius="radio_m", radius_min_pixels=4,
-                        radius_max_pixels=18, pickable=True, opacity=0.8)],
-                    tooltip={
-                        "html": "<b>{eds}</b> — {estacion}<br/>"
-                                "{cli} · {comuna}<br/>"
-                                "{lbl} · {dias_sin_mp} días sin MP<br/>"
-                                "Última: {ult} · Límite: {lim}",
-                        # El tooltip por defecto es una caja negra cruda,
-                        # pegada al borde y sin respiro entre lineas.
-                        "style": {
-                            "backgroundColor": "#0C2540" if dark else "#ffffff",
-                            "color": "#e2e8f0" if dark else "#1e293b",
-                            "border": "1px solid " + ("#1e3356" if dark else "#e2e8f0"),
-                            "borderRadius": "8px",
-                            "padding": "8px 10px",
-                            "fontSize": "12px",
-                            "lineHeight": "1.45",
-                            "boxShadow": "0 4px 14px rgba(0,0,0,.18)",
-                            "maxWidth": "280px",
-                        },
-                    }),
-                    use_container_width=True)
-            except Exception as exc:
-                st.map(pts[["lat", "lon"]], size=120)
-                st.caption(f"Mapa simple (pydeck no disponible: {exc}).")
-
-            st.markdown(
-                f"<span style='font-size:.8rem;color:{muted};'>"
-                "🔴 vencida · 🟡 en ventana hoy · 🟠 vence ≤10 días · 🟢 al día"
-                "</span>", unsafe_allow_html=True)
-
-            st.markdown("**Cartera por comuna**")
-            pc = (base.groupby("comuna")
-                      .agg(EDS=("eds", "count"),
-                           Vencidas=("estado", lambda s: int((s == "vencida").sum())),
-                           EnVentana=("estado", lambda s: int((s == "ventana").sum())),
-                           Dias=("dias_sin_mp", "median"))
-                      .reset_index()
-                      .rename(columns={"comuna": "Comuna", "EnVentana": "En ventana",
-                                       "Dias": "Días sin MP (mediana)"})
-                      .sort_values(["Vencidas", "EDS"], ascending=False))
-            st.dataframe(pc, use_container_width=True, hide_index=True,
-                         height=min(420, 38 * len(pc) + 40))
-
-    # ── Rutas ────────────────────────────────────────────────────────────────
-    with t_rut:
+    # ── Horizonte y dotación ─────────────────────────────────────────────────
+    # Viven fuera de las pestañas porque el plan lo consumen todas: el mapa
+    # muestra la fecha programada de cada EDS, Rutas el detalle por jornada y
+    # Ajuste manual el recálculo de lo pendiente.
+    with st.expander("📆 Horizonte y dotación", expanded=False):
         r1, r2, r3 = st.columns([1.1, 1.1, 1.8])
         ini = r1.date_input("Inicio", date(2026, 10, 1), key="mpp_ini")
         fin_ = r2.date_input("Término", date(2026, 10, 31), key="mpp_fin")
@@ -491,31 +463,247 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                  "técnico no está disponible para MP. La dotación se toma de "
                  "Planificación Turnos STO, semana a semana.")
 
-        if not tecs:
-            st.info("Selecciona al menos un técnico para generar rutas.")
-        elif fin_ < ini:
-            st.warning("La fecha de término es anterior al inicio.")
+    plan, sin_turno, aviso_plan = pd.DataFrame(), None, None
+    if not tecs:
+        aviso_plan = "Selecciona al menos un técnico en «Horizonte y dotación»."
+    elif fin_ < ini:
+        aviso_plan = "La fecha de término es anterior al inicio."
+    else:
+        dias = dias_habiles(ini, fin_, sab)
+        fijos = st.session_state.get("mpp_fijos", {})
+        disp = tecs
+        if desc_turno:
+            try:
+                import turnos as _tn
+                mapa = _tn.de_turno_por_dia(fin_)
+                disp = {d: _tn.disponibles_para_mp(tecs, d, mapa) for d in dias}
+                sin_turno = sum(len(v) for v in disp.values()) / max(1, len(dias))
+            except Exception as exc:
+                st.warning(f"No se pudo leer la programación de turnos ({exc}). "
+                           "Se usa la dotación completa.")
+        plan = planificar(base, dias, disp, cap, radio, fijos)
+        st.session_state["mpp_plan"] = plan
+
+    t_map, t_rut, t_atr, t_man = st.tabs(
+        ["🗺️  Mapa y cartera", "📅  Rutas", "🔴  Arrastre", "🔧  Ajuste manual"])
+
+    # ── Mapa ─────────────────────────────────────────────────────────────────
+    with t_map:
+        pts = base.dropna(subset=["lat", "lon"]).copy()
+        if pts.empty:
+            st.info("Sin coordenadas para la selección actual.")
         else:
-            dias = dias_habiles(ini, fin_, sab)
-            fijos = st.session_state.get("mpp_fijos", {})
-            disp, sin_turno = tecs, None
-            if desc_turno:
+            # Resumen por comuna: es lo que pinta el polígono y lo que se
+            # muestra al hacer clic.
+            res = (base.groupby("comuna")
+                       .agg(eds=("eds", "count"),
+                            vencidas=("estado", lambda s: int((s == "vencida").sum())),
+                            ventana=("estado", lambda s: int((s == "ventana").sum())),
+                            dias=("dias_sin_mp", "median"))
+                       .reset_index())
+            res_ix = res.set_index("comuna")
+
+            geo_poly = cargar_comunas()
+            sel_click = None
+
+            if geo_poly:
+                # Una comuna se pinta por su carga y su urgencia: rojo si tiene
+                # MP vencidas, ámbar si hay alguna en ventana, teal si está al
+                # día. La opacidad sube con la cantidad de EDS, para que a
+                # simple vista se vea dónde se concentra el trabajo.
+                # El cruce es por nombre normalizado + alias: "Los Ángeles"
+                # vs "Los Angeles", "La Calera" vs "Calera", y localidades
+                # como Batuco o Reñaca que se resuelven a su comuna real.
+                por_norm = {}
+                for c in res["comuna"].dropna():
+                    por_norm[norm_comuna(ALIAS_COMUNA.get(c, c))] = c
+                feats = []
+                for f in geo_poly["features"]:
+                    cn = por_norm.get(norm_comuna(f["properties"].get("comuna")))
+                    if cn is None:
+                        continue
+                    r = res_ix.loc[cn]
+                    n_eds = int(r["eds"])
+                    if int(r["vencidas"]):
+                        col = [220, 38, 38]
+                    elif int(r["ventana"]):
+                        col = [234, 179, 8]
+                    else:
+                        col = [1, 121, 138]
+                    alpha = 45 + min(90, n_eds * 9)
+                    feats.append({
+                        "type": "Feature",
+                        "geometry": f["geometry"],
+                        "properties": {
+                            "comuna": cn,
+                            "eds": n_eds,
+                            "vencidas": int(r["vencidas"]),
+                            "ventana": int(r["ventana"]),
+                            "dias": int(r["dias"]) if pd.notna(r["dias"]) else 0,
+                            "fill": col + [alpha],
+                            "linea": col,
+                        },
+                    })
+                st.caption(
+                    "**Haz clic en una comuna** para ver su detalle abajo. "
+                    "El color es la urgencia (rojo = tiene MP vencidas, ámbar = "
+                    "alguna en ventana, teal = al día) y la intensidad, cuántas "
+                    "EDS concentra.")
+            else:
+                feats = []
+                st.warning(
+                    "No se encontró `comunas_chile.geojson`; se muestran sólo los "
+                    "puntos. Sin polígonos no se puede seleccionar por comuna.")
+
+            pts["color"] = pts["estado"].map(
+                lambda e: ESTADOS.get(e, ESTADOS["sin_hist"])[1])
+            pts["radio_m"] = pts["estado"].map(
+                {"vencida": 900, "ventana": 700, "proxima": 550}).fillna(400)
+            pts["lbl"] = pts["estado"].map(
+                lambda e: ESTADOS.get(e, ESTADOS["sin_hist"])[0])
+            pts["ult"] = pd.to_datetime(pts["ultima_mp"]).dt.strftime("%d-%m-%Y")
+            pts["lim"] = pd.to_datetime(pts["limite"]).dt.strftime("%d-%m-%Y")
+            pts["cli"] = pts["cliente"].map(_cli_corto)
+            # Fecha programada por EDS, desde el plan ya calculado arriba.
+            prog = ({} if plan.empty
+                    else dict(zip(plan["eds"],
+                                  pd.to_datetime(plan["fecha"]).dt.strftime("%d-%m-%Y"))))
+            pts["prog"] = pts["eds"].map(prog).fillna("sin programar")
+
+            try:
+                import pydeck as pdk
+                zoom = 11.5 if sel_com else (9.2 if zona == "Santiago (RM)" else 4.2)
+                estilo_mapa = (pdk.map_styles.CARTO_DARK if dark
+                               else pdk.map_styles.CARTO_LIGHT)
+                capas = []
+                if feats:
+                    capas.append(pdk.Layer(
+                        "GeoJsonLayer",
+                        data={"type": "FeatureCollection", "features": feats},
+                        get_fill_color="properties.fill",
+                        get_line_color="properties.linea",
+                        get_line_width=90, line_width_min_pixels=1.2,
+                        stroked=True, filled=True, pickable=True,
+                        auto_highlight=True, id="comunas"))
+                capas.append(pdk.Layer(
+                    "ScatterplotLayer", data=pts, id="eds",
+                    get_position="[lon, lat]", get_fill_color="color",
+                    get_radius="radio_m", radius_min_pixels=4,
+                    radius_max_pixels=18, pickable=True, opacity=0.9,
+                    stroked=True, get_line_color=[255, 255, 255], line_width_min_pixels=1))
+                ev = st.pydeck_chart(
+                    pdk.Deck(
+                        map_style=estilo_mapa,
+                        initial_view_state=pdk.ViewState(
+                            latitude=float(pts["lat"].mean()),
+                            longitude=float(pts["lon"].mean()),
+                            zoom=zoom, pitch=0),
+                        layers=capas,
+                        tooltip={
+                            "html": "<b>{eds}</b> {comuna}<br/>{estacion}<br/>"
+                                    "{cli}<br/>{lbl} · {dias_sin_mp} días sin MP<br/>"
+                                    "Programada: {prog}<br/>"
+                                    "Última: {ult} · Límite: {lim}",
+                            "style": {
+                                "backgroundColor": "#0C2540" if dark else "#ffffff",
+                                "color": "#e2e8f0" if dark else "#1e293b",
+                                "border": "1px solid " + ("#1e3356" if dark else "#e2e8f0"),
+                                "borderRadius": "8px",
+                                "padding": "8px 10px",
+                                "fontSize": "12px",
+                                "lineHeight": "1.45",
+                                "boxShadow": "0 4px 14px rgba(0,0,0,.18)",
+                                "maxWidth": "300px",
+                            },
+                        }),
+                    use_container_width=True,
+                    selection_mode="single-object", on_select="rerun",
+                    key="mpp_mapa")
+                # Lo que devuelve el clic: la comuna del polígono, o la comuna
+                # de la EDS si se pinchó un punto.
                 try:
-                    import turnos as _tn
-                    mapa = _tn.de_turno_por_dia(fin_)
-                    disp = {d: _tn.disponibles_para_mp(tecs, d, mapa) for d in dias}
-                    sin_turno = sum(len(v) for v in disp.values()) / max(1, len(dias))
-                except Exception as exc:
-                    st.warning(f"No se pudo leer la programación de turnos ({exc}). "
-                               "Se usa la dotación completa.")
+                    objs = (ev.selection or {}).get("objects", {}) or {}
+                    for capa, filas in objs.items():
+                        if not filas:
+                            continue
+                        o = filas[0]
+                        sel_click = o.get("comuna") or o.get("properties", {}).get("comuna")
+                        if sel_click:
+                            break
+                except Exception:
+                    sel_click = None
+            except Exception as exc:
+                st.map(pts[["lat", "lon"]], size=120)
+                st.caption(f"Mapa simple (pydeck no disponible: {exc}).")
+
+            st.markdown(
+                f"<span style='font-size:.8rem;color:{muted};'>"
+                "Puntos — 🔴 vencida · 🟡 en ventana hoy · 🟠 vence ≤10 días · "
+                "🟢 al día</span>", unsafe_allow_html=True)
+
+            # ── Detalle de la comuna seleccionada ────────────────────────────
+            foco = sel_click or (sel_com[0] if len(sel_com) == 1 else None)
+            if foco:
+                det = base[base["comuna"] == foco].copy()
+                st.markdown(f"### 📍 {foco}")
+                m = st.columns(4)
+                m[0].metric("EDS", f"{len(det):,}")
+                m[1].metric("🔴 Vencidas", int((det["estado"] == "vencida").sum()))
+                m[2].metric("🟡 En ventana", int((det["estado"] == "ventana").sum()))
+                m[3].metric("Días sin MP (mediana)",
+                            f"{det['dias_sin_mp'].median():.0f}")
+
+                det["Programada"] = det["eds"].map(prog).fillna("—")
+                if not plan.empty:
+                    det["Técnico"] = det["eds"].map(
+                        dict(zip(plan["eds"], plan["tecnico"]))).fillna("—")
+                else:
+                    det["Técnico"] = "—"
+                det["Estado"] = det["estado"].map(
+                    lambda e: ESTADOS.get(e, ESTADOS["sin_hist"])[0])
+                det["Cliente"] = det["cliente"].map(_cli_corto)
+                tbl = (det[["eds", "estacion", "Cliente", "tipo", "plan",
+                            "Programada", "Técnico", "ultima_mp", "limite",
+                            "dias_sin_mp", "Estado"]]
+                       .rename(columns={"eds": "Código EDS", "estacion": "Estación",
+                                        "tipo": "Tipo de mantención",
+                                        "plan": "Plan de tareas",
+                                        "ultima_mp": "Última MP", "limite": "Límite",
+                                        "dias_sin_mp": "Días sin MP"}))
+                for c in ("Última MP", "Límite"):
+                    tbl[c] = pd.to_datetime(tbl[c]).dt.strftime("%d-%m-%Y")
+                tbl = tbl.sort_values("Límite", key=lambda s: pd.to_datetime(
+                    s, format="%d-%m-%Y"))
+                st.dataframe(tbl, use_container_width=True, hide_index=True,
+                             height=min(460, 38 * len(tbl) + 40))
+                st.download_button(
+                    f"⬇️ Descargar {foco} (CSV)",
+                    tbl.to_csv(index=False).encode("utf-8-sig"),
+                    f"mp_{foco.lower().replace(' ', '_')}_{hoy:%Y%m%d}.csv",
+                    "text/csv", key="mpp_dl_comuna")
+            else:
+                st.caption("Selecciona una comuna en el mapa para ver su detalle.")
+
+            st.markdown("**Cartera por comuna**")
+            pc = (res.rename(columns={"comuna": "Comuna", "eds": "EDS",
+                                      "vencidas": "Vencidas",
+                                      "ventana": "En ventana",
+                                      "dias": "Días sin MP (mediana)"})
+                     .sort_values(["Vencidas", "EDS"], ascending=False))
+            st.dataframe(pc, use_container_width=True, hide_index=True,
+                         height=min(420, 38 * len(pc) + 40))
+
+    # ── Rutas ────────────────────────────────────────────────────────────────
+    with t_rut:
+        if aviso_plan:
+            st.info(aviso_plan)
+        elif plan.empty:
+            st.info("Nada que programar en el horizonte elegido.")
+        else:
             if sin_turno is not None:
                 st.caption(
                     f"Dotación disponible para MP: **{sin_turno:.1f} de {len(tecs)} "
                     f"técnicos** por día hábil, una vez descontados los de turno.")
-            plan = planificar(base, dias, disp, cap, radio, fijos)
-            if plan.empty:
-                st.info("Nada que programar en el horizonte elegido.")
-            else:
                 arr = int((pd.to_datetime(base["limite"]).dt.date < ini).sum())
                 if arr:
                     st.warning(
