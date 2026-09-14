@@ -1192,6 +1192,9 @@ components.html(f"""<script>
 
 # Colores de tema para HTML inline — evita hardcodear colores claros en dark mode
 _t = {
+    # Bandera de tema: la usan los componentes que eligen su propio
+    # recurso segun claro/oscuro (p.ej. el mapa base del planificador de MP).
+    "dark":     _current_theme == "dark",
     "card":     "#111f38"               if _current_theme == "dark" else "#f8fafc",
     "border":   "#1e3356"               if _current_theme == "dark" else "#e2e8f0",
     "text":     "#e2e8f0"               if _current_theme == "dark" else "#1e293b",

@@ -322,6 +322,7 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
     import streamlit as st
 
     muted = (theme or {}).get("muted", "#94a3b8")
+    dark = bool((theme or {}).get("dark", False))
 
     st.caption(
         "Planificador de MP por **ciclo real**, no por lo que Fracttal tenga "
@@ -414,8 +415,13 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
             try:
                 import pydeck as pdk
                 zoom = 11.5 if sel_com else (9.2 if zona == "Santiago (RM)" else 4.2)
+                # Con map_style=None pydeck NO dibuja mapa base y los puntos
+                # quedan flotando sobre el vacio: sin calles no se puede juzgar
+                # si una ruta es razonable. Carto no requiere token de Mapbox.
+                estilo_mapa = (pdk.map_styles.CARTO_DARK if dark
+                               else pdk.map_styles.CARTO_LIGHT)
                 st.pydeck_chart(pdk.Deck(
-                    map_style=None,
+                    map_style=estilo_mapa,
                     initial_view_state=pdk.ViewState(
                         latitude=float(pts["lat"].mean()),
                         longitude=float(pts["lon"].mean()),
@@ -425,10 +431,25 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         get_position="[lon, lat]", get_fill_color="color",
                         get_radius="radio_m", radius_min_pixels=4,
                         radius_max_pixels=18, pickable=True, opacity=0.8)],
-                    tooltip={"html": "<b>{eds}</b> — {estacion}<br/>"
-                                     "{cli} · {comuna}<br/>"
-                                     "{lbl} · {dias_sin_mp} días sin MP<br/>"
-                                     "Última: {ult} · Límite: {lim}"}),
+                    tooltip={
+                        "html": "<b>{eds}</b> — {estacion}<br/>"
+                                "{cli} · {comuna}<br/>"
+                                "{lbl} · {dias_sin_mp} días sin MP<br/>"
+                                "Última: {ult} · Límite: {lim}",
+                        # El tooltip por defecto es una caja negra cruda,
+                        # pegada al borde y sin respiro entre lineas.
+                        "style": {
+                            "backgroundColor": "#0C2540" if dark else "#ffffff",
+                            "color": "#e2e8f0" if dark else "#1e293b",
+                            "border": "1px solid " + ("#1e3356" if dark else "#e2e8f0"),
+                            "borderRadius": "8px",
+                            "padding": "8px 10px",
+                            "fontSize": "12px",
+                            "lineHeight": "1.45",
+                            "boxShadow": "0 4px 14px rgba(0,0,0,.18)",
+                            "maxWidth": "280px",
+                        },
+                    }),
                     use_container_width=True)
             except Exception as exc:
                 st.map(pts[["lat", "lon"]], size=120)
