@@ -50,6 +50,8 @@ COMUNAS_RM = frozenset({
     "Til Til", "Malloco",
 })
 
+# Estado del CICLO de cada EDS respecto de hoy. Sirve para el arrastre y para
+# medir cumplimiento, pero no es lo que se pinta en el mapa.
 ESTADOS = {
     "vencida":  ("🔴 Vencida",   [220,  38,  38]),
     "ventana":  ("🟡 En ventana", [234, 179,   8]),
@@ -57,6 +59,45 @@ ESTADOS = {
     "al_dia":   ("🟢 Al día",    [ 34, 197,  94]),
     "sin_hist": ("⚪ Sin historial", [148, 163, 184]),
 }
+
+# Estado de EJECUCIÓN dentro del mes, que es la lectura operativa: qué falta
+# por hacer. Es lo que colorea el mapa.
+#   realizada — la MP del mes ya se hizo. La EDS sale de la cola.
+#   pendiente — falta hacerla, pero todavía está en plazo.
+#   vencida   — paso su fecha limite, o paso la fecha en que estaba pautada y
+#               no se ejecuto. Hay que hacerla igual: no se perdona, se arrastra.
+EJECUCION = {
+    "realizada": ("🟢 Realizada", [ 34, 197,  94]),
+    "pendiente": ("🟡 Pendiente", [234, 179,   8]),
+    "vencida":   ("🔴 Vencida",   [220,  38,  38]),
+}
+
+
+def estado_ejecucion(cartera: pd.DataFrame, plan: pd.DataFrame,
+                     desde: date, hoy: date) -> pd.Series:
+    """Estado de ejecución de cada EDS dentro del mes que arranca en `desde`.
+
+    Una MP cuenta como REALIZADA si su última MP cae dentro del mes: es el
+    mismo dato con el que se cierra el ciclo, no un registro aparte que haya
+    que mantener al día.
+
+    Cuenta como VENCIDA si ya paso su limite, o si la fecha en que estaba
+    pautada quedo atras y no se ejecuto. Ese segundo caso es el que importa en
+    terreno: la visita no desaparece, vuelve a la cola.
+    """
+    ini_mes = pd.Timestamp(desde).normalize().replace(day=1)
+    hoy_ts = pd.Timestamp(hoy).normalize()
+    ult = pd.to_datetime(cartera["ultima_mp"])
+    lim = pd.to_datetime(cartera["limite"])
+    prog = (cartera["eds"].map(dict(zip(plan["eds"], pd.to_datetime(plan["fecha"]))))
+            if not plan.empty else pd.Series(pd.NaT, index=cartera.index))
+
+    realizada = ult >= ini_mes
+    atrasada = (lim < hoy_ts) | (prog.notna() & (prog < hoy_ts))
+    return pd.Series(
+        ["realizada" if r else ("vencida" if a else "pendiente")
+         for r, a in zip(realizada, atrasada)],
+        index=cartera.index)
 
 
 # ── Geometría ────────────────────────────────────────────────────────────────
@@ -522,24 +563,6 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
     if sel_com:
         base = base[base["comuna"].isin(sel_com)]
 
-    # ── KPIs de cartera ──────────────────────────────────────────────────────
-    nv = int((base["estado"] == "vencida").sum())
-    nw = int((base["estado"] == "ventana").sum())
-    npx = int((base["estado"] == "proxima").sum())
-    ints = cartera["intervalo_real"].dropna()
-    cumpl = float((ints <= ciclo + tol).mean() * 100) if len(ints) else float("nan")
-
-    k = st.columns(5)
-    k[0].metric("EDS en cartera", f"{len(base):,}")
-    k[1].metric("🔴 Vencidas", f"{nv:,}",
-                help=f"Pasaron {ciclo + tol} días desde su última MP.")
-    k[2].metric("🟡 En ventana hoy", f"{nw:,}")
-    k[3].metric("🟠 Vencen ≤10 días", f"{npx:,}")
-    k[4].metric("Cumplimiento real", f"{cumpl:.0f}%" if cumpl == cumpl else "—",
-                help="Porcentaje de los intervalos históricos entre MPs "
-                     f"consecutivas que se cerraron dentro de {ciclo + tol} días. "
-                     "Es desempeño medido, no una meta.")
-
     # ── Horizonte y dotación ─────────────────────────────────────────────────
     # Viven fuera de las pestañas porque el plan lo consumen todas: el mapa
     # muestra la fecha programada de cada EDS, Rutas el detalle por jornada y
@@ -585,6 +608,33 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                            "Se usa la dotación completa.")
         plan = planificar(base, dias, disp, cap, radio, fijos)
         st.session_state["mpp_plan"] = plan
+    # Estado de ejecucion del mes: es lo que colorea el mapa y lo que responde
+    # la pregunta operativa "¿que me falta por hacer aqui?".
+    _desde = ini if not aviso_plan else max(hoy, INICIO_SISTEMA)
+    cartera["ejec"] = estado_ejecucion(cartera, plan, _desde, hoy)
+    base = base.merge(cartera[["eds", "ejec"]], on="eds", how="left")
+
+    # ── KPIs de cartera ──────────────────────────────────────────────────────
+    nre = int((base["ejec"] == "realizada").sum())
+    npe = int((base["ejec"] == "pendiente").sum())
+    nv = int((base["ejec"] == "vencida").sum())
+    ints = cartera["intervalo_real"].dropna()
+    cumpl = float((ints <= ciclo + tol).mean() * 100) if len(ints) else float("nan")
+
+    k = st.columns(5)
+    k[0].metric("EDS en cartera", f"{len(base):,}")
+    k[1].metric("🟢 Realizadas", f"{nre:,}",
+                help=f"Su MP del mes ya se hizo (desde el {_desde:%d-%m-%Y}). "
+                     "Salen de la cola.")
+    k[2].metric("🟡 Pendientes", f"{npe:,}",
+                help="Falta hacerlas, pero siguen en plazo.")
+    k[3].metric("🔴 Vencidas", f"{nv:,}",
+                help="Pasaron su límite, o la fecha en que estaban pautadas y "
+                     "no se ejecutaron. Se arrastran: hay que hacerlas igual.")
+    k[4].metric("Cumplimiento real", f"{cumpl:.0f}%" if cumpl == cumpl else "—",
+                help="Porcentaje de los intervalos históricos entre MPs "
+                     f"consecutivas que se cerraron dentro de {ciclo + tol} días. "
+                     "Es desempeño medido, no una meta.")
 
     t_map, t_rut, t_atr, t_man = st.tabs(
         ["🗺️  Mapa y cartera", "📅  Rutas", "🔴  Arrastre", "🔧  Ajuste manual"])
@@ -599,8 +649,9 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
             # muestra al hacer clic.
             res = (base.groupby("comuna")
                        .agg(eds=("eds", "count"),
-                            vencidas=("estado", lambda s: int((s == "vencida").sum())),
-                            ventana=("estado", lambda s: int((s == "ventana").sum())),
+                            realizadas=("ejec", lambda s: int((s == "realizada").sum())),
+                            pendientes=("ejec", lambda s: int((s == "pendiente").sum())),
+                            vencidas=("ejec", lambda s: int((s == "vencida").sum())),
                             dias=("dias_sin_mp", "median"))
                        .reset_index())
             res_ix = res.set_index("comuna")
@@ -626,12 +677,15 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         continue
                     r = res_ix.loc[cn]
                     n_eds = int(r["eds"])
+                    # Verde solo cuando NO queda nada por hacer en la comuna
+                    # este mes. Si hay algo vencido manda el rojo: una MP que
+                    # no se hizo en su fecha sigue pendiente, no se perdona.
                     if int(r["vencidas"]):
-                        col = [220, 38, 38]
-                    elif int(r["ventana"]):
-                        col = [234, 179, 8]
+                        col = EJECUCION["vencida"][1]
+                    elif int(r["pendientes"]):
+                        col = EJECUCION["pendiente"][1]
                     else:
-                        col = [1, 121, 138]
+                        col = EJECUCION["realizada"][1]
                     alpha = 45 + min(90, n_eds * 9)
                     feats.append({
                         "type": "Feature",
@@ -648,11 +702,14 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                             # texto plano y las etiquetas viven en el template.
                             "t1": cn,
                             "t2": f"{n_eds} EDS en cartera",
-                            "t3": (f"🔴 {int(r['vencidas'])} vencidas · "
-                                   f"🟡 {int(r['ventana'])} en ventana"),
-                            "t4": (f"Mediana "
-                                   f"{int(r['dias']) if pd.notna(r['dias']) else 0}"
-                                   " días sin MP"),
+                            "t3": (f"🟢 {int(r['realizadas'])} realizadas · "
+                                   f"🟡 {int(r['pendientes'])} pendientes · "
+                                   f"🔴 {int(r['vencidas'])} vencidas"),
+                            "t4": ("Sin pendientes este mes"
+                                   if not (int(r['pendientes']) + int(r['vencidas']))
+                                   else f"Faltan "
+                                        f"{int(r['pendientes']) + int(r['vencidas'])}"
+                                        " MP por ejecutar"),
                         },
                     })
                 st.caption(
@@ -666,12 +723,12 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     "No se encontró `comunas_chile.geojson`; se muestran sólo los "
                     "puntos. Sin polígonos no se puede seleccionar por comuna.")
 
-            pts["color"] = pts["estado"].map(
-                lambda e: ESTADOS.get(e, ESTADOS["sin_hist"])[1])
-            pts["radio_m"] = pts["estado"].map(
-                {"vencida": 900, "ventana": 700, "proxima": 550}).fillna(400)
-            pts["lbl"] = pts["estado"].map(
-                lambda e: ESTADOS.get(e, ESTADOS["sin_hist"])[0])
+            pts["color"] = pts["ejec"].map(
+                lambda e: EJECUCION.get(e, ESTADOS["sin_hist"])[1])
+            pts["radio_m"] = pts["ejec"].map(
+                {"vencida": 900, "pendiente": 650}).fillna(420)
+            pts["lbl"] = pts["ejec"].map(
+                lambda e: EJECUCION.get(e, ESTADOS["sin_hist"])[0])
             pts["ult"] = pd.to_datetime(pts["ultima_mp"]).dt.strftime("%d-%m-%Y")
             pts["lim"] = pd.to_datetime(pts["limite"]).dt.strftime("%d-%m-%Y")
             pts["cli"] = pts["cliente"].map(_cli_corto)
@@ -776,8 +833,9 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
 
             st.markdown(
                 f"<span style='font-size:.8rem;color:{muted};'>"
-                "Puntos — 🔴 vencida · 🟡 en ventana hoy · 🟠 vence ≤10 días · "
-                "🟢 al día</span>", unsafe_allow_html=True)
+                "🟢 realizada este mes · 🟡 pendiente en plazo · 🔴 vencida o no "
+                "ejecutada en su fecha. Una comuna queda verde solo cuando no "
+                "le falta ninguna MP del mes.</span>", unsafe_allow_html=True)
 
             # ── Detalle de la comuna seleccionada ────────────────────────────
             foco = sel_click or (sel_com[0] if len(sel_com) == 1 else None)
@@ -786,8 +844,8 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                 st.markdown(f"### 📍 {foco}")
                 m = st.columns(4)
                 m[0].metric("EDS", f"{len(det):,}")
-                m[1].metric("🔴 Vencidas", int((det["estado"] == "vencida").sum()))
-                m[2].metric("🟡 En ventana", int((det["estado"] == "ventana").sum()))
+                m[1].metric("🟢 Realizadas", int((det["ejec"] == "realizada").sum()))
+                m[2].metric("🟡 Pendientes", int((det["ejec"] == "pendiente").sum()))
                 m[3].metric("Días sin MP (mediana)",
                             f"{det['dias_sin_mp'].median():.0f}")
 
@@ -797,8 +855,8 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                         dict(zip(plan["eds"], plan["tecnico"]))).fillna("—")
                 else:
                     det["Técnico"] = "—"
-                det["Estado"] = det["estado"].map(
-                    lambda e: ESTADOS.get(e, ESTADOS["sin_hist"])[0])
+                det["Estado"] = det["ejec"].map(
+                    lambda e: EJECUCION.get(e, ESTADOS["sin_hist"])[0])
                 det["Cliente"] = det["cliente"].map(_cli_corto)
                 tbl = (det[["eds", "estacion", "Cliente", "tipo", "plan",
                             "Programada", "Técnico", "ultima_mp", "limite",
@@ -823,11 +881,15 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                 st.caption("Selecciona una comuna en el mapa para ver su detalle.")
 
             st.markdown("**Cartera por comuna**")
-            pc = (res.rename(columns={"comuna": "Comuna", "eds": "EDS",
-                                      "vencidas": "Vencidas",
-                                      "ventana": "En ventana",
+            pc = (res.assign(**{"Faltan": res["pendientes"] + res["vencidas"]})
+                     .rename(columns={"comuna": "Comuna", "eds": "EDS",
+                                      "realizadas": "🟢 Realizadas",
+                                      "pendientes": "🟡 Pendientes",
+                                      "vencidas": "🔴 Vencidas",
                                       "dias": "Días sin MP (mediana)"})
-                     .sort_values(["Vencidas", "EDS"], ascending=False))
+                     [["Comuna", "EDS", "🟢 Realizadas", "🟡 Pendientes",
+                       "🔴 Vencidas", "Faltan", "Días sin MP (mediana)"]]
+                     .sort_values(["🔴 Vencidas", "Faltan"], ascending=False))
             st.dataframe(pc, use_container_width=True, hide_index=True,
                          height=min(420, 38 * len(pc) + 40))
 
