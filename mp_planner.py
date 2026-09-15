@@ -60,12 +60,42 @@ ESTADOS = {
     "sin_hist": ("⚪ Sin historial", [148, 163, 184]),
 }
 
+# Color del punto = CLIENTE, para reconocer la marca de un vistazo. El estado
+# va como símbolo DENTRO del punto, no como color: son dos preguntas distintas
+# ("¿de quién es esta estación?" y "¿está lista?") y mezclarlas en un solo
+# canal obliga a perder una.
+COLOR_CLIENTE = {
+    "COPEC":     [220,  38,  38],   # rojo
+    "SHELL":     [234, 179,   8],   # amarillo
+    "ESMAX":     [ 34, 197,  94],   # verde
+    "ARAMCO":    [ 34, 197,  94],
+    "ABASTIBLE": [ 37,  99, 235],   # azul
+}
+COLOR_CLIENTE_OTRO = [100, 116, 139]        # particulares y terceros
+
+GLIFO_EJEC = {"realizada": "✅", "pendiente": "•", "vencida": "❌"}
+
+
+def color_cliente(nombre) -> list:
+    """Color de marca a partir del nombre del cliente.
+
+    El maestro escribe "SHELL (Enex)", "ESMAX (Aramco)" y una decena de
+    variantes de "PARTICULAR ...", asi que se busca la marca por contencion en
+    vez de exigir el nombre exacto.
+    """
+    n = str(nombre or "").upper()
+    for marca, col in COLOR_CLIENTE.items():
+        if marca in n:
+            return col
+    return COLOR_CLIENTE_OTRO
+
+
 # Estado de EJECUCIÓN dentro del mes, que es la lectura operativa: qué falta
-# por hacer. Es lo que colorea el mapa.
+# por hacer. Colorea los polígonos de comuna y el símbolo de cada punto.
 #   realizada — la MP del mes ya se hizo. La EDS sale de la cola.
 #   pendiente — falta hacerla, pero todavía está en plazo.
-#   vencida   — paso su fecha limite, o paso la fecha en que estaba pautada y
-#               no se ejecuto. Hay que hacerla igual: no se perdona, se arrastra.
+#   vencida   — pasó su fecha límite, o pasó la fecha en que estaba pautada y
+#               no se ejecutó. Hay que hacerla igual: no se perdona, se arrastra.
 EJECUCION = {
     "realizada": ("🟢 Realizada", [ 34, 197,  94]),
     "pendiente": ("🟡 Pendiente", [234, 179,   8]),
@@ -359,7 +389,8 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
     for eds, (f, tec) in fijos.items():
         if eds in pend:
             r = pend.pop(eds)
-            filas.append({**r, "fecha": f, "tecnico": tec, "origen": "manual"})
+            filas.append({**r, "fecha": f, "tecnico": tec,
+                          "origen": "manual", "orden": 0})
 
     ocupado = {(f["fecha"], f["tecnico"]): 1 for f in filas}
     for f in filas:
@@ -391,8 +422,12 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
                     + max(0, (pd.Timestamp(r["limite"]).date() - d).days) * 0.6))
                 ruta.append(nxt)
                 pend.pop(nxt["eds"])
-            for r in ruta:
-                filas.append({**r, "fecha": d, "tecnico": tec, "origen": "auto"})
+            # El orden importa y se pierde si despues se reordena la tabla:
+            # `ruta` ya viene en secuencia de visita (semilla, luego el vecino
+            # mas cercano). Es lo que dibuja el trazado en el mapa.
+            for i_r, r in enumerate(ruta, 1):
+                filas.append({**r, "fecha": d, "tecnico": tec,
+                              "origen": "auto", "orden": i_r})
             ocupado[(d, tec)] = ocupado.get((d, tec), 0) + len(ruta)
 
     if not filas:
@@ -408,7 +443,7 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
         disp[k] = max((haversine(a[0], a[1], b[0], b[1]) for a in pts for b in pts),
                       default=0.0)
     p["km_ruta"] = [disp.get((f, t), 0.0) for f, t in zip(p["fecha"], p["tecnico"])]
-    return p.sort_values(["fecha", "tecnico", "limite"]).reset_index(drop=True)
+    return p.sort_values(["fecha", "tecnico", "orden"]).reset_index(drop=True)
 
 
 def detectar_ejecutadas(plan: pd.DataFrame, cartera: pd.DataFrame) -> pd.DataFrame:
@@ -574,6 +609,20 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
     if sel_com:
         base = base[base["comuna"].isin(sel_com)]
 
+    # ── Ruta de un técnico en un día ─────────────────────────────────────────
+    # Responde "¿por dónde parte Edison el 01-10 y en qué orden sigue?". Va
+    # junto al filtro de equipo porque es la continuación natural: equipo →
+    # persona → su jornada.
+    g1, g2, g3 = st.columns([1.1, 1.1, 2.2])
+    _roster_ruta = (eq_map.get(equipo) if equipo != "Todos"
+                    else sorted({m for v in eq_map.values() for m in v}))
+    ruta_tec = g1.selectbox("Ver ruta de", ["—"] + list(_roster_ruta),
+                            key="mpp_ruta_tec",
+                            help="Dibuja en el mapa el recorrido de ese técnico "
+                                 "en la fecha elegida, en orden de visita.")
+    ruta_fecha = g2.date_input("Fecha de la ruta", max(hoy, INICIO_SISTEMA),
+                               key="mpp_ruta_fecha")
+
     # ── Horizonte y dotación ─────────────────────────────────────────────────
     # Viven fuera de las pestañas porque el plan lo consumen todas: el mapa
     # muestra la fecha programada de cada EDS, Rutas el detalle por jornada y
@@ -735,12 +784,11 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     "No se encontró `comunas_chile.geojson`; se muestran sólo los "
                     "puntos. Sin polígonos no se puede seleccionar por comuna.")
 
-            pts["color"] = pts["ejec"].map(
-                lambda e: EJECUCION.get(e, ESTADOS["sin_hist"])[1])
-            pts["radio_m"] = pts["ejec"].map(
-                {"vencida": 900, "pendiente": 650}).fillna(420)
+            pts["color"] = pts["cliente"].map(color_cliente)
+            pts["radio_m"] = 700
             pts["lbl"] = pts["ejec"].map(
                 lambda e: EJECUCION.get(e, ESTADOS["sin_hist"])[0])
+            pts["glifo"] = pts["ejec"].map(GLIFO_EJEC).fillna("•")
             pts["ult"] = pd.to_datetime(pts["ultima_mp"]).dt.strftime("%d-%m-%Y")
             pts["lim"] = pd.to_datetime(pts["limite"]).dt.strftime("%d-%m-%Y")
             pts["cli"] = pts["cliente"].map(_cli_corto)
@@ -751,13 +799,21 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
             pts["prog"] = pts["eds"].map(prog).fillna("sin programar")
             pts["t1"] = [f"{e} — {str(es)[:40]}"
                          for e, es in zip(pts["eds"], pts["estacion"])]
-            pts["t2"] = pts["cli"] + " · " + pts["comuna"].astype(str)
+            pts["t2"] = pts["cliente"].astype(str) + " · " + pts["comuna"].astype(str)
             pts["t3"] = pts["lbl"] + " · " + pts["dias_sin_mp"].astype(str)                 + " días sin MP"
             pts["t4"] = ("Programada: " + pts["prog"] + " · Límite: " + pts["lim"])
+
+            # Paradas de la ruta elegida, en orden de visita.
+            _ruta = pd.DataFrame()
+            if ruta_tec != "—" and not plan.empty:
+                _ruta = plan[(plan["tecnico"] == ruta_tec)
+                             & (plan["fecha"].dt.date == ruta_fecha)].copy()
 
             try:
                 import pydeck as pdk
                 zoom = 11.5 if sel_com else (9.2 if zona == "Santiago (RM)" else 4.2)
+                if not _ruta.empty:
+                    zoom = 11.0
                 estilo_mapa = (pdk.map_styles.CARTO_DARK if dark
                                else pdk.map_styles.CARTO_LIGHT)
                 capas = []
@@ -804,15 +860,70 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                 capas.append(pdk.Layer(
                     "ScatterplotLayer", data=pts, id="eds",
                     get_position="[lon, lat]", get_fill_color="color",
-                    get_radius="radio_m", radius_min_pixels=4,
-                    radius_max_pixels=18, pickable=True, opacity=0.9,
-                    stroked=True, get_line_color=[255, 255, 255], line_width_min_pixels=1))
+                    get_radius="radio_m", radius_min_pixels=7,
+                    radius_max_pixels=22, pickable=True, opacity=0.95,
+                    stroked=True, get_line_color=[255, 255, 255],
+                    line_width_min_pixels=1.5))
+                # Estado DENTRO del punto: el color ya dice de quién es la
+                # estación, el símbolo dice si está lista.
+                _gl = pdk.Layer(
+                    "TextLayer", data=pts, id="glifos",
+                    get_position="[lon, lat]", get_text="glifo",
+                    get_size=12, size_units="pixels",
+                    size_min_pixels=9, size_max_pixels=15,
+                    get_color=[255, 255, 255],
+                    get_alignment_baseline="'center'",
+                    get_text_anchor="'middle'",
+                    pickable=False)
+                _gl.__dict__["characterSet"] = sorted(set(GLIFO_EJEC.values()) | {"•"})
+                capas.append(_gl)
+
+                # ── Trazado de la ruta del técnico elegido ────────────────
+                if not _ruta.empty:
+                    _cam = _ruta.sort_values("orden")
+                    _pts_ruta = [[float(x), float(y)]
+                                 for x, y in zip(_cam["lon"], _cam["lat"])]
+                    if len(_pts_ruta) > 1:
+                        capas.append(pdk.Layer(
+                            "PathLayer",
+                            data=[{"path": _pts_ruta}], get_path="path",
+                            get_color=[12, 37, 64] if not dark else [125, 211, 252],
+                            get_width=4, width_units="pixels",
+                            width_min_pixels=3, cap_rounded=True,
+                            joint_rounded=True, pickable=False, id="trazo"))
+                    # Halo bajo las paradas de la ruta, para distinguirlas del
+                    # resto de EDS sin cambiarles el color de cliente.
+                    capas.append(pdk.Layer(
+                        "ScatterplotLayer", data=_cam, id="ruta_halo",
+                        get_position="[lon, lat]",
+                        get_fill_color=[12, 37, 64, 60] if not dark
+                                       else [125, 211, 252, 70],
+                        get_radius=1500, radius_min_pixels=16,
+                        radius_max_pixels=34, pickable=False))
+                    # Numero de parada: 1, 2, 3… en orden de visita.
+                    _num = _cam.assign(_n=_cam["orden"].astype(str))
+                    _nl = pdk.Layer(
+                        "TextLayer", data=_num, id="ruta_num",
+                        get_position="[lon, lat]", get_text="_n",
+                        get_size=13, size_units="pixels",
+                        size_min_pixels=11, size_max_pixels=17,
+                        get_color=[255, 255, 255],
+                        get_pixel_offset=[0, -22],
+                        get_alignment_baseline="'center'",
+                        get_text_anchor="'middle'",
+                        background=True,
+                        get_background_color=[12, 37, 64, 235] if not dark
+                                             else [14, 165, 233, 235],
+                        background_padding=[5, 2, 5, 2],
+                        pickable=False)
+                    _nl.__dict__["characterSet"] = list("0123456789")
+                    capas.append(_nl)
                 ev = st.pydeck_chart(
                     pdk.Deck(
                         map_style=estilo_mapa,
                         initial_view_state=pdk.ViewState(
-                            latitude=float(pts["lat"].mean()),
-                            longitude=float(pts["lon"].mean()),
+                            latitude=float((_ruta if not _ruta.empty else pts)["lat"].mean()),
+                            longitude=float((_ruta if not _ruta.empty else pts)["lon"].mean()),
                             zoom=zoom, pitch=0),
                         layers=capas,
                         tooltip={
@@ -851,9 +962,47 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
 
             st.markdown(
                 f"<span style='font-size:.8rem;color:{muted};'>"
-                "🟢 realizada este mes · 🟡 pendiente en plazo · 🔴 vencida o no "
-                "ejecutada en su fecha. Una comuna queda verde solo cuando no "
-                "le falta ninguna MP del mes.</span>", unsafe_allow_html=True)
+                "<b>Color del punto = cliente:</b> 🔴 Copec · 🟡 Shell · "
+                "🟢 Esmax/Aramco · 🔵 Abastible · ⚪ particulares. "
+                "<b>Símbolo dentro:</b> ✅ realizada · • pendiente · ❌ vencida. "
+                "<b>Color de la comuna:</b> verde si no le falta ninguna MP del "
+                "mes, ámbar si quedan en plazo, rojo si hay vencidas."
+                "</span>", unsafe_allow_html=True)
+
+            # ── Recorrido del técnico elegido ───────────────────────────────
+            if ruta_tec != "—":
+                if _ruta.empty:
+                    st.info(f"**{ruta_tec}** no tiene ruta asignada el "
+                            f"{ruta_fecha:%d-%m-%Y}. Puede ser que esté de turno "
+                            "(atendiendo correctivas) o que ese día no haya MP "
+                            "que le corresponda en la zona filtrada.")
+                else:
+                    _c = _ruta.sort_values("orden")
+                    _km = sum(haversine(a.lat, a.lon, b.lat, b.lon)
+                              for a, b in zip(_c.itertuples(), _c.iloc[1:].itertuples()))
+                    st.markdown(f"### 🚩 Ruta de {ruta_tec} — {ruta_fecha:%d-%m-%Y}")
+                    _m = st.columns(3)
+                    _m[0].metric("Paradas", len(_c))
+                    _m[1].metric("Recorrido", f"{_km:.1f} km",
+                                 help="Suma de las distancias entre paradas "
+                                      "consecutivas, en línea recta.")
+                    _m[2].metric("Comunas", _c["comuna"].nunique())
+                    _tr = _c[["orden", "eds", "estacion", "cliente", "comuna",
+                              "tipo", "plan", "limite"]].rename(columns={
+                        "orden": "#", "eds": "Código EDS", "estacion": "Estación",
+                        "cliente": "Cliente", "comuna": "Comuna",
+                        "tipo": "Tipo de mantención", "plan": "Plan de tareas",
+                        "limite": "Límite"})
+                    _tr["Límite"] = pd.to_datetime(_tr["Límite"]).dt.strftime("%d-%m-%Y")
+                    _tr["#"] = _tr["#"].astype(str) + _tr["#"].map(
+                        lambda n: "  ◀ inicio" if n == 1 else
+                                  ("  ◀ fin" if n == len(_c) else ""))
+                    st.dataframe(_tr, use_container_width=True, hide_index=True)
+                    st.caption(
+                        "El orden sale del motor de ruteo: parte por la MP más "
+                        "urgente del día y sigue por la más cercana a la anterior. "
+                        "Las distancias son en línea recta, no de manejo.")
+                    st.divider()
 
             # ── Detalle de la comuna seleccionada ────────────────────────────
             foco = sel_click or (sel_com[0] if len(sel_com) == 1 else None)
