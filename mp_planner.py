@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import itertools
 import math
+import re
 from datetime import date, timedelta
 
 import pandas as pd
@@ -288,6 +289,35 @@ except Exception:                      # fuera de Streamlit (tests, scripts)
     _cartera_cache = None
 
 
+_RX_SUFIJO_B = re.compile(r"^(.*?)[\s_\-]?B$", re.I)
+
+
+def unificar_sufijo_b(codigos) -> dict:
+    """Mapa {codigo -> codigo de su estación} colapsando el sufijo "B".
+
+    El maestro registra un segundo equipo de lavado en la misma estación con
+    una "B" al final (60711 y 60711B, "Eq Oriente" y "Eq Poniente"). No son dos
+    estaciones: es una parada con dos máquinas, y así se planifican en terreno
+    —el plan de operaciones las pone en la misma ruta—.
+
+    Hoy ningún código con B tiene OTs ni coordenadas, así que esto no cambia
+    nada; existe para que el día que se registre una, se sume al ciclo de su
+    estación en vez de aparecer como una EDS nueva que nunca se ha mantenido.
+
+    Solo colapsa cuando la estación base existe en el mismo conjunto: hay
+    códigos que terminan en B por su propio nombre y no son un segundo equipo.
+    """
+    cs = {str(c).strip() for c in codigos if str(c).strip()}
+    mapa = {}
+    for c in cs:
+        m = _RX_SUFIJO_B.match(c)
+        if m:
+            base = m.group(1).strip()
+            if base and base in cs:
+                mapa[c] = base
+    return mapa
+
+
 def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
                       eds_excluidas=frozenset(),
                       ciclo: int = CICLO_DIAS, tol: int = TOLERANCIA) -> pd.DataFrame:
@@ -317,6 +347,10 @@ def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
     h = h[h["eds"].notna() & (h["eds"].str.strip() != "") & (h["eds"] != "nan")]
     if h.empty:
         return pd.DataFrame()
+    # Segundo equipo de lavado -> misma estación (ver unificar_sufijo_b).
+    _alias = unificar_sufijo_b(h["eds"])
+    if _alias:
+        h["eds"] = h["eds"].replace(_alias)
 
     h = h.sort_values("fin")
     agg = h.groupby("eds").agg(
@@ -355,6 +389,11 @@ def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
     agg["estado"] = agg.apply(_estado, axis=1)
 
     if not geo.empty:
+        geo = geo.copy()
+        _ag = unificar_sufijo_b(geo["eds_occim"])
+        if _ag:
+            geo["eds_occim"] = geo["eds_occim"].replace(_ag)
+            geo = geo.drop_duplicates("eds_occim", keep="first")
         agg = agg.merge(
             geo.rename(columns={"eds_occim": "eds", "latitud": "lat", "longitud": "lon"}),
             on="eds", how="left")
