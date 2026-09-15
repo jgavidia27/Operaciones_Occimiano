@@ -575,29 +575,38 @@ def _cli_corto(c) -> str:
 
 
 def _equipos(hasta: date | None = None):
-    """Equipos de terreno y sus miembros, sin los que están de baja a esa fecha.
+    """Equipos de terreno y sus miembros, sin los que ya no están a esa fecha.
 
-    El roster maestro conserva a los técnicos dados de baja para que la data
-    histórica siga mapeando a su equipo. Para planificar hacia adelante hay que
-    sacarlos, o el motor les asigna rutas a gente que ya no está.
+    El roster maestro conserva a quien se fue para que la data histórica siga
+    mapeando a su equipo. Para planificar hacia adelante hay que sacarlos, o el
+    motor le asigna rutas a gente que ya no trabaja aquí.
+
+    Ojo: hay DOS registros de salida y ambos hay que mirar. TECNICOS_BAJA va
+    indexado por nombre completo; TECNICOS_INACTIVOS por nombre corto. Mirar
+    solo uno deja al otro dentro de las rutas sin ningún error visible.
     """
     try:
-        from data import GRUPOS_TERRENO, TECNICOS_BAJA
+        from data import GRUPOS_TERRENO, TECNICOS_BAJA, TECNICOS_INACTIVOS
     except Exception:
         return {}
     corte = (hasta or date.today()).isoformat()
-    # Las bajas se registran con nombre completo y el roster usa nombre corto:
-    # el cruce es por tokens, igual que con los turnos.
+
+    # El roster usa nombre corto y las salidas a veces el completo, así que el
+    # cruce es por tokens, igual que con los turnos.
     fuera = set()
-    for full, info in (TECNICOS_BAJA or {}).items():
-        if str(info.get("hasta", "")) < corte:
-            fuera.add(frozenset(_tok(full)))
+    for registro in (TECNICOS_BAJA or {}, TECNICOS_INACTIVOS or {}):
+        for clave, info in registro.items():
+            if str(info.get("hasta", "")) >= corte:
+                continue
+            fuera.add(frozenset(_tok(clave)))
+            if info.get("nombre_full"):
+                fuera.add(frozenset(_tok(info["nombre_full"])))
 
-    def de_baja(corto: str) -> bool:
+    def ya_no_esta(corto: str) -> bool:
         t = _tok(corto)
-        return bool(t) and any(t <= f for f in fuera)
+        return bool(t) and any(t <= f or f <= t for f in fuera)
 
-    return {k: [m for m in v["miembros"] if not de_baja(m)]
+    return {k: [m for m in v["miembros"] if not ya_no_esta(m)]
             for k, v in GRUPOS_TERRENO.items()}
 
 
