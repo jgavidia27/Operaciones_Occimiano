@@ -194,6 +194,23 @@ def norm_comuna(nombre) -> str:
     return " ".join(_re.sub(r"[^A-Z0-9 ]", " ", s).split())
 
 
+def _prop_cruda(capa, **props):
+    """Fija propiedades de una capa SIN que pydeck las convierta en expresión.
+
+    pydeck prefija con "@@=" cualquier string que reciba como argumento, porque
+    asume que es el nombre de un campo del dato (un accessor). Para `getPath` o
+    `getText` eso es lo correcto; para propiedades que esperan un valor literal
+    —`widthUnits`, `sizeUnits`, `characterSet`— es un desastre silencioso:
+    deck.gl recibe una función donde esperaba "pixels", descarta la unidad y
+    dibuja con la que tenga por defecto. Una PathLayer así pinta una línea de 4
+    unidades de mundo en vez de 4 píxeles y tapa el mapa entero.
+
+    No hay error ni en Python ni en consola: solo el mapa mal dibujado.
+    """
+    capa.__dict__.update(props)
+    return capa
+
+
 def _centroide(geom) -> list | None:
     """Punto donde va el rótulo: centroide del anillo exterior más grande.
 
@@ -837,7 +854,7 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                                "pos": f["properties"]["centro"]}
                               for f in feats if f["properties"]["centro"]],
                         get_position="pos", get_text="comuna",
-                        get_size=11, size_units="pixels",
+                        get_size=11,
                         size_min_pixels=9, size_max_pixels=14,
                         get_color=[226, 232, 240] if dark else [15, 23, 42],
                         get_alignment_baseline="'center'",
@@ -854,8 +871,9 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     # "function is not iterable". Sin él, deck.gl arma el atlas
                     # de la fuente con un set ASCII y la Ñ y las vocales
                     # acentuadas se dibujan como espacio: "Ñuñoa" queda "u oa".
-                    _rot.__dict__["characterSet"] = _charset(
-                        f["properties"]["comuna"] for f in feats)
+                    _prop_cruda(_rot, sizeUnits="pixels",
+                                characterSet=_charset(
+                                    f["properties"]["comuna"] for f in feats))
                     capas.append(_rot)
                 capas.append(pdk.Layer(
                     "ScatterplotLayer", data=pts, id="eds",
@@ -869,13 +887,14 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                 _gl = pdk.Layer(
                     "TextLayer", data=pts, id="glifos",
                     get_position="[lon, lat]", get_text="glifo",
-                    get_size=12, size_units="pixels",
+                    get_size=12,
                     size_min_pixels=9, size_max_pixels=15,
                     get_color=[255, 255, 255],
                     get_alignment_baseline="'center'",
                     get_text_anchor="'middle'",
                     pickable=False)
-                _gl.__dict__["characterSet"] = sorted(set(GLIFO_EJEC.values()) | {"•"})
+                _prop_cruda(_gl, sizeUnits="pixels",
+                            characterSet=sorted(set(GLIFO_EJEC.values()) | {"•"}))
                 capas.append(_gl)
 
                 # ── Trazado de la ruta del técnico elegido ────────────────
@@ -884,13 +903,14 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     _pts_ruta = [[float(x), float(y)]
                                  for x, y in zip(_cam["lon"], _cam["lat"])]
                     if len(_pts_ruta) > 1:
-                        capas.append(pdk.Layer(
+                        capas.append(_prop_cruda(pdk.Layer(
                             "PathLayer",
                             data=[{"path": _pts_ruta}], get_path="path",
                             get_color=[12, 37, 64] if not dark else [125, 211, 252],
-                            get_width=4, width_units="pixels",
-                            width_min_pixels=3, cap_rounded=True,
-                            joint_rounded=True, pickable=False, id="trazo"))
+                            get_width=4, width_min_pixels=3,
+                            cap_rounded=True, joint_rounded=True,
+                            pickable=False, id="trazo"),
+                            widthUnits="pixels"))
                     # Halo bajo las paradas de la ruta, para distinguirlas del
                     # resto de EDS sin cambiarles el color de cliente.
                     capas.append(pdk.Layer(
@@ -905,7 +925,7 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     _nl = pdk.Layer(
                         "TextLayer", data=_num, id="ruta_num",
                         get_position="[lon, lat]", get_text="_n",
-                        get_size=13, size_units="pixels",
+                        get_size=13,
                         size_min_pixels=11, size_max_pixels=17,
                         get_color=[255, 255, 255],
                         get_pixel_offset=[0, -22],
@@ -916,7 +936,7 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                                              else [14, 165, 233, 235],
                         background_padding=[5, 2, 5, 2],
                         pickable=False)
-                    _nl.__dict__["characterSet"] = list("0123456789")
+                    _prop_cruda(_nl, sizeUnits="pixels", characterSet=list("0123456789"))
                     capas.append(_nl)
                 ev = st.pydeck_chart(
                     pdk.Deck(
