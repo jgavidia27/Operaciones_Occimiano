@@ -29,6 +29,11 @@ CICLO_DIAS = 30
 TOLERANCIA = 5
 CAP_DIA = 3
 RADIO_KM = 8.0
+# Jornada y traslado, en minutos. El traslado sale del plan de operaciones:
+# la diferencia entre la carga de la ruta y la suma de sus tareas es de
+# ~105 min de mediana.
+JORNADA_MIN = 480
+TRASLADO_MIN = 105
 
 # Puesta en marcha del sistema. Hasta esta fecha la programacion de MP se lleva
 # en el Excel de operaciones; desde aqui, toda visita de MP se planifica y se
@@ -289,7 +294,9 @@ except Exception:                      # fuera de Streamlit (tests, scripts)
     _cartera_cache = None
 
 
-_RX_SUFIJO_B = re.compile(r"^(.*?)[\s_\-]?B$", re.I)
+# El segundo equipo se escribe de varias formas: 60711B, "40046 B",
+# "60001(B)", "60079 (B)". Todas son la misma estación.
+_RX_SUFIJO_B = re.compile(r"^(.*?)[\s_\-]*\(?B\)?$", re.I)
 
 
 def unificar_sufijo_b(codigos) -> dict:
@@ -316,6 +323,29 @@ def unificar_sufijo_b(codigos) -> dict:
             if base and base in cs:
                 mapa[c] = base
     return mapa
+
+
+def cargar_tipos() -> pd.DataFrame:
+    """Tipo y duración de la MP por EDS, desde estaciones_servicio.
+
+    Devuelve vacío si las columnas todavía no existen (ver
+    setup_tipo_mantencion.sql), y en ese caso el planificador cae a capacidad
+    por número de visitas. Es deliberado: la vista tiene que funcionar antes y
+    después de que se corra el DDL.
+    """
+    try:
+        from supabase_client import _query
+        rows = _query("estaciones_servicio",
+                      "select=eds_occim,tipo_mantencion,duracion_mp_min", 5000)
+    except Exception:
+        return pd.DataFrame(columns=["eds", "tipo_mp", "dur_min"])
+    t = pd.DataFrame(rows)
+    if t.empty or "duracion_mp_min" not in t.columns:
+        return pd.DataFrame(columns=["eds", "tipo_mp", "dur_min"])
+    t = t.rename(columns={"eds_occim": "eds", "tipo_mantencion": "tipo_mp",
+                          "duracion_mp_min": "dur_min"})
+    t["dur_min"] = pd.to_numeric(t["dur_min"], errors="coerce")
+    return t[["eds", "tipo_mp", "dur_min"]]
 
 
 def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
@@ -402,6 +432,13 @@ def construir_cartera(raw_prev, geo: pd.DataFrame, hoy: date,
             agg[c] = None
     agg["zona"] = agg["comuna"].apply(
         lambda c: "Santiago (RM)" if c in COMUNAS_RM else ("Regiones" if c else "Sin comuna"))
+
+    tipos = cargar_tipos()
+    if not tipos.empty:
+        agg = agg.merge(tipos, on="eds", how="left")
+    for c in ("tipo_mp", "dur_min"):
+        if c not in agg.columns:
+            agg[c] = None
     return agg.sort_values("limite").reset_index(drop=True)
 
 
@@ -435,7 +472,7 @@ def _mejor_orden(stops):
     return mejor, mejor_km
 
 
-def pulir_rutas(rutas: dict, pasadas: int = 4) -> dict:
+def pulir_rutas(rutas: dict, pasadas: int = 4, cabe=None) -> dict:
     """Intercambia paradas entre rutas del MISMO día mientras baje el total.
 
     El greedy arma cada ruta sin mirar a las demás, así que con varios técnicos
@@ -443,7 +480,14 @@ def pulir_rutas(rutas: dict, pasadas: int = 4) -> dict:
     una parada de la otra. Un intercambio simple entre pares de rutas, repetido
     hasta que deje de mejorar, corrige eso sin alterar qué MP se hace ese día
     —solo quién la hace—, de modo que el cumplimiento de ventana no cambia.
+
+    `cabe(ruta)` valida que la jornada resultante siga cabiendo en el horario.
+    Sin ese filtro el pulido optimiza kilómetros y de paso junta dos estaciones
+    largas el mismo día: bajaba el recorrido y subía la jornada a 9,4 h.
     """
+    if cabe is None:
+        def cabe(_ruta):
+            return True
     for _ in range(pasadas):
         mejoro = False
         for dia in sorted({f for f, _ in rutas}):
@@ -456,6 +500,8 @@ def pulir_rutas(rutas: dict, pasadas: int = 4) -> dict:
                         for ib in range(len(B)):
                             na = A[:ia] + [B[ib]] + A[ia + 1:]
                             nb = B[:ib] + [A[ia]] + B[ib + 1:]
+                            if not (cabe(na) and cabe(nb)):
+                                continue
                             nuevo = _mejor_orden(na)[1] + _mejor_orden(nb)[1]
                             if nuevo < base - 0.05:      # umbral: evita oscilar
                                 rutas[claves[i]] = A = na
@@ -468,17 +514,23 @@ def pulir_rutas(rutas: dict, pasadas: int = 4) -> dict:
 
 def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
                cap: int = CAP_DIA, radio: float = RADIO_KM,
-               fijos: dict | None = None) -> pd.DataFrame:
+               fijos: dict | None = None, jornada_min: int = JORNADA_MIN,
+               traslado_min: int = TRASLADO_MIN) -> pd.DataFrame:
     """Asigna cada MP a un (día, técnico) equilibrando urgencia y cercanía.
 
     Algoritmo — greedy por día, "semilla + vecinos":
       1. Para cada día/técnico se toma como SEMILLA la MP viable más urgente
          (menor fecha límite). Esto garantiza que lo vencido salga primero.
-      2. La ruta se completa con las MPs más cercanas a la semilla, priorizando
-         entre ellas las de límite más próximo. Así la ruta queda geográficamente
-         compacta sin postergar lo urgente.
+      2. La ruta se completa con las MPs más cercanas a la semilla. La urgencia
+         no vuelve a pesar aquí: ya la cubrió la semilla, y volver a ponderarla
+         hacía cruzar la ciudad por una MP con holgura teniendo vecinas al lado.
       3. Si dentro del radio no hay vecinos, el radio se expande (16, 32 km…)
          antes de dejar al técnico con media jornada vacía.
+
+    La jornada se llena por TIEMPO cuando la cartera trae `dur_min`, no por
+    número de visitas: una estación con termo toma 2:10 y una simple 1:20, así
+    que "3 al día" son 5,8 h en un caso y 8,2 h en otro. Si el dato no está
+    —porque no se ha corrido setup_tipo_mantencion.sql— se cae a `cap` visitas.
 
     `fijos` son asignaciones manuales del administrador: {eds: (fecha, tecnico)}.
     Se respetan tal cual y el resto se recalcula alrededor de ellas.
@@ -491,6 +543,23 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
     pend = {r["eds"]: r for r in cartera.to_dict("records")
             if pd.notna(r.get("lat")) and pd.notna(r.get("lon"))}
     filas = []
+
+    # ¿Hay duraciones para llenar la jornada por tiempo? A las EDS sin dato se
+    # les asigna la mediana de las conocidas, que es mejor que descartarlas.
+    _durs = [float(r["dur_min"]) for r in pend.values()
+             if r.get("dur_min") and float(r["dur_min"]) > 0]
+    por_tiempo = len(_durs) >= max(5, 0.3 * len(pend)) if pend else False
+    _dur_def = (sorted(_durs)[len(_durs) // 2] if _durs else 0)
+
+    def _dur(r) -> float:
+        v = r.get("dur_min")
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            v = 0
+        return v if v > 0 else _dur_def
+
+    presupuesto = max(60, jornada_min - traslado_min)
 
     for eds, (f, tec) in fijos.items():
         if eds in pend:
@@ -516,7 +585,13 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
             seed = min(viables, key=lambda r: (r["limite"], r["eds"]))
             ruta = [seed]
             pend.pop(seed["eds"])
-            while len(ruta) < cupo and pend:
+            usado = _dur(seed)
+            while pend:
+                if por_tiempo:
+                    if usado >= presupuesto:
+                        break
+                elif len(ruta) >= cupo:
+                    break
                 rad, cand = radio, []
                 while rad <= radio * 8 and not cand:
                     cand = [r for r in pend.values()
@@ -530,7 +605,10 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
                 # la ciudad por una MP con más holgura teniendo vecinas al lado.
                 nxt = min(cand, key=lambda r: min(
                     haversine(s["lat"], s["lon"], r["lat"], r["lon"]) for s in ruta))
+                if por_tiempo and usado + _dur(nxt) > presupuesto:
+                    break          # no cabe en la jornada: se deja para otro día
                 ruta.append(nxt)
+                usado += _dur(nxt)
                 pend.pop(nxt["eds"])
             rutas_dia[(d, tec)] = ruta
             ocupado[(d, tec)] = ocupado.get((d, tec), 0) + len(ruta)
@@ -541,7 +619,10 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
     # Santiago baja el recorrido total de 473 a 313 km (-34%) y el peor día de
     # 74 a 40 km.
     if rutas_dia:
-        for (d, tec), ruta in pulir_rutas(rutas_dia).items():
+        def _cabe(ruta) -> bool:
+            return (not por_tiempo) or sum(_dur(r) for r in ruta) <= presupuesto
+
+        for (d, tec), ruta in pulir_rutas(rutas_dia, cabe=_cabe).items():
             for i_r, r in enumerate(ruta, 1):
                 filas.append({**r, "fecha": d, "tecnico": tec,
                               "origen": "auto", "orden": i_r})
@@ -703,11 +784,21 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                                     help="Días entre una MP y la siguiente."))
         tol = int(c2.number_input("Tolerancia (± días)", 0, 20, TOLERANCIA, 1,
                                   help="Se incumple recién pasado ciclo + tolerancia."))
-        cap = int(c3.number_input("MP por técnico/día", 1, 8, CAP_DIA, 1))
+        cap = int(c3.number_input("MP por técnico/día", 1, 8, CAP_DIA, 1,
+                                  help="Solo se usa como respaldo, cuando las "
+                                       "estaciones no tienen duración cargada."))
         radio = float(c4.number_input("Radio de agrupación (km)", 2.0, 40.0,
                                       RADIO_KM, 1.0,
                                       help="Distancia máxima entre EDS de una misma "
                                            "ruta. Se expande sola si no hay vecinos."))
+        c5, c6 = st.columns(2)
+        jornada_h = float(c5.number_input("Jornada (horas)", 4.0, 12.0,
+                                          JORNADA_MIN / 60, 0.5))
+        traslado = int(c6.number_input("Traslado por ruta (min)", 0, 240,
+                                       TRASLADO_MIN, 15,
+                                       help="Tiempo de desplazamiento y holgura "
+                                            "de la jornada completa, fuera del "
+                                            "trabajo en las estaciones."))
 
     if _cartera_cache is not None:
         cartera = _cartera_cache(raw_prev, geo, hoy.isoformat(),
@@ -791,7 +882,8 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
             except Exception as exc:
                 st.warning(f"No se pudo leer la programación de turnos ({exc}). "
                            "Se usa la dotación completa.")
-        plan = planificar(base, dias, disp, cap, radio, fijos)
+        plan = planificar(base, dias, disp, cap, radio, fijos,
+                          jornada_min=int(jornada_h * 60), traslado_min=traslado)
         st.session_state["mpp_plan"] = plan
     # Estado de ejecucion del mes: es lo que colorea el mapa y lo que responde
     # la pregunta operativa "¿que me falta por hacer aqui?".
@@ -820,6 +912,20 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                 help="Porcentaje de los intervalos históricos entre MPs "
                      f"consecutivas que se cerraron dentro de {ciclo + tol} días. "
                      "Es desempeño medido, no una meta.")
+
+    _con_dur = int(pd.to_numeric(base["dur_min"], errors="coerce").fillna(0).gt(0).sum())
+    if _con_dur:
+        st.caption(
+            f"⏱️ Jornada llenada por **tiempo**: {_con_dur} de {len(base)} EDS "
+            f"tienen duración cargada (jornada {jornada_h:.1f} h menos "
+            f"{traslado} min de traslado). Una estación con termo toma 2:10 y "
+            "una simple 1:20, así que el número de visitas por día varía.")
+    else:
+        st.caption(
+            f"Jornada llenada por **número de visitas** ({cap} por técnico/día). "
+            "Para llenarla por tiempo hay que cargar la duración de cada "
+            "estación — ver `setup_tipo_mantencion.sql` y "
+            "`seed_tipo_mantencion.py`.")
 
     t_map, t_rut, t_atr, t_man = st.tabs(
         ["🗺️  Mapa y cartera", "📅  Rutas", "🔴  Arrastre", "🔧  Ajuste manual"])
