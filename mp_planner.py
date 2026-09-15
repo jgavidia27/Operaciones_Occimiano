@@ -33,7 +33,15 @@ RADIO_KM = 8.0
 # la diferencia entre la carga de la ruta y la suma de sus tareas es de
 # ~105 min de mediana.
 JORNADA_MIN = 480
-TRASLADO_MIN = 105
+# Holgura fija de la jornada: base -> primera parada, ultima -> base,
+# colacion. El viaje ENTRE paradas no se supone, se calcula con la matriz.
+TRASLADO_MIN = 75
+# Conversion de linea recta a minutos cuando falta el par en la matriz.
+# 2,4 min/km es la mediana observada en Santiago contra OSRM.
+MIN_POR_KM = 2.4
+# Servicio de ruteo. Solo se usa para DIBUJAR la ruta seleccionada; los
+# tiempos de planificacion salen de eds_viaje, que es estatica.
+OSRM_URL = "https://router.project-osrm.org"
 
 # Puesta en marcha del sistema. Hasta esta fecha la programacion de MP se lleva
 # en el Excel de operaciones; desde aqui, toda visita de MP se planifica y se
@@ -276,6 +284,14 @@ try:
     def _cargar_geo_cache() -> pd.DataFrame:
         return _cargar_geo_raw()
 
+    @_stc.cache_data(ttl=3600, show_spinner=False)
+    def _cargar_viajes_cache() -> dict:
+        return cargar_viajes()
+
+    @_stc.cache_data(ttl=86400, show_spinner=False)
+    def _geometria_cache(coords: tuple) -> list:
+        return geometria_ruta(coords)
+
     @_stc.cache_resource(show_spinner=False)
     def _cargar_comunas_cache() -> dict | None:
         return _cargar_comunas_raw()
@@ -292,6 +308,8 @@ except Exception:                      # fuera de Streamlit (tests, scripts)
     _cargar_geo_cache = None
     _cargar_comunas_cache = None
     _cartera_cache = None
+    _cargar_viajes_cache = None
+    _geometria_cache = None
 
 
 # El segundo equipo se escribe de varias formas: 60711B, "40046 B",
@@ -323,6 +341,72 @@ def unificar_sufijo_b(codigos) -> dict:
             if base and base in cs:
                 mapa[c] = base
     return mapa
+
+
+def cargar_viajes() -> dict:
+    """Matriz de viaje real entre EDS: {(origen, destino): minutos}.
+
+    Devuelve vacío si la tabla no existe todavía (ver setup_eds_viaje.sql) y el
+    planificador cae a distancia en línea recta. Es deliberado: la vista tiene
+    que funcionar antes y después de poblar la matriz.
+    """
+    try:
+        from supabase_client import _query
+        rows = _query("eds_viaje", "select=eds_origen,eds_destino,minutos", 400000)
+    except Exception:
+        return {}
+    out = {}
+    for r in rows or []:
+        try:
+            out[(r["eds_origen"], r["eds_destino"])] = float(r["minutos"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def minutos_entre(viajes: dict, a: str, b: str,
+                  lat1=None, lon1=None, lat2=None, lon2=None) -> float:
+    """Minutos de viaje entre dos EDS, con respaldo si el par no está.
+
+    El respaldo convierte la línea recta a minutos con un factor de 2,4 min/km,
+    que es la mediana observada en Santiago. Es peor que el dato real —de ahí
+    la matriz— pero deja el motor funcionando cuando falta un par.
+    """
+    v = viajes.get((a, b))
+    if v is None:
+        v = viajes.get((b, a))
+    if v is not None:
+        return v
+    if None in (lat1, lon1, lat2, lon2):
+        return 0.0
+    return haversine(lat1, lon1, lat2, lon2) * 2.4
+
+
+def geometria_ruta(coords: tuple, osrm: str = OSRM_URL) -> list:
+    """Traza real de la ruta siguiendo calles: [[lon, lat], ...].
+
+    `coords` es una tupla de (lon, lat) en orden de visita. Devuelve lista
+    vacía si el servicio no responde, y el mapa cae a la línea recta: un trazo
+    aproximado es preferible a un mapa sin ruta.
+
+    Es la única llamada en vivo a OSRM. Los tiempos para planificar NO salen de
+    aquí: vienen de la matriz guardada en eds_viaje.
+    """
+    if len(coords) < 2:
+        return []
+    try:
+        import requests as _rq
+        ruta = ";".join(f"{lon},{lat}" for lon, lat in coords)
+        r = _rq.get(f"{osrm}/route/v1/driving/{ruta}",
+                    params={"overview": "full", "geometries": "geojson"}, timeout=12)
+        if r.status_code != 200:
+            return []
+        j = r.json()
+        if j.get("code") != "Ok" or not j.get("routes"):
+            return []
+        return j["routes"][0]["geometry"]["coordinates"]
+    except Exception:
+        return []
 
 
 def cargar_tipos() -> pd.DataFrame:
@@ -454,25 +538,33 @@ def dias_habiles(desde: date, hasta: date, sabados: bool = False) -> list[date]:
     return out
 
 
-def _km(stops) -> float:
+def _costo(stops, metrica=None) -> float:
+    """Costo de recorrer las paradas en ese orden.
+
+    Con `metrica` son minutos de calle; sin ella, kilómetros en línea recta.
+    El orden importa poco en distancia recta y bastante en calle: una calle de
+    un solo sentido o un puente cambian cuál es el mejor recorrido.
+    """
+    if metrica is not None:
+        return sum(metrica(a, b) for a, b in zip(stops, stops[1:]))
     return sum(haversine(a["lat"], a["lon"], b["lat"], b["lon"])
                for a, b in zip(stops, stops[1:]))
 
 
-def _mejor_orden(stops):
+def _mejor_orden(stops, metrica=None):
     """Orden de visita más corto. Con 3-5 paradas el óptimo se calcula por
     fuerza bruta; el vecino más cercano deja zigzags que otro orden acorta."""
     if len(stops) <= 2:
-        return list(stops), _km(stops)
-    mejor, mejor_km = None, float("inf")
+        return list(stops), _costo(stops, metrica)
+    mejor, mejor_costo = None, float("inf")
     for perm in itertools.permutations(stops):
-        k = _km(perm)
-        if k < mejor_km:
-            mejor, mejor_km = list(perm), k
-    return mejor, mejor_km
+        k = _costo(perm, metrica)
+        if k < mejor_costo:
+            mejor, mejor_costo = list(perm), k
+    return mejor, mejor_costo
 
 
-def pulir_rutas(rutas: dict, pasadas: int = 4, cabe=None) -> dict:
+def pulir_rutas(rutas: dict, pasadas: int = 4, cabe=None, metrica=None) -> dict:
     """Intercambia paradas entre rutas del MISMO día mientras baje el total.
 
     El greedy arma cada ruta sin mirar a las demás, así que con varios técnicos
@@ -495,27 +587,28 @@ def pulir_rutas(rutas: dict, pasadas: int = 4, cabe=None) -> dict:
             for i in range(len(claves)):
                 for j in range(i + 1, len(claves)):
                     A, B = rutas[claves[i]], rutas[claves[j]]
-                    base = _mejor_orden(A)[1] + _mejor_orden(B)[1]
+                    base = _mejor_orden(A, metrica)[1] + _mejor_orden(B, metrica)[1]
                     for ia in range(len(A)):
                         for ib in range(len(B)):
                             na = A[:ia] + [B[ib]] + A[ia + 1:]
                             nb = B[:ib] + [A[ia]] + B[ib + 1:]
                             if not (cabe(na) and cabe(nb)):
                                 continue
-                            nuevo = _mejor_orden(na)[1] + _mejor_orden(nb)[1]
+                            nuevo = _mejor_orden(na, metrica)[1] + _mejor_orden(nb, metrica)[1]
                             if nuevo < base - 0.05:      # umbral: evita oscilar
                                 rutas[claves[i]] = A = na
                                 rutas[claves[j]] = B = nb
                                 base, mejoro = nuevo, True
         if not mejoro:
             break
-    return {k: _mejor_orden(v)[0] for k, v in rutas.items()}
+    return {k: _mejor_orden(v, metrica)[0] for k, v in rutas.items()}
 
 
 def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
                cap: int = CAP_DIA, radio: float = RADIO_KM,
                fijos: dict | None = None, jornada_min: int = JORNADA_MIN,
-               traslado_min: int = TRASLADO_MIN) -> pd.DataFrame:
+               traslado_min: int = TRASLADO_MIN,
+               viajes: dict | None = None) -> pd.DataFrame:
     """Asigna cada MP a un (día, técnico) equilibrando urgencia y cercanía.
 
     Algoritmo — greedy por día, "semilla + vecinos":
@@ -559,7 +652,27 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
             v = 0
         return v if v > 0 else _dur_def
 
+    # `traslado_min` pasa a ser SOLO la holgura fija de la jornada (ida desde
+    # la base a la primera parada, vuelta desde la última, colación). El viaje
+    # ENTRE paradas ya no se supone: se calcula y se descuenta ruta por ruta.
     presupuesto = max(60, jornada_min - traslado_min)
+
+    # Métrica de cercanía. Con la matriz cargada se agrupa por MINUTOS DE
+    # CALLE; sin ella, por distancia en línea recta. La recta se equivoca por
+    # un factor de 1,3 a 5,2 y, al no ser constante, tampoco sirve para
+    # comparar: dos EDS a 2 km pueden estar a 5 minutos o a 25 según si hay
+    # puente o hay que rodear.
+    viajes = viajes or {}
+
+    def cerca(a: dict, b: dict) -> float:
+        """Minutos de viaje. SIEMPRE en minutos, con matriz o sin ella, para
+        que el radio, el orden de visita y la capacidad hablen la misma unidad."""
+        return minutos_entre(viajes, a["eds"], b["eds"],
+                             a["lat"], a["lon"], b["lat"], b["lon"])
+
+    # El radio se configura en km porque es lo intuitivo; se convierte a la
+    # unidad de la métrica con la mediana observada en Santiago.
+    radio_efectivo = radio * MIN_POR_KM
 
     for eds, (f, tec) in fijos.items():
         if eds in pend:
@@ -585,17 +698,16 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
             seed = min(viables, key=lambda r: (r["limite"], r["eds"]))
             ruta = [seed]
             pend.pop(seed["eds"])
-            usado = _dur(seed)
+            usado = _dur(seed)          # trabajo + viaje entre paradas
             while pend:
                 if por_tiempo:
                     if usado >= presupuesto:
                         break
                 elif len(ruta) >= cupo:
                     break
-                rad, cand = radio, []
-                while rad <= radio * 8 and not cand:
-                    cand = [r for r in pend.values()
-                            if haversine(seed["lat"], seed["lon"], r["lat"], r["lon"]) <= rad]
+                rad, cand = radio_efectivo, []
+                while rad <= radio_efectivo * 8 and not cand:
+                    cand = [r for r in pend.values() if cerca(seed, r) <= rad]
                     rad *= 2
                 if not cand:
                     break
@@ -603,12 +715,15 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
                 # no solo la última. La urgencia ya está cubierta por la
                 # semilla; volver a ponderarla aquí hacía que el motor cruzara
                 # la ciudad por una MP con más holgura teniendo vecinas al lado.
-                nxt = min(cand, key=lambda r: min(
-                    haversine(s["lat"], s["lon"], r["lat"], r["lon"]) for s in ruta))
-                if por_tiempo and usado + _dur(nxt) > presupuesto:
+                nxt = min(cand, key=lambda r: min(cerca(s, r) for s in ruta))
+                # El costo de sumar una parada es su trabajo MÁS el viaje
+                # hasta ella. Una EDS corta pero lejos puede no caber, y una
+                # larga pero al lado sí: eso es lo que la línea recta ocultaba.
+                extra = _dur(nxt) + min(cerca(s, nxt) for s in ruta)
+                if por_tiempo and usado + extra > presupuesto:
                     break          # no cabe en la jornada: se deja para otro día
                 ruta.append(nxt)
-                usado += _dur(nxt)
+                usado += extra
                 pend.pop(nxt["eds"])
             rutas_dia[(d, tec)] = ruta
             ocupado[(d, tec)] = ocupado.get((d, tec), 0) + len(ruta)
@@ -620,9 +735,14 @@ def planificar(cartera: pd.DataFrame, dias: list[date], tecnicos: list[str],
     # 74 a 40 km.
     if rutas_dia:
         def _cabe(ruta) -> bool:
-            return (not por_tiempo) or sum(_dur(r) for r in ruta) <= presupuesto
+            if not por_tiempo:
+                return True
+            trabajo = sum(_dur(r) for r in ruta)
+            viaje = _mejor_orden(ruta, cerca)[1] if len(ruta) > 1 else 0
+            return trabajo + viaje <= presupuesto
 
-        for (d, tec), ruta in pulir_rutas(rutas_dia, cabe=_cabe).items():
+        for (d, tec), ruta in pulir_rutas(rutas_dia, cabe=_cabe,
+                                          metrica=cerca).items():
             for i_r, r in enumerate(ruta, 1):
                 filas.append({**r, "fecha": d, "tecnico": tec,
                               "origen": "auto", "orden": i_r})
@@ -882,8 +1002,11 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
             except Exception as exc:
                 st.warning(f"No se pudo leer la programación de turnos ({exc}). "
                            "Se usa la dotación completa.")
+        _viajes = (_cargar_viajes_cache() if _cargar_viajes_cache
+                   else cargar_viajes())
         plan = planificar(base, dias, disp, cap, radio, fijos,
-                          jornada_min=int(jornada_h * 60), traslado_min=traslado)
+                          jornada_min=int(jornada_h * 60), traslado_min=traslado,
+                          viajes=_viajes)
         st.session_state["mpp_plan"] = plan
     # Estado de ejecucion del mes: es lo que colorea el mapa y lo que responde
     # la pregunta operativa "¿que me falta por hacer aqui?".
@@ -1130,9 +1253,16 @@ def render(raw_prev, hoy: date, theme: dict | None = None):
                     _pts_ruta = [[float(x), float(y)]
                                  for x, y in zip(_cam["lon"], _cam["lat"])]
                     if len(_pts_ruta) > 1:
+                        # Traza por calle si el servicio responde; si no, la
+                        # recta entre paradas. Un trazo aproximado es mejor que
+                        # un mapa sin ruta.
+                        _geo = (_geometria_cache(tuple(map(tuple, _pts_ruta)))
+                                if _geometria_cache
+                                else geometria_ruta(tuple(map(tuple, _pts_ruta))))
+                        _trazo = _geo if len(_geo) > 1 else _pts_ruta
                         capas.append(_prop_cruda(pdk.Layer(
                             "PathLayer",
-                            data=[{"path": _pts_ruta}], get_path="path",
+                            data=[{"path": _trazo}], get_path="path",
                             get_color=[12, 37, 64] if not dark else [125, 211, 252],
                             get_width=4, width_min_pixels=3,
                             cap_rounded=True, joint_rounded=True,
