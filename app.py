@@ -17863,6 +17863,37 @@ elif _page == _NAV_PAGES[2]:
                               if c in _df_out.columns]
                 _df_out = _df_out[[c for c in _cols_base if c in _df_out.columns] + _cols_flow]
 
+                # ── ¿Se están explicando las condiciones reportadas? ──────────
+                # El campo de observación se agregó para que la condición no
+                # quede sin explicación ("Estanque sucio" sin decir por qué).
+                # Esto mide si eso está ocurriendo: cuenta las OTs con una
+                # condición REAL y mira cuántas traen texto del técnico.
+                # Las OTs sin condición no entran: ahí no hay nada que explicar.
+                if "Condición sub estándar" in _df_out.columns:
+                    _cond = _df_out["Condición sub estándar"].astype(str).str.strip()
+                    _con_cond = _df_out[
+                        (~_cond.isin(("—", "", "nan")))
+                        & (~_cond.str.contains("sin incidencia", case=False, na=False))
+                    ]
+                    _n_cond = len(_con_cond)
+                    if _n_cond:
+                        _expl = _con_cond.get("Observación de la condición",
+                                              pd.Series(dtype=str)).astype(str).str.strip()
+                        _n_expl = int((~_expl.isin(("—", "", "nan"))).sum())
+                        _pct_expl = round(_n_expl / _n_cond * 100)
+                        _msg = (f"**{_n_cond}** OT(s) con condición sub estándar reportada · "
+                                f"**{_n_expl}** con explicación del técnico ({_pct_expl}%)")
+                        if _n_expl == _n_cond:
+                            st.success(f"✅ {_msg}")
+                        elif _pct_expl >= 50:
+                            st.warning(f"⚠️ {_msg} — quedan "
+                                       f"{_n_cond - _n_expl} condiciones sin explicar.")
+                        else:
+                            st.error(
+                                f"🚨 {_msg}. La condición queda registrada pero no se "
+                                "sabe qué pasa, que es justo lo que el campo de "
+                                "observación busca evitar.")
+
                 _cfg = {
                     "Cliente":        st.column_config.TextColumn(width=110),
                     "Fecha finaliz.": st.column_config.TextColumn(width=100),
