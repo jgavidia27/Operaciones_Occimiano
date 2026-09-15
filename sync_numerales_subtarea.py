@@ -198,6 +198,11 @@ def fetch_subtareas_numeral(folio: str) -> list:
             # percibido en la máquina, ej. "Sin sal en Ablandador",
             # "Estanque sucio", o "Sin incidencias que reportar".
             "incidencia_reportar":    None,
+            # OBSERVACIÓN DE LA INCIDENCIA (DETALLE) — campo de texto libre que
+            # sigue a la lista desplegable. Se agregó en sep-2026 porque la
+            # incidencia sola no explica QUÉ pasa: decía "Estanque sucio" sin
+            # decir por qué ni en qué grado.
+            "observacion_incidencia": None,
             # PRIORIDAD ENCONTRADA STO (correctivos): lista desplegable donde el
             # técnico registra la prioridad REAL que dedujo en terreno (P1/P2/
             # P3/P4). Permite contrastar la prioridad que pidió el cliente vs la
@@ -366,6 +371,12 @@ def fetch_subtareas_numeral(folio: str) -> list:
                         idx[kid]["fichero_cambio"] = "NO"
                     else:
                         idx[kid]["fichero_cambio"] = val[:30]
+            elif "OBSERVACI" in desc and "INCIDENCIA" in desc:
+                # "OBSERVACIÓN DE LA INCIDENCIA (DETALLE)" — va ANTES de la rama
+                # de INCIDENCIA A REPORTAR porque su texto contiene las dos
+                # palabras y si no, la otra rama se lo comería.
+                if not val_empty:
+                    idx[kid]["observacion_incidencia"] = val[:500]
             elif "INCIDENCIA" in desc and "REPORTAR" in desc:
                 # "INCIDENCIA A REPORTAR" — lista desplegable al final de cada
                 # mantención preventiva (todos los clientes). El técnico reporta
@@ -439,6 +450,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
             "fichero_acepta_monedas": r.get("fichero_acepta_monedas"),
             "fichero_cambio":         r.get("fichero_cambio"),
             "incidencia_reportar":   r.get("incidencia_reportar"),
+            "observacion_incidencia": r.get("observacion_incidencia"),
             "prioridad_encontrada_sto": r.get("prioridad_encontrada_sto"),
             "task_status":           r.get("task_status"),
             "fecha_inicio_subtarea": r.get("fecha_inicio_subtarea"),
@@ -468,13 +480,15 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     and ("form_tiene_" in r.text or "lts_hr_" in r.text
                          or "cubre_fichero" in r.text or "flowey_" in r.text
                          or "task_status" in r.text or "fichero_" in r.text
-                         or "incidencia_reportar" in r.text or "prioridad_encontrada" in r.text)):
+                         or "incidencia_reportar" in r.text or "observacion_incidencia" in r.text
+                         or "prioridad_encontrada" in r.text)):
                 time.sleep(1.5 * (intento + 1))
                 continue  # reintentar payload completo
             if r.status_code == 400 and ("form_tiene_" in r.text or "lts_hr_" in r.text
                                          or "cubre_fichero" in r.text or "flowey_" in r.text
                                          or "task_status" in r.text or "fichero_" in r.text
-                                         or "incidencia_reportar" in r.text or "prioridad_encontrada" in r.text):
+                                         or "incidencia_reportar" in r.text or "observacion_incidencia" in r.text
+                         or "prioridad_encontrada" in r.text):
                 for rec in payload:
                     rec.pop("form_tiene_bomba", None)
                     rec.pop("form_tiene_consumo", None)
@@ -489,6 +503,7 @@ def upsert_subtareas(folio: str, filas: list) -> tuple:
                     rec.pop("fichero_acepta_monedas", None)
                     rec.pop("fichero_cambio", None)
                     rec.pop("incidencia_reportar", None)
+                    rec.pop("observacion_incidencia", None)
                     rec.pop("prioridad_encontrada_sto", None)
                     rec.pop("task_status", None)
                 r2 = requests.post(url, headers=h, data=json.dumps(payload), timeout=30)

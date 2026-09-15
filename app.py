@@ -17748,12 +17748,27 @@ elif _page == _NAV_PAGES[2]:
                                     _incid = "\n".join(sorted(set(_reales)))
                                 else:
                                     _incid = "Sin incidencias"
+                        # ── Observación de la condición (texto libre) ──
+                        # El técnico explica QUÉ pasa con la condición que
+                        # reportó. Antes quedaba registrada la condición pero
+                        # no su explicación.
+                        _obs_cond = "—"
+                        if "observacion_incidencia" in _grp.columns:
+                            _ov = _grp["observacion_incidencia"].dropna().astype(str).str.strip()
+                            _ov = _ov[(_ov != "") & (~_ov.str.lower().isin(("none", "nan", "null")))]
+                            _ov = _ov[~_ov.str.contains("sin observaci", case=False, na=False)]
+                            if not _ov.empty:
+                                # Varias observaciones (una por equipo) apiladas,
+                                # igual que la condición: no se unen con ' · '
+                                # para que no se lean como un texto solo.
+                                _obs_cond = "\n".join(sorted(set(_ov)))
                         _resumen_por_ot[_fol] = {
                             "equipos":       _equipos_short or "—",
                             "n_total":       _n_total,
                             "n_ok":          _n_ok,
                             "pct":           _pct,
                             "incidencia":    _incid,
+                            "obs_condicion": _obs_cond,
                         }
                         # Observación derivada
                         if _n_total == _n_ok:
@@ -17786,6 +17801,7 @@ elif _page == _NAV_PAGES[2]:
                     "equipos": "—", "n_total": 0, "n_ok": 0, "pct": 0,
                     "obs": "Sin subtareas en Supabase (aún sin sync)",
                     "incidencia": "—",
+                    "obs_condicion": "—",
                 })
                 _fl  = _flowey_por_ot.get(_fol, {"flowey_utiliza": "—", "flowey_shampoo": "—", "flowey_cera": "—"})
                 _cod_eds = str(_r.get("codigo_eds", "") or _r.get("estacion", "") or "—")
@@ -17804,7 +17820,8 @@ elif _page == _NAV_PAGES[2]:
                     "% Completitud": _res["pct"],
                     "Observación":   _res["obs"],
                     "Plan":          str(_r.get("plan_tareas", "") or "—")[:40],
-                    "Incidencia reportada": _res.get("incidencia", "—"),
+                    "Condición sub estándar": _res.get("incidencia", "—"),
+                    "Observación de la condición": _res.get("obs_condicion", "—"),
                 }
                 # Columnas FLOWEY solo cuando el usuario filtra por Aramco
                 # (evita ruido — el resto de clientes no tienen esa pregunta
@@ -17841,7 +17858,7 @@ elif _page == _NAV_PAGES[2]:
                 _cols_base = ["Cliente","Fecha finaliz.","N° OT","EDS","Estación","Técnico",
                               "Duración","Dentro plazo","Planes ejecutados",
                               "OK / Total","% Completitud","Observación","Plan",
-                              "Incidencia reportada"]
+                              "Condición sub estándar","Observación de la condición"]
                 _cols_flow = [c for c in ("FLOWEY utiliza","Shampoo 20% OK","Cera 10% OK")
                               if c in _df_out.columns]
                 _df_out = _df_out[[c for c in _cols_base if c in _df_out.columns] + _cols_flow]
@@ -17869,11 +17886,16 @@ elif _page == _NAV_PAGES[2]:
                         help="% de planes ejecutados que quedaron OK. Ej: 3/4 = 75%"),
                     "Observación":    st.column_config.TextColumn(width=210),
                     "Plan":           st.column_config.TextColumn(width=220),
-                    "Incidencia reportada": st.column_config.TextColumn(width=220,
+                    "Condición sub estándar": st.column_config.TextColumn(width=220,
                         help="Respuesta del técnico a 'INCIDENCIA A REPORTAR' al final de la "
-                             "mantención preventiva. Muestra la incidencia real percibida en la "
+                             "mantención preventiva. Muestra la condición real percibida en la "
                              "máquina; 'Sin incidencias' cuando no reportó problema; '—' si el "
                              "plan aún no está sincronizado o el formulario no incluía la pregunta."),
+                    "Observación de la condición": st.column_config.TextColumn(width=260,
+                        help="Explicación en palabras del técnico sobre la condición reportada "
+                             "('OBSERVACIÓN DE LA INCIDENCIA (DETALLE)' en Fracttal). Se agregó "
+                             "al formulario en sep-2026, así que las MP anteriores muestran '—': "
+                             "no es un error, es que la pregunta todavía no existía."),
                     "FLOWEY utiliza": st.column_config.TextColumn(width=110,
                         help="Solo Aramco. Respuesta a '¿EL EQUIPO UTILIZA PRODUCTOS FLOWEY?'"),
                     "Shampoo 20% OK": st.column_config.TextColumn(width=120,
